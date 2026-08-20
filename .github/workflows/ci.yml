@@ -97,6 +97,15 @@ jobs:
           git -C "${zipdiff_dir}" checkout --detach FETCH_HEAD
           test "$(git -C "${zipdiff_dir}" rev-parse HEAD)" = "${ZIPDIFF_REVISION}"
 
+      - name: Make generated timestamps deterministic
+        run: |
+          set -euo pipefail
+          zipdiff_dir="${RUNNER_TEMP}/ZipDiff"
+          patch_file="${GITHUB_WORKSPACE}/tests/corpus/zipdiff/deterministic-timestamps.patch"
+          git -C "${zipdiff_dir}" apply --check "${patch_file}"
+          git -C "${zipdiff_dir}" apply "${patch_file}"
+          grep -Fq 'Self::new(0, 0)' "${zipdiff_dir}/zip-diff/src/fields.rs"
+
       - name: Generate construction corpus
         working-directory: ${{ runner.temp }}/ZipDiff/zip-diff
         run: cargo run --locked --release --bin construction

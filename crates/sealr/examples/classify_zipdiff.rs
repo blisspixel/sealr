@@ -117,7 +117,7 @@ fn main() -> ExitCode {
 #[derive(Debug)]
 struct Expectations {
     total: usize,
-    digests: BTreeMap<String, String>,
+    digest: String,
     groups: BTreeMap<(String, String), usize>,
     allowed: BTreeSet<String>,
 }
@@ -126,7 +126,7 @@ fn read_expectations(path: &Path) -> Result<Expectations, String> {
     let contents =
         fs::read_to_string(path).map_err(|error| format!("{}: {error}", path.display()))?;
     let mut total = None;
-    let mut digests = BTreeMap::new();
+    let mut digest = None;
     let mut groups = BTreeMap::new();
     let mut allowed = BTreeSet::new();
     for (index, raw_line) in contents.lines().enumerate() {
@@ -145,24 +145,12 @@ fn read_expectations(path: &Path) -> Result<Expectations, String> {
                     return Err(format!("line {line_number}: duplicate total"));
                 }
             }
-            ["digest", "sha256", platform, value] => {
-                if platform.is_empty()
-                    || !platform
-                        .bytes()
-                        .all(|byte| byte.is_ascii_lowercase() || byte == b'-')
-                {
-                    return Err(format!("line {line_number}: invalid platform"));
-                }
+            ["digest", "sha256", value] => {
                 if value.len() != 64 || !value.bytes().all(|byte| byte.is_ascii_hexdigit()) {
                     return Err(format!("line {line_number}: invalid SHA-256 digest"));
                 }
-                if digests
-                    .insert((*platform).to_owned(), value.to_ascii_lowercase())
-                    .is_some()
-                {
-                    return Err(format!(
-                        "line {line_number}: duplicate digest for {platform}"
-                    ));
+                if digest.replace(value.to_ascii_lowercase()).is_some() {
+                    return Err(format!("line {line_number}: duplicate digest"));
                 }
             }
             ["count", class, result, value] => {
@@ -183,9 +171,7 @@ fn read_expectations(path: &Path) -> Result<Expectations, String> {
         }
     }
     let total = total.ok_or_else(|| "missing total directive".to_owned())?;
-    if digests.is_empty() {
-        return Err("missing digest directive".to_owned());
-    }
+    let digest = digest.ok_or_else(|| "missing digest directive".to_owned())?;
     let grouped_total: usize = groups.values().sum();
     if grouped_total != total {
         return Err(format!(
@@ -204,7 +190,7 @@ fn read_expectations(path: &Path) -> Result<Expectations, String> {
     }
     Ok(Expectations {
         total,
-        digests,
+        digest,
         groups,
         allowed,
     })
@@ -224,15 +210,11 @@ fn verify(
             expectations.total
         ));
     }
-    let platform = env::consts::OS;
-    match expectations.digests.get(platform) {
-        Some(expected) if corpus_digest != expected => failures.push(format!(
-            "corpus digest on {platform}: expected {expected}, got {corpus_digest}"
-        )),
-        Some(_) => {}
-        None => failures.push(format!(
-            "corpus digest: manifest has no expectation for platform {platform}"
-        )),
+    if corpus_digest != expectations.digest {
+        failures.push(format!(
+            "corpus digest: expected {}, got {corpus_digest}",
+            expectations.digest
+        ));
     }
     for (key, expected) in &expectations.groups {
         let actual = groups.get(key).map_or(0, |entry| entry.0);
@@ -256,7 +238,7 @@ fn verify(
     }
     if failures.is_empty() {
         eprintln!(
-            "verified {} ZipDiff constructions on {platform}; {} documented controls allowed",
+            "verified {} ZipDiff constructions; {} documented controls allowed",
             expectations.total,
             expectations.allowed.len()
         );

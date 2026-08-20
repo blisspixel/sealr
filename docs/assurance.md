@@ -17,7 +17,7 @@ Trust is the scarce resource. Performance and format breadth come after the inva
 
 ## ZipDiff as a gate
 
-The CI gate regenerates the [ZipDiff](https://github.com/ouuan/ZipDiff) `construction` output at a pinned revision. The [manifest](../tests/corpus/zipdiff/expectations.txt) binds all fixture bytes through explicit per-platform aggregate digests, exact finding counts, and the valid-control allowlist. The upstream generator emits some host-dependent metadata; a platform must have its own exact digest to pass. The 50-parser Docker farm is not part of CI or the product runtime.
+The CI gate regenerates the [ZipDiff](https://github.com/ouuan/ZipDiff) `construction` output at a pinned revision. After revision verification, a committed patch replaces the generator's current-time DOS timestamp defaults with zero. The [manifest](../tests/corpus/zipdiff/expectations.txt) then binds the deterministic fixture bytes through one aggregate digest, exact finding counts, and the valid-control allowlist. The 50-parser Docker farm is not part of CI or the product runtime.
 
 If ZipDiff adds a 15th type, its changed count and digest fail the gate before the manifest can be updated deliberately.
 

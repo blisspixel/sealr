@@ -1,0 +1,10 @@
+diff --git a/zip-diff/src/fields.rs b/zip-diff/src/fields.rs
+--- a/zip-diff/src/fields.rs
++++ b/zip-diff/src/fields.rs
+@@ -97,5 +97,5 @@
+ impl Default for DosDateTime {
+     fn default() -> Self {
+-        Utc::now().into()
++        Self::new(0, 0)
+     }
+ }

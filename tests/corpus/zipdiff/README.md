@@ -5,19 +5,23 @@ This gate regenerates all 5,927 construction archives from the pinned upstream r
 The [expectation manifest](expectations.txt) binds:
 
 - the upstream construction count;
-- platform-specific aggregate SHA-256 values that bind every relative path, file length, and fixture SHA-256 in sorted order;
+- an aggregate SHA-256 that binds every relative path, file length, and fixture SHA-256 in sorted order;
 - every class and emitted finding-code count;
 - the exact allowlist of valid controls and portable character cases.
 
 Every archive absent from the allowlist must be rejected. A new acceptance, a rejected control, a changed finding, a missing fixture, or an upstream construction change fails the gate.
 
-The upstream generator writes some host-dependent ZIP metadata, so Windows and Linux have separate expected aggregate values. The verifier requires an expectation for its current operating system. It does not accept a digest merely because it is valid on another platform.
+The upstream generator defaults each DOS timestamp to the current UTC time. CI applies the committed [deterministic timestamp patch](deterministic-timestamps.patch) after verifying the exact upstream revision and before generation. This removes only that clock input and makes the byte corpus reproducible across runs and operating systems.
 
 The aggregate hash record for each fixture is `u64_le(path_length) || path || u64_le(file_length) || sha256(file)`. Records are ordered by normalized relative path and hashed together with SHA-256.
 
 Local reproduction, after generating the upstream `constructions` directory:
 
 ```console
+git -C /path/to/ZipDiff apply /path/to/sealr/tests/corpus/zipdiff/deterministic-timestamps.patch
+cd /path/to/ZipDiff/zip-diff
+cargo run --locked --release --bin construction
+cd /path/to/sealr
 cargo run --locked --release -p sealr --example classify_zipdiff -- /path/to/constructions --expect tests/corpus/zipdiff/expectations.txt
 ```
 

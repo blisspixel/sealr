@@ -46,7 +46,7 @@ Target: a single-format boundary whose claims are backed by fixtures, properties
 Completed 2026-08-20:
 
 1. The CI job fetches revision `7c427ed254bb3a5985d54870c12f97db78118e67` and generates all 5,927 construction files. Generated binaries are not committed.
-2. The manifest records origin, revision, license, platform-specific aggregate SHA-256 values binding every fixture path and digest, exact class and finding counts, and the exact valid-control allowlist. The upstream generator emits host-dependent metadata, so the verifier requires the digest for its current operating system rather than treating one host's bytes as universal.
+2. The manifest records origin, revision, license, an aggregate SHA-256 binding every fixture path and digest, exact class and finding counts, and the exact valid-control allowlist. A committed patch replaces the upstream generator's current-time DOS header defaults with zero only after its exact revision is verified, making the byte corpus reproducible across runs and operating systems.
 3. The production API classifies the corpus. Any new acceptance, rejected control, finding-count drift, missing file, byte change, or upstream construction change fails the gate.
 4. All A3, A5, B1, B3, B4, C1, C2, C3, C4, and C5 constructions reject. A4 retains only its valid empty-directory control. A2 retains ten internally consistent controls. B2 retains 62 portable punctuation controls.
 5. Local deterministic tests cover valid directories and descriptors plus the ambiguity gaps found during corpus evaluation.
