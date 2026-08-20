@@ -5,11 +5,13 @@ This gate regenerates all 5,927 construction archives from the pinned upstream r
 The [expectation manifest](expectations.txt) binds:
 
 - the upstream construction count;
-- an aggregate SHA-256 that binds every relative path, file length, and fixture SHA-256 in sorted order;
+- platform-specific aggregate SHA-256 values that bind every relative path, file length, and fixture SHA-256 in sorted order;
 - every class and emitted finding-code count;
 - the exact allowlist of valid controls and portable character cases.
 
 Every archive absent from the allowlist must be rejected. A new acceptance, a rejected control, a changed finding, a missing fixture, or an upstream construction change fails the gate.
+
+The upstream generator writes some host-dependent ZIP metadata, so Windows and Linux have separate expected aggregate values. The verifier requires an expectation for its current operating system. It does not accept a digest merely because it is valid on another platform.
 
 The aggregate hash record for each fixture is `u64_le(path_length) || path || u64_le(file_length) || sha256(file)`. Records are ordered by normalized relative path and hashed together with SHA-256.
 

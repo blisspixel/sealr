@@ -45,7 +45,7 @@ The current Rust implementation supports classic ZIP32 archives with stored or D
 - Streaming Deflate, CRC32, and SHA-256 calculation without buffering an expanded member in memory.
 - Capability-relative, same-volume staging with 128-bit random names. Members use create-new handles, and the requested destination is published with native no-replace semantics only after every member passes.
 - Deterministic JSON view and unsigned receipt on allow and reject paths.
-- A pinned 5,927-file, 14-class ZipDiff construction gate with an aggregate corpus digest, exact finding-count expectations, and an explicit 73-file control allowlist.
+- A pinned 5,927-file, 14-class ZipDiff construction gate with platform-specific aggregate corpus digests, exact finding-count expectations, and an explicit 73-file control allowlist.
 - An adversarial unit suite, strict Clippy, rustfmt, documentation checks, cross-platform tests, and cargo-deny policy in CI.
 
 ## Security limitations
