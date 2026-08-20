@@ -33,7 +33,8 @@ The repository now has:
 - a pinned, aggregate-digested gate over all 5,927 upstream ZipDiff constructions, with exact finding counts and an explicit valid-control allowlist;
 - adversarial tests for traversal, ADS, ambiguity, layout, CRC rollback, destination preservation, and quota behavior;
 - a pinned current Rust toolchain plus strict format, Clippy, debug test, optimized build, cross-platform release test, docs, and supply-chain CI gates;
-- dependency update automation and an explicit permissive-license policy.
+- dependency update automation and an explicit permissive-license policy;
+- protected `main` requiring pull requests, linear history, resolved conversations, and every CI job.
 
 This is a strong pre-alpha baseline. It is not a production security boundary yet.
 
@@ -201,14 +202,14 @@ Phase 0.1 is complete only when every row is green.
 
 | Gate | Required evidence |
 |---|---|
-| One ZIP interpretation | 14-class ZipDiff manifest and passing 5,927-file fixture suite. Complete locally; public CI verification awaits repository publication. |
+| One ZIP interpretation | Complete: 14-class ZipDiff manifest and passing 5,927-file fixture suite in public CI. |
 | Path containment | Canonical-path properties plus capability-writer race tests |
 | Resource bounds | Source, metadata, member, total, ratio, and counter tests |
 | Reject rollback | No published destination on content, I/O, or policy failure |
 | Inspect equals materialize | Golden tree and digest comparisons |
 | Reduced authority | Landlock worker test and receipt field |
 | Assurance | Unit, property, fuzz smoke, Kani, Clippy, rustfmt, docs, cargo-deny |
-| Portability | Linux, macOS, and Windows CI green |
+| Portability | Current baseline complete: Linux, macOS, and Windows CI green |
 | Performance | Reproducible baseline with memory and throughput budgets |
 | Honesty | README limitations match executable behavior |
 
