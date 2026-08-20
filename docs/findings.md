@@ -1,0 +1,107 @@
+# Finding codes
+
+Agents switch on `code`. Humans read `detail`. There is no numeric risk score.
+
+```json
+{
+  "code": "zip.diff.a3_name",
+  "severity": "error",
+  "member": "word/document.xml",
+  "detail": "CDH name != LFH name"
+}
+```
+
+The enclosing view and receipt bind the policy. Individual finding objects do not repeat it.
+
+## Severity
+
+| Value | Meaning |
+|---|---|
+| `error` | Reject the archive. This is the only severity emitted by the current implementation. |
+| `deny` | Reserved for a future policy that can deny one member without weakening archive-level invariants. |
+| `warn` | Reserved for policy-dependent continuation. |
+| `info` | Reserved for recorded transformations such as permission stripping. |
+
+Unknown error codes must be treated as rejection by consumers.
+
+## Implemented registry
+
+### Source and format
+
+| Code | Meaning |
+|---|---|
+| `source.io` | The archive source could not be inspected, opened, or read. |
+| `format.unsupported` | Magic or format is unsupported or disallowed by policy. |
+| `format.magic` | Reserved for explicit magic-versus-extension policy. |
+| `method.unsupported` | ZIP compression method is not Store or Deflate. |
+
+### Path and topology
+
+| Code | Meaning |
+|---|---|
+| `path.absolute` | Absolute, UNC-like, or drive-qualified member path. |
+| `path.dotdot` | Parent component. |
+| `path.empty` | Empty component or empty normalized name. |
+| `path.ads` | Colon that could address an NTFS alternate data stream. |
+| `path.reserved` | Windows reserved device name. |
+| `path.trailing` | Component ending in dot or space. |
+| `path.escape` | Internal containment join failed. |
+| `path.depth` | Normalized depth exceeds policy. |
+| `path.nul` | NUL byte in a decoded name. |
+| `path.invalid_char` | ASCII control, backslash, or a portable Windows-illegal character. |
+| `path.unicode` | Non-ASCII path rejected until canonical Unicode normalization is implemented. |
+| `path.case_fold` | ASCII case-fold collision or case-fold topology conflict. |
+| `path.conflict` | A path is both a file and a directory ancestor or descendant. |
+
+### Materialization
+
+| Code | Meaning |
+|---|---|
+| `materialize.exists` | Destination exists or appeared before publication. |
+| `materialize.io` | Staging, directory, member, flush, sync, or cleanup-related I/O failed. |
+| `materialize.commit` | Final same-volume no-replace publication failed. |
+
+### Quotas
+
+| Code | Meaning |
+|---|---|
+| `quota.archive` | Compressed input exceeds `max_archive_bytes`. |
+| `quota.files` | Entry count exceeds `max_files`. |
+| `quota.member` | Declared or actual member size exceeds its cap. |
+| `quota.total` | Declared or actual running total exceeds its cap. |
+| `quota.ratio` | Declared or actual compression ratio exceeds policy. |
+| `quota.metadata` | ZIP structural metadata exceeds its cap. |
+| `quota.declared_lie` | Actual expanded size disagrees with the declared size. |
+
+### ZIP structure and differentials
+
+| Code | Meaning |
+|---|---|
+| `zip.diff.a1_method` | CDH and LFH methods disagree. |
+| `zip.diff.a2_size` | CDH, LFH, CRC, size, or data descriptor fields disagree. |
+| `zip.diff.a3_name` | Raw CDH and LFH names disagree, or an alternate Unicode Path extra field is present. |
+| `zip.diff.a4_dir` | Filename, size, host, or external attributes disagree on entry type. |
+| `zip.diff.a5_crypt` | Encryption-related flags disagree. |
+| `zip.diff.b1_dup` | Duplicate canonical destination path. |
+| `zip.diff.b2_chars` | Reserved for the upstream character ambiguity class. Current paths use the more specific `path.*` codes. |
+| `zip.diff.c1_stream` | Hidden, prefixed, gapped, or otherwise unreferenced local-record bytes. |
+| `zip.diff.c2_eocd` | Ambiguous or additional EOCD structure. |
+| `zip.diff.c3_count` | Disk, entry-count, CDH, or central-directory structure disagreement. |
+| `zip.diff.c4_offset` | Invalid central, local, payload, or descriptor offset. |
+| `zip.diff.c5_zip64` | ZIP64 marker encountered. ZIP64 is not implemented. |
+| `zip.overlap` | Referenced local records overlap each other or the central directory. |
+| `zip.encrypted` | Encrypted member. |
+| `zip.encoding` | Invalid UTF-8 name or unsupported non-ASCII CP437 decoding. |
+| `zip.extra` | Extra-field sequence is malformed or repeats an identifier. |
+| `zip.flags` | Non-encryption CDH and LFH flags disagree. |
+| `crc.mismatch` | Expanded member CRC32 disagrees with the archive. |
+
+## Reserved registry work
+
+The threat model names B3 canonicalization and B4 case behavior. The current implementation reports specific `path.*` codes for the covered ASCII subset. Phase 0.1 will import the upstream construction corpus and decide whether aliases or dedicated `zip.diff.b3_canon` and `zip.diff.b4_case` codes are needed.
+
+TAR link, permission, dictionary, polyglot, signing, and sandbox findings will be added only with their implementations and tests.
+
+## Stability
+
+Finding strings become compatibility commitments at the first supported release. Before that release, registry changes must update this document, golden receipts, and fixture expectations in the same change.

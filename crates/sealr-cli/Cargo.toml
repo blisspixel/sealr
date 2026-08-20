@@ -1,0 +1,18 @@
+[package]
+name = "sealr-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "CLI façade for the sealr archive boundary"
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "sealr"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+sealr = { version = "0.0.0", path = "../sealr" }
+serde.workspace = true
+serde_json.workspace = true

@@ -1,0 +1,128 @@
+# ZipDiff construction expectations for sealr's strict default policy.
+# Upstream: https://github.com/ouuan/ZipDiff
+# Revision: 7c427ed254bb3a5985d54870c12f97db78118e67
+# Upstream license: Apache-2.0
+#
+# Every unlisted construction must be rejected. ALLOWED entries below are
+# internally consistent controls or portable filename cases emitted by the
+# broad character generator. Count directives bind each class and finding.
+
+total 5927
+digest sha256 1573cfbde0b6ed41769215c7a5ee6ceb8151aca58127d4f64960715794fc59a9
+
+count a1 zip.diff.a1_method 2
+count a2 ALLOWED 10
+count a2 quota.declared_lie 6
+count a2 zip.diff.a2_size 260
+count a2 zip.diff.c1_stream 12
+count a2 zip.diff.c5_zip64 4321
+count a3 zip.diff.a3_name 7
+count a4 ALLOWED 1
+count a4 path.invalid_char 1
+count a4 zip.diff.a4_dir 7
+count a5 zip.diff.a5_crypt 2
+count a5 zip.encrypted 1
+count b1 zip.diff.b1_dup 1
+count b2 ALLOWED 62
+count b2 path.absolute 2
+count b2 path.absolute+path.absolute 1
+count b2 path.invalid_char 111
+count b2 path.invalid_char+path.invalid_char 57
+count b2 path.nul 5
+count b2 path.nul+path.invalid_char 6
+count b2 path.nul+path.nul 1
+count b2 zip.diff.b1_dup 25
+count b2 zip.encoding 912
+count b3 path.absolute 2
+count b3 path.dotdot 4
+count b3 path.empty 2
+count b3 path.invalid_char 2
+count b3 path.trailing 4
+count b3 zip.diff.b1_dup 6
+count b4 path.case_fold 1
+count c1 zip.diff.a1_method 1
+count c1 zip.diff.c1_stream 5
+count c1 zip.overlap 1
+count c2 zip.diff.c1_stream 1
+count c2 zip.diff.c2_eocd 2
+count c3 quota.files 1
+count c3 zip.diff.c3_count 5
+count c3 zip.diff.c4_offset 2
+count c4 zip.diff.c4_offset 1
+count c5 quota.files 16
+count c5 zip.diff.c3_count 42
+count c5 zip.diff.c5_zip64 16
+
+allow a2/a2-1.zip
+allow a2/a2-1009.zip
+allow a2/a2-129.zip
+allow a2/a2-145.zip
+allow a2/a2-273.zip
+allow a2/a2-289.zip
+allow a2/a2-433.zip
+allow a2/a2-577.zip
+allow a2/a2-721.zip
+allow a2/a2-865.zip
+allow a4/a4-3.zip
+allow b2/b2-100.zip
+allow b2/b2-101.zip
+allow b2/b2-106.zip
+allow b2/b2-107.zip
+allow b2/b2-109.zip
+allow b2/b2-110.zip
+allow b2/b2-112.zip
+allow b2/b2-113.zip
+allow b2/b2-115.zip
+allow b2/b2-116.zip
+allow b2/b2-118.zip
+allow b2/b2-119.zip
+allow b2/b2-121.zip
+allow b2/b2-122.zip
+allow b2/b2-124.zip
+allow b2/b2-125.zip
+allow b2/b2-130.zip
+allow b2/b2-131.zip
+allow b2/b2-133.zip
+allow b2/b2-134.zip
+allow b2/b2-136.zip
+allow b2/b2-137.zip
+allow b2/b2-139.zip
+allow b2/b2-140.zip
+allow b2/b2-142.zip
+allow b2/b2-143.zip
+allow b2/b2-148.zip
+allow b2/b2-149.zip
+allow b2/b2-154.zip
+allow b2/b2-155.zip
+allow b2/b2-163.zip
+allow b2/b2-164.zip
+allow b2/b2-166.zip
+allow b2/b2-167.zip
+allow b2/b2-172.zip
+allow b2/b2-173.zip
+allow b2/b2-175.zip
+allow b2/b2-176.zip
+allow b2/b2-178.zip
+allow b2/b2-179.zip
+allow b2/b2-181.zip
+allow b2/b2-182.zip
+allow b2/b2-184.zip
+allow b2/b2-185.zip
+allow b2/b2-190.zip
+allow b2/b2-191.zip
+allow b2/b2-193.zip
+allow b2/b2-194.zip
+allow b2/b2-687.zip
+allow b2/b2-688.zip
+allow b2/b2-690.zip
+allow b2/b2-712.zip
+allow b2/b2-713.zip
+allow b2/b2-715.zip
+allow b2/b2-737.zip
+allow b2/b2-738.zip
+allow b2/b2-740.zip
+allow b2/b2-762.zip
+allow b2/b2-763.zip
+allow b2/b2-765.zip
+allow b2/b2-97.zip
+allow b2/b2-98.zip

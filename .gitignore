@@ -1,0 +1,9 @@
+/target
+/.research
+**/*.rs.bk
+.idea
+.vscode
+.DS_Store
+*.profraw
+/fuzz/target
+/.kani
