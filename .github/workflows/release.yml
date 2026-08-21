@@ -365,10 +365,44 @@ jobs:
             ' <<<"${release_pages}"
           )"
           matching_release_count="$(jq -er 'length' <<<"${matching_releases}")"
+          mapfile -t local_assets < <(find dist -maxdepth 1 -type f -printf '%f\n' | sort)
+          if [[ "${#local_assets[@]}" -ne 4 ]]; then
+            echo "::error::expected exactly four local release assets"
+            exit 1
+          fi
+
           existing_release=""
           existing_release_id=""
           case "${matching_release_count}" in
-            0) ;;
+            0)
+              create_payload="$(
+                jq -cn \
+                  --arg tag "${GITHUB_REF_NAME}" \
+                  --arg target "${GITHUB_SHA}" \
+                  --arg name "${release_title}" \
+                  --rawfile body "${notes_file}" '
+                    {
+                      tag_name: $tag,
+                      target_commitish: $target,
+                      name: $name,
+                      body: $body,
+                      draft: true,
+                      prerelease: true,
+                      make_latest: "false"
+                    }
+                  '
+              )"
+              existing_release="$(
+                gh api --method POST \
+                  -H "X-GitHub-Api-Version: 2026-03-10" \
+                  "repos/${GITHUB_REPOSITORY}/releases" \
+                  --input - <<<"${create_payload}"
+              )"
+              existing_release_id="$(
+                jq -er '.id | select(type == "number" and . > 0)' \
+                  <<<"${existing_release}"
+              )"
+              ;;
             1)
               existing_release_id="$(
                 jq -er '.[0].id | select(type == "number" and . > 0)' \
@@ -393,54 +427,205 @@ jobs:
               exit 1
               ;;
           esac
-          if [[ -n "${existing_release}" ]]; then
-            if [[ "$(jq -r '.draft' <<<"${existing_release}")" != "true" || \
-                  "$(jq -r '.prerelease' <<<"${existing_release}")" != "true" || \
-                  "$(jq -r '.name' <<<"${existing_release}")" != "${release_title}" ]]; then
-              echo "::error::an existing release is not the expected resumable draft"
-              exit 1
-            fi
-            mapfile -t existing_assets < <(jq -r '.assets[].name' <<<"${existing_release}")
-            for asset in "${existing_assets[@]}"; do
-              if [[ ! -f "dist/${asset}" ]]; then
-                echo "::error::existing draft contains an unexpected asset: ${asset}"
-                exit 1
-              fi
-            done
 
-            gh release edit "${GITHUB_REF_NAME}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --draft=true \
-              --prerelease=true \
-              --latest=false \
-              --verify-tag \
-              --title "${release_title}" \
-              --notes-file "${notes_file}"
-            gh release upload "${GITHUB_REF_NAME}" dist/* \
-              --repo "${GITHUB_REPOSITORY}" \
-              --clobber
-          else
-            gh release create "${GITHUB_REF_NAME}" dist/* \
-              --repo "${GITHUB_REPOSITORY}" \
-              --draft \
-              --prerelease \
-              --latest=false \
-              --verify-tag \
-              --title "${release_title}" \
-              --notes-file "${notes_file}"
+          if [[ "$(jq -r '.id' <<<"${existing_release}")" != "${existing_release_id}" || \
+                "$(jq -r '.tag_name' <<<"${existing_release}")" != "${GITHUB_REF_NAME}" || \
+                "$(jq -r '.draft' <<<"${existing_release}")" != "true" || \
+                "$(jq -r '.prerelease' <<<"${existing_release}")" != "true" || \
+                "$(jq -r '.immutable' <<<"${existing_release}")" != "false" || \
+                "$(jq -r '.author.login' <<<"${existing_release}")" != "github-actions[bot]" ]]; then
+            echo "::error::release is not the expected resumable draft"
+            exit 1
+          fi
+          update_payload="$(
+            jq -cn \
+              --arg name "${release_title}" \
+              --rawfile body "${notes_file}" '
+                {
+                  name: $name,
+                  body: $body,
+                  draft: true,
+                  prerelease: true,
+                  make_latest: "false"
+                }
+              '
+          )"
+          existing_release="$(
+            gh api --method PATCH \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}" \
+              --input - <<<"${update_payload}"
+          )"
+          expected_upload_url="https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}/assets{?name,label}"
+          if [[ "$(jq -r '.id' <<<"${existing_release}")" != "${existing_release_id}" || \
+                "$(jq -r '.tag_name' <<<"${existing_release}")" != "${GITHUB_REF_NAME}" || \
+                "$(jq -r '.upload_url' <<<"${existing_release}")" != "${expected_upload_url}" ]]; then
+            echo "::error::numeric release update changed release identity"
+            exit 1
           fi
 
-          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}")"
-          if [[ -n "${existing_release_id}" ]] &&
-             ! jq -e --argjson id "${existing_release_id}" '.id == $id' \
-               <<<"${release_json}" >/dev/null; then
+          existing_asset_count="$(jq -er '.assets | length' <<<"${existing_release}")"
+          if [[ "${existing_asset_count}" -gt 4 ]] || ! jq -e '
+            [.assets[].id] as $ids |
+            ($ids | length) == ($ids | unique | length)
+          ' <<<"${existing_release}" >/dev/null; then
+            echo "::error::existing draft asset count or IDs are unsafe"
+            exit 1
+          fi
+          mapfile -t existing_assets < <(jq -r '.assets[].name' <<<"${existing_release}")
+          for asset in "${existing_assets[@]}"; do
+            if [[ ! -f "dist/${asset}" ]] || ! jq -e \
+              --arg name "${asset}" '
+                [.assets[] |
+                  select(
+                    .name == $name and
+                    (.id | type == "number" and . > 0) and
+                    .uploader.login == "github-actions[bot]" and
+                    (
+                      (
+                        .state == "uploaded" and
+                        .size > 0 and
+                        (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$"))
+                      ) or
+                      .state == "starter"
+                    )
+                  )] |
+                length == 1
+              ' <<<"${existing_release}" >/dev/null; then
+              echo "::error::existing draft contains an unsafe asset: ${asset}"
+              exit 1
+            fi
+          done
+
+          mapfile -t existing_asset_ids < <(jq -r '.assets[].id' <<<"${existing_release}")
+          for asset_id in "${existing_asset_ids[@]}"; do
+            expected_asset="$(
+              jq -ce --argjson id "${asset_id}" '.assets[] | select(.id == $id)' \
+                <<<"${existing_release}"
+            )"
+            asset_json="$(
+              gh api --method GET \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
+            )"
+            if ! jq -e --argjson expected "${expected_asset}" '
+              .id == $expected.id and
+              .name == $expected.name and
+              .state == $expected.state and
+              .size == $expected.size and
+              .digest == $expected.digest and
+              .uploader.login == $expected.uploader.login
+            ' <<<"${asset_json}" >/dev/null; then
+              echo "::error::release asset changed before numeric deletion: ${asset_id}"
+              exit 1
+            fi
+            gh api --method DELETE --silent \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
+          done
+
+          existing_release="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}"
+          )"
+          if ! jq -e \
+            --arg tag "${GITHUB_REF_NAME}" \
+            --arg name "${release_title}" \
+            --argjson id "${existing_release_id}" \
+            --rawfile notes "${notes_file}" '
+              .id == $id and
+              .tag_name == $tag and
+              .name == $name and
+              .body == $notes and
+              .draft == true and
+              .prerelease == true and
+              .immutable == false and
+              .author.login == "github-actions[bot]" and
+              (.assets | length) == 0
+            ' <<<"${existing_release}" >/dev/null; then
+            echo "::error::release changed before numeric asset uploads"
+            exit 1
+          fi
+
+          for asset in "${local_assets[@]}"; do
+            local_digest="sha256:$(sha256sum "dist/${asset}" | cut -d' ' -f1)"
+            local_size="$(stat -c '%s' -- "dist/${asset}")"
+            case "${asset}" in
+              *.zip) content_type="application/zip" ;;
+              *.tar.gz) content_type="application/gzip" ;;
+              SHA256SUMS) content_type="text/plain; charset=utf-8" ;;
+              *)
+                echo "::error::unsupported release asset type: ${asset}"
+                exit 1
+                ;;
+            esac
+            encoded_asset="$(jq -rn --arg value "${asset}" '$value | @uri')"
+            upload_response="$(
+              curl --fail-with-body --silent --show-error \
+                --proto '=https' \
+                --request POST \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                -H "Content-Type: ${content_type}" \
+                --data-binary "@dist/${asset}" \
+                --url "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}/assets?name=${encoded_asset}"
+            )"
+            if ! jq -e \
+              --arg name "${asset}" \
+              --arg type "${content_type}" \
+              --arg digest "${local_digest}" \
+              --argjson size "${local_size}" '
+                (.id | type == "number") and .id > 0 and
+                .name == $name and
+                .state == "uploaded" and
+                .content_type == $type and
+                .size == $size and
+                .digest == $digest and
+                .uploader.login == "github-actions[bot]"
+              ' <<<"${upload_response}" >/dev/null; then
+              echo "::error::uploaded asset failed identity or digest verification: ${asset}"
+              exit 1
+            fi
+          done
+
+          readback_pages="$(
+            gh api --method GET --paginate --slurp \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases?per_page=100"
+          )"
+          readback_matches="$(
+            jq -ce --arg tag "${GITHUB_REF_NAME}" '
+              if (type == "array" and all(.[]; type == "array")) then
+                [.[][] | select(.tag_name == $tag)]
+              else
+                error("unexpected paginated releases response")
+              end
+            ' <<<"${readback_pages}"
+          )"
+          if [[ "$(jq -er 'length' <<<"${readback_matches}")" -ne 1 ]]; then
+            echo "::error::draft release readback did not find exactly one matching release"
+            exit 1
+          fi
+          readback_release_id="$(
+            jq -er '.[0].id | select(type == "number" and . > 0)' \
+              <<<"${readback_matches}"
+          )"
+          if [[ "${readback_release_id}" != "${existing_release_id}" ]]; then
             echo "::error::resumed release identity changed before readback"
             exit 1
           fi
+          release_json="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/${readback_release_id}"
+          )"
           if [[ "$(jq -r '.draft' <<<"${release_json}")" != "true" || \
                 "$(jq -r '.prerelease' <<<"${release_json}")" != "true" || \
                 "$(jq -r '.immutable' <<<"${release_json}")" != "false" || \
                 "$(jq -r '.author.login' <<<"${release_json}")" != "github-actions[bot]" || \
+                "$(jq -r '.id' <<<"${release_json}")" != "${readback_release_id}" || \
                 "$(jq -r '.tag_name' <<<"${release_json}")" != "${GITHUB_REF_NAME}" || \
                 "$(jq -r '.name' <<<"${release_json}")" != "${release_title}" ]]; then
             echo "::error::draft release identity did not pass readback verification"
