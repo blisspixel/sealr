@@ -38,7 +38,7 @@ Pipelines that matter for us:
 | Agent `inspect` → host `materialize` | **Our** dual API; we must not be two parsers |
 | Scanner (libarchive) → sealr | We must not be the second interpretation |
 
-**Invariant for this engine:** inspect, materialize, and mount MUST share one interpretation. If we ever grow a “recovery” or “streaming” mode (LibreOffice’s actual bug), it MUST NOT be used for display while the verifier used “normal.”
+**Invariant for this engine:** current inspect and materialize share one interpretation. Any future projection or mount MUST consume that same interpretation. A recovery or streaming parser MUST NOT provide a second display or effect meaning.
 
 ---
 
@@ -73,9 +73,9 @@ CRC32 is **not** authentication (paper: easy to pad while preserving CRC). We st
 |---|---|---|---|
 | C1 | Streaming vs CD-first `#` (many constructions) | LFH without CDH; LFH after EOCD; LFH in comment; descriptor hunt; holes/overlaps | **CD-first only.** Ignore unreferenced LFHs. Deny overlapping compressed ranges (also Fifield bombs). Deny LFH data that doesn’t match CD offsets. No streaming extract API in v0. Finding `zip.diff.c1_stream`. |
 | C2 | EOCDR selection `#` | Multiple EOCD signatures; comment-length skip; libzip “consistency score” | Scan backward; **one** EOCD whose comment length **exactly** matches remaining bytes. Extra EOCD signatures in the comment → finding, default **deny**. Finding `zip.diff.c2_eocd`. |
-| C3 | CDH count confusion `#` | Total vs this-disk count; 16-bit wrap; size vs count | CD entry count MUST equal EOCD total AND this-disk (single-disk archives). MUST equal actual CDHs parsed. ZIP64 counts win only when classic fields are `0xFFFF`. Finding `zip.diff.c3_count`. |
+| C3 | CDH count confusion `#` | Total vs this-disk count; 16-bit wrap; size vs count | In alpha.2, ZIP32 counts must agree with each other and the actual CDH count. ZIP64 sentinels and records fail closed. Finding `zip.diff.c3_count`. |
 | C4 | CD & LFH offset confusion | Gap before EOCD; prepended SFX; parsers add δ to offsets | Default **deny** prepended junk (SFX later, explicit). CD offset + CD size MUST land exactly on EOCD. LFH offsets MUST land inside the file and not overlap. Finding `zip.diff.c4_offset`. |
-| C5 | ZIP64 EOCD processing `#` (new type) | Locator vs signature search; mix ZIP64 and classic fields | If ZIP64 locator present, use it; classic fields MUST be `0xFFFF`/`0xFFFFFFFF` or **deny**. Do not mix. Finding `zip.diff.c5_zip64`. |
+| C5 | ZIP64 EOCD processing `#` (new type) | Locator vs signature search; mix ZIP64 and classic fields | Alpha.2 rejects every ZIP64 locator, EOCD record, sentinel, and semantic extra. A future ZIP64 profile must bind the locator and record and must never mix classic and ZIP64 interpretations. Finding `zip.diff.c5_zip64`. |
 
 ---
 
@@ -101,18 +101,18 @@ You et al. §7.2, seven strategies:
 
 | Mitigation | We do? |
 |---|---|
-| Use the same parser everywhere in a workflow | **Yes, internally** (inspect = materialize = mount). We cannot force Gmail to use us. |
-| On-access / consume the other component’s parse | Agent mount is the analog: one hydrate. |
+| Use the same parser everywhere in a workflow | **Yes for current inspect and materialize.** Any future projection or mount must consume the same IR. We cannot control consumers that reopen the source elsewhere. |
+| On-access / consume the other component’s parse | A future admitted-tree projection is the analog. It is not implemented. |
 | **Normalize** (extract + repack to an unambiguous ZIP) | Phase 3. Powerful; must not become a second parser. Normalize **with this engine**, then the output is the artifact. |
-| Identify ambiguous patterns | **Default.** The 14 types as findings; malformed ⇒ deny unless a named policy. |
+| Identify ambiguous patterns | **Current strict default.** Known ambiguous or malformed structure is denied. A future compatibility profile must be separately versioned rather than acting as an insecure fallback. |
 | Incorporate multiple parsers | Research/CI only (ZipDiff corpus). Not in the hot path. |
-| Fix unique/outlier behaviors | Our public interpretation doc **is** the spec we implement. |
+| Fix unique/outlier behaviors | A versioned interpretation specification and executable behavior must agree. Alpha.2 is still bound to the tool version rather than a stable profile. |
 | Better format design | Later (next-gen container). |
 
-Default posture: **reject ambiguity**. Legitimate SFX and signed APKs need named policies (`policy: sfx-v1`, `policy: apk-v1`), copied onto the receipt - never `--insecure`.
+Default posture: **reject ambiguity**. Future SFX or APK support would require separate named interpretation and consumer profiles recorded in evidence, never an `--insecure` fallback.
 
 ---
 
 ## What we are not
 
-We are not an antivirus. We are not Syft. We do not claim CRC is a signature. We do not run 50 parsers at extract time. We **are** the one strict parser plus a report that names every ambiguity we saw, including ones we refused to interpret.
+Sealr is not an antivirus or package inventory system. It does not claim CRC is a signature and does not run 50 parsers during an invocation. Alpha.2 is one strict parser that returns a structured finding at the deterministic refusal point. A rejected view may be partial and must not be treated as a complete inventory.

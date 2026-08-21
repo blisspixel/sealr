@@ -1,0 +1,30 @@
+{
+  "schema": "sealr.readme-walkthrough.v1",
+  "tool_version": "0.1.0-alpha.2",
+  "presentation": "rendered-terminal-style-summary",
+  "fixtures": {
+    "allowed.zip": "580606f3b53229ab60ff1d786bac90c91f75c054269c11142cd971f380d3fc25",
+    "rejected-parent-path.zip": "5039cccff40a5df0d0b61a2734b5dafeb8224f914603cae870f1638990f58140"
+  },
+  "transcripts": {
+    "unix": {
+      "01-inspect-allowed.txt": "ed76e8ef90f5502b95f45f77f711c7864df2db14c3b146ed8e08d2c32de3d2a1",
+      "02-reject-parent-path.txt": "3fbba4a3392dab0d26ba39f8f8d7bf4151776fbcd1aef76b149532947408d11b",
+      "03-materialize-allowed.txt": "f5bf0c121744ffdb829bc15be0142314e67a921447915c1938895cf941964785"
+    },
+    "windows": {
+      "01-inspect-allowed.txt": "97c5556d9595473e89c3b95d065f388a524bbf4e365755eee58f52ce6570d9c7",
+      "02-reject-parent-path.txt": "7ea457fceb3efae6b316fe8eba90f477bdb49d607e4bb982d756841af932477b",
+      "03-materialize-allowed.txt": "52f95d21c84f010d096d6d049e2f5a45ad3fe8b569817f71dcdd2a8f737e34c3"
+    }
+  },
+  "image_transcript_variant": "windows",
+  "images": {
+    "sealr-inspect-allowed-terminal-dark.png": "db4793530d4faabdd5fa1f0192078db939b66ded666dccb5c5636306c1be242d",
+    "sealr-inspect-allowed-terminal-light.png": "1fee8e4757ab6c491f3e5a3651d4c9a1ee57ab9a9d98897b271f46f0292420f7",
+    "sealr-materialize-allowed-terminal-dark.png": "0bb9fe27ac57c60a6c1c04c5627b12666e480ca2aa956bf1bcd35396659ae1eb",
+    "sealr-materialize-allowed-terminal-light.png": "3621063835016c9a6ef3b2ddaee550571bef4de7956985e39fae68f01d81ffb6",
+    "sealr-reject-parent-path-terminal-dark.png": "2dfc01a0fb43436092e0dce930b08c07d391dfa902de1a9138c64e968fcee095",
+    "sealr-reject-parent-path-terminal-light.png": "c8bb6ae10a54f5911ca444be014b734c96c5169af257efc9de2c9c004137a6ff"
+  }
+}

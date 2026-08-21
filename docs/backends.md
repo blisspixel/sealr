@@ -1,89 +1,49 @@
-# Backends
+# Codec and acceleration backends
 
-Runtime priority is not implementation order. **Default is always CPU.** Everything else is optional, dynamically loaded, and allowed to return `Unavailable`.
+> Deferred engineering track. Alpha.2 has no runtime backend scheduler, GPU path, QAT path, or alternate codec selection. The current ZIP Deflate implementation uses `flate2` with the pure-Rust `zlib-rs` backend and verifies exact compressed-input consumption.
 
-## 0. CPU SIMD (always)
+Backends may optimize verification or realization. They may not define interpretation, paths, policy, findings, verification completeness, or tree identity.
 
-The product. If this does not beat `7z` / `unzip` / `ripunzip` on the published corpus, GPU work is theater.
+## Workload model
 
-| Codec | Library | Notes |
-|---|---|---|
-| Deflate / gzip / ZIP method 8 | `zlib-rs` (default, pure Rust streaming); `libdeflate` (optional, whole-buffer); ISA-L later | Never miniz_oxide in release |
-| Store | memcpy | Never GPU |
-| Zstd | C libzstd behind a feature; `ruzstd` only for no-C builds | One ZIP member = one frame; member rayon is enough |
-| LZ4 | `lz4_flex` until a corpus needs C lz4 | First GPU-comparison codec |
-| CRC32 | `crc32fast` | Same pass as write |
-| Apple | Compression.framework / LZFSE on Darwin, plus the ZIP walker | No Metal inflate |
-| AMD CPU | AOCL-Compression worth probing on Zen | CPU, not hipCOMP |
+Measure four costs before selecting a backend:
 
-Parallel gzip of one stream (`rapidgzip`-style) is a later experiment, not Phase 1. `pigz` does not parallel-decompress.
+```text
+T_structure  parse and evaluate layout
+T_verify     decompress and hash required content
+T_realize    create and publish filesystem objects
+T_reuse      return an already verified tree
+```
 
-## 1. Intel QAT (optional, Linux servers)
+Many small files are usually dominated by metadata and security scanning. A large independent member may be codec-bound. Content-addressed reuse may avoid both costs. One throughput number cannot represent all three cases.
 
-The only hardware inflate that speaks **stock** gzip/ZIP Deflate into **host** memory. No PCIe round-trip.
+## Backend admission gate
 
-Probe, use for large Deflate/Gzip members, fall back to ISA-L. Operationally heavier than SIMD (firmware, huge pages). Do not require it.
+An optional backend is eligible only when it:
 
-**Intel IAA is not a ZIP backend.** Decompress rejects distances > 4 KiB. RFC 1951 windows are 32 KiB. Easy to misuse; don’t silently send stock ZIP there.
+1. reports exact compressed bytes consumed and uncompressed bytes produced;
+2. produces byte-identical output for every admitted stream;
+3. preserves codec-error, trailing-input, size, CRC32, SHA-256, and quota findings;
+4. passes the hostile codec corpus and cross-backend differential tests;
+5. records its identity and version in evidence;
+6. remains optional and fails closed or falls back before semantic processing begins;
+7. improves a named workload after initialization, transfer, filesystem, and antivirus costs are included.
 
-## 2. NVIDIA nvCOMP (optional)
+## Candidate optimizations
 
-C API from Rust, dynamically loaded `nvcomp.dll` / `libnvcomp.so`. NVIDIA GPUs only (SDK EULA). The CLI must still have material functionality without it.
+The likely order is:
 
-| Path | Codecs | When |
-|---|---|---|
-| **DE** (fixed-function copy engine) | Snappy, LZ4, Deflate, Gzip | **B200 / B300 / GB200 / GB300 only.** Not GeForce RTX 50. Chunks ≤ 4 MiB on B200. Special alloc flags or it silently uses SMs. |
-| **SM** | Those plus Zstd, GDeflate, Cascaded, … | Consumer NVIDIA, including RTX 50 |
+1. reuse an already verified content tree;
+2. parallel verification of independent members within deterministic resource accounting;
+3. optimized CPU copy and DEFLATE implementations that expose exact consumption;
+4. clone or link realization from a trusted content-addressed store;
+5. remote range ingestion backed by an immutable private snapshot;
+6. hardware offload only for a demonstrated large-buffer or device-memory consumer.
 
-`nvlzcat` (nvCOMP 5.2+) is Linux, one gzip stream, the honest GPU gzip demo. It is not ZIP-to-folder.
+GPU, QAT, Mojo, CubeCL, mmap, DirectStorage, and specialized codecs remain research options. None is on the active Phase 0.1 path.
 
-Several nvCOMP decompressors assume **valid input** from the same compressor. Untrusted ZIP still CRCs on the host. Do not disable OOB checks to chase GB/s on untrusted members.
+## Reporting rule
 
-License: redistribute the blob inside a larger app, NVIDIA GPUs only, no copyleft-infection of the SDK. Offer a build without the blob.
+Every benchmark names the source corpus, destination, verification controls, backend, cold or warm state, CPU time, wall time, peak memory, open-handle peak, and bytes avoided through reuse. Security controls remain enabled.
 
-## 3. Mojo (research, not a product backend in 2026)
-
-Verdict: **later.**
-
-Mojo 1.0 shipped 11 Aug 2026; compiler went Apache 2.0 on 18 Aug. GPU host APIs (`DeviceContext`) moved into **MAX** (Community License). Windows is **WSL-only**. Shared libs work on Linux/macOS (`@export` + `abi("C")` + `initialize_runtime()`), with undocumented Modular runtime rpath. Apple unified-memory zero-copy can be silently wrong. You cannot target Blackwell DE from a Mojo kernel.
-
-**12-month bet:** (1) independently-chunked **LZ4** kernel vs CPU vs nvCOMP, after H2D+D2H; (2) optional **comptime-specialized** CRC/BLAKE3 for a *fixed* member-size class. Success is beating CPU SIMD on fat buffers, byte-identical. If that loses, publish it and stop.
-
-Agent Python is **PyO3 on Rust**, not Mojo’s Python interop. Comptime does **not** move policy into Mojo.
-
-Do not put `pixi` / MAX on the user install path. Do not block Windows. Do not promise NVIDIA+AMD+Apple in a feature table.
-
-If portable GPU must live in the crate graph, **CubeCL** (Rust `#[cube]` → CUDA/HIP/Metal/SPIR-V, MIT/Apache) is the more honest product candidate. wgpu is a later fallback, a bad first bitstream.
-
-## 4. Not backends for extract-to-folder
-
-| Thing | Why not |
-|---|---|
-| DirectStorage + GDeflate | Dest MEMORY → CPU by design. Dest BUFFER → D3D12. Format is not ZIP method 8. |
-| hipCOMP | Preview, nvCOMP 2.2-era, not production, no DE |
-| Metal “lossless” | Texture bandwidth, not Deflate |
-| Home-grown LZMA-on-GPU | Serial dictionary, no DE, 7-Zip already owns the chunked case |
-| GPU as default | Cold CUDA context ruins a 200 ms unzip |
-
-## Decision rules (copy onto the scheduler)
-
-**May offload**
-
-1. Destination is device memory.
-2. Datacenter DE present, codec in {LZ4, Snappy, Deflate, Gzip}, DE-capable buffers, chunks ≤ 4 MiB.
-3. One or few members, each ≳ 64–256 MiB uncompressed, independently chunked, CPU inflate is the bottleneck.
-4. QAT present, large Deflate/Gzip, Linux.
-
-**Must not offload**
-
-1. Filesystem tree of many small files.
-2. Stock ZIP with thousands of members < ~1–4 MiB.
-3. LZMA / xz / 7z / bzip2.
-4. Need strict validation of untrusted bitstreams (nvCOMP valid-input-only).
-5. No NVIDIA GPU, or CUDA would be loaded just for this.
-6. Already saturating disk with CPU inflate.
-7. macOS / AMD GPU / iGPU-only as of 2026.
-
-When `--gpu` is on, print what you actually got: `nvcomp-sm` vs `nvcomp-de (B200)` vs `unavailable`. Do not advertise RTX 50 hardware unzip.
-
-Primary references: [nvCOMP](https://docs.nvidia.com/cuda/nvcomp/), [Intel QATzip](https://github.com/intel/QATzip), [Intel Query Processing Library](https://github.com/intel/qpl), [DirectStorage 1.1](https://devblogs.microsoft.com/directx/directstorage-1-1-now-available/), and [Mojo GPU fundamentals](https://docs.modular.com/mojo/manual/gpu/fundamentals/).
+See [architecture.md](architecture.md#performance-architecture) and [ROADMAP.md](../ROADMAP.md#deferred-performance-track).

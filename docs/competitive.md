@@ -1,84 +1,42 @@
-# Competitive landscape
+# Adjacent tools and research
 
-Fast extract is already split by workload. A rayon unzip is crowded. A scheduler that picks CPU SIMD vs GPU *per member*, with szips-grade safety and honest benches, is not.
+> Research snapshot reviewed 2026-08-21. This page supports product decisions but is not a live market database or a source of security guarantees. Recheck upstream behavior before relying on a comparison.
 
-Snapshot: 2026-08-19. Numbers are upper bounds on *that* machine, not extract-to-NTFS promises.
+Sealr overlaps several established categories but should not claim to replace them.
 
-**Second pass (same day):** more of the market exists than the first scan listed. **Cram**, **Bandizip parallel ZIP**, **NanaZip**, **ripzip**, **go-extract**, **ExtractNow**, **qzip**, **dtrx**. The full thesis is still unoccupied. Phase 1 as a standalone product is not. See [who-else.md](who-else.md).
+## Landscape
 
-## Who already wins which row
-
-| Workload | Who wins | Notes |
-|---|---|---|
-| Many independent ZIP members | **ripunzip** (Rust + rayon) | Chromium ASAN zip ~3.85 GB: 9 s vs unzip 94 s (Linux); 52 s vs 7z 165 s (Windows). Author: not universal. HDD/AV dominate. |
-| One huge `.gz` | **rapidgzip** | Paper: 5.6–8.7 GB/s @ 128 cores. README later: 12–24 GB/s with index. `pigz` does **not** parallel-decompress. |
-| Single-core Deflate | **igzip / libdeflate** | ~1 GB/s in-memory Silesia. Codec numbers, not unzip. |
-| Solid `.7z` | **7-Zip** | Only if the compressor wrote multiple LZMA2 chunks. 1-thread-created archive stays 1-thread. LZMA decode ~30–100 MB/s/thread. |
-| Ordinary `.zst` | `zstd` ~0.8 GB/s/core | `pzstd` only helps `pzstd`-framed files. |
-| Unified CLI (zip+tar+7z) | **ouch** | Their own benches: sometimes *slower* than `tar`. Not the speed bar. |
-| Game assets → VRAM | DirectStorage + GDeflate | Dest MEMORY → CPU on purpose. |
-| GPU gzip CLI | **nvlzcat** | Linux, one stream, NVIDIA, nvCOMP 5.2+. |
-| Safe unzip | safezip / safe_unzip / **szips** | Slow-and-safe corner. |
-| Windows default | Explorer Compressed Folders | Single-thread, the floor. PeaZip corpus: Explorer 17.2 s vs 7-Zip ZIP 8.9 s. |
-
-**7-Zip does not use the GPU.** [ip7z/7zip#129](https://github.com/ip7z/7zip/issues/129) is Windows graphics-preference confusion.
-
-## Tool matrix (extract CLIs)
-
-| Tool | Parallel | GPU | Safety story |
+| Category | Representative work | What it does well | What Sealr should learn |
 |---|---|---|---|
-| ripunzip | Per ZIP member | No | `enclosed_name`; no bomb product |
-| ouch | Across archives; not a rayon unzip | No | Optional landlock; not bombs |
-| 7-Zip | LZMA2 chunks if encoder cooperated | **No** | Mature path/symlink hardening; not bomb caps |
-| unzip / bsdtar | Sequential | No | Some slip hardening; streaming ≠ bombs |
-| rapidgzip | Speculative Deflate blocks | No | `--verify` CRC is opt-in and slower |
-| nvlzcat | One gzip on GPU | NVIDIA | Not Zip Slip relevant |
-| szips | Sequential Python | No | Jail + caps + CRC - the DNA to keep |
+| General archive tools | [7-Zip](https://7-zip.org/), [PeaZip](https://peazip.github.io/), platform archive utilities | Broad formats, mature user workflows, strong compatibility | Do not compete on format count or desktop extraction convenience |
+| Unified extraction | [ouch](https://github.com/ouch-org/ouch), [HashiCorp go-extract](https://github.com/hashicorp/go-extract), [exarch](https://github.com/bug-ops/exarch) | Practical APIs, multiple formats, path and resource controls | Clear configuration and safe defaults matter, but breadth alone is not Sealr's goal |
+| Parallel ZIP extraction | [ripunzip](https://github.com/GoogleChrome/ripunzip), [ripzip](https://github.com/velopack/ripzip-rs) | Efficient member-level work on suitable archives | Performance depends on corpus and destination; measure with all verification enabled |
+| Read-only archive access | [ratarmount](https://github.com/mxmlnkn/ratarmount), [archivemount](https://github.com/cybernoid/archivemount) | Avoids eager extraction for some workloads | Any future projection must consume the admitted IR and expose verification completeness |
+| Supply-chain evidence | [in-toto](https://in-toto.io/), [Sigstore](https://www.sigstore.dev/), [GitHub artifact attestations](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) | Standard envelopes, identities, and verification workflows | Use established authenticated envelopes after Sealr's claim bytes are canonical |
+| Parser differential research | [ZipDiff](https://github.com/ouuan/ZipDiff) and its [USENIX Security 2025 paper](https://www.usenix.org/conference/usenixsecurity25/presentation/you) | Reproducible ambiguity taxonomy across many ZIP parsers | Treat one byte sequence having multiple consumer meanings as a first-class admission problem |
 
-Rust libraries: `zip` crate is sequential `extract()` and had CVE-2025-29787 (symlink slip, patched 2.3.0). `sevenz-rust` is unmaintained; **sevenz-rust2** is what ouch uses. `rawzip` is the structure parser we want.
+## Narrow differentiation to test
 
-## Empty niche
+The working hypothesis is modest:
 
-1. **Scheduler + `--why`**, not another codec.
-2. **Honest benches** as a first-class artifact: named workload rows, dest = `/dev/null` *and* NVMe *and* NTFS-many-files, CRC on vs off, AV on vs off. Compare 7z, unzip, ripunzip, ouch, rapidgzip, nvlzcat. If GPU loses, print that.
-3. **szips safety on the fast path** (jail, overlap, caps, CRC default-on).
-4. **Folder-of-archives** with the right algorithm per archive (ZIP members, gzip stream, 7z chunks) in one binary.
-5. **Windows extract that is not Explorer and not “install 7-Zip.”** A `sealr --dest` that is safe-by-default and faster on many-member ZIP is a *wedge*, not the product. The product is the tuple. A GPU checkbox is not.
+1. one strict interpretation is shared by inspection and every Sealr effect;
+2. known ambiguous structure receives stable, machine-readable refusal evidence;
+3. accepted content receives explicit verification completeness;
+4. downstream consumers use the admitted representation instead of reparsing the source;
+5. Linux, macOS, and Windows produce the same semantic tree evidence for the same profile.
 
-## Do not bother
+Alpha.2 establishes pieces of the first two points for a narrow ZIP32 subset. It does not yet establish canonical tree identity, reusable admission, a stable consumer profile, or the complete cross-platform semantic contract.
 
-- `zip` + rayon clone of ripunzip
-- ouch-style unified UX as the differentiator
-- Replacing 7-Zip as the format Swiss army knife (RAR/ISO/NSIS)
-- Parallel gzip that isn’t as good as rapidgzip
-- GPU Deflate for 50k tiny files to NTFS
-- GPU LZMA / solid 7z
-- nvlzcat-but-Windows as the whole product
-- Safety-only Python wrapper (szips already was)
-- Mojo-only CLI
-- Beating memcpy charts of stored data
+## What not to optimize for first
 
-## What “new” looks like
+- the largest format list;
+- a desktop archive GUI;
+- one synthetic unzip throughput result;
+- GPU or hardware checkboxes;
+- a custom signature system;
+- many language bindings without one dependent consumer;
+- permissive recovery for rejected archives.
 
-Not interesting: `ZipArchive` + rayon + libdeflate, one hyperfine on a 200 MB zip.
+The next test of differentiation is not a marketing comparison. It is whether the Phase 0.1 semantic identity, corpus, worker, and verifier gates can be implemented without weakening compatibility or platform support.
 
-Interesting:
-
-```
-sealr --source ./folder --dest ./out
-  inspect: 8 zips (12k small deflate), 1 4 GB .gz, 1 solid 7z (2 chunks), 1 pzstd .zst
-  schedule the right backend per shape
-  safety: jail, caps, CRC on
-  print: backend, GB/s, why-not-GPU
-  same corpus vs 7z / unzip / ripunzip / ouch / rapidgzip
-```
-
-## Primary sources
-
-- [ripunzip benchmark and design notes](https://github.com/GoogleChrome/ripunzip)
-- [Rapidgzip paper](https://doi.org/10.1145/3588195.3592992)
-- [7-Zip release history](https://7-zip.org/)
-- [pzstd framing and benchmarks](https://github.com/facebook/zstd/blob/dev/contrib/pzstd/README.md)
-- [DirectStorage 1.1 architecture](https://devblogs.microsoft.com/directx/directstorage-1-1-now-available/)
-- [nvCOMP nvlzcat documentation](https://docs.nvidia.com/cuda/nvcomp/nvlzcat.html)
-- [PeaZip compression and extraction benchmark](https://peazip.github.io/peazip-compression-benchmark.html)
+See [who-else.md](who-else.md) for project-specific notes and [ROADMAP.md](../ROADMAP.md#active-execution-queue) for the implementation order.

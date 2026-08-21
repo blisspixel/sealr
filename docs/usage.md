@@ -4,16 +4,16 @@ The current CLI is a thin facade over `sealr::apply()`.
 
 ## Inspect
 
-```powershell
-cargo run --locked -p sealr-cli -- path\to\archive.zip
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.zip
 ```
 
 The inspectable view is printed as pretty JSON on stdout. The unsigned receipt is printed as pretty JSON on stderr. No member files are created.
 
 ## Materialize
 
-```powershell
-cargo run --locked -p sealr-cli -- path\to\archive.zip --dest D:\new-output
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.zip --dest ./new-output
 ```
 
 The destination must not exist, and its parent must already exist. On Linux and macOS, the parent must have a trusted owner and either deny group and other writes or use trusted sticky-directory semantics. macOS extended ACLs fail closed. Windows requires a non-remote, writable NTFS parent with persistent ACLs and creates the stage with a protected effective-TokenUser-only DACL. sealr creates a random hidden stage beside the destination, retains it as a directory capability, and resolves every validated member component through no-follow directory handles. It publishes with the platform's native no-replace operation only after every member passes policy, expansion limits, CRC32 verification, and SHA-256 calculation.
@@ -56,7 +56,7 @@ Source open and read failures currently become a structured rejection and theref
 ## Current CLI surface
 
 ```text
-Usage: sealr.exe [OPTIONS] <ARCHIVE>
+Usage: sealr [OPTIONS] <ARCHIVE>
 
 Arguments:
   <ARCHIVE>  Archive file
@@ -68,3 +68,49 @@ Options:
 ```
 
 Policy files, JSONL output, receipt paths, mounts, folder scans, force replacement, backend selection, and signing are roadmap items. They are not accepted flags today.
+
+## Target CLI experience
+
+Alpha.2 intentionally exposes the underlying JSON contract. It is useful for validation but is not the finished human interface.
+
+After the semantic outcome model stabilizes, the default terminal experience should be concise and task-oriented:
+
+```text
+$ sealr gate package.zip
+
+ADMITTED  package.zip
+Verified: complete
+Files:    47
+Expanded: 812 KiB
+Evidence: package.zip.sealr.json
+```
+
+This is design notation, not current output. The exact fields depend on the versioned interpretation, admission, verification, effect, and completeness types.
+
+The target CLI follows these rules:
+
+- human output is short, scannable, and explains the next action;
+- `--json` emits one versioned machine envelope on stdout;
+- progress and diagnostics never corrupt machine stdout;
+- color defaults to terminal-aware `auto`, honors `NO_COLOR`, and is never required to understand a result;
+- redirected output has no animation or control sequences;
+- exit classes distinguish denial, indeterminate input, failed effects, and command misuse;
+- no telemetry, implicit network request, update check, or hidden write occurs;
+- Linux, macOS, and Windows help and output receive equal golden coverage;
+- UI formatting remains a thin layer over the Rust library and adds no second parser or policy path.
+
+Job-oriented verbs such as `gate`, `verify`, `materialize`, and `explain` follow the semantic types. They must not freeze the current combined verdict under a more polished surface.
+
+## README capture policy
+
+The committed images are rendered terminal-style summaries derived from the current alpha.2 JSON view and receipt streams. They remain paired with copyable commands and expected text. They were first captured for alpha.1; the visible walkthrough output did not change in alpha.2. Whenever visible output changes, the walkthrough fixtures and transcripts must be regenerated from the locally built release-profile binary, semantic assertions must run first, and both light and dark screenshots must be recaptured.
+
+Current CI regenerates fixture and native transcript inputs, checks their SHA-256 values against the manifest's Unix or Windows variant, and verifies the exact PNG hashes, asset set, format, dimensions, density, and metadata policy. A future pixel-level renderer comparison is deliberately not claimed.
+
+Screenshots demonstrate released behavior. They are never the only instructions and are not updated to show planned commands before those commands exist.
+
+## Design references
+
+- [Command Line Interface Guidelines](https://clig.dev/) for human-first output, composable streams, useful help, and actionable errors.
+- [`clap::ColorChoice`](https://docs.rs/clap/latest/clap/enum.ColorChoice.html) for the existing parser's terminal-aware `auto`, `always`, and `never` behavior.
+- [`NO_COLOR`](https://no-color.org/) for the cross-tool environment convention.

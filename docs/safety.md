@@ -6,7 +6,7 @@ Goals: no path escape, no disk/RAM bomb, no silent corruption, no extra files (A
 
 Language: MUST / SHOULD / MAY.
 
-This is the target safety specification. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) record current implementation status. Options described as future policy surfaces are not accepted by the Phase 0 CLI.
+This is the target safety specification. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) record current implementation status. Options described as future policy surfaces are not accepted by the alpha.2 CLI.
 
 ## Path jail (hard, not a flag)
 
@@ -20,7 +20,7 @@ Let `dest` be the user destination after `abspath`. Let `raw` be the member name
 4. `.` MAY be dropped.
 5. Reject absolute: leading `/`, `//server/share`, or `^[A-Za-z]:`.
 6. Join `dest` + components. Reject unless the result is `dest` or a strict child. Canonicalize **dest root** once; do not `canonicalize` children that do not exist yet.
-7. Decode according to the format, then jail one canonical Unicode string. Phase 0 requires valid UTF-8 when ZIP bit 11 is set, accepts only ASCII when it is clear, and rejects every non-ASCII result until CP437 transcoding and Unicode normalization are implemented.
+7. Decode according to the format, then jail one canonical Unicode string. Alpha.2 requires valid UTF-8 when ZIP bit 11 is set, accepts only ASCII when it is clear, and rejects every non-ASCII result until CP437 transcoding and Unicode normalization are implemented.
 
 Do the jail in a pure function on strings **before** any `open`. Re-check after join.
 
@@ -38,9 +38,9 @@ On Windows, sealr supports only a retained parent handle that reports non-remote
 
 ## Symlinks and reparse points
 
-Current Phase 0 behavior: **do not create them.** ZIP external attributes that describe a special file type are rejected, and file/directory attribute disagreements are rejected.
+Current alpha.2 behavior: **do not create them.** ZIP external attributes that describe a special file type are rejected, and file/directory attribute disagreements are rejected.
 
-A future named policy may allow constrained links only after the target passes the jail relative to the link parent and is proven non-absolute. Such links must be created only after regular files. Member creation never opens through a symlink or reparse point: each canonical component is opened separately with no-follow semantics from a retained directory handle. Windows also rejects a reparse-point attribute on each opened directory or file handle. Phase 0 has no link-enabling CLI option. Repeated hostile race stress remains a Phase 0.1 gate.
+A future named policy may allow constrained links only after the target passes the jail relative to the link parent and is proven non-absolute. Such links must be created only after regular files. Member creation never opens through a symlink or reparse point: each canonical component is opened separately with no-follow semantics from a retained directory handle. Windows also rejects a reparse-point attribute on each opened directory or file handle. Alpha.2 has no link-enabling CLI option. Repeated hostile race stress remains a Phase 0.1 gate.
 
 ## Overlap (ZIP)
 
@@ -59,7 +59,7 @@ MAX_COMPRESSION_RATIO = 100
 CURRENT_CHUNK      = 64 KiB
 ```
 
-| Control | Phase 0 default | Future named policy surface |
+| Control | Alpha.2 default | Future named policy surface |
 |---|---|---|
 | Jail, ADS `:`, reserved names, no `..`, no overlap | on | none |
 | No symlink creation | on | constrained links may be considered later |
@@ -77,7 +77,7 @@ Ratio 100 is stricter than DEFLATE’s theoretical max (~1032:1) and will reject
 
 | Check | szips | sealr |
 |---|---|---|
-| `testzip()` full pre-pass | yes | **Do not default.** Inspection already inflates to a sink in Phase 0. |
+| `testzip()` full pre-pass | yes | **Do not default.** Inspection already inflates to a sink in alpha.2. |
 | CRC | re-read from disk | **During write**, one pass |
 | SHA-256 | log every file | Current receipt path hashes every member during the same pass. Hash selection is a later policy surface. |
 | Other checksums | ZIP CRC only | Always verify when present (gzip CRC, zstd xxHash, 7z CRC) |
@@ -90,19 +90,19 @@ Current behavior: refuse if the destination exists. Replacement is not implement
 
 Do not preserve setuid/setgid. Mask to `0777` minus umask, or `0755`/`0644`.
 
-The Rust policy field `atomic` defaults to false. When true, completed member files are synced before publication. Directory durability and crash recovery are not yet guaranteed. There is no Phase 0 CLI switch for this field.
+The Rust policy field `atomic` defaults to false. When true, completed member files are synced before publication. Directory durability and crash recovery are not yet guaranteed. There is no alpha.2 CLI switch for this field.
 
 Publication is native and no-replace on the three release platforms. Linux uses `renameat2` with `RENAME_NOREPLACE`; macOS uses `renameatx_np` with `RENAME_EXCL`. Windows creates the stage relative to the retained parent handle with `NtCreateFile`, `FILE_CREATE`, reparse-point-open semantics, and the explicit protected DACL. It withholds delete sharing, retains the returned stage handle for the full write, and publishes that same object with `NtSetInformationFile`, the retained parent as `RootDirectory`, and replacement disabled.
 
 Linux, macOS, and Windows are the supported materialization platforms. Every other target fails closed with `materialize.unsupported`; Windows storage outside the matrix below fails with `materialize.unsupported_filesystem`.
 
-| Windows parent observed through the retained handle | Phase 0.1 status | Reason |
+| Windows parent observed through the retained handle | Alpha.2 status | Reason |
 |---|---|---|
 | Non-remote, writable NTFS with `FILE_PERSISTENT_ACLS` | Supported | Creation-time descriptor and descendant inheritance are natively tested. |
 | ReFS, including Dev Drive | Rejected | ACL support is documented but the complete stage, inheritance, reparse, cleanup, and publication path is not natively qualified. |
-| FAT32, exFAT, UDF, CDFS, or unknown | Rejected | The required persistent owner-private ACL cannot be established. |
-| SMB, UNC, mapped remote drives, DFS, WebDAV, NFS redirectors, or any `FILE_REMOTE_DEVICE` handle | Rejected | Remote ACL, sharing, and rename semantics are outside the current proof. |
-| Read-only volume or any volume-query failure | Rejected | Required stage creation or the support decision cannot be proven safe. |
+| FAT32, exFAT, UDF, CDFS, or unknown | Rejected | The required persistent protected sole-principal DACL semantics cannot be established. |
+| SMB, UNC, mapped remote drives, DFS, WebDAV, NFS redirectors, or any `FILE_REMOTE_DEVICE` handle | Rejected | Remote ACL, sharing, and rename semantics are outside the qualified support boundary. |
+| Read-only volume or any volume-query failure | Rejected | Required stage creation or the support decision cannot be established. |
 
 ## Receipt evidence
 
@@ -122,17 +122,17 @@ Windows evidence reports `storage_policy: windows-local-ntfs-v1` and `stage_acl_
 
 The current core keeps platform `unsafe` code in two narrow FFI modules: descriptor-based extended-ACL inspection on macOS and native volume, token, security-descriptor, stage-creation, and publication operations on Windows. This is the explicit audit boundary for pointer lifetime, layout, handle ownership, share flags, and error conversion.
 
-Root, administrators, SYSTEM, same-principal processes, filesystem-override or backup/restore privileges, filter drivers, and debugging or handle-duplication rights can act with or override the library's authority. They are outside this in-process containment claim. A reduced-authority worker narrows parser ambient authority, but a distinct service identity or equivalent mandatory-access-control boundary is required to contain another process running as the same user.
+Root, administrators, SYSTEM, principals matching the effective token's default-owner SID, same-principal processes, filesystem-override or backup/restore privileges, filter drivers, and debugging or handle-duplication rights can act with or override the library's authority. They are outside this in-process containment claim. A reduced-authority worker narrows parser ambient authority, but a distinct service identity or equivalent mandatory-access-control boundary is required to contain another process running as the same user.
 
 ## 7z
 
-szips ran `7z x -y -o{dest}` with **no jail**. sealr MUST NOT. Native parse + the same jail, or do not ship 7z.
+7z is not implemented. Sealr MUST NOT shell out to another extractor and then imply that its own interpretation, jail, quotas, or evidence covered the result. A future 7z profile requires a maintained native parser strategy and the same semantic, capability, worker, corpus, and evidence gates, or it does not ship.
 
 ## szips parity
 
 MUST keep or strengthen: path jail (reject backslash, absolute, `..`, empty, and `:`), containment checks, the four caps, skip ratio when `compress_size == 0`, chunked I/O, CRC verification, no nested recursion, and non-recursive folder scan.
 
-MUST drop: a redundant `testzip()` pre-pass, a second SHA-256 read pass, silent overwrite, and shell-out 7z. Phase 0 computes CRC32 and SHA-256 together while streaming each expanded member.
+MUST drop: a redundant `testzip()` pre-pass, a second SHA-256 read pass, silent overwrite, and shell-out 7z. Alpha.2 computes CRC32 and SHA-256 together while streaming each expanded member.
 
 MUST add: reserved names, trailing dot/space, ZIP overlap reject, no symlink extract, actual-byte caps, ZipDiff A1–C5 deny-or-finding, TAR PAX/GNU metadata size cap, inspect ≡ materialize.
 

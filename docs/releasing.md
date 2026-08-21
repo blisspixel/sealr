@@ -2,6 +2,8 @@
 
 Releases come only from the current protected `main` commit. The tag workflow stages an attested draft. It never publishes. A trusted local promotion script revalidates live repository controls and publishes only the exact verified draft through the operator's existing administrative GitHub session.
 
+Verification commands for the current published prerelease are maintained in [release-verification.md](release-verification.md). Historical release notes remain identical to their immutable GitHub release bodies.
+
 The workflow and promotion script are intentionally pinned to one preview version at a time.
 
 ## Preconditions

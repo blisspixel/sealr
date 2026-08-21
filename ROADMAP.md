@@ -18,9 +18,9 @@ The next milestone is **Phase 0.1: the ZIP trust gate**.
 
 Sealr is an archive-ingress boundary. It is not a general agent-execution proxy, model verifier, credential broker, or enterprise control plane.
 
-Do not add TAR, 7z, MCP, language bindings, accelerators, or signing first. The current implementation has a credible ZIP32 parser, an executable ZipDiff gate, and component-bound output. The next work is a versioned admitted-tree identity and separate outcome axes, followed by reduced-authority filesystem isolation, canonical Unicode paths, snapshot-backed bounded input, and layered adversarial assurance.
+Do not add TAR, 7z, MCP, language bindings, accelerators, or archive-decision signing first. The current implementation has a strict but incomplete ZIP32 parser, an executable ZipDiff gate, and component-bound output. The next work is a versioned admitted-tree identity and separate outcome axes, followed by reduced-authority filesystem isolation, canonical Unicode paths, snapshot-backed bounded input, and layered adversarial assurance.
 
-This order matters because format breadth multiplies every unresolved parser, path, resource, and materialization mistake. Closing one format exceptionally well gives later formats a real boundary to reuse.
+This order matters because format breadth multiplies every unresolved parser, path, resource, and materialization mistake. Testing one narrow format thoroughly gives later formats a clearer boundary to reuse.
 
 ## Current baseline
 
@@ -44,7 +44,33 @@ The repository now has:
 - protected `main` requiring pull requests, linear history, resolved conversations, and all five current required CI checks;
 - the `v0.1.0-alpha.2` hardened-materialization preview line, built from protected `main` through all five required main CI checks and the release workflow, with immutable releases enabled.
 
-This is a strong second alpha preview baseline. It is not a production security boundary yet.
+This is the current second-alpha baseline. It is incomplete and is not a production security boundary.
+
+## Active execution queue
+
+There is one primary implementation stream and one parallel assurance stream:
+
+1. **Primary: Step 3, semantic identity.** First separate outcome and completeness axes, then introduce `SourceSnapshot` and the versioned `ArchiveIR`, then make inspect and materialize consume that one object, and finally specify layout and content-tree identities with cross-platform golden bytes.
+2. **Parallel: finish the Step 2 adversarial matrix.** Add deterministic namespace and staged-content mutation seams on Linux, macOS, and Windows. These tests may strengthen the existing materializer, but they must not invent a second tree or manifest representation.
+3. **Next after the semantic contract: Step 4, the supervised Linux worker.** The worker protocol and supervisor audit consume the Step 3 tree and manifest. macOS and Windows stay native release gates and report process isolation unavailable until credible platform-specific worker boundaries exist.
+
+Steps 5 through 10 then proceed in order: authenticated recovery and durability, canonical Unicode paths, snapshot-backed bounded random access, layered assurance, stable evidence plus avoided-work performance, and the stable CLI experience. After Phase 0.1, the Python wheel consumer and reusable-tree gate come before TAR or any other format expansion.
+
+## Repository tooling and dependency rule
+
+The shipped library and CLI remain Rust and have no PowerShell or Bash runtime dependency. Native Ubuntu, macOS, and Windows jobs are equal release gates.
+
+The repository currently uses PowerShell for several cross-runner documentation, walkthrough, licensing, and promotion tasks because `pwsh` is available on all three hosted runner families and the release operator uses Windows. Bash is also used for Linux-hosted GitHub API and release checks. This works, but it duplicates logic across scripting environments and makes the repository look more platform-specific than the product is.
+
+Shared deterministic tasks will move into a small Rust `xtask` surface in this order:
+
+1. documentation and metadata verification;
+2. walkthrough fixture, transcript, and asset-manifest generation;
+3. third-party license generation and verification;
+4. release-candidate classification and archive inspection;
+5. release promotion after the Rust implementation reproduces every numeric-ID, provenance, and fail-closed gate in the current operator script.
+
+Thin host-specific wrappers may remain only where an operating-system or operator boundary requires them. New runtime dependencies require a written capability need, license and advisory review, transitive-size review, and evidence that the standard library or an existing dependency is insufficient. UI work must not add an async runtime, TUI framework, telemetry client, or network stack to the release binary without a measured requirement.
 
 ## Phase 0.1: ZIP trust gate
 
@@ -70,7 +96,7 @@ Evidence:
 - dedicated `ZipDiff 14-class gate` CI job;
 - no external parser is part of the library or extraction runtime.
 
-### 2. Put every destination operation behind a directory capability: in progress
+### 2. Put every destination operation behind a directory capability: foundation shipped, adversarial closure active
 
 Completed through 2026-08-21:
 
@@ -79,7 +105,7 @@ Completed through 2026-08-21:
 - Stage names use 128 bits from the operating-system random source. Linux and macOS stages are created with mode `0700`.
 - The destination parent must already exist. Linux accepts only trusted-owner parents protected by mode or sticky rename semantics. macOS additionally rejects extended ACLs through a retained descriptor query.
 - Windows admits only non-remote, writable NTFS parents with persistent ACLs, then atomically creates and retains the stage with parent-relative `NtCreateFile` and a protected effective-TokenUser-only inheritable DACL.
-- Windows verifies the stage owner and exact DACL through the retained handle before any member write, preventing both inherited cross-principal mutation and a discovered name from being replaced between creation and handle acquisition.
+- Windows verifies the stage owner and exact DACL through the retained handle before any member write, removing inherited DACL grants to other principals and preventing a discovered name from being replaced between creation and handle acquisition. Descendants inherit the sole TokenUser ACE but receive the creating token's default owner; a principal matching that owner SID remains outside the in-process containment promise.
 - Member files use no-follow, create-new handles. Windows validates the generic reparse-point attribute on opened directory and file handles rather than recognizing only ordinary symbolic links.
 - Normal rejection attempts explicit stage cleanup and retries once after failure before constructing the receipt. Setup failure after stage creation uses retained-handle cleanup first and a parent-relative retry. Receipts distinguish not-started, setup-failed, staged, aborted, publication-failed, and committed outcomes, including final cleanup success or failure.
 - Final publication uses `RENAME_NOREPLACE` on Linux, `RENAME_EXCL` on macOS, and `NtSetInformationFile` with the retained source and parent handles on Windows. All three are no-replace operations.
@@ -107,7 +133,15 @@ Exit proof:
 - receipts report the actual platform publication primitive and every post-stage cleanup outcome;
 - crash-recovery behavior is documented and tested separately from normal rollback.
 
-### 3. Establish semantic identity and separate outcomes
+### 3. Establish semantic identity and separate outcomes: immediate implementation milestone
+
+Implementation order inside this step:
+
+1. Replace the unavailable all-zero source digest with explicit digest availability, add separate outcome and completeness types, and preserve a compatibility adapter for the alpha.2 public shape.
+2. Introduce `SourceSnapshot` over the current owned and caller-borrowed in-memory bytes, then build the versioned `ArchiveIR` once from that snapshot.
+3. Make inspect serialization, materialization, tests, and future worker messages consume the same immutable IR without reparsing source bytes.
+4. Compile interpretation, budget, target, consumer, and effect inputs into typed supported controls. Replace floating-point ratios and saturating security counters before their external formats stabilize.
+5. Specify canonical layout and content-tree bytes with domain separation and golden vectors, then require byte-identical results on every supported release platform.
 
 Deliverables:
 
@@ -120,7 +154,7 @@ Deliverables:
 7. Specify `sealr.lock.v1` only after the interpretation and tree-root algorithms are stable. It will bind byte identity to semantic identity so consumers can verify meaning without selecting another parser.
 8. Add golden cross-platform fixtures proving that the same source bytes and profile produce the same IR and layout identity on Linux, macOS, x86_64 Windows, and 32-bit Windows where runtime tests are supported.
 
-Why third: a worker protocol, cache, projection, language binding, package profile, or attestation built around the current invocation-shaped `View` would freeze the wrong abstraction. The admitted tree and independent outcome axes are the contract every later component needs.
+Why this is the immediate next implementation step: a worker protocol, cache, projection, language binding, package profile, or attestation built around the current invocation-shaped `View` would freeze the wrong abstraction. The admitted tree and independent outcome axes are the contract every later component needs.
 
 Exit proof:
 
@@ -143,7 +177,7 @@ Deliverables:
 7. Add deterministic barriers and bounded repeated hostile namespace and content-mutation tests. Require zero outside writes, zero destination replacement, and exact manifest equality on success.
 8. Keep macOS and Windows behavior green and report isolation unavailable there until their credible worker packaging boundaries are implemented.
 
-Why fourth: the Windows DACL closes inherited cross-principal access but does not reduce a compromised parser's ambient authority. The worker protocol should carry the canonical IR and staged-tree manifest from Step 3 rather than invent another representation. A supervisor-owned lifecycle also defines the correct owner for recovery. Landlock confines the worker itself; it does not constrain another process running as the same user. Same-principal containment requires a distinct service identity or equivalent mandatory-access-control boundary and remains outside this milestone.
+Why fourth: the Windows DACL removes inherited DACL grants to other principals but does not reduce a compromised parser's ambient authority. Windows descendants still receive the creating token's default owner, and a principal matching that SID remains outside this milestone. The worker protocol should carry the canonical IR and staged-tree manifest from Step 3 rather than invent another representation. A supervisor-owned lifecycle also defines the correct owner for recovery. Landlock confines the worker itself; it does not constrain another process running as the same user. Same-principal containment requires a distinct service identity or equivalent mandatory-access-control boundary and remains outside this milestone.
 
 Exit proof:
 
@@ -264,6 +298,32 @@ Exit proof:
 - well-formed fixtures produce identical inspect and materialize trees;
 - the baseline and accepted regression budget are checked into the repository.
 
+### 10. Stabilize a quiet, honest CLI experience
+
+Deliverables:
+
+1. Keep the library as the semantic authority. The CLI translates typed outcomes into presentation and never reparses an archive or reimplements policy.
+2. Make the default output a concise human summary that names the decision, verification completeness, effect status, source and tree identities when available, important findings, and evidence location.
+3. Provide one stable machine envelope through `--json`; keep progress and diagnostics off machine stdout. Add `--evidence-out` and related output controls only after their schemas are versioned.
+4. Introduce job-oriented verbs such as `gate`, `verify`, `materialize`, and `explain` only after the Step 3 outcome axes exist. Preserve a documented compatibility path for the alpha CLI.
+5. Support terminal-aware color with `auto`, `always`, and `never`, honor `NO_COLOR`, avoid animation in noninteractive output, and make every command useful without color or Unicode decoration.
+6. Define stable exit classes for admitted, denied, indeterminate, effect-failed, and command-line misuse. Human wording may improve without changing machine fields or rule identities.
+7. Add cross-platform golden tests for help, human summaries, JSON, narrow terminals, redirected streams, paths with spaces, and failure remediation on Ubuntu, macOS, and Windows.
+8. Keep the release binary local and quiet by default: no telemetry, update checks, implicit network calls, or hidden writes.
+9. Enforce the runtime dependency rule above. Prefer standard formatting and the existing argument parser over a TUI or rendering framework.
+10. Regenerate README walkthrough transcripts and light and dark screenshots from a release-profile binary built from the exact release candidate whenever visible output changes. Keep copyable commands and expected text beside every image, and bind committed screenshots to a checked transcript and asset manifest.
+
+Why tenth: polishing the alpha.2 combined verdict first would make a pleasant interface around the wrong semantic model. The CLI should expose the independent facts established in Step 3 and the evidence stabilized in Step 9. It is still a Phase 0.1 gate because users must be able to understand a security decision without reading raw internal JSON.
+
+Exit proof:
+
+- the same command communicates the same semantic facts on Linux, macOS, and Windows;
+- redirected machine output is byte-stable and free of progress or color sequences;
+- human output remains readable at narrow widths and with color disabled;
+- every denial and indeterminate result names a stable rule or phase and a useful next action;
+- README screenshots match the checked transcripts from the exact release-candidate source;
+- the CLI adds no unreviewed runtime dependency or network behavior.
+
 ## Phase 0.1 release gate
 
 Phase 0.1 is complete only when every row is green.
@@ -281,11 +341,33 @@ Phase 0.1 is complete only when every row is green.
 | Assurance | Unit, property, fuzz smoke, Kani, Clippy, rustfmt, docs, cargo-deny |
 | Portability | Current baseline green; every new gate must keep native Linux, macOS, and Windows CI green |
 | Performance | Reproducible baseline with memory and throughput budgets |
+| CLI experience | Stable human and machine output, cross-platform goldens, quiet defaults, screenshot provenance, and reviewed dependency budget |
 | Honesty | README limitations match executable behavior |
 
-## Phase 0.2: TAR without weakening the gate
+## Phase 0.2: one canonical consumer
 
 Only after Phase 0.1:
+
+- a `python-wheel.v1` consumer profile that validates wheel metadata, `RECORD`, normalized topology, relocation destinations, and actual verified content;
+- `sealr lock` binding source, interpretation, consumer, policy, layout, and content identities;
+- a GitHub Action that gates wheels and emits the same evidence as the Rust API;
+- one public same-digest, different-tree wheel demonstration and a reproducible compatibility report;
+- one external package publisher, registry, build backend, or installer that consumes Sealr's admitted representation rather than reparsing the ZIP;
+- Sigstore keyless signing of Sealr semantic admission records only after their unsigned claim bytes and independent verifier are stable. Release archives already carry GitHub build-provenance attestations.
+
+Done when one external consumer treats Sealr's admitted tree and semantic lock as its canonical decision.
+
+## Phase 0.3: reusable admitted trees
+
+- a local content-addressed store keyed by the verified content-tree identity;
+- materialization from verified blobs without reparsing or reinflating the source;
+- a read-only projection with an explicit verification frontier and no implicit promotion;
+- cache admission bound to source, interpretation, policy, target, consumer, and verification identities;
+- separate structure, verification, realization, and reuse benchmarks.
+
+Done when repeated consumers can reuse one admitted tree without a second parser and every partial verification state remains explicit.
+
+## Phase 1: TAR without weakening the gate
 
 - TAR, PAX, and GNU long-name parsing through the same canonical path and quota core;
 - gzip and zstd wrappers with bounded window and metadata policy;
@@ -295,17 +377,6 @@ Only after Phase 0.1:
 
 Done when ZIP and TAR are format adapters around one tested boundary rather than separate extractors.
 
-## Phase 1: one canonical consumer
-
-- a `python-wheel.v1` consumer profile that validates wheel metadata, `RECORD`, normalized topology, relocation destinations, and actual verified content;
-- `sealr lock` binding source, interpretation, consumer, policy, layout, and content identities;
-- a GitHub Action that gates wheels and emits the same evidence as the Rust API;
-- one public same-digest, different-tree wheel demonstration and a reproducible compatibility report;
-- one external package publisher, registry, build backend, or installer that consumes Sealr's admitted representation rather than reparsing the ZIP;
-- Sigstore keyless signing only after the unsigned claim bytes and independent verifier are stable.
-
-Done when one external consumer treats Sealr's admitted tree and semantic lock as its canonical decision.
-
 ## Phase 2: ecosystem and audit
 
 - CycloneDX member inventory;
@@ -314,7 +385,7 @@ Done when one external consumer treats Sealr's admitted tree and semantic lock a
 - external security audit after the core surface freezes;
 - one package-manager or agent-runtime integration;
 - an `agent-workspace.v1` consumer profile after the wheel profile, with read-only admitted-tree access and explicit promotion;
-- signed release artifacts and reproducible release metadata.
+- any detached release signatures required beyond the existing build-provenance attestations, plus reproducible release metadata.
 
 ## Phase 3: research differentiation
 
