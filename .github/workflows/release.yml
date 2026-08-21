@@ -535,14 +535,28 @@ jobs:
           )"
           validate_candidate_state "${existing_release}" "${existing_release_id}"
 
-          confirmation_pages="$(get_release_pages)"
-          confirmation="$(classify_release_pages <<<"${confirmation_pages}")"
-          require_safe_classification "${confirmation}"
-          if ! jq -e --argjson id "${existing_release_id}" '
-            ((.exact | length) + (.recovery | length)) == 1 and
-            (.exact + .recovery)[0].id == $id
-          ' <<<"${confirmation}" >/dev/null; then
-            echo "::error::release identity changed before numeric rebinding"
+          list_identity_stable=false
+          for attempt in {1..10}; do
+            confirmation_pages="$(get_release_pages)"
+            confirmation="$(classify_release_pages <<<"${confirmation_pages}")"
+            require_safe_classification "${confirmation}"
+            if jq -e --argjson id "${existing_release_id}" '
+              ((.exact | length) + (.recovery | length)) == 1 and
+              (.exact + .recovery)[0].id == $id
+            ' <<<"${confirmation}" >/dev/null; then
+              list_identity_stable=true
+              break
+            fi
+            if [[ "$(jq -er '(.exact | length) + (.recovery | length)' <<<"${confirmation}")" -ne 0 ]]; then
+              echo "::error::release identity changed before numeric rebinding"
+              exit 1
+            fi
+            if [[ "${attempt}" -lt 10 ]]; then
+              sleep 3
+            fi
+          done
+          if [[ "${list_identity_stable}" != "true" ]]; then
+            echo "::error::release list did not stabilize before numeric rebinding"
             exit 1
           fi
 
