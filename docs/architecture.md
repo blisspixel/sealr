@@ -46,9 +46,8 @@ The receipt's `materialization` object records the selected backend, stage prote
 
 The format parser, path grammar, quota counters, content verification, and policy decision share one in-process trust boundary. The materializer receives validated relative components rather than archive-controlled ambient paths.
 
-Alpha.2's bounded in-memory source provides invocation-scoped immutability through owned path bytes or a caller-borrowed immutable slice. It does not yet:
+Alpha.2's bounded in-memory source provides invocation-scoped immutability through owned path bytes or a caller-borrowed immutable slice. Receipt v2 now splits interpretation, admission, verification, effect, and view completeness, with `Verdict` kept as a compatibility adapter. It does not yet:
 
-- split interpretation, admission, verification, and effect into independent outcome axes;
 - produce a normative `ArchiveIR`, layout root, or content-tree root;
 - expose a named `SourceSnapshot` abstraction or a private snapshot that supports bounded random access;
 - run parsing in a reduced-authority worker;
