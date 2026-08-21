@@ -24,7 +24,7 @@ On a normal rejection, the final destination does not appear. sealr attempts cle
 
 The view contains:
 
-- source path, detected magic, and either the archive digest or the documented unavailable sentinel when source bytes could not be read;
+- source path, detected magic, and either `{ "sha256": "..." }` or `{ "status": "unavailable" }` when source bytes could not be read;
 - policy id and digest;
 - verdict and whether materialization committed;
 - structured findings;
@@ -32,7 +32,8 @@ The view contains:
 
 The receipt binds:
 
-- source digest, or the documented unavailable sentinel on a pre-read failure;
+- source digest `{ "sha256": "..." }`, or `{ "status": "unavailable" }` on a pre-read failure;
+- interpretation, admission, verification, effect, and view-completeness axes (`sealr.receipt.v2`);
 - policy id and digest;
 - view digest;
 - tool name and version;
@@ -51,7 +52,7 @@ Receipts are currently unsigned and the kernel jail is unavailable.
 | `2` | The archive or materialization request was rejected. View and receipt are still emitted. |
 | Clap default | Command-line syntax or argument error. |
 
-Source open and read failures currently become a structured rejection and therefore exit `2`.
+Source open and read failures currently become a structured rejection and therefore exit `2`. Receipts mark those failures as `interpretation: indeterminate` with an unavailable source digest. An admitted archive whose destination cannot be published is still exit `2` through the compatibility verdict, while the receipt records `admission: admitted` and `effect: failed`.
 
 ## Current CLI surface
 

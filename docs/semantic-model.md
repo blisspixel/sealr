@@ -56,10 +56,10 @@ The current public outcome is:
 
 ```text
 UntrustedArchive x Policy
-  -> (Allowed { wrote } | Rejected) x Receipt x View
+  -> axes x (Allowed { wrote } | Rejected) x Receipt v2 x View v1
 ```
 
-This is a useful first boundary, but it combines facts that infrastructure consumers eventually need to reason about independently. The current `view_digest` binds an invocation-specific serialized view. It is not a semantic layout root or content-tree root.
+`Outcome` and `sealr.receipt.v2` now carry interpretation, admission, verification, effect, and view-completeness. The inspectable view and CLI still serialize the compatibility `Allowed`/`Rejected` adapter, so an admitted archive with a failed destination remains `verdict: rejected`. `view_digest` binds that invocation-specific view. It is not a semantic layout root or content-tree root.
 
 ## Target outcome model
 
@@ -94,7 +94,7 @@ ViewCompleteness
 
 These axes prevent operational failures from changing semantic claims. For example, a destination publication error can be `Interpreted + Admitted + Complete + Failed`. The archive did not become unsafe because one filesystem operation failed. A source read error is `Indeterminate`, not a policy denial. A lazy read-only projection can be admitted while its verification state remains partial.
 
-The axes must be visible in Rust types, JSON schemas, CLI output, and future authenticated claims. Until that schema ships, current `Allowed` and `Rejected` semantics remain authoritative.
+The axes are visible in Rust types and receipt JSON. CLI stdout still emits the compatibility view, and exit `2` still covers both denial and effect failure. Future authenticated claims and a job-oriented CLI should consume the axes rather than freeze `Verdict`.
 
 ## Canonical `ArchiveIR`
 

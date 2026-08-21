@@ -26,15 +26,20 @@ pub struct Request<'a> {
 }
 
 pub struct Outcome {
-    pub verdict: Verdict,
-    pub receipt: Receipt,            // always
-    pub view: View,                  // always
+    pub interpretation: InterpretationStatus,
+    pub admission: AdmissionStatus,
+    pub verification: VerificationStatus,
+    pub effect: EffectStatus,
+    pub view_completeness: ViewCompleteness,
+    pub verdict: Verdict,            // alpha.2 compatibility adapter
+    pub receipt: Receipt,            // always; schema sealr.receipt.v2
+    pub view: View,                  // always; schema sealr.view.v1
 }
 
 pub enum Verdict {
     /// Policy passed. `wrote` is true only after a requested destination commits.
     Allowed { wrote: bool },
-    /// Policy or materialization failed. View and receipt explain why.
+    /// Compatibility reject: admission denied, not evaluated, or effect failed.
     Rejected,
 }
 ```
@@ -44,10 +49,11 @@ Invariants:
 - `apply` with `dest: None` never creates member files. Inspect-only success is `Allowed { wrote: false }`.
 - `wrote == true` only if `dest.is_some()` and the complete staged member tree committed at the requested destination.
 - Every outcome contains both a view and a receipt, including source, parse, policy, quota, and materialization failures.
+- `verdict` is derived: `Admitted + Committed` → `Allowed { wrote: true }`; `Admitted + NotRequested` → `Allowed { wrote: false }`; every other combination, including `Admitted + Failed`, → `Rejected`. The receipt axes are the precise record.
 
 - `receipt.view_digest` is currently SHA-256 of deterministic `serde_json` bytes for the versioned Rust struct. RFC 8785 JCS is a Phase 0.1 gate.
 - `receipt.policy.digest` uses the same current deterministic struct serialization. It is not yet a cross-encoder canonical JSON promise.
-- After the source bytes are available, `receipt.source.sha256` is SHA-256 of the archive blob. A source open, read, or pre-read size rejection currently uses 64 zero hex characters as an explicit unavailable sentinel. A dedicated digest-availability field is a receipt-schema gate.
+- After the source bytes are available, `receipt.source` is `{ "sha256": "..." }`. A source open, read, or pre-read size rejection uses `{ "status": "unavailable" }` and omits `sha256`. Bytes that were held, including an over-cap `Source::Bytes` input, are hashed. The inspectable view keeps the same digest object so `receipt.source` equals `view.source.digest`.
 - The same source bytes, source metadata, and policy produce the same interpreted member tree and findings. Materialization may add an I/O finding, but it must not reinterpret archive bytes. **This is the LibreOffice bug we refuse:** inspect and materialize cannot disagree about the archive tree.
 
 No second function that “recovers” a broken zip.
@@ -92,9 +98,14 @@ The current receipt is versioned unsigned JSON (`signed: false`). DSSE and in-to
 
 ```json
 {
-  "schema": "sealr.receipt.v1",
+  "schema": "sealr.receipt.v2",
   "verdict": "allowed",
   "wrote": false,
+  "interpretation": { "status": "interpreted" },
+  "admission": { "status": "admitted" },
+  "verification": { "status": "complete" },
+  "effect": { "status": "not-requested" },
+  "view_completeness": { "status": "complete" },
   "source": { "sha256": "..." },
   "policy": { "id": "sealr:policy/default/v1", "digest": { "sha256": "..." } },
   "view_digest": { "sha256": "..." },
@@ -144,7 +155,7 @@ This target decomposition supports results that the current `Verdict` cannot exp
 - a future read-only projection reports a partial verification frontier;
 - a partial rejected view names the phase and cause at which construction stopped.
 
-These are target types, not current Rust symbols or JSON fields.
+These axes now exist as Rust types on `Outcome` and as JSON fields on `sealr.receipt.v2`. The inspectable `View` and CLI exit codes still use the compatibility `Verdict`. `SourceSnapshot`, `ArchiveIR`, and type-state methods remain design notation.
 
 ### Type-state flow
 

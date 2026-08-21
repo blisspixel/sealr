@@ -7,6 +7,10 @@ use std::path::Path;
 use crate::findings::{Finding, FindingCode, Severity};
 use crate::jail::jail_relative;
 use crate::materialize::{CapabilityMaterializer, MaterializationMeta};
+use crate::outcome::{
+    AdmissionStatus, EffectStatus, InterpretationStatus, SemanticAxes, SourceDigest,
+    VerificationStatus, ViewCompleteness,
+};
 use crate::policy::{hex_sha256, Policy};
 use crate::zip::{self, ZipMember};
 use cap_std::fs::File as CapFile;
@@ -62,7 +66,7 @@ pub struct View {
 #[derive(Clone, Debug, Serialize)]
 pub struct SourceMeta {
     pub path: Option<String>,
-    pub digest: DigestHex,
+    pub digest: SourceDigest,
     pub magic: &'static str,
 }
 
@@ -82,7 +86,12 @@ pub struct Receipt {
     pub schema: &'static str,
     pub verdict: &'static str,
     pub wrote: bool,
-    pub source: DigestHex,
+    pub interpretation: InterpretationStatus,
+    pub admission: AdmissionStatus,
+    pub verification: VerificationStatus,
+    pub effect: EffectStatus,
+    pub view_completeness: ViewCompleteness,
+    pub source: SourceDigest,
     pub policy: PolicyMeta,
     pub view_digest: DigestHex,
     pub tool: ToolMeta,
@@ -107,6 +116,11 @@ pub struct EnvMeta {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Outcome {
+    pub interpretation: InterpretationStatus,
+    pub admission: AdmissionStatus,
+    pub verification: VerificationStatus,
+    pub effect: EffectStatus,
+    pub view_completeness: ViewCompleteness,
     pub verdict: Verdict,
     pub receipt: Receipt,
     pub view: View,
@@ -125,12 +139,20 @@ impl Outcome {
 pub fn apply(req: Request<'_>) -> Outcome {
     match apply_inner(&req) {
         Ok(o) => o,
-        Err(finding) => reject_only(
-            request_fallback_meta(&req),
-            vec![finding],
-            None,
-            MaterializationMeta::not_started(req.dest.is_some(), req.policy.atomic),
-        ),
+        Err(failure) => {
+            let admission = if failure.finding.code == FindingCode::QuotaArchive {
+                AdmissionStatus::Denied
+            } else {
+                AdmissionStatus::NotEvaluated
+            };
+            reject_only(
+                (failure.path, failure.digest, req.policy.clone()),
+                vec![failure.finding.clone()],
+                None,
+                MaterializationMeta::not_started(req.dest.is_some(), req.policy.atomic),
+                SemanticAxes::source_failure(&failure.finding, admission),
+            )
+        }
     }
 }
 
@@ -139,23 +161,41 @@ struct SourceData<'a> {
     bytes: Cow<'a, [u8]>,
 }
 
-fn read_source<'a>(src: &'a Source<'a>, policy: &Policy) -> Result<SourceData<'a>, Finding> {
+struct SourceFailure {
+    path: Option<String>,
+    digest: SourceDigest,
+    finding: Finding,
+}
+
+fn read_source<'a>(src: &'a Source<'a>, policy: &Policy) -> Result<SourceData<'a>, SourceFailure> {
     match src {
         Source::Path(p) => {
+            let path = Some(p.display().to_string());
+            let unavailable = |finding: Finding| SourceFailure {
+                path: path.clone(),
+                digest: SourceDigest::unavailable(),
+                finding,
+            };
             let len = fs::metadata(p)
-                .map_err(|e| Finding::error(FindingCode::SourceIo, format!("metadata: {e}")))?
+                .map_err(|e| {
+                    unavailable(Finding::error(
+                        FindingCode::SourceIo,
+                        format!("metadata: {e}"),
+                    ))
+                })?
                 .len();
             if len > policy.max_archive_bytes {
-                return Err(Finding::error(
+                return Err(unavailable(Finding::error(
                     FindingCode::QuotaArchive,
                     format!(
                         "archive is {len} bytes; cap is {}",
                         policy.max_archive_bytes
                     ),
-                ));
+                )));
             }
-            let mut file = File::open(p)
-                .map_err(|e| Finding::error(FindingCode::SourceIo, format!("open: {e}")))?;
+            let mut file = File::open(p).map_err(|e| {
+                unavailable(Finding::error(FindingCode::SourceIo, format!("open: {e}")))
+            })?;
             let initial_capacity = usize::try_from(len)
                 .unwrap_or(usize::MAX)
                 .min(8 * 1024 * 1024);
@@ -163,68 +203,82 @@ fn read_source<'a>(src: &'a Source<'a>, policy: &Policy) -> Result<SourceData<'a
             (&mut file)
                 .take(policy.max_archive_bytes.saturating_add(1))
                 .read_to_end(&mut bytes)
-                .map_err(|e| Finding::error(FindingCode::SourceIo, format!("read: {e}")))?;
+                .map_err(|e| {
+                    unavailable(Finding::error(FindingCode::SourceIo, format!("read: {e}")))
+                })?;
             if bytes.len() as u64 > policy.max_archive_bytes {
-                return Err(Finding::error(
-                    FindingCode::QuotaArchive,
-                    "archive grew beyond the input cap while being read",
-                ));
+                return Err(SourceFailure {
+                    path,
+                    digest: SourceDigest::available(hex_sha256(&bytes)),
+                    finding: Finding::error(
+                        FindingCode::QuotaArchive,
+                        "archive grew beyond the input cap while being read",
+                    ),
+                });
             }
             Ok(SourceData {
-                path: Some(p.display().to_string()),
+                path,
                 bytes: Cow::Owned(bytes),
             })
         }
         Source::Bytes { path, data } => {
+            let path = path.map(|s| s.to_string());
             if data.len() as u64 > policy.max_archive_bytes {
-                return Err(Finding::error(
-                    FindingCode::QuotaArchive,
-                    format!(
-                        "archive is {} bytes; cap is {}",
-                        data.len(),
-                        policy.max_archive_bytes
+                return Err(SourceFailure {
+                    path,
+                    digest: SourceDigest::available(hex_sha256(data)),
+                    finding: Finding::error(
+                        FindingCode::QuotaArchive,
+                        format!(
+                            "archive is {} bytes; cap is {}",
+                            data.len(),
+                            policy.max_archive_bytes
+                        ),
                     ),
-                ));
+                });
             }
             Ok(SourceData {
-                path: path.map(|s| s.to_string()),
+                path,
                 bytes: Cow::Borrowed(data),
             })
         }
     }
 }
 
-fn request_fallback_meta(req: &Request<'_>) -> (Option<String>, String, Policy) {
-    let path = match &req.source {
-        Source::Path(path) => Some(path.display().to_string()),
-        Source::Bytes { path, .. } => path.map(str::to_owned),
-    };
-    (path, "00".repeat(32), req.policy.clone())
-}
-
-fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
+fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
     let policy = req.policy;
     let initial_materialization =
         MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
     let src = read_source(&req.source, policy)?;
-    let source_digest = hex_sha256(&src.bytes);
+    let source_digest = SourceDigest::available(hex_sha256(&src.bytes));
+    let source_meta = (src.path.clone(), source_digest.clone(), policy.clone());
     let magic = detect_magic(&src.bytes);
     if magic != "zip" {
         let f = Finding::error(FindingCode::FormatUnsupported, format!("magic {magic}"));
         return Ok(reject_only(
-            (src.path.clone(), source_digest, policy.clone()),
-            vec![f],
+            source_meta,
+            vec![f.clone()],
             Some(magic),
             initial_materialization,
+            SemanticAxes::structure_stop(
+                InterpretationStatus::Unsupported,
+                AdmissionStatus::NotEvaluated,
+                &f,
+            ),
         ));
     }
     if !policy.allows_format("zip") {
         let f = Finding::error(FindingCode::FormatUnsupported, "zip not in policy.formats");
         return Ok(reject_only(
-            (src.path.clone(), source_digest, policy.clone()),
-            vec![f],
+            source_meta,
+            vec![f.clone()],
             Some("zip"),
             initial_materialization,
+            SemanticAxes::structure_stop(
+                InterpretationStatus::Unsupported,
+                AdmissionStatus::Denied,
+                &f,
+            ),
         ));
     }
 
@@ -232,10 +286,11 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
         Ok(z) => z,
         Err(f) => {
             return Ok(reject_only(
-                (src.path.clone(), source_digest, policy.clone()),
-                vec![f],
+                source_meta,
+                vec![f.clone()],
                 Some("zip"),
                 initial_materialization,
+                parse_failure_axes(&f),
             ));
         }
     };
@@ -246,10 +301,15 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
             format!("{} entries", parsed.members.len()),
         );
         return Ok(reject_only(
-            (src.path.clone(), source_digest, policy.clone()),
-            vec![f],
+            source_meta,
+            vec![f.clone()],
             Some("zip"),
             initial_materialization,
+            SemanticAxes::structure_stop(
+                InterpretationStatus::Interpreted,
+                AdmissionStatus::Denied,
+                &f,
+            ),
         ));
     }
     if parsed.metadata_bytes > policy.max_metadata_bytes {
@@ -261,10 +321,15 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
             ),
         );
         return Ok(reject_only(
-            (src.path.clone(), source_digest, policy.clone()),
-            vec![f],
+            source_meta,
+            vec![f.clone()],
             Some("zip"),
             initial_materialization,
+            SemanticAxes::structure_stop(
+                InterpretationStatus::Interpreted,
+                AdmissionStatus::Denied,
+                &f,
+            ),
         ));
     }
 
@@ -370,14 +435,15 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
 
     let fatal = findings.iter().any(|f| f.severity == Severity::Error);
     if fatal {
+        let cause = first_error(&findings);
         return Ok(finish(
             (src.path, source_digest),
             "zip",
             policy,
-            Verdict::Rejected,
             findings,
             Vec::new(),
             initial_materialization,
+            SemanticAxes::denied_at_admission(&cause),
         ));
     }
 
@@ -396,19 +462,21 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
                 findings.extend(setup_findings);
                 materialization =
                     MaterializationMeta::setup_failed(policy.atomic, cleanup, windows);
+                let cause = first_error(&findings);
                 return Ok(finish(
                     (src.path, source_digest),
                     "zip",
                     policy,
-                    Verdict::Rejected,
                     findings,
                     members_view,
                     materialization,
+                    SemanticAxes::admitted_setup_failed(&cause),
                 ));
             }
         },
     };
     let write = stage.is_some();
+    let planned_count = planned.len() as u64;
 
     for (m, parts) in planned {
         let kind = if m.is_dir { "dir" } else { "file" };
@@ -419,14 +487,21 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
                 if let Err(finding) = materializer.create_directory(&parts, &m.name) {
                     findings.push(finding);
                     materialization = abort_and_report(&mut stage, &mut findings, materialization);
+                    let cause = first_error(&findings);
+                    let verified = members_view.len() as u64;
                     return Ok(finish(
                         (src.path, source_digest),
                         "zip",
                         policy,
-                        Verdict::Rejected,
                         findings,
                         members_view,
                         materialization,
+                        SemanticAxes::admitted_verification_stop(
+                            verified,
+                            planned_count.saturating_sub(verified),
+                            &cause,
+                            write,
+                        ),
                     ));
                 }
             }
@@ -447,14 +522,21 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
             Err(finding) => {
                 findings.push(finding);
                 materialization = abort_and_report(&mut stage, &mut findings, materialization);
+                let cause = first_error(&findings);
+                let verified = members_view.len() as u64;
                 return Ok(finish(
                     (src.path, source_digest),
                     "zip",
                     policy,
-                    Verdict::Rejected,
                     findings,
                     members_view,
                     materialization,
+                    SemanticAxes::admitted_verification_stop(
+                        verified,
+                        planned_count.saturating_sub(verified),
+                        &cause,
+                        write,
+                    ),
                 ));
             }
         };
@@ -472,14 +554,21 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
             Err(finding) => {
                 findings.push(finding.on(&m.name));
                 materialization = abort_and_report(&mut stage, &mut findings, materialization);
+                let cause = first_error(&findings);
+                let verified = members_view.len() as u64;
                 return Ok(finish(
                     (src.path, source_digest),
                     "zip",
                     policy,
-                    Verdict::Rejected,
                     findings,
                     members_view,
                     materialization,
+                    SemanticAxes::admitted_verification_stop(
+                        verified,
+                        planned_count.saturating_sub(verified),
+                        &cause,
+                        write,
+                    ),
                 ));
             }
         };
@@ -492,14 +581,21 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
                 .on(&m.name),
             );
             materialization = abort_and_report(&mut stage, &mut findings, materialization);
+            let cause = first_error(&findings);
+            let verified = members_view.len() as u64;
             return Ok(finish(
                 (src.path, source_digest),
                 "zip",
                 policy,
-                Verdict::Rejected,
                 findings,
                 members_view,
                 materialization,
+                SemanticAxes::admitted_verification_stop(
+                    verified,
+                    planned_count.saturating_sub(verified),
+                    &cause,
+                    write,
+                ),
             ));
         }
         actual_total = actual_total.saturating_add(actual);
@@ -520,14 +616,15 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
         if let Err(finding) = materializer.commit() {
             findings.push(finding);
             materialization = abort_and_report(&mut stage, &mut findings, materialization);
+            let cause = first_error(&findings);
             return Ok(finish(
                 (src.path, source_digest),
                 "zip",
                 policy,
-                Verdict::Rejected,
                 findings,
                 members_view,
                 materialization,
+                SemanticAxes::admitted_publication_failed(&cause),
             ));
         }
         materialization = materializer.report();
@@ -536,10 +633,14 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
         (src.path, source_digest),
         "zip",
         policy,
-        Verdict::Allowed { wrote: write },
         findings,
         members_view,
         materialization,
+        if write {
+            SemanticAxes::materialize_committed()
+        } else {
+            SemanticAxes::inspect_complete()
+        },
     ))
 }
 
@@ -720,14 +821,15 @@ fn detect_magic(bytes: &[u8]) -> &'static str {
 }
 
 fn finish(
-    (path, source_digest): (Option<String>, String),
+    (path, source_digest): (Option<String>, SourceDigest),
     magic: &'static str,
     policy: &Policy,
-    verdict: Verdict,
     findings: Vec<Finding>,
     members: Vec<MemberView>,
     materialization: MaterializationMeta,
+    axes: SemanticAxes,
 ) -> Outcome {
+    let verdict = compat_verdict(&axes);
     let (verdict_s, wrote) = match &verdict {
         Verdict::Allowed { wrote } => ("allowed", *wrote),
         Verdict::Rejected => ("rejected", false),
@@ -736,9 +838,7 @@ fn finish(
         schema: "sealr.view.v1",
         source: SourceMeta {
             path,
-            digest: DigestHex {
-                sha256: source_digest.clone(),
-            },
+            digest: source_digest.clone(),
             magic,
         },
         policy: PolicyMeta {
@@ -754,12 +854,15 @@ fn finish(
     };
     let view_json = serde_json::to_vec(&view).expect("view json");
     let receipt = Receipt {
-        schema: "sealr.receipt.v1",
+        schema: "sealr.receipt.v2",
         verdict: verdict_s,
         wrote,
-        source: DigestHex {
-            sha256: source_digest,
-        },
+        interpretation: axes.interpretation.clone(),
+        admission: axes.admission.clone(),
+        verification: axes.verification.clone(),
+        effect: axes.effect.clone(),
+        view_completeness: axes.view_completeness.clone(),
+        source: source_digest,
         policy: view.policy.clone(),
         view_digest: DigestHex {
             sha256: hex_sha256(&view_json),
@@ -778,6 +881,11 @@ fn finish(
         findings,
     };
     Outcome {
+        interpretation: axes.interpretation,
+        admission: axes.admission,
+        verification: axes.verification,
+        effect: axes.effect,
+        view_completeness: axes.view_completeness,
         verdict,
         receipt,
         view,
@@ -785,20 +893,57 @@ fn finish(
 }
 
 fn reject_only(
-    (path, digest, policy): (Option<String>, String, Policy),
+    (path, digest, policy): (Option<String>, SourceDigest, Policy),
     findings: Vec<Finding>,
     magic: Option<&'static str>,
     materialization: MaterializationMeta,
+    axes: SemanticAxes,
 ) -> Outcome {
     finish(
         (path, digest),
         magic.unwrap_or("unknown"),
         &policy,
-        Verdict::Rejected,
         findings,
         Vec::new(),
         materialization,
+        axes,
     )
+}
+
+fn compat_verdict(axes: &SemanticAxes) -> Verdict {
+    match (&axes.admission, &axes.effect) {
+        (AdmissionStatus::Admitted, EffectStatus::Committed) => Verdict::Allowed { wrote: true },
+        (AdmissionStatus::Admitted, EffectStatus::NotRequested) => {
+            Verdict::Allowed { wrote: false }
+        }
+        _ => Verdict::Rejected,
+    }
+}
+
+fn first_error(findings: &[Finding]) -> Finding {
+    findings
+        .iter()
+        .find(|finding| finding.severity == Severity::Error)
+        .cloned()
+        .expect("error path records an error finding")
+}
+
+fn parse_failure_axes(finding: &Finding) -> SemanticAxes {
+    let interpretation = match finding.code {
+        FindingCode::FormatUnsupported
+        | FindingCode::FormatMagic
+        | FindingCode::ZipDiffC5Zip64
+        | FindingCode::ZipEncoding
+        | FindingCode::ZipEncrypted
+        | FindingCode::MethodUnsupported => InterpretationStatus::Unsupported,
+        FindingCode::QuotaFiles | FindingCode::QuotaMetadata => InterpretationStatus::Interpreted,
+        _ => InterpretationStatus::Malformed,
+    };
+    let admission = match finding.code {
+        FindingCode::QuotaFiles | FindingCode::QuotaMetadata => AdmissionStatus::Denied,
+        _ => AdmissionStatus::NotEvaluated,
+    };
+    SemanticAxes::structure_stop(interpretation, admission, finding)
 }
 
 #[cfg(test)]
@@ -975,7 +1120,12 @@ mod tests {
         assert!(!out.wrote());
         assert_eq!(out.view.members.len(), 1);
         assert_eq!(out.view.members[0].path, "nested/hello.txt");
-        assert!(!out.receipt.source.sha256.is_empty());
+        assert!(out.receipt.source.is_available());
+        assert_eq!(out.interpretation, InterpretationStatus::Interpreted);
+        assert_eq!(out.admission, AdmissionStatus::Admitted);
+        assert_eq!(out.verification, VerificationStatus::Complete);
+        assert_eq!(out.effect, EffectStatus::NotRequested);
+        assert_eq!(out.receipt.schema, "sealr.receipt.v2");
         assert_eq!(out.receipt.policy.id, policy.id);
         assert_eq!(
             out.receipt.materialization.schema,
@@ -1100,6 +1250,14 @@ mod tests {
             mat.receipt.materialization.cleanup,
             "not-applicable-after-commit"
         );
+        assert_eq!(inspect.interpretation, InterpretationStatus::Interpreted);
+        assert_eq!(inspect.admission, AdmissionStatus::Admitted);
+        assert_eq!(inspect.effect, EffectStatus::NotRequested);
+        assert_eq!(mat.interpretation, InterpretationStatus::Interpreted);
+        assert_eq!(mat.admission, AdmissionStatus::Admitted);
+        assert_eq!(mat.verification, VerificationStatus::Complete);
+        assert_eq!(mat.effect, EffectStatus::Committed);
+        assert!(matches!(mat.verdict, Verdict::Allowed { wrote: true }));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1124,7 +1282,10 @@ mod tests {
             .findings
             .iter()
             .any(|f| f.code == FindingCode::PathDotDot));
-        assert!(!out.receipt.source.sha256.is_empty());
+        assert!(out.receipt.source.is_available());
+        assert_eq!(out.interpretation, InterpretationStatus::Interpreted);
+        assert_eq!(out.admission, AdmissionStatus::Denied);
+        assert_eq!(out.effect, EffectStatus::NotRequested);
         assert!(!dir.join("outside.txt").exists());
         let parent = dir.parent().unwrap();
         assert!(!parent.join("outside.txt").exists());
@@ -1195,7 +1356,9 @@ mod tests {
             dest: None,
         });
         assert!(out.rejected());
-        assert!(!out.receipt.source.sha256.is_empty());
+        assert!(out.receipt.source.is_available());
+        assert_eq!(out.interpretation, InterpretationStatus::Unsupported);
+        assert_eq!(out.admission, AdmissionStatus::NotEvaluated);
         assert_eq!(out.view.verdict, "rejected");
     }
 
@@ -1227,6 +1390,11 @@ mod tests {
         assert!(!dir.join("new.txt").exists());
         assert_eq!(out.receipt.materialization.outcome, "setup-failed");
         assert_eq!(out.receipt.materialization.cleanup, "not-created");
+        assert_eq!(out.interpretation, InterpretationStatus::Interpreted);
+        assert_eq!(out.admission, AdmissionStatus::Admitted);
+        assert_eq!(out.verification, VerificationStatus::StructureOnly);
+        assert_eq!(out.effect, EffectStatus::Failed);
+        assert!(matches!(out.verdict, Verdict::Rejected));
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1453,6 +1621,36 @@ mod tests {
             .iter()
             .any(|finding| finding.code == FindingCode::QuotaArchive));
         assert_eq!(out.receipt.policy.id, policy.id);
+        let digest = hex_sha256(&bytes);
+        assert_eq!(out.receipt.source.sha256(), Some(digest.as_str()));
+        assert_eq!(out.interpretation, InterpretationStatus::Indeterminate);
+        assert_eq!(out.admission, AdmissionStatus::Denied);
+    }
+
+    #[test]
+    fn missing_source_path_marks_digest_unavailable() {
+        let policy = Policy::default_v1();
+        let missing = temp_dest("missing-source").join("nope.zip");
+        let out = apply(Request {
+            source: Source::Path(&missing),
+            policy: &policy,
+            dest: None,
+        });
+
+        assert!(out.rejected());
+        assert!(!out.receipt.source.is_available());
+        assert_eq!(out.receipt.source.sha256(), None);
+        assert_eq!(out.interpretation, InterpretationStatus::Indeterminate);
+        assert_eq!(out.admission, AdmissionStatus::NotEvaluated);
+        assert_eq!(out.effect, EffectStatus::NotRequested);
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::SourceIo));
+        let json = serde_json::to_value(&out.receipt.source).unwrap();
+        assert_eq!(json, serde_json::json!({"status": "unavailable"}));
+        assert_ne!(json, serde_json::json!({"sha256": "00".repeat(32)}));
     }
 
     #[test]

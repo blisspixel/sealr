@@ -2,7 +2,7 @@
 
 > Current status: alpha.2 emits a versioned deterministic unsigned JSON receipt. RFC 8785 canonicalization, canonical tree identities, DSSE, Sigstore, standardized predicates, SBOM output, and an independent verifier are planned work.
 
-The current receipt is always returned, including on rejection. It records source and policy digests when available, the invocation-specific view digest, tool and environment fields, materialization lifecycle evidence, verdict, and findings.
+The current receipt is always returned, including on rejection. `sealr.receipt.v2` records source digest availability, interpretation/admission/verification/effect/completeness axes, the invocation-specific view digest, tool and environment fields, materialization lifecycle evidence, the compatibility verdict, and findings.
 
 It is an **EvidenceRecord**, not an attestation. `signed: false` is explicit. It proves neither signer identity nor freshness, and `view_digest` is not a canonical layout or content-tree identity.
 

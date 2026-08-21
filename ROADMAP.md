@@ -137,7 +137,7 @@ Exit proof:
 
 Implementation order inside this step:
 
-1. Replace the unavailable all-zero source digest with explicit digest availability, add separate outcome and completeness types, and preserve a compatibility adapter for the alpha.2 public shape.
+1. Replace the unavailable all-zero source digest with explicit digest availability, add separate outcome and completeness types, and preserve a compatibility adapter for the alpha.2 public shape. **Landed:** `SourceDigest` omits SHA-256 when bytes were never held; `Outcome` and receipt v2 expose interpretation, admission, verification, effect, and view-completeness; `Verdict` remains the alpha.2 adapter. The inspectable `View` still serializes `allowed`/`rejected`.
 2. Introduce `SourceSnapshot` over the current owned and caller-borrowed in-memory bytes, then build the versioned `ArchiveIR` once from that snapshot.
 3. Make inspect serialization, materialization, tests, and future worker messages consume the same immutable IR without reparsing source bytes.
 4. Compile interpretation, budget, target, consumer, and effect inputs into typed supported controls. Replace floating-point ratios and saturating security counters before their external formats stabilize.

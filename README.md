@@ -63,7 +63,7 @@ The following work must land before a production-readiness claim:
 - Normal rejection attempts stage cleanup and retries once after failure, then records `removed` or `failed` in the receipt. Setup failure after stage creation uses the retained stage handle first and a parent-relative retry. A killed process or two cleanup failures can leave a hidden staging directory.
 - The default durability mode is `flush-only`. Setting the Rust policy field `atomic: true` syncs completed member files, but directory syncing, crash recovery, and power-loss durability are not implemented.
 - Landlock, seccomp, AppContainer, and other process sandboxes are not implemented. Receipts report `kernel_jail: unavailable`.
-- After a source is read, its receipt digest is the archive SHA-256. A failure before the bytes are available currently uses an all-zero SHA-256 sentinel; explicit digest availability is still a receipt-schema gate.
+- After a source is read, its receipt digest is the archive SHA-256. A failure before the bytes are available records `{ "status": "unavailable" }` instead of a digest. Receipts now also carry separate interpretation, admission, verification, effect, and view-completeness axes; the alpha.2 `Allowed`/`Rejected` verdict remains a compatibility adapter and still maps an admitted archive with a failed destination to `Rejected`.
 - Receipts are unsigned, and their JSON digest is deterministic for the current Rust structs but is not yet RFC 8785 JCS.
 - The current `View` is invocation evidence, not an effect-independent tree artifact. Its digest covers verdict, write state, findings, and members, so it is not a semantic tree identity. Materialization failures also currently map into the end-to-end `Rejected` verdict. A versioned admitted-tree schema, separate admission and effect outcomes, layout and content roots, and explicit view completeness are the next semantic gate.
 - ZIP64, TAR, compressed TAR, gzip, zstd, and 7z are not implemented.
@@ -162,7 +162,7 @@ The semantic walkthrough is enforced by CLI integration tests on the native plat
 
 The next milestone remains the Phase 0.1 trust gate, not another archive format. The immediate implementation milestone is Step 3, semantic identity:
 
-1. Replace the unavailable digest sentinel and separate interpretation, verification, admission, effect, and view-completeness outcomes.
+1. Outcome axes and explicit digest availability have landed in the library and `sealr.receipt.v2`. The inspectable `View` still serializes the compatibility verdict.
 2. Introduce `SourceSnapshot` over the current immutable in-memory inputs and build one versioned, effect-independent `ArchiveIR`.
 3. Make inspect, materialize, tests, and future worker messages consume that same IR without reparsing the archive.
 4. Define distinct source, interpretation, layout, content-tree, and invocation identities with byte-identical cross-platform golden vectors.

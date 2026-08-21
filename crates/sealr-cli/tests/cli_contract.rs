@@ -77,14 +77,23 @@ fn assert_allowed_streams(output: &Output, wrote: bool) -> (Value, Value) {
     let receipt = json(&output.stderr, "stderr");
 
     assert_eq!(view["schema"], "sealr.view.v1");
-    assert_eq!(receipt["schema"], "sealr.receipt.v1");
+    assert_eq!(receipt["schema"], "sealr.receipt.v2");
     assert_eq!(view["verdict"], "allowed");
     assert_eq!(view["wrote"], wrote);
     assert_eq!(receipt["verdict"], "allowed");
     assert_eq!(receipt["wrote"], wrote);
+    assert_eq!(receipt["interpretation"]["status"], "interpreted");
+    assert_eq!(receipt["admission"]["status"], "admitted");
+    assert_eq!(receipt["verification"]["status"], "complete");
+    assert_eq!(
+        receipt["effect"]["status"],
+        if wrote { "committed" } else { "not-requested" }
+    );
+    assert_eq!(receipt["view_completeness"]["status"], "complete");
     assert_eq!(receipt["signed"], false);
     assert_eq!(receipt["source"], view["source"]["digest"]);
     assert_eq!(receipt["policy"], view["policy"]);
+    assert!(receipt["source"].get("status").is_none());
     (view, receipt)
 }
 
@@ -157,6 +166,11 @@ fn rejected_parent_path_exits_two_and_never_writes() {
     assert_eq!(receipt["wrote"], false);
     assert_eq!(receipt["source"]["sha256"], REJECTED_SHA256);
     assert_eq!(receipt["source"], view["source"]["digest"]);
+    assert_eq!(receipt["schema"], "sealr.receipt.v2");
+    assert_eq!(receipt["interpretation"]["status"], "interpreted");
+    assert_eq!(receipt["admission"]["status"], "denied");
+    assert_eq!(receipt["verification"]["status"], "structure-only");
+    assert_eq!(receipt["effect"]["status"], "not-requested");
 
     let findings = view["findings"]
         .as_array()
@@ -216,6 +230,30 @@ fn missing_destination_parent_rejects_without_creating_it() {
     assert_eq!(receipt["materialization"]["outcome"], "setup-failed");
     assert_eq!(receipt["materialization"]["cleanup"], "not-created");
     assert_eq!(view["findings"][0]["code"], "materialize.io");
+    assert_eq!(receipt["schema"], "sealr.receipt.v2");
+    assert_eq!(receipt["interpretation"]["status"], "interpreted");
+    assert_eq!(receipt["admission"]["status"], "admitted");
+    assert_eq!(receipt["verification"]["status"], "structure-only");
+    assert_eq!(receipt["effect"]["status"], "failed");
     assert!(!parent.exists());
     assert!(!destination.exists());
+}
+
+#[test]
+fn missing_archive_exits_two_without_a_source_digest() {
+    let run = RunDirectory::create("missing-archive");
+    let missing = run.path.join("nope.zip");
+    let output = sealr(&[&missing]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let view = json(&output.stdout, "stdout");
+    let receipt = json(&output.stderr, "stderr");
+    assert_eq!(view["verdict"], "rejected");
+    assert_eq!(receipt["schema"], "sealr.receipt.v2");
+    assert_eq!(receipt["source"]["status"], "unavailable");
+    assert!(receipt["source"].get("sha256").is_none());
+    assert_eq!(view["source"]["digest"]["status"], "unavailable");
+    assert_eq!(receipt["interpretation"]["status"], "indeterminate");
+    assert_eq!(receipt["admission"]["status"], "not-evaluated");
+    assert_eq!(receipt["effect"]["status"], "not-requested");
 }
