@@ -537,6 +537,13 @@ jobs:
 
           list_identity_stable=false
           for attempt in {1..10}; do
+            verify_live_source
+            existing_release="$(
+              gh api --method GET \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}"
+            )"
+            validate_candidate_state "${existing_release}" "${existing_release_id}"
             confirmation_pages="$(get_release_pages)"
             confirmation="$(classify_release_pages <<<"${confirmation_pages}")"
             require_safe_classification "${confirmation}"
@@ -601,6 +608,16 @@ jobs:
             ' <<<"${confirmation}" >/dev/null; then
               rebound=true
               break
+            fi
+            rebound_candidate_count="$(
+              jq -er '(.exact | length) + (.recovery | length)' \
+                <<<"${confirmation}"
+            )"
+            if [[ "${rebound_candidate_count}" -eq 0 ]]; then
+              if [[ "${attempt}" -lt 5 ]]; then
+                sleep 2
+              fi
+              continue
             fi
             if ! jq -e --argjson id "${existing_release_id}" '
               (.exact | length) == 0 and
