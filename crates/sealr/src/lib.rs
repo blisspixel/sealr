@@ -5,6 +5,7 @@
 
 mod apply;
 mod findings;
+mod ir;
 mod jail;
 mod materialize;
 mod outcome;
@@ -14,6 +15,9 @@ mod zip;
 
 pub use apply::{apply, MemberView, Outcome, Receipt, Request, Source, Verdict, View};
 pub use findings::{Finding, FindingCode, Severity};
+pub use ir::{
+    ArchiveIR, IrMember, MemberKind, MemberVerification, ARCHIVE_IR_SCHEMA, ZIP_STRICT_ASCII_V1,
+};
 pub use jail::{jail_relative, join_under_dest};
 pub use materialize::{MaterializationMeta, WindowsMaterializationEvidence};
 pub use outcome::{

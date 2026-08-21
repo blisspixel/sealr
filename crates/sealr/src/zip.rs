@@ -14,6 +14,7 @@ const EOCD_MIN: usize = 22;
 
 #[derive(Clone, Debug)]
 pub struct ZipMember {
+    pub raw_name: Vec<u8>,
     pub name: String,
     pub method: u16,
     pub flags: u16,
@@ -239,6 +240,7 @@ pub fn parse_zip(
             payload_end
         };
         members.push(ZipMember {
+            raw_name: name_bytes.to_vec(),
             name,
             method,
             flags,

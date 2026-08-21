@@ -8,6 +8,7 @@ The project is in initial development. Compatibility may change between preview 
 
 ### Added
 
+- `sealr.archive-ir.v1` is the versioned ZIP interpretation. Inspect and materialize consume the same IR under `sealr.profile.zip.strict-ascii.v1` instead of reparsing archive bytes.
 - `SourceSnapshot` is the named immutable in-memory source. Path inputs are process-owned; caller byte slices stay borrowed. ZIP payload reads go through checked snapshot ranges, and receipts record `source_snapshot` as `memory-owned`, `memory-borrowed`, or `unavailable`.
 - Receipts now use `sealr.receipt.v2` and record separate interpretation, admission, verification, effect, and view-completeness axes. The alpha.2 `Allowed`/`Rejected` verdict remains a derived compatibility adapter, so an admitted archive whose destination fails is still `Rejected` at the CLI.
 

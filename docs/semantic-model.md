@@ -31,8 +31,8 @@ The architecture review produced useful priorities, speculative extensions, and 
 | Exact compressed-input consumption and distinct codec findings | Adopted for immediate hardening | This is required by the current one-interpretation claim and has direct differential-parser precedent. |
 | Unsigned evidence terminology | Adopted now | Current JSON is an EvidenceRecord or receipt, not an authenticated attestation. |
 | Separate interpretation, admission, verification, effect, and completeness axes | Scheduled for semantic identity gate | The current `Allowed` or `Rejected` verdict cannot express these independent facts without a schema change. |
-| Versioned `ArchiveIR` and separate source, interpretation, layout, content, and effect identities | Scheduled for semantic identity gate | These definitions must precede semantic locks, reuse, projection, and consumer integrations. |
-| Immutable `SourceSnapshot` abstraction | Scheduled for semantic identity gate | Current path inputs become owned whole-buffer bytes and byte inputs are borrowed immutably for the call. The abstraction must preserve that property; bounded random access can follow later. |
+| Versioned `ArchiveIR` and separate source, interpretation, layout, content, and effect identities | ArchiveIR landed; tree identities scheduled | `sealr.archive-ir.v1` is the inspect/materialize member plan. Layout and content-tree roots remain unspecified. |
+| Immutable `SourceSnapshot` abstraction | Landed for in-memory sources | Path inputs become owned whole-buffer bytes and byte inputs are borrowed immutably for the call. Bounded random access can follow later. |
 | Typed interpretation, budget, target, consumer, and effect profiles | Scheduled for semantic identity gate | External policy must not blur byte interpretation with operational or consumer choices. |
 | Semantic lock | Scheduled after canonical encoding and roots | A lock is useful only when profile and tree identities are normative and stable. |
 | Hostile and benign compatibility corpora | Scheduled for trust gate | Strictness must be measured within named supported domains on all release platforms. |
