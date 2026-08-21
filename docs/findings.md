@@ -65,7 +65,7 @@ Unknown error codes must be treated as rejection by consumers.
 | `materialize.cleanup` | Explicit removal of a staged tree failed. The receipt reports `cleanup: failed`. |
 | `materialize.unsupported` | The platform has no supported atomic no-replace publication primitive, so materialization failed closed. |
 | `materialize.unsupported_filesystem` | The opened Windows parent is remote, read-only, lacks persistent ACLs, is not NTFS, or could not be classified safely. |
-| `materialize.unsafe_stage` | A created Windows stage did not retain the exact protected effective-TokenUser-only DACL required before member writes. |
+| `materialize.unsafe_stage` | A created Windows stage did not retain the required effective-TokenUser object owner or exact protected effective-TokenUser-only DACL before member writes. |
 
 ### Quotas
 

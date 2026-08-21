@@ -20,7 +20,7 @@ This makes a small worker process practical: open only the archive and destinati
 
 [cap-std](https://github.com/bytecodealliance/cap-std) exposes filesystem operations relative to an open directory capability on Linux, macOS, FreeBSD, and Windows. Its [cap-fs-ext](https://docs.rs/cap-fs-ext/latest/cap_fs_ext/) companion adds portable no-follow directory and file opens.
 
-That portable baseline is now in the materialization path: archive-derived names are accepted only as validated relative components, and each component is opened no-follow from a retained directory handle. Linux and macOS publication is handle-relative and exclusive. Windows uses isolated native adapters to admit local NTFS, apply and verify an owner-private stage DACL during atomic creation, then publish without replacement through the retained source and parent handles. Hostile concurrent mutation stress and reduced-authority process isolation remain open work.
+That portable baseline is now in the materialization path: archive-derived names are accepted only as validated relative components, and each component is opened no-follow from a retained directory handle. Linux and macOS publication is handle-relative and exclusive. Windows uses isolated native adapters to admit local NTFS, apply and verify an owner-private stage security descriptor during atomic creation, then publish without replacement through the retained source and parent handles. Hostile concurrent mutation stress and reduced-authority process isolation remain open work.
 
 ## Small Rust properties can be machine checked
 

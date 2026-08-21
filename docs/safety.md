@@ -34,7 +34,7 @@ On Linux and macOS, the opened parent must be owned by the effective user or roo
 
 On macOS, sealr queries the already-open parent and stage descriptors for extended ACLs. Any extended ACL is rejected because it can grant namespace rights that mode bits do not show. Failure to prove an ACL absent also rejects materialization.
 
-On Windows, sealr supports only a retained parent handle that reports non-remote, writable NTFS with persistent ACLs. ReFS, FAT32, exFAT, UDF, CDFS, remote redirectors and shares, read-only volumes, and query ambiguity fail closed with `materialize.unsupported_filesystem`. The stage is created atomically with a protected DACL whose owner and sole allow principal are the effective token user. That ACE grants `FILE_ALL_ACCESS`, inherits to files and directories, and is verified through the returned handle before any member write.
+On Windows, sealr supports only a retained parent handle that reports non-remote, writable NTFS with persistent ACLs. ReFS, FAT32, exFAT, UDF, CDFS, remote redirectors and shares, read-only volumes, and query ambiguity fail closed with `materialize.unsupported_filesystem`. The stage is created atomically with a security descriptor whose object owner is the effective token user and whose protected DACL contains one inheritable `FILE_ALL_ACCESS` allow ACE for that SID. The descriptor is verified through the returned handle before any member write. Descendant DACLs retain that sole effective principal. Windows assigns each descendant its creating token's default owner, which can be an owner-enabled group for an administrative token. A principal matching that default-owner SID can change the descendant DACL and is outside the in-process containment promise.
 
 ## Symlinks and reparse points
 

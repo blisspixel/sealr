@@ -20,8 +20,6 @@ use windows_sys::Win32::Foundation::{
     HANDLE, INVALID_HANDLE_VALUE, OBJ_CASE_INSENSITIVE, UNICODE_STRING,
 };
 use windows_sys::Win32::Security::Authorization::{GetSecurityInfo, SE_FILE_OBJECT};
-#[cfg(test)]
-use windows_sys::Win32::Security::INHERITED_ACE;
 use windows_sys::Win32::Security::{
     AclSizeInformation, AddAccessAllowedAceEx, CopySid, EqualSid, GetAce, GetAclInformation,
     GetLengthSid, GetSecurityDescriptorControl, GetTokenInformation, InitializeAcl,
@@ -29,8 +27,10 @@ use windows_sys::Win32::Security::{
     SetSecurityDescriptorDacl, SetSecurityDescriptorOwner, TokenUser, ACCESS_ALLOWED_ACE, ACL,
     ACL_REVISION, ACL_SIZE_INFORMATION, CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION,
     INHERIT_ONLY_ACE, OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-    SECURITY_DESCRIPTOR, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
+    SECURITY_DESCRIPTOR, SE_DACL_PROTECTED, TOKEN_INFORMATION_CLASS, TOKEN_QUERY, TOKEN_USER,
 };
+#[cfg(test)]
+use windows_sys::Win32::Security::{TokenOwner, INHERITED_ACE, TOKEN_OWNER};
 use windows_sys::Win32::Storage::FileSystem::{
     GetVolumeInformationByHandleW, DELETE, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY,
     FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE,
@@ -293,6 +293,7 @@ pub(super) fn ensure_private_stage_security(root: &CapDir) -> io::Result<()> {
     validate_private_security(
         root.as_raw_handle(),
         expected_sid.as_ptr(),
+        expected_sid.as_ptr(),
         SecurityKind::StageRoot,
     )
 }
@@ -302,10 +303,13 @@ pub(super) fn ensure_private_descendant_security(
     handle: HANDLE,
     is_directory: bool,
 ) -> io::Result<()> {
-    let expected_sid = effective_user_sid()?;
+    let token = effective_token()?;
+    let expected_user = token_user_sid(&token)?;
+    let expected_owner = token_owner_sid(&token)?;
     validate_private_security(
         handle,
-        expected_sid.as_ptr(),
+        expected_owner.as_ptr(),
+        expected_user.as_ptr(),
         if is_directory {
             SecurityKind::ChildDirectory
         } else {
@@ -325,7 +329,8 @@ enum SecurityKind {
 
 fn validate_private_security(
     handle: HANDLE,
-    expected_sid: PSID,
+    expected_owner: PSID,
+    expected_principal: PSID,
     kind: SecurityKind,
 ) -> io::Result<()> {
     let mut owner: PSID = ptr::null_mut();
@@ -356,12 +361,17 @@ fn validate_private_security(
     }
     let _descriptor = LocalDescriptor(descriptor);
 
-    // Safety: owner and dacl point inside the live descriptor, and expected_sid is owned by the
-    // caller for this validation call.
-    if owner.is_null() || unsafe { EqualSid(owner, expected_sid) } == 0 {
+    // Safety: owner and dacl point inside the live descriptor, and both expected SIDs are owned by
+    // the caller for this validation call. The stage root's explicit owner is TokenUser. Windows
+    // assigns descendants the creating token's TokenOwner while separately inheriting the root's
+    // sole-TokenUser DACL.
+    if owner.is_null()
+        || unsafe { IsValidSid(owner) } == 0
+        || unsafe { EqualSid(owner, expected_owner) } == 0
+    {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
-            "stage owner is not the effective token user",
+            "security descriptor owner does not match the required token identity",
         ));
     }
     let mut control = 0_u16;
@@ -448,7 +458,8 @@ fn validate_private_security(
     }
     let ace_sid = ptr::addr_of!(ace.SidStart).cast_mut().cast::<c_void>();
     // Safety: an ACCESS_ALLOWED_ACE stores its SID beginning at SidStart.
-    if unsafe { IsValidSid(ace_sid) } == 0 || unsafe { EqualSid(ace_sid, expected_sid) } == 0 {
+    if unsafe { IsValidSid(ace_sid) } == 0 || unsafe { EqualSid(ace_sid, expected_principal) } == 0
+    {
         return Err(io::Error::new(
             io::ErrorKind::PermissionDenied,
             "stage allow ACE principal is not the effective token user",
@@ -588,12 +599,34 @@ impl PrivateStageSecurity {
 
 fn effective_user_sid() -> io::Result<OwnedSid> {
     let token = effective_token()?;
+    token_user_sid(&token)
+}
+
+fn token_user_sid(token: &OwnedHandle) -> io::Result<OwnedSid> {
+    let token_words = token_information(token, TokenUser)?;
+    // Safety: a successful TokenUser query initializes TOKEN_USER at the start of the buffer.
+    let sid = unsafe { (*token_words.as_ptr().cast::<TOKEN_USER>()).User.Sid };
+    copy_valid_sid(sid, "effective token returned an invalid user SID")
+}
+
+#[cfg(test)]
+fn token_owner_sid(token: &OwnedHandle) -> io::Result<OwnedSid> {
+    let token_words = token_information(token, TokenOwner)?;
+    // Safety: a successful TokenOwner query initializes TOKEN_OWNER at the start of the buffer.
+    let sid = unsafe { (*token_words.as_ptr().cast::<TOKEN_OWNER>()).Owner };
+    copy_valid_sid(sid, "effective token returned an invalid default-owner SID")
+}
+
+fn token_information(
+    token: &OwnedHandle,
+    information_class: TOKEN_INFORMATION_CLASS,
+) -> io::Result<Vec<usize>> {
     let mut required = 0_u32;
     // Safety: the first call intentionally supplies no buffer to obtain the required size.
     let first = unsafe {
         GetTokenInformation(
             token.as_raw_handle(),
-            TokenUser,
+            information_class,
             ptr::null_mut(),
             0,
             &mut required,
@@ -603,13 +636,13 @@ fn effective_user_sid() -> io::Result<OwnedSid> {
         return Err(last_os_error());
     }
     let required_usize = usize::try_from(required)
-        .map_err(|_| io::Error::other("token user buffer length does not fit usize"))?;
+        .map_err(|_| io::Error::other("token information buffer length does not fit usize"))?;
     let mut token_words = vec![0_usize; required_usize.div_ceil(size_of::<usize>())];
     // Safety: token_words is aligned and at least the required byte length.
     if unsafe {
         GetTokenInformation(
             token.as_raw_handle(),
-            TokenUser,
+            information_class,
             token_words.as_mut_ptr().cast::<c_void>(),
             required,
             &mut required,
@@ -618,25 +651,24 @@ fn effective_user_sid() -> io::Result<OwnedSid> {
     {
         return Err(last_os_error());
     }
-    // Safety: a successful TokenUser query initializes TOKEN_USER at the start of the buffer.
-    let sid = unsafe { (*token_words.as_ptr().cast::<TOKEN_USER>()).User.Sid };
-    // Safety: sid is supplied by the kernel inside the live token buffer.
+    Ok(token_words)
+}
+
+fn copy_valid_sid(sid: PSID, invalid_message: &'static str) -> io::Result<OwnedSid> {
+    // Safety: sid is supplied by the kernel inside a live token-information buffer.
     if sid.is_null() || unsafe { IsValidSid(sid) } == 0 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "effective token returned an invalid user SID",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidData, invalid_message));
     }
     // Safety: the SID is validated and remains live while its length is queried and copied.
     let sid_length = unsafe { GetLengthSid(sid) };
     if sid_length == 0 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidData,
-            "effective token returned an empty user SID",
+            "effective token returned an empty SID",
         ));
     }
     let sid_bytes = usize::try_from(sid_length)
-        .map_err(|_| io::Error::other("effective user SID length does not fit usize"))?;
+        .map_err(|_| io::Error::other("effective token SID length does not fit usize"))?;
     let mut words = vec![0_usize; sid_bytes.div_ceil(size_of::<usize>())];
     // Safety: destination storage is aligned and at least sid_length bytes; source is validated.
     if unsafe { CopySid(sid_length, words.as_mut_ptr().cast::<c_void>(), sid) } == 0 {
