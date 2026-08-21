@@ -1,0 +1,431 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_VERSION: 0.1.0-alpha.1
+  RUST_VERSION: 1.98.0
+
+jobs:
+  validate:
+    name: Validate release tag
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pinned Rust
+        run: rustup toolchain install "${RUST_VERSION}" --profile minimal
+
+      - name: Select pinned Rust
+        run: rustup default "${RUST_VERSION}"
+
+      - name: Verify tag, version, and protected main
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          expected_tag="v${RELEASE_VERSION}"
+          if [[ "${GITHUB_REF_TYPE}" != "tag" || "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
+            echo "::error::expected release tag ${expected_tag}, got ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+          if [[ "$(git cat-file -t "${GITHUB_REF}")" != "tag" ]]; then
+            echo "::error::release tag must be annotated"
+            exit 1
+          fi
+
+          mapfile -t versions < <(
+            cargo metadata --locked --no-deps --format-version 1 |
+              jq -r '.packages[].version' |
+              sort -u
+          )
+          if [[ "${#versions[@]}" -ne 1 || "${versions[0]}" != "${RELEASE_VERSION}" ]]; then
+            echo "::error::workspace package versions must all equal ${RELEASE_VERSION}"
+            printf 'observed version: %s\n' "${versions[@]:-none}"
+            exit 1
+          fi
+
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+          tag_commit="$(git rev-list -n 1 "${GITHUB_REF}")"
+          main_commit="$(git rev-parse refs/remotes/origin/main)"
+          if [[ "${tag_commit}" != "${main_commit}" ]]; then
+            echo "::error::release tag must point to the current protected main commit"
+            echo "tag commit:  ${tag_commit}"
+            echo "main commit: ${main_commit}"
+            exit 1
+          fi
+
+          if [[ -n "$(git status --short)" ]]; then
+            echo "::error::release checkout is not clean"
+            git status --short
+            exit 1
+          fi
+
+      - name: Require exact protected main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_PROMPT_DISABLED: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag_commit="$(git rev-list -n 1 "${GITHUB_REF}")"
+          required_jobs=(
+            "Format, lint, test, and docs"
+            "Test on windows-latest"
+            "Test on macos-latest"
+            "ZipDiff 14-class gate"
+            "Supply chain"
+          )
+          run_json=""
+          for attempt in {1..90}; do
+            runs_json="$(
+              gh api --method GET \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
+                -f branch=main \
+                -f event=push \
+                -f head_sha="${tag_commit}" \
+                -f per_page=10
+            )"
+            run_json="$(
+              jq -c \
+                --arg sha "${tag_commit}" '
+                  [.workflow_runs[] |
+                    select(
+                      .head_sha == $sha and
+                      .head_branch == "main" and
+                      .event == "push" and
+                      (.path | startswith(".github/workflows/ci.yml"))
+                    )] |
+                  if length == 0 then empty else max_by(.run_number) end
+                ' <<<"${runs_json}"
+            )"
+            if [[ -n "${run_json}" ]]; then
+              status="$(jq -r '.status' <<<"${run_json}")"
+              conclusion="$(jq -r '.conclusion // ""' <<<"${run_json}")"
+              if [[ "${status}" == "completed" && "${conclusion}" == "success" ]]; then
+                break
+              fi
+              if [[ "${status}" == "completed" ]]; then
+                echo "::error::exact main CI concluded ${conclusion}"
+                exit 1
+              fi
+            fi
+            if [[ "${attempt}" -eq 90 ]]; then
+              echo "::error::exact main CI did not complete successfully within 30 minutes"
+              exit 1
+            fi
+            sleep 20
+          done
+
+          run_id="$(jq -r '.id' <<<"${run_json}")"
+          run_attempt="$(jq -r '.run_attempt' <<<"${run_json}")"
+          jobs_json="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/attempts/${run_attempt}/jobs" \
+              -f per_page=100
+          )"
+          for required in "${required_jobs[@]}"; do
+            count="$(jq --arg name "${required}" '[.jobs[] | select(.name == $name)] | length' <<<"${jobs_json}")"
+            if [[ "${count}" -ne 1 ]]; then
+              echo "::error::expected exactly one CI job named ${required}, found ${count}"
+              exit 1
+            fi
+            if ! jq -e \
+              --arg name "${required}" '
+                .jobs[] |
+                select(.name == $name) |
+                .status == "completed" and .conclusion == "success"
+              ' <<<"${jobs_json}" >/dev/null; then
+              echo "::error::required CI job did not complete successfully: ${required}"
+              exit 1
+            fi
+          done
+
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+          if [[ "$(git rev-parse refs/remotes/origin/main)" != "${tag_commit}" ]]; then
+            echo "::error::protected main advanced while release validation was running"
+            exit 1
+          fi
+          echo "exact protected main CI passed: run ${run_id}, attempt ${run_attempt}"
+
+  build:
+    name: Build and test on ${{ matrix.os }}
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust
+        shell: pwsh
+        run: rustup toolchain install $env:RUST_VERSION --profile minimal
+
+      - name: Select pinned Rust
+        shell: pwsh
+        run: rustup default $env:RUST_VERSION
+
+      - name: Run optimized tests
+        run: cargo test --locked --release --workspace --all-features
+
+      - name: Build release binary
+        run: cargo build --locked --release -p sealr-cli
+
+      - name: Package and smoke-test native binary
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          $targetLine = rustc -vV | Select-String -Pattern '^host: '
+          if ($null -eq $targetLine) {
+            throw "rustc did not report its host target"
+          }
+          $targetTriple = $targetLine.Line.Substring(6).Trim()
+          $archiveBase = "sealr-$env:RELEASE_VERSION-$targetTriple"
+          $packageParent = Join-Path $PWD "package"
+          $packageRoot = Join-Path $packageParent $archiveBase
+          $distRoot = Join-Path $PWD "dist"
+          $binaryName = if ($IsWindows) { "sealr.exe" } else { "sealr" }
+
+          New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
+          New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
+          Copy-Item -LiteralPath (Join-Path $PWD "target/release/$binaryName") -Destination $packageRoot
+          Copy-Item -LiteralPath (Join-Path $PWD "README.md") -Destination $packageRoot
+          Copy-Item -LiteralPath (Join-Path $PWD "CHANGELOG.md") -Destination $packageRoot
+          Copy-Item -LiteralPath (Join-Path $PWD "LICENSE") -Destination $packageRoot
+          if (-not $IsWindows) {
+            chmod 755 (Join-Path $packageRoot $binaryName)
+            if ($LASTEXITCODE -ne 0) {
+              throw "chmod failed with exit code $LASTEXITCODE"
+            }
+          }
+
+          if ($IsWindows) {
+            $archivePath = Join-Path $distRoot "$archiveBase.zip"
+            Push-Location $packageParent
+            try {
+              Compress-Archive -Path $archiveBase -DestinationPath $archivePath
+            } finally {
+              Pop-Location
+            }
+          } else {
+            $archivePath = Join-Path $distRoot "$archiveBase.tar.gz"
+            tar -C $packageParent -czf $archivePath $archiveBase
+            if ($LASTEXITCODE -ne 0) {
+              throw "tar failed with exit code $LASTEXITCODE"
+            }
+          }
+
+          $smokeRoot = Join-Path $PWD "smoke"
+          New-Item -ItemType Directory -Path $smokeRoot -Force | Out-Null
+          if ($IsWindows) {
+            Expand-Archive -LiteralPath $archivePath -DestinationPath $smokeRoot
+          } else {
+            tar -C $smokeRoot -xzf $archivePath
+            if ($LASTEXITCODE -ne 0) {
+              throw "archive extraction failed with exit code $LASTEXITCODE"
+            }
+          }
+
+          $packagedBinary = Join-Path (Join-Path $smokeRoot $archiveBase) $binaryName
+          $reportedVersion = (& $packagedBinary --version | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0 -or $reportedVersion -ne "sealr $env:RELEASE_VERSION") {
+            throw "packaged binary reported unexpected version: $reportedVersion"
+          }
+          & $packagedBinary --help | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "packaged binary help smoke test failed"
+          }
+
+          "archive=$archivePath" >> $env:GITHUB_OUTPUT
+          "target=$targetTriple" >> $env:GITHUB_OUTPUT
+
+      - name: Upload native release archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.os }}-${{ steps.package.outputs.target }}
+          path: ${{ steps.package.outputs.archive }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  stage:
+    name: Attest and stage prerelease draft
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_PROMPT_DISABLED: "1"
+    steps:
+      - name: Check out tagged release notes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download native release archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify archive set and create checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+
+          mapfile -t assets < <(
+            find . -maxdepth 1 -type f \
+              \( -name 'sealr-*.zip' -o -name 'sealr-*.tar.gz' \) \
+              -printf '%f\n' |
+              sort
+          )
+          if [[ "${#assets[@]}" -ne 3 ]]; then
+            echo "::error::expected three native release archives, found ${#assets[@]}"
+            printf 'asset: %s\n' "${assets[@]:-none}"
+            exit 1
+          fi
+          for asset in "${assets[@]}"; do
+            if [[ "${asset}" != sealr-${RELEASE_VERSION}-* ]]; then
+              echo "::error::unexpected release asset name: ${asset}"
+              exit 1
+            fi
+          done
+
+          sha256sum "${assets[@]}" > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Attest native release archives
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+
+      - name: Create or resume the exact prerelease draft
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_title="sealr ${RELEASE_VERSION}: ZIP boundary preview"
+          notes_file="docs/releases/v${RELEASE_VERSION}.md"
+          if [[ ! -f "${notes_file}" ]]; then
+            echo "::error::missing release notes: ${notes_file}"
+            exit 1
+          fi
+          existing_release="$(
+            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" 2>/dev/null || true
+          )"
+          if [[ -n "${existing_release}" ]]; then
+            if [[ "$(jq -r '.draft' <<<"${existing_release}")" != "true" || \
+                  "$(jq -r '.prerelease' <<<"${existing_release}")" != "true" || \
+                  "$(jq -r '.name' <<<"${existing_release}")" != "${release_title}" ]]; then
+              echo "::error::an existing release is not the expected resumable draft"
+              exit 1
+            fi
+            mapfile -t existing_assets < <(jq -r '.assets[].name' <<<"${existing_release}")
+            for asset in "${existing_assets[@]}"; do
+              if [[ ! -f "dist/${asset}" ]]; then
+                echo "::error::existing draft contains an unexpected asset: ${asset}"
+                exit 1
+              fi
+            done
+
+            gh release edit "${GITHUB_REF_NAME}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --draft=true \
+              --prerelease=true \
+              --latest=false \
+              --verify-tag \
+              --title "${release_title}" \
+              --notes-file "${notes_file}"
+            gh release upload "${GITHUB_REF_NAME}" dist/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber
+          else
+            gh release create "${GITHUB_REF_NAME}" dist/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --draft \
+              --prerelease \
+              --latest=false \
+              --verify-tag \
+              --title "${release_title}" \
+              --notes-file "${notes_file}"
+          fi
+
+          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}")"
+          if [[ "$(jq -r '.draft' <<<"${release_json}")" != "true" || \
+                "$(jq -r '.prerelease' <<<"${release_json}")" != "true" || \
+                "$(jq -r '.tag_name' <<<"${release_json}")" != "${GITHUB_REF_NAME}" || \
+                "$(jq -r '.name' <<<"${release_json}")" != "${release_title}" ]]; then
+            echo "::error::draft release identity did not pass readback verification"
+            exit 1
+          fi
+          if ! jq -e --rawfile notes "${notes_file}" '.body == $notes' <<<"${release_json}" >/dev/null; then
+            echo "::error::draft release body differs from the tagged release notes"
+            exit 1
+          fi
+
+          mapfile -t local_assets < <(find dist -maxdepth 1 -type f -printf '%f\n' | sort)
+          mapfile -t remote_assets < <(jq -r '.assets[].name' <<<"${release_json}" | sort)
+          if [[ "${#local_assets[@]}" -ne 4 || \
+                "$(printf '%s\n' "${local_assets[@]}")" != "$(printf '%s\n' "${remote_assets[@]}")" ]]; then
+            echo "::error::draft release asset set differs from the exact local four-asset set"
+            exit 1
+          fi
+          for asset in "${local_assets[@]}"; do
+            local_digest="sha256:$(sha256sum "dist/${asset}" | cut -d' ' -f1)"
+            if ! jq -e \
+              --arg name "${asset}" \
+              --arg digest "${local_digest}" '
+                [.assets[] |
+                  select(
+                    .name == $name and
+                    .state == "uploaded" and
+                    .size > 0 and
+                    .digest == $digest
+                  )] |
+                length == 1
+              ' <<<"${release_json}" >/dev/null; then
+              echo "::error::draft asset failed state, size, or digest verification: ${asset}"
+              exit 1
+            fi
+          done
+          echo "verified prerelease draft; publication requires scripts/publish_release.ps1"

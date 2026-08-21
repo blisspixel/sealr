@@ -17,9 +17,9 @@ That is a **product**, not a menu. Every call returns paperwork and a view. The 
 |---|---|---|
 | **Materialization \| Rejection** | yes (sum) | Files on disk **or** a fail-closed no. Never both. Never silent. |
 | **AttestedReceipt** | always | Signed (or explicitly `signed: false`) record of archive digest, policy, findings, dest, tool. Exists **on reject**. |
-| **InspectableView** | always | Structured tree + findings (JSONL). Mount is one *representation* of this view, not a third dest. |
+| **InspectableView** | always | Structured tree + findings. The current CLI emits one pretty JSON document. Mount is one *representation* of this view, not a third dest. |
 
-Findings live in the view and are summarized on the receipt. Inspect-only is `Rejection` of disk writes (or empty materialization) plus a full view - agents reason from that. `materialize` is the same function with writes enabled *if* policy said yes.
+Findings live in the view and are summarized on the receipt. Inspect-only success is `Allowed { wrote: false }` plus a full view. `materialize` is the same function with writes enabled if policy said yes.
 
 You never get files without a receipt and a view. You never get a reject without a receipt and a view. That is what makes this a boundary other systems can depend on, instead of `extract() -> ()`.
 
@@ -109,7 +109,7 @@ Ironclad defaults: the only way to use the engine is the safe way. Policy can *n
 
 ## Architecture (hybrid, 2026)
 
-**Rust core is the security boundary.** Memory safety, FFI, the trust story package managers need. Jail, ZipDiff checks, limit counters, dest open: **no `unsafe`**. Near-zero elsewhere; mmap of the archive is isolated in `sealr-io` and documented.
+**Rust core is the security boundary.** The jail, ZipDiff checks, and limit counters remain safe Rust. Operating-system functions without a safe equivalent stay in small reviewed platform modules with explicit pointer, layout, handle, and error-conversion invariants. Future archive mmap belongs in an equally isolated `sealr-io` boundary and is never used for outputs.
 
 **Mojo is secondary, high-leverage, not the critical path.** 1.0 + Apache compiler (August 2026) is real. Use it for bulk hash/CRC on multi-GB–TB inspect, high-throughput validation, GPU-accelerable stages when dest is a buffer or mount page cache, later content-addressed select. **Do not** put path containment or limit enforcement in Mojo until its path/I/O story is audited. If Mojo never ships, the primitive still exists. Details: [backends.md](backends.md).
 

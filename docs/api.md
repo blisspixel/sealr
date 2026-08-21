@@ -30,32 +30,22 @@ pub struct Outcome {
 }
 
 pub enum Verdict {
-    Materialized { dest: PathBuf },
-    Rejected { codes: Vec<FindingCode> }, // also in view.findings
+    /// Policy passed. `wrote` is true only after a requested destination commits.
+    Allowed { wrote: bool },
+    /// Policy or materialization failed. View and receipt explain why.
+    Rejected,
 }
 ```
 
 Invariants:
 
-- `apply` with `dest: None` never creates member files. `verdict` is `Rejected` **or** a future `AcceptedView` - Phase 0 uses `Rejected` only for policy failure; inspect-only **success** is `verdict: Materialized { dest: /* empty sentinel */ }` **no.** Cleaner:
-
-Phase 0 enum, actually:
-
-```rust
-pub enum Verdict {
-    /// Policy passed. If dest was Some, files are there.
-    /// If dest was None, no member files were written.
-    Allowed { wrote: bool },
-    /// Policy failed. No member files. View + receipt explain.
-    Rejected,
-}
-```
-
-`wrote == true` only if `dest.is_some()` and every member that should exist is on disk (or atomic commit succeeded). Inspect-only success: `Allowed { wrote: false }`.
+- `apply` with `dest: None` never creates member files. Inspect-only success is `Allowed { wrote: false }`.
+- `wrote == true` only if `dest.is_some()` and the complete staged member tree committed at the requested destination.
+- Every outcome contains both a view and a receipt, including source, parse, policy, quota, and materialization failures.
 
 - `receipt.view_digest` is currently SHA-256 of deterministic `serde_json` bytes for the versioned Rust struct. RFC 8785 JCS is a Phase 0.1 gate.
 - `receipt.policy.digest` uses the same current deterministic struct serialization. It is not yet a cross-encoder canonical JSON promise.
-- `receipt.source.digest` is SHA-256 of the archive blob.
+- `receipt.source.sha256` is SHA-256 of the archive blob.
 - The same source bytes, source metadata, and policy produce the same interpreted member tree and findings. Materialization may add an I/O finding, but it must not reinterpret archive bytes. **This is the LibreOffice bug we refuse:** inspect and materialize cannot disagree about the archive tree.
 
 No second function that “recovers” a broken zip.
@@ -73,17 +63,16 @@ One document. The current CLI emits pretty JSON; JSONL is planned. The current d
   "policy": { "id": "sealr:policy/default/v1", "digest": { "sha256": "..." } },
   "verdict": "allowed",
   "wrote": false,
-  "findings": [ { "code": "perm.setuid", "severity": "info", "member": "bin/su", "detail": "stripped" } ],
+  "findings": [],
   "members": [
     {
-      "path": "src/main.rs",
+      "path": "bundle/hello.txt",
       "kind": "file",
-      "comp_bytes": 1200,
-      "uncomp_bytes": 3400,
-      "method": "deflate",
-      "crc32": "a1b2c3d4",
-      "sha256": "...",
-      "mime": "text/x-rust"
+      "comp_bytes": 17,
+      "uncomp_bytes": 17,
+      "method": "store",
+      "crc32": "21e8836b",
+      "sha256": "a02804962d3beb2db9929fa6b128329795c7c076d96bb51f63d6afe626bd691e"
     }
   ]
 }
@@ -95,24 +84,38 @@ Mount: same `members[].path` namespace. Hydrate on `read` uses the same inflate+
 
 ---
 
-## AttestedReceipt
+## Receipt
 
-Unsigned JSON is valid (`signed: false`). DSSE wraps the in-toto Statement when keys exist.
-
-Predicate `https://sealr.dev/attestation/extraction/v1`:
+The current receipt is versioned unsigned JSON (`signed: false`). DSSE and in-toto wrapping are future work.
 
 ```json
 {
+  "schema": "sealr.receipt.v1",
   "verdict": "allowed",
   "wrote": false,
-  "source": { "digest": { "sha256": "..." } },
+  "source": { "sha256": "..." },
   "policy": { "id": "sealr:policy/default/v1", "digest": { "sha256": "..." } },
   "view_digest": { "sha256": "..." },
-  "tool": { "name": "sealr", "version": "0.0.0" },
+  "tool": { "name": "sealr", "version": "0.1.0-alpha.1" },
   "environment": { "os": "windows", "arch": "x86_64", "kernel_jail": "unavailable" },
-  "findings": [ { "code": "perm.setuid", "severity": "info" } ]
+  "materialization": {
+    "schema": "sealr.materialization.v1",
+    "requested": false,
+    "backend": "none",
+    "stage_mode": "none",
+    "stage_creation_primitive": "none",
+    "member_resolution": "none",
+    "durability": "none",
+    "publication_primitive": "none",
+    "outcome": "not-requested",
+    "cleanup": "not-applicable"
+  },
+  "signed": false,
+  "findings": []
 }
 ```
+
+When materialization is requested, the materialization object reports the component-bound backend, stage protection, exact stage-creation primitive, durability mode, exact platform publication primitive, lifecycle outcome, and cleanup result. Windows reports `ntcreatefile-parent-handle-create-directory-nofollow` for atomic stage creation and `ntsetinformationfile-retained-source-parent-noreplace` for publication through retained handles.
 
 On reject, `members` in the view may be partial; `view_digest` still covers exactly that view. Downstream: “digest D under policy P produced view V.”
 

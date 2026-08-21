@@ -13,7 +13,7 @@ UntrustedArchive x Policy
 
 The next milestone is **Phase 0.1: the ZIP trust gate**.
 
-Do not add TAR, 7z, MCP, Python, GPU, or signing first. The current implementation has the right contract, a credible ZIP32 parser, an executable ZipDiff gate, and capability-relative output. The strongest claims still depend on hostile filesystem-race closure, canonical Unicode paths, bounded random-access input, and process isolation.
+Do not add TAR, 7z, MCP, Python, GPU, or signing first. The current implementation has the right contract, a credible ZIP32 parser, an executable ZipDiff gate, and component-bound output. The strongest claims still depend on reduced-authority filesystem isolation, canonical Unicode paths, bounded random-access input, and layered adversarial assurance.
 
 This order matters because format breadth multiplies every unresolved parser, path, resource, and materialization mistake. Closing one format exceptionally well gives later formats a real boundary to reuse.
 
@@ -28,7 +28,8 @@ The repository now has:
 - exact local-record layout with hidden bytes, gaps, prefixes, and overlap rejected;
 - bounded archive reads and streaming expanded-byte enforcement;
 - staged materialization that publishes only after all members pass;
-- capability-relative member writes, random private staging, create-new files, and native no-replace publication on Linux, macOS, and Windows;
+- component-bound no-follow member writes, random same-volume staging, create-new files, and native no-replace publication on Linux, macOS, and Windows;
+- versioned materialization receipts that report the backend, stage mode, stage-creation primitive, component resolution, durability, platform publication primitive, outcome, and cleanup state;
 - fail-closed ASCII path handling and topology-collision checks;
 - a pinned, aggregate-digested gate over all 5,927 upstream ZipDiff constructions, with exact finding counts and an explicit valid-control allowlist;
 - adversarial tests for traversal, ADS, ambiguity, layout, CRC rollback, destination preservation, and quota behavior;
@@ -66,29 +67,37 @@ Evidence:
 
 Completed 2026-08-20:
 
-- All archive-derived member paths are passed as canonical relative components to a `cap-std` stage handle.
+- The private materializer is factored out of `apply` behind one narrow component-based boundary.
+- All archive-derived member paths are passed as canonical relative components to a `cap-std` stage handle. Each component is created or opened separately with no-follow semantics from a retained directory capability.
 - Stage names use 128 bits from the operating-system random source. Unix stages are created with mode `0700`.
-- Member files use create-new handles. Normal rejection removes the stage.
-- Final publication uses `RENAME_NOREPLACE` on Linux, `RENAME_EXCL` on Apple platforms, and `MoveFileW` without replacement on Windows.
-- Deterministic tests preserve a destination that appears after staging. Unix CI also attempts an out-of-stage symlink redirect and requires refusal.
+- The destination parent must already exist. Linux accepts only trusted-owner parents protected by mode or sticky rename semantics. Apple platforms additionally reject extended ACLs through a retained descriptor query.
+- Windows atomically creates and retains the stage with parent-relative `NtCreateFile`, preventing a discovered name from being replaced between creation and handle acquisition.
+- Member files use no-follow, create-new handles. Windows validates the generic reparse-point attribute on opened directory and file handles rather than recognizing only ordinary symbolic links.
+- Normal rejection attempts explicit stage cleanup twice before constructing the receipt. Receipts distinguish not-started, setup-failed, staged, aborted, publication-failed, and committed outcomes, including final cleanup success or failure.
+- Final publication uses `RENAME_NOREPLACE` on Linux, `RENAME_EXCL` on Apple platforms, and `NtSetInformationFile` with the retained source and parent handles on Windows. All three are no-replace operations.
+- Unsupported publication platforms fail closed instead of using a check-then-rename fallback.
+- Deterministic tests preserve a destination that appears after staging, refuse parent and leaf symlinks, reject non-component input and non-directory parents, preserve outside bytes, verify explicit cleanup, and require inspect and materialize member equality.
 
 Remaining deliverables:
 
-1. Factor the private stage into a narrow, independently testable `Materializer` interface.
-2. Add per-component no-follow enforcement rather than relying only on beneath-style containment and an initially private stage.
-3. Record staging mode, durability mode, publication primitive, and capability backend in the receipt.
-4. Detect stale stage directories safely without deleting unrelated paths.
-5. Add repeated Linux symlink-swap and Windows reparse-point race tests where the platform permits them.
-6. Decide and document supported behavior on platforms without an atomic no-replace directory primitive.
+1. Install an explicit owner-private Windows stage ACL and define the exact local-filesystem support matrix for NTFS, ReFS, and remote shares.
+2. Add repeated Linux symlink-swap and Windows junction or reparse-point mutation tests, plus deterministic injected-race seams where scheduler timing would otherwise make failures flaky.
+3. Move parsing and materialization into a reduced-authority worker so same-principal processes do not inherit the caller's full ambient filesystem authority.
+4. Detect abandoned stage directories safely using an authenticated ownership marker and age policy, without deleting unrelated or attacker-created lookalike paths.
+5. Expand deterministic commit fault injection and golden receipt fixtures across Linux, Apple, and Windows. Cleanup retry-success and terminal-failure injection are already covered.
+6. Define directory syncing and power-loss durability separately from normal transactional rollback.
 
-Why this remains next: lexical path validation and beneath-style capability containment now prevent archive paths and escaping symlinks from reaching ambient filesystem opens. The remaining risk is an actively hostile process mutating the private stage after discovering it. Native no-follow traversal, Windows reparse coverage, and explicit receipt evidence close that claim.
+Why this remains next: archive-controlled names now cross a component-bound no-follow materializer, and Windows stage creation and publication retain object identity. The remaining filesystem risk is authority, not ordinary path traversal: any principal granted child-mutation rights by the inherited parent DACL can modify staged content, same-principal processes share the caller's authority, and an interrupted process can leave a stage behind. Private stage authority, a constrained worker, repeated race evidence, and safe recovery close that narrower claim before the project expands accepted names or formats.
 
 Exit proof:
 
 - archive-controlled strings never reach ambient filesystem open functions;
+- each archive-derived component is opened no-follow from a retained directory handle;
 - reject returns without a published destination;
 - existing destinations are preserved byte-for-byte;
 - symlink and reparse-point race tests cannot redirect a write;
+- Windows stage creation and publication remain bound to the retained objects under deterministic substitution attempts;
+- receipts report the actual platform publication primitive and every post-stage cleanup outcome;
 - crash-recovery behavior is documented and tested separately from normal rollback.
 
 ### 3. Define one canonical member-name representation
@@ -143,7 +152,7 @@ Deliverables:
 4. Assert no panic, bounded output, deterministic verdict, and receipt presence.
 5. Add Kani harnesses for the pure path and quota core only.
 6. Run fast deterministic gates on every change. Add longer scheduled fuzzing only after runtime and cost are measured.
-7. Keep unsafe code out of the parser, jail, quota, and materializer boundary.
+7. Keep unsafe code out of the parser, jail, and quota core. Isolate unavoidable operating-system calls in small platform modules with explicit reviewed invariants.
 
 Why fifth: unit tests lock known attacks, fuzzing searches byte-level state space, property tests cover semantic classes, and Kani proves bounded properties. None replaces the others. Kani's own guidance makes small proof harnesses the right unit, while the Rust Fuzz Book makes byte-slice parser targets straightforward.
 
@@ -181,7 +190,7 @@ Deliverables:
 
 1. Canonicalize policy and view JSON with RFC 8785 JCS before hashing.
 2. Version the policy, view, receipt, and finding registry with compatibility tests.
-3. Add receipt fields for materializer backend, stage cleanup, isolation, and degraded conditions.
+3. Add receipt fields for isolation and degraded conditions. Materializer backend and stage-cleanup evidence are already versioned in the current receipt.
 4. Benchmark inspect and materialize against representative valid ZIPs.
 5. Compare tree and content results with established parsers only for well-formed inputs.
 6. Publish CPU time, peak memory, allocations, and output throughput, not one headline number.

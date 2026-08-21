@@ -36,9 +36,9 @@ The rest of the system can be messy. The arrow itself should not be. Do not clai
 ## Continuous
 
 - oss-fuzz once the crate is public.
-- `cargo deny`, `cargo geiger` (unsafe allowlist in the security-critical path is **empty** by default; document any exception).
+- `cargo deny`, `cargo geiger` (the unsafe allowlist is empty by default; every platform exception requires a documented invariant and focused tests).
 - Living threat model: this docs set. Record dated decisions in curated documentation and executable tests.
 
 ## Unsafe policy
 
-Security-critical path (jail, CD parse, limit counters, dest open): **no `unsafe`**. mmap of the *archive* may require `unsafe` in `sealr-io`; isolate it, document the truncation invariant, do not use mmap for *outputs*.
+The jail, central-directory parser, and limit counters contain no `unsafe`. The current Apple descriptor-ACL and Windows native stage/publication adapters are isolated exceptions with documented pointer, layout, handle, and error-conversion invariants. Archive mmap may require a future `sealr-io` exception; isolate it, document the truncation invariant, and never use mmap for outputs.

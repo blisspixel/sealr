@@ -18,9 +18,9 @@ This makes a small worker process practical: open only the archive and destinati
 
 ## Capability-oriented filesystem APIs are mature enough to use
 
-[cap-std](https://github.com/bytecodealliance/cap-std) exposes filesystem operations relative to an open directory capability on Linux, macOS, FreeBSD, and Windows. It is designed to prevent ambient path traversal and uses beneath-style resolution.
+[cap-std](https://github.com/bytecodealliance/cap-std) exposes filesystem operations relative to an open directory capability on Linux, macOS, FreeBSD, and Windows. Its [cap-fs-ext](https://docs.rs/cap-fs-ext/latest/cap_fs_ext/) companion adds portable no-follow directory and file opens.
 
-That portable baseline is now in the materialization path: archive-derived components are resolved beneath a fresh stage handle. Native exclusive rename primitives protect final publication on Linux, macOS, and Windows. Per-component no-follow semantics and hostile race stress remain open work.
+That portable baseline is now in the materialization path: archive-derived names are accepted only as validated relative components, and each component is opened no-follow from a retained directory handle. Linux and Apple publication is handle-relative and exclusive. Windows uses isolated native adapters to atomically create and retain the stage, then publish it without replacement through the retained source and parent handles. Hostile concurrent mutation stress and reduced-authority process isolation remain open work.
 
 ## Small Rust properties can be machine checked
 
@@ -51,7 +51,7 @@ The pieces now line up:
 | Need | Available mechanism |
 |---|---|
 | Known differential classes | ZipDiff paper and constructions |
-| Small trusted core | Rust modules with no unsafe code |
+| Small trusted core | Safe Rust parser and jail plus isolated reviewed platform adapters |
 | Reduced ambient authority | Landlock worker, later AppContainer |
 | Path-relative output | Directory-capability filesystem API |
 | Unknown-input discovery | cargo-fuzz with corpus seeds |

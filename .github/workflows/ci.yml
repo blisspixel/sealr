@@ -27,6 +27,34 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Validate workflow syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/actionlint.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "${archive}" \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  ${archive}" |
+            sha256sum --check
+          tar -C "${RUNNER_TEMP}" -xzf "${archive}" actionlint
+          "${RUNNER_TEMP}/actionlint"
+
+      - name: Parse PowerShell automation
+        shell: pwsh
+        run: |
+          $errors = $null
+          Get-ChildItem -LiteralPath scripts -Filter '*.ps1' | ForEach-Object {
+            $null = [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$null,
+              [ref]$errors
+            )
+            if ($errors.Count -ne 0) {
+              throw "PowerShell parse failed for $($_.Name): $($errors -join '; ')"
+            }
+          }
+
       - name: Install pinned Rust
         run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal --component clippy,rustfmt
 
@@ -44,6 +72,13 @@ jobs:
 
       - name: Build optimized workspace
         run: cargo build --locked --release --workspace --all-features
+
+      - name: Verify README walkthrough
+        shell: pwsh
+        run: |
+          pwsh -NoLogo -NoProfile -File scripts/walkthrough.ps1 -SkipBuild
+          pwsh -NoLogo -NoProfile -File scripts/render_walkthrough.ps1
+          pwsh -NoLogo -NoProfile -File scripts/verify_walkthrough_assets.ps1
 
       - name: Build documentation
         env:
@@ -67,6 +102,14 @@ jobs:
 
       - name: Select pinned Rust
         run: rustup default ${{ env.RUST_VERSION }}
+
+      - name: Install 32-bit Windows target
+        if: runner.os == 'Windows'
+        run: rustup target add i686-pc-windows-msvc
+
+      - name: Check 32-bit Windows ABI
+        if: runner.os == 'Windows'
+        run: cargo check --locked -p sealr --target i686-pc-windows-msvc
 
       - name: Run release tests
         run: cargo test --locked --release --workspace --all-features

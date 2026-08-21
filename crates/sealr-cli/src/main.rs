@@ -15,7 +15,7 @@ use serde::Serialize;
 struct Cli {
     /// Archive file
     archive: PathBuf,
-    /// Request materialization into this directory
+    /// Materialize into a new directory below an existing parent
     #[arg(long)]
     dest: Option<PathBuf>,
 }

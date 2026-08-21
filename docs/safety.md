@@ -26,11 +26,21 @@ Do the jail in a pure function on strings **before** any `open`. Re-check after 
 
 szips did not check reserved names or trailing dot/space. sealr MUST.
 
+## Destination namespace admission
+
+The destination parent must already exist. sealr canonicalizes and opens that parent as a retained directory capability; it does not create a missing parent. The final destination must be absent both at admission and at no-replace publication.
+
+On Unix, the opened parent must be owned by the effective user or root. A parent with group or other write permission is rejected unless it has the sticky bit and a trusted owner. Sticky does not protect entries from the directory owner, so a sticky directory owned by another user is rejected. A root-owned sticky directory is accepted only because root is outside the in-process threat boundary. The created stage is checked for effective-user ownership and mode `0700` semantics.
+
+On macOS, sealr queries the already-open parent and stage descriptors for extended ACLs. Any extended ACL is rejected because it can grant namespace rights that mode bits do not show. Failure to prove an ACL absent also rejects materialization.
+
+On Windows, the stage inherits the parent ACL. Callers must therefore choose a parent that does not grant untrusted principals child-mutation rights. The retained stage handle protects the stage name from rename, removal, and substitution, but it is not a replacement for a restrictive DACL.
+
 ## Symlinks and reparse points
 
 Current Phase 0 behavior: **do not create them.** ZIP external attributes that describe a special file type are rejected, and file/directory attribute disagreements are rejected.
 
-A future named policy may allow constrained links only after the target passes the jail relative to the link parent and is proven non-absolute. Such links must be created only after regular files. Member creation must never open through a symlink or reparse point. Phase 0 has no link-enabling CLI option, and per-component no-follow race closure remains a release gate.
+A future named policy may allow constrained links only after the target passes the jail relative to the link parent and is proven non-absolute. Such links must be created only after regular files. Member creation never opens through a symlink or reparse point: each canonical component is opened separately with no-follow semantics from a retained directory handle. Windows also rejects a reparse-point attribute on each opened directory or file handle. Phase 0 has no link-enabling CLI option. Repeated hostile race stress remains a Phase 0.1 gate.
 
 ## Overlap (ZIP)
 
@@ -81,6 +91,28 @@ Current behavior: refuse if the destination exists. Replacement is not implement
 Do not preserve setuid/setgid. Mask to `0777` minus umask, or `0755`/`0644`.
 
 The Rust policy field `atomic` defaults to false. When true, completed member files are synced before publication. Directory durability and crash recovery are not yet guaranteed. There is no Phase 0 CLI switch for this field.
+
+Publication is native and no-replace on the three release platforms. Linux uses `renameat2` with `RENAME_NOREPLACE`; macOS uses `renameatx_np` with `RENAME_EXCL`. Windows creates the stage relative to the retained parent handle with `NtCreateFile`, `FILE_CREATE`, and reparse-point-open semantics. It withholds delete sharing, retains the returned stage handle for the full write, and publishes that same object with `NtSetInformationFile`, the retained parent as `RootDirectory`, and replacement disabled.
+
+Linux, macOS, and Windows are the supported materialization platforms. Every other target fails closed with `materialize.unsupported`.
+
+## Receipt evidence
+
+The receipt records the materialization backend, stage mode, stage-creation primitive, member-resolution primitive, durability mode, publication primitive, outcome, and cleanup result. Setup failure, successful commit, publication failure, explicit abort, and failed cleanup are distinguishable. These fields are evidence of the selected control path, but the preview receipt is unsigned and is not authentication.
+
+The current receipt strings are an auditable map to the implemented native controls:
+
+| Platform | `stage_mode` | `stage_creation_primitive` | `publication_primitive` |
+|---|---|---|---|
+| Linux | `same-volume-random-128-mode-0700` | `mkdirat-mode-0700-openat-nofollow-safe-parent` | `renameat2-noreplace` |
+| macOS | `same-volume-random-128-mode-0700` | `mkdirat-mode-0700-openat-nofollow-safe-parent` | `renameatx-np-excl` |
+| Windows | `same-volume-random-128-inherited-acl` | `ntcreatefile-parent-handle-create-directory-nofollow` | `ntsetinformationfile-retained-source-parent-noreplace` |
+
+All three report `component-handles-nofollow` for member resolution. Durability reports `member-sync` when `atomic` is true and `flush-only` otherwise.
+
+The current core keeps platform `unsafe` code in two narrow FFI modules: descriptor-based extended-ACL inspection on Apple platforms and native stage creation/publication on Windows. This is the explicit audit boundary for pointer lifetime, layout, handle ownership, share flags, and error conversion.
+
+Root, administrators, same-principal processes, filesystem-override capabilities, and debugging or handle-duplication rights can act with or override the library's authority. They are outside this in-process containment claim. A reduced-authority worker is required to narrow that residual boundary.
 
 ## 7z
 
