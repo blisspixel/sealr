@@ -54,6 +54,7 @@ Invariants:
 - `receipt.view_digest` is currently SHA-256 of deterministic `serde_json` bytes for the versioned Rust struct. RFC 8785 JCS is a Phase 0.1 gate.
 - `receipt.policy.digest` uses the same current deterministic struct serialization. It is not yet a cross-encoder canonical JSON promise.
 - After the source bytes are available, `receipt.source` is `{ "sha256": "..." }`. A source open, read, or pre-read size rejection uses `{ "status": "unavailable" }` and omits `sha256`. Bytes that were held, including an over-cap `Source::Bytes` input, are hashed. The inspectable view keeps the same digest object so `receipt.source` equals `view.source.digest`.
+- `receipt.source_snapshot` is `memory-owned` for path inputs, `memory-borrowed` for caller byte slices, and `unavailable` when ingest failed before a snapshot was retained. Parse and payload reads use that snapshot; they do not reopen the caller path.
 - The same source bytes, source metadata, and policy produce the same interpreted member tree and findings. Materialization may add an I/O finding, but it must not reinterpret archive bytes. **This is the LibreOffice bug we refuse:** inspect and materialize cannot disagree about the archive tree.
 
 No second function that “recovers” a broken zip.
@@ -107,6 +108,7 @@ The current receipt is versioned unsigned JSON (`signed: false`). DSSE and in-to
   "effect": { "status": "not-requested" },
   "view_completeness": { "status": "complete" },
   "source": { "sha256": "..." },
+  "source_snapshot": "memory-owned",
   "policy": { "id": "sealr:policy/default/v1", "digest": { "sha256": "..." } },
   "view_digest": { "sha256": "..." },
   "tool": { "name": "sealr", "version": "0.1.0-alpha.2" },

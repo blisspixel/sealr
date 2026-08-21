@@ -163,7 +163,7 @@ The semantic walkthrough is enforced by CLI integration tests on the native plat
 The next milestone remains the Phase 0.1 trust gate, not another archive format. The immediate implementation milestone is Step 3, semantic identity:
 
 1. Outcome axes and explicit digest availability have landed in the library and `sealr.receipt.v2`. The inspectable `View` still serializes the compatibility verdict.
-2. Introduce `SourceSnapshot` over the current immutable in-memory inputs and build one versioned, effect-independent `ArchiveIR`.
+2. `SourceSnapshot` now names the current owned and caller-borrowed in-memory bytes. Parse, payload reads, and digest recording use that one object. A versioned `ArchiveIR` is next.
 3. Make inspect, materialize, tests, and future worker messages consume that same IR without reparsing the archive.
 4. Define distinct source, interpretation, layout, content-tree, and invocation identities with byte-identical cross-platform golden vectors.
 

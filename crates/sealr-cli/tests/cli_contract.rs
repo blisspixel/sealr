@@ -90,6 +90,7 @@ fn assert_allowed_streams(output: &Output, wrote: bool) -> (Value, Value) {
         if wrote { "committed" } else { "not-requested" }
     );
     assert_eq!(receipt["view_completeness"]["status"], "complete");
+    assert_eq!(receipt["source_snapshot"], "memory-owned");
     assert_eq!(receipt["signed"], false);
     assert_eq!(receipt["source"], view["source"]["digest"]);
     assert_eq!(receipt["policy"], view["policy"]);
@@ -256,4 +257,5 @@ fn missing_archive_exits_two_without_a_source_digest() {
     assert_eq!(receipt["interpretation"]["status"], "indeterminate");
     assert_eq!(receipt["admission"]["status"], "not-evaluated");
     assert_eq!(receipt["effect"]["status"], "not-requested");
+    assert_eq!(receipt["source_snapshot"], "unavailable");
 }

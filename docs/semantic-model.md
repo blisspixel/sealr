@@ -160,7 +160,7 @@ SourceSnapshot
   | VerifiedImmutableFilesystemObject
 ```
 
-The current owned and borrowed byte variants can implement this abstraction first. Parsing, lazy verification, and realization must read from the same byte object whose source digest was recorded. A later bounded random-access implementation can use a private spool or content-addressed object, but holding a file descriptor, ETag, length, or path alone is not enough if another writer can mutate the underlying bytes. Source truncation, growth, replacement, and same-file mutation need deterministic adversarial tests on Linux, macOS, and Windows.
+The current owned and borrowed byte variants now implement this abstraction as `SourceSnapshot`. Parsing, payload reads, and digest recording use that one object. A later bounded random-access implementation can use a private spool or content-addressed object, but holding a file descriptor, ETag, length, or path alone is not enough if another writer can mutate the underlying bytes. Source truncation, growth, replacement, and same-file mutation need deterministic adversarial tests on Linux, macOS, and Windows.
 
 ## Profiles and compiled policy
 

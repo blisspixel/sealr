@@ -1,6 +1,7 @@
 //! CD-first ZIP reader. One interpretation. Disagreement is a finding.
 
 use crate::findings::{Finding, FindingCode};
+use crate::snapshot::SourceSnapshot;
 use std::collections::BTreeSet;
 
 const EOCD_SIG: u32 = 0x0605_4b50;
@@ -598,11 +599,8 @@ fn check_layout(members: &[ZipMember], cd_off: u64) -> Result<(), Finding> {
     Ok(())
 }
 
-pub fn payload<'a>(bytes: &'a [u8], m: &ZipMember) -> Result<&'a [u8], Finding> {
-    let start = m.data_offset as usize;
-    let end = start.saturating_add(m.comp_size as usize);
-    if end > bytes.len() {
-        return Err(Finding::error(FindingCode::ZipDiffC4Offset, "payload past EOF").on(&m.name));
-    }
-    Ok(&bytes[start..end])
+pub fn payload<'s>(snapshot: &'s SourceSnapshot<'_>, m: &ZipMember) -> Result<&'s [u8], Finding> {
+    snapshot
+        .range(m.data_offset, m.comp_size)
+        .map_err(|finding| finding.on(&m.name))
 }
