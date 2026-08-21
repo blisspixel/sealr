@@ -350,9 +350,49 @@ jobs:
             echo "::error::missing release notes: ${notes_file}"
             exit 1
           fi
-          existing_release="$(
-            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}" 2>/dev/null || true
+          release_pages="$(
+            gh api --method GET --paginate --slurp \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases?per_page=100"
           )"
+          matching_releases="$(
+            jq -ce --arg tag "${GITHUB_REF_NAME}" '
+              if (type == "array" and all(.[]; type == "array")) then
+                [.[][] | select(.tag_name == $tag)]
+              else
+                error("unexpected paginated releases response")
+              end
+            ' <<<"${release_pages}"
+          )"
+          matching_release_count="$(jq -er 'length' <<<"${matching_releases}")"
+          existing_release=""
+          existing_release_id=""
+          case "${matching_release_count}" in
+            0) ;;
+            1)
+              existing_release_id="$(
+                jq -er '.[0].id | select(type == "number" and . > 0)' \
+                  <<<"${matching_releases}"
+              )"
+              existing_release="$(
+                gh api --method GET \
+                  -H "X-GitHub-Api-Version: 2026-03-10" \
+                  "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}"
+              )"
+              if ! jq -e \
+                --arg tag "${GITHUB_REF_NAME}" \
+                --argjson id "${existing_release_id}" \
+                '.id == $id and .tag_name == $tag' \
+                <<<"${existing_release}" >/dev/null; then
+                echo "::error::release identity changed during discovery"
+                exit 1
+              fi
+              ;;
+            *)
+              echo "::error::multiple releases use the expected tag"
+              exit 1
+              ;;
+          esac
           if [[ -n "${existing_release}" ]]; then
             if [[ "$(jq -r '.draft' <<<"${existing_release}")" != "true" || \
                   "$(jq -r '.prerelease' <<<"${existing_release}")" != "true" || \
@@ -391,8 +431,16 @@ jobs:
           fi
 
           release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}")"
+          if [[ -n "${existing_release_id}" ]] &&
+             ! jq -e --argjson id "${existing_release_id}" '.id == $id' \
+               <<<"${release_json}" >/dev/null; then
+            echo "::error::resumed release identity changed before readback"
+            exit 1
+          fi
           if [[ "$(jq -r '.draft' <<<"${release_json}")" != "true" || \
                 "$(jq -r '.prerelease' <<<"${release_json}")" != "true" || \
+                "$(jq -r '.immutable' <<<"${release_json}")" != "false" || \
+                "$(jq -r '.author.login' <<<"${release_json}")" != "github-actions[bot]" || \
                 "$(jq -r '.tag_name' <<<"${release_json}")" != "${GITHUB_REF_NAME}" || \
                 "$(jq -r '.name' <<<"${release_json}")" != "${release_title}" ]]; then
             echo "::error::draft release identity did not pass readback verification"
@@ -420,7 +468,8 @@ jobs:
                     .name == $name and
                     .state == "uploaded" and
                     .size > 0 and
-                    .digest == $digest
+                    .digest == $digest and
+                    .uploader.login == "github-actions[bot]"
                   )] |
                 length == 1
               ' <<<"${release_json}" >/dev/null; then
