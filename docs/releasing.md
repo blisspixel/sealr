@@ -51,11 +51,13 @@ The tag workflow:
 5. extracts every package and smoke-tests its version and help output;
 6. creates and verifies `SHA256SUMS` for exactly three native archives;
 7. records build provenance for those archives;
-8. creates or safely resumes the exact expected prerelease draft;
+8. creates or safely resumes the exact expected prerelease draft by numeric release ID;
 9. reads back its body, state, four-asset set, sizes, and API digests;
 10. stops without publishing.
 
 An existing published release, mismatched draft, unexpected asset, tag drift, or exact-CI failure stops the workflow.
+
+If an annotated tag must be moved while its draft is still private, GitHub can rename the draft to an `untagged-*` placeholder. The workflow recovers only one bot-owned orphan that matches the exact title, notes, state, and safe expected asset subset. It pins that numeric release ID, verifies the live annotated tag and protected `main`, then rebinds the draft to the expected tag. Any near-match, duplicate, unexpected asset, or identity change stops before asset mutation. The promotion script never performs orphan recovery.
 
 ## Promote the verified draft
 

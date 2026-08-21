@@ -40,6 +40,10 @@ jobs:
           tar -C "${RUNNER_TEMP}" -xzf "${archive}" actionlint
           "${RUNNER_TEMP}/actionlint"
 
+      - name: Verify release candidate selection
+        shell: bash
+        run: bash scripts/verify_release_candidate.sh
+
       - name: Parse PowerShell automation
         shell: pwsh
         run: |
