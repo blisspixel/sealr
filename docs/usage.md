@@ -33,6 +33,7 @@ The view contains:
 The receipt binds:
 
 - source digest `{ "sha256": "..." }`, or `{ "status": "unavailable" }` on a pre-read failure;
+- source snapshot kind (`memory-owned`, `memory-borrowed`, or `unavailable`);
 - interpretation, admission, verification, effect, and view-completeness axes (`sealr.receipt.v2`);
 - policy id and digest;
 - view digest;

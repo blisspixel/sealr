@@ -36,7 +36,7 @@ The [Rust Fuzz Book](https://rust-fuzz.github.io/book/) documents cargo-fuzz and
 
 Source digests, policy digests, structured findings, and a view digest can be returned for both allow and reject. in-toto, DSSE, Sigstore, SBOM formats, and GitHub artifact attestations provide established envelopes and signing workflows once sealr's unsigned receipt bytes are stable.
 
-Separate outcome axes and explicit source-digest availability now exist on `Outcome` and `sealr.receipt.v2`. The next semantic-identity task is a versioned `ArchiveIR` over an immutable `SourceSnapshot`. Canonical evidence bytes follow those definitions, and signing follows canonicalization.
+Separate outcome axes, explicit source-digest availability, and a named in-memory `SourceSnapshot` now exist. The next semantic-identity task is a versioned `ArchiveIR` built once from that snapshot. Canonical evidence bytes follow those definitions, and signing follows canonicalization.
 
 ## Acceleration is optional
 

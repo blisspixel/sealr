@@ -15,7 +15,7 @@ The library exposes one `apply()` path for inspect and materialize. Both modes u
 
 The current input and interpretation boundary is:
 
-1. Use a bounded in-memory source. Path inputs are read into owned bytes; borrowed byte inputs remain borrowed for the call.
+1. Ingest a `SourceSnapshot`. Path inputs become owned bytes; borrowed byte inputs remain borrowed for the call. The digest is SHA-256 of that object.
 2. Locate and validate ZIP32 EOCD and the central directory.
 3. Compare redundant central and local metadata, validate source ranges, reject overlaps and hidden structural records, and apply the strict path grammar.
 4. If a destination was requested, create and retain its private stage after structural planning and before member processing.
@@ -46,10 +46,10 @@ The receipt's `materialization` object records the selected backend, stage prote
 
 The format parser, path grammar, quota counters, content verification, and policy decision share one in-process trust boundary. The materializer receives validated relative components rather than archive-controlled ambient paths.
 
-Alpha.2's bounded in-memory source provides invocation-scoped immutability through owned path bytes or a caller-borrowed immutable slice. Receipt v2 now splits interpretation, admission, verification, effect, and view completeness, with `Verdict` kept as a compatibility adapter. It does not yet:
+Alpha.2's bounded in-memory source is now a named `SourceSnapshot`: path inputs become owned bytes, caller byte inputs remain borrowed, and the recorded digest is SHA-256 of that exact object. ZIP payload reads use checked ranges over the snapshot. Receipt v2 reports `source_snapshot` as `memory-owned`, `memory-borrowed`, or `unavailable`. It does not yet:
 
 - produce a normative `ArchiveIR`, layout root, or content-tree root;
-- expose a named `SourceSnapshot` abstraction or a private snapshot that supports bounded random access;
+- replace whole-archive buffering with a private spool or verified filesystem snapshot;
 - run parsing in a reduced-authority worker;
 - expose a read-only projection or content-addressed store;
 - sign or independently verify evidence.

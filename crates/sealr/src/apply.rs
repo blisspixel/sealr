@@ -1,4 +1,3 @@
-use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
@@ -12,6 +11,7 @@ use crate::outcome::{
     VerificationStatus, ViewCompleteness,
 };
 use crate::policy::{hex_sha256, Policy};
+use crate::snapshot::{SnapshotKind, SourceSnapshot};
 use crate::zip::{self, ZipMember};
 use cap_std::fs::File as CapFile;
 use crc32fast::Hasher as Crc;
@@ -92,6 +92,7 @@ pub struct Receipt {
     pub effect: EffectStatus,
     pub view_completeness: ViewCompleteness,
     pub source: SourceDigest,
+    pub source_snapshot: SnapshotKind,
     pub policy: PolicyMeta,
     pub view_digest: DigestHex,
     pub tool: ToolMeta,
@@ -151,14 +152,10 @@ pub fn apply(req: Request<'_>) -> Outcome {
                 None,
                 MaterializationMeta::not_started(req.dest.is_some(), req.policy.atomic),
                 SemanticAxes::source_failure(&failure.finding, admission),
+                SnapshotKind::Unavailable,
             )
         }
     }
-}
-
-struct SourceData<'a> {
-    path: Option<String>,
-    bytes: Cow<'a, [u8]>,
 }
 
 struct SourceFailure {
@@ -167,7 +164,10 @@ struct SourceFailure {
     finding: Finding,
 }
 
-fn read_source<'a>(src: &'a Source<'a>, policy: &Policy) -> Result<SourceData<'a>, SourceFailure> {
+fn read_source<'a>(
+    src: &'a Source<'a>,
+    policy: &Policy,
+) -> Result<SourceSnapshot<'a>, SourceFailure> {
     match src {
         Source::Path(p) => {
             let path = Some(p.display().to_string());
@@ -216,10 +216,7 @@ fn read_source<'a>(src: &'a Source<'a>, policy: &Policy) -> Result<SourceData<'a
                     ),
                 });
             }
-            Ok(SourceData {
-                path,
-                bytes: Cow::Owned(bytes),
-            })
+            Ok(SourceSnapshot::owned(path, bytes))
         }
         Source::Bytes { path, data } => {
             let path = path.map(|s| s.to_string());
@@ -237,10 +234,7 @@ fn read_source<'a>(src: &'a Source<'a>, policy: &Policy) -> Result<SourceData<'a
                     ),
                 });
             }
-            Ok(SourceData {
-                path,
-                bytes: Cow::Borrowed(data),
-            })
+            Ok(SourceSnapshot::borrowed(path, data))
         }
     }
 }
@@ -249,10 +243,10 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
     let policy = req.policy;
     let initial_materialization =
         MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
-    let src = read_source(&req.source, policy)?;
-    let source_digest = SourceDigest::available(hex_sha256(&src.bytes));
-    let source_meta = (src.path.clone(), source_digest.clone(), policy.clone());
-    let magic = detect_magic(&src.bytes);
+    let snapshot = read_source(&req.source, policy)?;
+    let source_digest = snapshot.digest().clone();
+    let source_meta = (snapshot.path_owned(), source_digest.clone(), policy.clone());
+    let magic = detect_magic(snapshot.as_bytes());
     if magic != "zip" {
         let f = Finding::error(FindingCode::FormatUnsupported, format!("magic {magic}"));
         return Ok(reject_only(
@@ -265,6 +259,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                 AdmissionStatus::NotEvaluated,
                 &f,
             ),
+            snapshot.kind(),
         ));
     }
     if !policy.allows_format("zip") {
@@ -279,10 +274,15 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                 AdmissionStatus::Denied,
                 &f,
             ),
+            snapshot.kind(),
         ));
     }
 
-    let parsed = match zip::parse_zip(&src.bytes, policy.max_files, policy.max_metadata_bytes) {
+    let parsed = match zip::parse_zip(
+        snapshot.as_bytes(),
+        policy.max_files,
+        policy.max_metadata_bytes,
+    ) {
         Ok(z) => z,
         Err(f) => {
             return Ok(reject_only(
@@ -291,6 +291,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                 Some("zip"),
                 initial_materialization,
                 parse_failure_axes(&f),
+                snapshot.kind(),
             ));
         }
     };
@@ -310,6 +311,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                 AdmissionStatus::Denied,
                 &f,
             ),
+            snapshot.kind(),
         ));
     }
     if parsed.metadata_bytes > policy.max_metadata_bytes {
@@ -330,6 +332,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                 AdmissionStatus::Denied,
                 &f,
             ),
+            snapshot.kind(),
         ));
     }
 
@@ -437,7 +440,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
     if fatal {
         let cause = first_error(&findings);
         return Ok(finish(
-            (src.path, source_digest),
+            (snapshot.path_owned(), source_digest, snapshot.kind()),
             "zip",
             policy,
             findings,
@@ -464,7 +467,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                     MaterializationMeta::setup_failed(policy.atomic, cleanup, windows);
                 let cause = first_error(&findings);
                 return Ok(finish(
-                    (src.path, source_digest),
+                    (snapshot.path_owned(), source_digest, snapshot.kind()),
                     "zip",
                     policy,
                     findings,
@@ -490,7 +493,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                     let cause = first_error(&findings);
                     let verified = members_view.len() as u64;
                     return Ok(finish(
-                        (src.path, source_digest),
+                        (snapshot.path_owned(), source_digest, snapshot.kind()),
                         "zip",
                         policy,
                         findings,
@@ -517,7 +520,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
             continue;
         }
 
-        let payload = match zip::payload(&src.bytes, &m) {
+        let payload = match zip::payload(&snapshot, &m) {
             Ok(payload) => payload,
             Err(finding) => {
                 findings.push(finding);
@@ -525,7 +528,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                 let cause = first_error(&findings);
                 let verified = members_view.len() as u64;
                 return Ok(finish(
-                    (src.path, source_digest),
+                    (snapshot.path_owned(), source_digest, snapshot.kind()),
                     "zip",
                     policy,
                     findings,
@@ -557,7 +560,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                 let cause = first_error(&findings);
                 let verified = members_view.len() as u64;
                 return Ok(finish(
-                    (src.path, source_digest),
+                    (snapshot.path_owned(), source_digest, snapshot.kind()),
                     "zip",
                     policy,
                     findings,
@@ -584,7 +587,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
             let cause = first_error(&findings);
             let verified = members_view.len() as u64;
             return Ok(finish(
-                (src.path, source_digest),
+                (snapshot.path_owned(), source_digest, snapshot.kind()),
                 "zip",
                 policy,
                 findings,
@@ -618,7 +621,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
             materialization = abort_and_report(&mut stage, &mut findings, materialization);
             let cause = first_error(&findings);
             return Ok(finish(
-                (src.path, source_digest),
+                (snapshot.path_owned(), source_digest, snapshot.kind()),
                 "zip",
                 policy,
                 findings,
@@ -630,7 +633,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
         materialization = materializer.report();
     }
     Ok(finish(
-        (src.path, source_digest),
+        (snapshot.path_owned(), source_digest, snapshot.kind()),
         "zip",
         policy,
         findings,
@@ -821,7 +824,7 @@ fn detect_magic(bytes: &[u8]) -> &'static str {
 }
 
 fn finish(
-    (path, source_digest): (Option<String>, SourceDigest),
+    (path, source_digest, source_snapshot): (Option<String>, SourceDigest, SnapshotKind),
     magic: &'static str,
     policy: &Policy,
     findings: Vec<Finding>,
@@ -863,6 +866,7 @@ fn finish(
         effect: axes.effect.clone(),
         view_completeness: axes.view_completeness.clone(),
         source: source_digest,
+        source_snapshot,
         policy: view.policy.clone(),
         view_digest: DigestHex {
             sha256: hex_sha256(&view_json),
@@ -898,9 +902,10 @@ fn reject_only(
     magic: Option<&'static str>,
     materialization: MaterializationMeta,
     axes: SemanticAxes,
+    source_snapshot: SnapshotKind,
 ) -> Outcome {
     finish(
-        (path, digest),
+        (path, digest, source_snapshot),
         magic.unwrap_or("unknown"),
         &policy,
         findings,
@@ -1126,6 +1131,7 @@ mod tests {
         assert_eq!(out.verification, VerificationStatus::Complete);
         assert_eq!(out.effect, EffectStatus::NotRequested);
         assert_eq!(out.receipt.schema, "sealr.receipt.v2");
+        assert_eq!(out.receipt.source_snapshot, SnapshotKind::MemoryBorrowed);
         assert_eq!(out.receipt.policy.id, policy.id);
         assert_eq!(
             out.receipt.materialization.schema,
@@ -1136,6 +1142,26 @@ mod tests {
         assert_eq!(out.receipt.materialization.stage_creation_primitive, "none");
         assert_eq!(out.receipt.materialization.outcome, "not-requested");
         assert_eq!(out.receipt.materialization.cleanup, "not-applicable");
+    }
+
+    #[test]
+    fn path_source_uses_an_owned_memory_snapshot() {
+        let bytes = make_zip(&[("nested/hello.txt", b"hello")]);
+        let dir = temp_dest("owned-snap");
+        fs::create_dir_all(&dir).unwrap();
+        let archive = dir.join("t.zip");
+        fs::write(&archive, &bytes).unwrap();
+        let policy = Policy::default_v1();
+        let out = apply(Request {
+            source: Source::Path(&archive),
+            policy: &policy,
+            dest: None,
+        });
+        let digest = hex_sha256(&bytes);
+        assert!(!out.rejected(), "{:?}", out.view.findings);
+        assert_eq!(out.receipt.source_snapshot, SnapshotKind::MemoryOwned);
+        assert_eq!(out.receipt.source.sha256(), Some(digest.as_str()));
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1625,6 +1651,7 @@ mod tests {
         assert_eq!(out.receipt.source.sha256(), Some(digest.as_str()));
         assert_eq!(out.interpretation, InterpretationStatus::Indeterminate);
         assert_eq!(out.admission, AdmissionStatus::Denied);
+        assert_eq!(out.receipt.source_snapshot, SnapshotKind::Unavailable);
     }
 
     #[test]
@@ -1643,6 +1670,7 @@ mod tests {
         assert_eq!(out.interpretation, InterpretationStatus::Indeterminate);
         assert_eq!(out.admission, AdmissionStatus::NotEvaluated);
         assert_eq!(out.effect, EffectStatus::NotRequested);
+        assert_eq!(out.receipt.source_snapshot, SnapshotKind::Unavailable);
         assert!(out
             .view
             .findings
