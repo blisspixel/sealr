@@ -1,0 +1,29 @@
+THIRD-PARTY SOFTWARE LICENSES
+
+This file lists the locked normal and build dependency closure used to produce
+the corresponding sealr release executable. The sealr license is provided
+separately in LICENSE.
+
+COMPONENTS
+
+{{#each crates}}
+{{package.name}} {{package.version}}
+Declared license: {{license}}
+Source: {{#if package.repository}}{{package.repository}}{{else}}https://crates.io/crates/{{package.name}}{{/if}}
+
+{{/each}}
+LICENSE TEXTS
+
+{{#each licenses}}
+===============================================================================
+{{name}}
+===============================================================================
+
+Used by:
+{{#each used_by}}
+- {{crate.name}} {{crate.version}}
+{{/each}}
+
+{{{text}}}
+
+{{/each}}

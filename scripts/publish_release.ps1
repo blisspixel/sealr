@@ -8,9 +8,9 @@ $ErrorActionPreference = 'Stop'
 
 $Repository = 'blisspixel/sealr'
 $DefaultBranch = 'main'
-$Version = '0.1.0-alpha.1'
+$Version = '0.1.0-alpha.2'
 $ReleaseTag = "v$Version"
-$ReleaseTitle = "sealr ${Version}: ZIP boundary preview"
+$ReleaseTitle = "sealr ${Version}: hardened materialization preview"
 $CiWorkflow = '.github/workflows/ci.yml'
 $ReleaseWorkflow = '.github/workflows/release.yml'
 $GithubActionsAppId = 15368
@@ -423,14 +423,15 @@ function Get-ArchiveAssetNames {
 
     $assetNames = @($Release.assets | ForEach-Object { [string]$_.name })
     $archiveNames = @($assetNames | Where-Object { $_ -ne 'SHA256SUMS' })
-    Assert-Equal -Expected 3 -Actual $archiveNames.Count -Label 'native archive count'
+    $expectedArchiveNames = @(
+        "sealr-$Version-aarch64-apple-darwin.tar.gz"
+        "sealr-$Version-x86_64-pc-windows-msvc.zip"
+        "sealr-$Version-x86_64-unknown-linux-gnu.tar.gz"
+    )
+    Assert-ExactSet -Expected $expectedArchiveNames -Actual $archiveNames -Label 'native archives'
     foreach ($name in $archiveNames) {
-        Assert-True -Condition ($name -match '^sealr-0\.1\.0-alpha\.1-[A-Za-z0-9_.-]+\.(zip|tar\.gz)$') -Message "unexpected native archive name: $name"
         Assert-True -Condition (-not $name.Contains('..') -and [System.IO.Path]::GetFileName($name) -eq $name) -Message "unsafe native archive name: $name"
     }
-    Assert-Equal -Expected 1 -Actual @($archiveNames | Where-Object { $_ -match '-unknown-linux-gnu\.tar\.gz$' }).Count -Label 'Linux archive count'
-    Assert-Equal -Expected 1 -Actual @($archiveNames | Where-Object { $_ -match '-apple-darwin\.tar\.gz$' }).Count -Label 'Apple archive count'
-    Assert-Equal -Expected 1 -Actual @($archiveNames | Where-Object { $_ -match '-windows-msvc\.zip$' }).Count -Label 'Windows archive count'
     return $archiveNames
 }
 

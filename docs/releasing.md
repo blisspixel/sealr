@@ -38,16 +38,30 @@ pwsh -NoLogo -NoProfile -File scripts/verify_walkthrough_assets.ps1
 
 The six committed PNGs must match the verified transcripts in both themes. Each image is 1000 by 560 pixels at 144 DPI, no larger than 250 KB, and contains no local identity, absolute path, date, cursor, credit, or text metadata.
 
+## Third-party license gate
+
+The three committed third-party license bundles cover the exact locked normal and build dependency closure for the supported Linux, macOS, and Windows release targets. Development dependencies are excluded. Each bundle includes the selected license texts plus every root `NOTICE*` and `COPYRIGHT*` file from its target graph. Generation is offline and locked, output uses deterministic ordering and LF line endings, and unresolved licenses or non-crates.io packages stop the process.
+
+Install the pinned build tool, regenerate after dependency changes, then verify that regeneration is byte-identical:
+
+```powershell
+cargo install cargo-about --version 0.9.1 --locked --features cli
+pwsh -NoLogo -NoProfile -File scripts/generate_third_party_licenses.ps1
+pwsh -NoLogo -NoProfile -File scripts/verify_third_party_licenses.ps1
+```
+
+This tool is used only to build release notices. It is not a sealr runtime dependency.
+
 ## Stage the draft
 
-Create an annotated tag at the verified commit and push only that tag. For `0.1.0-alpha.1`, the tag is `v0.1.0-alpha.1`.
+Create an annotated tag at the verified commit and push only that tag. For `0.1.0-alpha.2`, the tag is `v0.1.0-alpha.2`.
 
 The tag workflow:
 
 1. verifies the annotated tag, workspace version, clean checkout, and identity with current `main`;
 2. waits for the exact protected `main` CI run at that commit and requires all five protected jobs to succeed;
 3. tests optimized workspace builds on standard Ubuntu, Windows, and macOS runners;
-4. builds and packages each native executable with README, changelog, and license files;
+4. builds and packages each native executable with README, changelog, the Apache-2.0 project license, and the verified target-specific third-party license bundle, including upstream root notice and copyright files;
 5. extracts every package and smoke-tests its version and help output;
 6. creates and verifies `SHA256SUMS` for exactly three native archives;
 7. records build provenance for those archives;

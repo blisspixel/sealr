@@ -2,14 +2,14 @@
 set -euo pipefail
 
 selector="scripts/release_candidate.jq"
-tag="v0.1.0-alpha.1"
-title="sealr 0.1.0-alpha.1: ZIP boundary preview"
-notes=$'# sealr 0.1.0-alpha.1\n'
+tag="v0.1.0-alpha.2"
+title="sealr 0.1.0-alpha.2: hardened materialization preview"
+notes=$'# sealr 0.1.0-alpha.2\n'
 allowed='[
   "SHA256SUMS",
-  "sealr-0.1.0-alpha.1-aarch64-apple-darwin.tar.gz",
-  "sealr-0.1.0-alpha.1-x86_64-pc-windows-msvc.zip",
-  "sealr-0.1.0-alpha.1-x86_64-unknown-linux-gnu.tar.gz"
+  "sealr-0.1.0-alpha.2-aarch64-apple-darwin.tar.gz",
+  "sealr-0.1.0-alpha.2-x86_64-pc-windows-msvc.zip",
+  "sealr-0.1.0-alpha.2-x86_64-unknown-linux-gnu.tar.gz"
 ]'
 
 make_release() {

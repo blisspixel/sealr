@@ -1,10 +1,14 @@
 * text=auto
 .gitattributes text eol=lf
 Cargo.lock text eol=lf
+LICENSE text eol=lf
 *.md text eol=lf
+*.ps1 text eol=lf
 *.rs text eol=lf
+*.sh text eol=lf
 *.toml text eol=lf
 *.txt text eol=lf
 *.patch text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+*.hbs text eol=lf

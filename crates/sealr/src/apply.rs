@@ -11,7 +11,7 @@ use crate::policy::{hex_sha256, Policy};
 use crate::zip::{self, ZipMember};
 use cap_std::fs::File as CapFile;
 use crc32fast::Hasher as Crc;
-use flate2::read::DeflateDecoder;
+use flate2::bufread::DeflateDecoder;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
@@ -392,9 +392,10 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
                 Some(stage)
             }
             Err(setup_error) => {
-                let (setup_findings, cleanup) = setup_error.into_parts();
+                let (setup_findings, cleanup, windows) = setup_error.into_parts();
                 findings.extend(setup_findings);
-                materialization = MaterializationMeta::setup_failed(policy.atomic, cleanup);
+                materialization =
+                    MaterializationMeta::setup_failed(policy.atomic, cleanup, windows);
                 return Ok(finish(
                     (src.path, source_digest),
                     "zip",
@@ -656,12 +657,31 @@ fn process_member(
             let mut buffer = [0_u8; 64 * 1024];
             loop {
                 let read = decoder.read(&mut buffer).map_err(|error| {
-                    Finding::error(FindingCode::CrcMismatch, format!("deflate: {error}"))
+                    Finding::error(
+                        FindingCode::CodecDeflateInvalidStream,
+                        format!("deflate: {error}"),
+                    )
                 })?;
                 if read == 0 {
                     break;
                 }
                 consume(&buffer[..read])?;
+            }
+            let consumed = decoder.total_in();
+            if consumed != payload.len() as u64 {
+                return Err(Finding::error(
+                    FindingCode::CodecDeflateTrailingInput,
+                    format!(
+                        "deflate consumed {consumed} of {} declared compressed bytes",
+                        payload.len()
+                    ),
+                ));
+            }
+            if decoder.total_out() != actual {
+                return Err(Finding::error(
+                    FindingCode::CodecDeflateInvalidStream,
+                    "deflate output accounting disagreed with the verified byte count",
+                ));
             }
         }
         _ => {
@@ -862,6 +882,37 @@ mod tests {
         bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
     }
 
+    fn extend_declared_deflate_payload(bytes: &mut Vec<u8>, suffix: &[u8]) {
+        let local_headers = signature_offsets(bytes, [0x50, 0x4b, 0x03, 0x04]);
+        let central_headers = signature_offsets(bytes, [0x50, 0x4b, 0x01, 0x02]);
+        let eocd_headers = signature_offsets(bytes, [0x50, 0x4b, 0x05, 0x06]);
+        assert_eq!(local_headers.len(), 1);
+        assert_eq!(central_headers.len(), 1);
+        assert_eq!(eocd_headers.len(), 1);
+
+        let local = local_headers[0];
+        let central = central_headers[0];
+        let eocd = eocd_headers[0];
+        let old_compressed_size = u32_at(bytes, local + 18);
+        assert_eq!(u32_at(bytes, central + 20), old_compressed_size);
+        let name_len = u16_at(bytes, local + 26) as usize;
+        let extra_len = u16_at(bytes, local + 28) as usize;
+        let payload_start = local + 30 + name_len + extra_len;
+        assert_eq!(
+            payload_start + old_compressed_size as usize,
+            central,
+            "fixture must place the central directory directly after the payload"
+        );
+
+        bytes.splice(central..central, suffix.iter().copied());
+        let new_compressed_size = old_compressed_size + suffix.len() as u32;
+        put_u32(bytes, local + 18, new_compressed_size);
+        let shifted_central = central + suffix.len();
+        put_u32(bytes, shifted_central + 20, new_compressed_size);
+        let shifted_eocd = eocd + suffix.len();
+        put_u32(bytes, shifted_eocd + 16, shifted_central as u32);
+    }
+
     fn add_matching_extra_fields(bytes: &mut Vec<u8>, extra: &[u8]) {
         let local = signature_offsets(bytes, [0x50, 0x4b, 0x03, 0x04])[0];
         let central = signature_offsets(bytes, [0x50, 0x4b, 0x01, 0x02])[0];
@@ -928,13 +979,72 @@ mod tests {
         assert_eq!(out.receipt.policy.id, policy.id);
         assert_eq!(
             out.receipt.materialization.schema,
-            "sealr.materialization.v1"
+            "sealr.materialization.v2"
         );
         assert!(!out.receipt.materialization.requested);
         assert_eq!(out.receipt.materialization.backend, "none");
         assert_eq!(out.receipt.materialization.stage_creation_primitive, "none");
         assert_eq!(out.receipt.materialization.outcome, "not-requested");
         assert_eq!(out.receipt.materialization.cleanup, "not-applicable");
+    }
+
+    #[test]
+    fn rejects_bytes_after_the_single_deflate_stream() {
+        let policy = Policy::default_v1();
+        let control = make_zip(&[("payload.txt", b"payload")]);
+        let control_out = apply(Request {
+            source: Source::Bytes {
+                path: Some("single-stream-control"),
+                data: &control,
+            },
+            policy: &policy,
+            dest: None,
+        });
+        assert!(!control_out.rejected(), "{:?}", control_out.view.findings);
+
+        for (label, suffix) in [
+            ("trailing-data", [0xde, 0xad, 0xbe, 0xef].as_slice()),
+            ("concatenated-stream", [0x03, 0x00].as_slice()),
+        ] {
+            let mut bytes = make_zip(&[("payload.txt", b"payload")]);
+            extend_declared_deflate_payload(&mut bytes, suffix);
+            let out = apply(Request {
+                source: Source::Bytes {
+                    path: Some(label),
+                    data: &bytes,
+                },
+                policy: &policy,
+                dest: None,
+            });
+
+            assert!(out.rejected(), "{label} was accepted: {:?}", out.view);
+            assert!(out
+                .view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::CodecDeflateTrailingInput));
+        }
+    }
+
+    #[test]
+    fn classifies_invalid_deflate_syntax_separately_from_crc_failure() {
+        let member = ZipMember {
+            name: "invalid.txt".to_owned(),
+            method: 8,
+            flags: 0,
+            crc: 0,
+            comp_size: 1,
+            uncomp_size: 0,
+            lfh_offset: 0,
+            data_offset: 0,
+            record_end: 1,
+            is_dir: false,
+        };
+        let mut sink = io::sink();
+        let finding = process_member(&[0xff], &member, &Policy::default_v1(), u64::MAX, &mut sink)
+            .unwrap_err();
+
+        assert_eq!(finding.code, FindingCode::CodecDeflateInvalidStream);
     }
 
     #[test]

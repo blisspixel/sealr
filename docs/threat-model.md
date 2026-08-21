@@ -1,4 +1,4 @@
-# Threat model (as of 20 August 2026)
+# Threat model (as of 21 August 2026)
 
 Archive extraction is a **security boundary**, same class as HTML sanitizers, memory-safe parsers, and supply-chain attestations. Folklore (“just reject `..`”) is not enough. This file is the living adversary model. Invariants: [invariants.md](invariants.md). Differentials: [differentials.md](differentials.md).
 
@@ -22,11 +22,11 @@ They win if two components in that pipeline **both succeed** and **disagree** ab
 
 For materialization, a concurrent local actor may also race names inside the destination parent or a discovered stage. The destination parent must already exist and is opened as a retained capability. A missing parent is rejected rather than created, and a destination that exists or appears during staging is preserved.
 
-On Unix, cross-principal namespace mutation is in scope. The opened parent is accepted only when its owner is the effective user or root and either its group/other write bits are clear or its sticky bit is set. Sticky does not make an untrusted directory owner safe, so a sticky directory owned by another user is rejected. Root-owned `/tmp` is trusted only because root is outside this in-process adversary boundary. The stage must be owned by the effective user with no group or other permissions. On macOS, any descriptor-reported extended ACL on the parent or stage is rejected, and an ACL query error fails closed, because an extended ACL can grant mutation rights beyond the mode bits.
+On Linux and macOS, cross-principal namespace mutation is in scope. The opened parent is accepted only when its owner is the effective user or root and either its group/other write bits are clear or its sticky bit is set. Sticky does not make an untrusted directory owner safe, so a sticky directory owned by another user is rejected. Root-owned `/tmp` is trusted only because root is outside this in-process adversary boundary. The stage must be owned by the effective user with no group or other permissions. On macOS, any descriptor-reported extended ACL on the parent or stage is rejected, and an ACL query error fails closed, because an extended ACL can grant mutation rights beyond the mode bits.
 
-On Windows, stage creation is an exclusive `NtCreateFile` operation rooted at the opened parent handle. The returned stage handle is retained without delete sharing. Publication uses `NtSetInformationFile` on that retained source handle, names the opened parent handle as the target root, and disables replacement. This closes stage-name substitution and destination clobber races. The stage inherits the parent ACL, so a caller-supplied parent that grants an untrusted principal child-mutation rights is outside this control and must be rejected by deployment policy.
+On Windows, the retained parent must report non-remote, writable NTFS with persistent ACLs. Stage creation is an exclusive `NtCreateFile` operation rooted at that handle and receives a protected DACL at creation time. The DACL owner and sole allow principal are the effective token user, and its inheritable ACE is verified through the returned handle before member writes. The stage handle is retained without delete sharing. Publication uses `NtSetInformationFile` on that retained source handle, names the opened parent handle as the target root, and disables replacement. This closes cross-principal inherited-DACL mutation, stage-name substitution, and destination clobber within the stated filesystem boundary.
 
-Member operations must not follow a substituted link or reparse point. Root, an administrator, a process running as the same security principal, a process with filesystem-override capabilities, or a process with debugging or handle-duplication rights is outside the containment promise of an in-process library. Containing those actors requires the planned reduced-authority worker. Receipts expose the selected stage, member-resolution, publication, outcome, and cleanup controls, but remain unsigned and therefore are evidence rather than authenticated attestations.
+Member operations must not follow a substituted link or reparse point. Root, an administrator, a process running as the same security principal, a process with filesystem-override capabilities, or a process with debugging or handle-duplication rights is outside the containment promise of an in-process library. The planned worker contains its own parser authority but does not constrain another same-user process; bringing that actor into scope requires a distinct service identity or equivalent mandatory-access-control boundary. Receipts expose the selected storage, stage ACL, member-resolution, publication, outcome, and cleanup controls, but remain unsigned and therefore are evidence rather than authenticated attestations.
 
 Pipelines that matter for us:
 
@@ -56,7 +56,7 @@ IDs are from the paper §5.2. `#` = new or newly extended by You et al.
 | A4 | Fake directory `#` | Trailing `/` vs `\`, external attributes (DOS vs Unix), `version made by` | `/` and zero sizes define a directory, and external type attributes must not contradict it. Backslash and non-regular external types are rejected. Finding `zip.diff.a4_dir`. |
 | A5 | Fake encryption `#` | Encrypted flag in CDH vs LFH; “first member encrypted ⇒ skip archive” | Encrypted members **refuse** (policy). CDH/LFH encryption flags MUST agree. Finding `zip.diff.a5_crypt`. |
 
-CRC32 is **not** authentication (paper: easy to pad while preserving CRC). We still verify it. We do not treat it as a signature. Optional BLAKE3/SHA-256 is the strong hash.
+CRC32 is **not** authentication (paper: easy to pad while preserving CRC). We still verify it. We do not treat it as a signature. SHA-256 is the current cryptographic content digest. BLAKE3 is not implemented.
 
 ### B - File-path processing
 

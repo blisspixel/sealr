@@ -30,11 +30,11 @@ szips did not check reserved names or trailing dot/space. sealr MUST.
 
 The destination parent must already exist. sealr canonicalizes and opens that parent as a retained directory capability; it does not create a missing parent. The final destination must be absent both at admission and at no-replace publication.
 
-On Unix, the opened parent must be owned by the effective user or root. A parent with group or other write permission is rejected unless it has the sticky bit and a trusted owner. Sticky does not protect entries from the directory owner, so a sticky directory owned by another user is rejected. A root-owned sticky directory is accepted only because root is outside the in-process threat boundary. The created stage is checked for effective-user ownership and mode `0700` semantics.
+On Linux and macOS, the opened parent must be owned by the effective user or root. A parent with group or other write permission is rejected unless it has the sticky bit and a trusted owner. Sticky does not protect entries from the directory owner, so a sticky directory owned by another user is rejected. A root-owned sticky directory is accepted only because root is outside the in-process threat boundary. The created stage is checked for effective-user ownership and mode `0700` semantics.
 
 On macOS, sealr queries the already-open parent and stage descriptors for extended ACLs. Any extended ACL is rejected because it can grant namespace rights that mode bits do not show. Failure to prove an ACL absent also rejects materialization.
 
-On Windows, the stage inherits the parent ACL. Callers must therefore choose a parent that does not grant untrusted principals child-mutation rights. The retained stage handle protects the stage name from rename, removal, and substitution, but it is not a replacement for a restrictive DACL.
+On Windows, sealr supports only a retained parent handle that reports non-remote, writable NTFS with persistent ACLs. ReFS, FAT32, exFAT, UDF, CDFS, remote redirectors and shares, read-only volumes, and query ambiguity fail closed with `materialize.unsupported_filesystem`. The stage is created atomically with a protected DACL whose owner and sole allow principal are the effective token user. That ACE grants `FILE_ALL_ACCESS`, inherits to files and directories, and is verified through the returned handle before any member write.
 
 ## Symlinks and reparse points
 
@@ -92,13 +92,21 @@ Do not preserve setuid/setgid. Mask to `0777` minus umask, or `0755`/`0644`.
 
 The Rust policy field `atomic` defaults to false. When true, completed member files are synced before publication. Directory durability and crash recovery are not yet guaranteed. There is no Phase 0 CLI switch for this field.
 
-Publication is native and no-replace on the three release platforms. Linux uses `renameat2` with `RENAME_NOREPLACE`; macOS uses `renameatx_np` with `RENAME_EXCL`. Windows creates the stage relative to the retained parent handle with `NtCreateFile`, `FILE_CREATE`, and reparse-point-open semantics. It withholds delete sharing, retains the returned stage handle for the full write, and publishes that same object with `NtSetInformationFile`, the retained parent as `RootDirectory`, and replacement disabled.
+Publication is native and no-replace on the three release platforms. Linux uses `renameat2` with `RENAME_NOREPLACE`; macOS uses `renameatx_np` with `RENAME_EXCL`. Windows creates the stage relative to the retained parent handle with `NtCreateFile`, `FILE_CREATE`, reparse-point-open semantics, and the explicit protected DACL. It withholds delete sharing, retains the returned stage handle for the full write, and publishes that same object with `NtSetInformationFile`, the retained parent as `RootDirectory`, and replacement disabled.
 
-Linux, macOS, and Windows are the supported materialization platforms. Every other target fails closed with `materialize.unsupported`.
+Linux, macOS, and Windows are the supported materialization platforms. Every other target fails closed with `materialize.unsupported`; Windows storage outside the matrix below fails with `materialize.unsupported_filesystem`.
+
+| Windows parent observed through the retained handle | Phase 0.1 status | Reason |
+|---|---|---|
+| Non-remote, writable NTFS with `FILE_PERSISTENT_ACLS` | Supported | Creation-time descriptor and descendant inheritance are natively tested. |
+| ReFS, including Dev Drive | Rejected | ACL support is documented but the complete stage, inheritance, reparse, cleanup, and publication path is not natively qualified. |
+| FAT32, exFAT, UDF, CDFS, or unknown | Rejected | The required persistent owner-private ACL cannot be established. |
+| SMB, UNC, mapped remote drives, DFS, WebDAV, NFS redirectors, or any `FILE_REMOTE_DEVICE` handle | Rejected | Remote ACL, sharing, and rename semantics are outside the current proof. |
+| Read-only volume or any volume-query failure | Rejected | Required stage creation or the support decision cannot be proven safe. |
 
 ## Receipt evidence
 
-The receipt records the materialization backend, stage mode, stage-creation primitive, member-resolution primitive, durability mode, publication primitive, outcome, and cleanup result. Setup failure, successful commit, publication failure, explicit abort, and failed cleanup are distinguishable. These fields are evidence of the selected control path, but the preview receipt is unsigned and is not authentication.
+The receipt records the materialization backend, stage mode, stage-creation primitive, member-resolution primitive, durability mode, publication primitive, outcome, and cleanup result. `sealr.materialization.v2` adds Windows storage-policy observations and stage-ACL verification without recording a SID, volume serial, label, or path. Setup failure, successful commit, publication failure, explicit abort, and failed cleanup are distinguishable. These fields are evidence of the selected control path, but the preview receipt is unsigned and is not authentication.
 
 The current receipt strings are an auditable map to the implemented native controls:
 
@@ -106,13 +114,15 @@ The current receipt strings are an auditable map to the implemented native contr
 |---|---|---|---|
 | Linux | `same-volume-random-128-mode-0700` | `mkdirat-mode-0700-openat-nofollow-safe-parent` | `renameat2-noreplace` |
 | macOS | `same-volume-random-128-mode-0700` | `mkdirat-mode-0700-openat-nofollow-safe-parent` | `renameatx-np-excl` |
-| Windows | `same-volume-random-128-inherited-acl` | `ntcreatefile-parent-handle-create-directory-nofollow` | `ntsetinformationfile-retained-source-parent-noreplace` |
+| Windows | `same-volume-random-128-protected-token-user-dacl` | `ntcreatefile-parent-handle-create-directory-explicit-dacl-nofollow` | `ntsetinformationfile-retained-source-parent-noreplace` |
 
 All three report `component-handles-nofollow` for member resolution. Durability reports `member-sync` when `atomic` is true and `flush-only` otherwise.
 
-The current core keeps platform `unsafe` code in two narrow FFI modules: descriptor-based extended-ACL inspection on Apple platforms and native stage creation/publication on Windows. This is the explicit audit boundary for pointer lifetime, layout, handle ownership, share flags, and error conversion.
+Windows evidence reports `storage_policy: windows-local-ntfs-v1` and `stage_acl_policy: windows-protected-token-user-v1`, plus the observed filesystem, device scope, persistent-ACL flag, read-only flag, and stage-ACL state.
 
-Root, administrators, same-principal processes, filesystem-override capabilities, and debugging or handle-duplication rights can act with or override the library's authority. They are outside this in-process containment claim. A reduced-authority worker is required to narrow that residual boundary.
+The current core keeps platform `unsafe` code in two narrow FFI modules: descriptor-based extended-ACL inspection on macOS and native volume, token, security-descriptor, stage-creation, and publication operations on Windows. This is the explicit audit boundary for pointer lifetime, layout, handle ownership, share flags, and error conversion.
+
+Root, administrators, SYSTEM, same-principal processes, filesystem-override or backup/restore privileges, filter drivers, and debugging or handle-duplication rights can act with or override the library's authority. They are outside this in-process containment claim. A reduced-authority worker narrows parser ambient authority, but a distinct service identity or equivalent mandatory-access-control boundary is required to contain another process running as the same user.
 
 ## 7z
 
