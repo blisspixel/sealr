@@ -4,6 +4,7 @@ use std::io::{self, Read, Write};
 use std::path::Path;
 
 use crate::findings::{Finding, FindingCode, Severity};
+use crate::ir::{ArchiveIR, IrMember, MemberKind};
 use crate::jail::jail_relative;
 use crate::materialize::{CapabilityMaterializer, MaterializationMeta};
 use crate::outcome::{
@@ -125,6 +126,10 @@ pub struct Outcome {
     pub verdict: Verdict,
     pub receipt: Receipt,
     pub view: View,
+    /// Effect-independent ZIP interpretation when planning produced a member list.
+    /// Absent when ingest or structure failed before a tree existed.
+    #[serde(skip)]
+    pub archive_ir: Option<ArchiveIR>,
 }
 
 impl Outcome {
@@ -450,6 +455,14 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
         ));
     }
 
+    let mut ir = ArchiveIR::new(
+        source_digest.clone(),
+        planned
+            .into_iter()
+            .map(|(zip, components)| IrMember::from_planned(zip, components))
+            .collect(),
+    );
+    let planned_count = ir.members.len() as u64;
     let mut members_view = Vec::new();
     let mut actual_total: u64 = 0;
     let mut materialization = initial_materialization;
@@ -466,33 +479,70 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                 materialization =
                     MaterializationMeta::setup_failed(policy.atomic, cleanup, windows);
                 let cause = first_error(&findings);
-                return Ok(finish(
-                    (snapshot.path_owned(), source_digest, snapshot.kind()),
-                    "zip",
-                    policy,
-                    findings,
-                    members_view,
-                    materialization,
-                    SemanticAxes::admitted_setup_failed(&cause),
+                return Ok(with_ir(
+                    finish(
+                        (snapshot.path_owned(), source_digest, snapshot.kind()),
+                        "zip",
+                        policy,
+                        findings,
+                        members_view,
+                        materialization,
+                        SemanticAxes::admitted_setup_failed(&cause),
+                    ),
+                    ir,
                 ));
             }
         },
     };
     let write = stage.is_some();
-    let planned_count = planned.len() as u64;
 
-    for (m, parts) in planned {
-        let kind = if m.is_dir { "dir" } else { "file" };
-        let method = if m.method == 0 { "store" } else { "deflate" };
-
-        if m.is_dir {
+    for index in 0..ir.members.len() {
+        if matches!(ir.members[index].kind, MemberKind::Directory) {
             if let Some(materializer) = stage.as_ref() {
-                if let Err(finding) = materializer.create_directory(&parts, &m.name) {
+                if let Err(finding) = materializer.create_directory(
+                    &ir.members[index].components,
+                    &ir.members[index].decoded_name,
+                ) {
+                    ir.members[index].mark_failed(finding.code.as_str());
                     findings.push(finding);
                     materialization = abort_and_report(&mut stage, &mut findings, materialization);
                     let cause = first_error(&findings);
                     let verified = members_view.len() as u64;
-                    return Ok(finish(
+                    return Ok(with_ir(
+                        finish(
+                            (snapshot.path_owned(), source_digest, snapshot.kind()),
+                            "zip",
+                            policy,
+                            findings,
+                            members_view,
+                            materialization,
+                            SemanticAxes::admitted_verification_stop(
+                                verified,
+                                planned_count.saturating_sub(verified),
+                                &cause,
+                                write,
+                            ),
+                        ),
+                        ir,
+                    ));
+                }
+            }
+            ir.members[index].mark_directory_verified();
+            members_view.push(member_view(&ir.members[index]));
+            continue;
+        }
+
+        let zip_member = ir.members[index].as_zip_member();
+        let payload = match zip::payload(&snapshot, &zip_member) {
+            Ok(payload) => payload,
+            Err(finding) => {
+                ir.members[index].mark_failed(finding.code.as_str());
+                findings.push(finding);
+                materialization = abort_and_report(&mut stage, &mut findings, materialization);
+                let cause = first_error(&findings);
+                let verified = members_view.len() as u64;
+                return Ok(with_ir(
+                    finish(
                         (snapshot.path_owned(), source_digest, snapshot.kind()),
                         "zip",
                         policy,
@@ -505,61 +555,63 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                             &cause,
                             write,
                         ),
-                    ));
-                }
-            }
-            members_view.push(MemberView {
-                path: parts.join("/"),
-                kind,
-                comp_bytes: 0,
-                uncomp_bytes: 0,
-                method: "store",
-                crc32: format!("{:08x}", m.crc),
-                sha256: hex_sha256(&[]),
-            });
-            continue;
-        }
-
-        let payload = match zip::payload(&snapshot, &m) {
-            Ok(payload) => payload,
-            Err(finding) => {
-                findings.push(finding);
-                materialization = abort_and_report(&mut stage, &mut findings, materialization);
-                let cause = first_error(&findings);
-                let verified = members_view.len() as u64;
-                return Ok(finish(
-                    (snapshot.path_owned(), source_digest, snapshot.kind()),
-                    "zip",
-                    policy,
-                    findings,
-                    members_view,
-                    materialization,
-                    SemanticAxes::admitted_verification_stop(
-                        verified,
-                        planned_count.saturating_sub(verified),
-                        &cause,
-                        write,
                     ),
+                    ir,
                 ));
             }
         };
         let remaining = policy.max_total_bytes.saturating_sub(actual_total);
         let processed = if let Some(stage) = stage.as_ref() {
             stage
-                .create_file(&parts)
-                .and_then(|file| process_member_to_file(payload, &m, policy, remaining, file))
+                .create_file(&ir.members[index].components)
+                .and_then(|file| {
+                    process_member_to_file(payload, &zip_member, policy, remaining, file)
+                })
         } else {
             let mut sink = io::sink();
-            process_member(payload, &m, policy, remaining, &mut sink)
+            process_member(payload, &zip_member, policy, remaining, &mut sink)
         };
         let (actual, crc, sha) = match processed {
             Ok(result) => result,
             Err(finding) => {
-                findings.push(finding.on(&m.name));
+                let finding = finding.on(&ir.members[index].decoded_name);
+                ir.members[index].mark_failed(finding.code.as_str());
+                findings.push(finding);
                 materialization = abort_and_report(&mut stage, &mut findings, materialization);
                 let cause = first_error(&findings);
                 let verified = members_view.len() as u64;
-                return Ok(finish(
+                return Ok(with_ir(
+                    finish(
+                        (snapshot.path_owned(), source_digest, snapshot.kind()),
+                        "zip",
+                        policy,
+                        findings,
+                        members_view,
+                        materialization,
+                        SemanticAxes::admitted_verification_stop(
+                            verified,
+                            planned_count.saturating_sub(verified),
+                            &cause,
+                            write,
+                        ),
+                    ),
+                    ir,
+                ));
+            }
+        };
+        if crc != ir.members[index].declared_crc {
+            let finding = Finding::error(
+                FindingCode::CrcMismatch,
+                format!("got {crc:08x} want {:08x}", ir.members[index].declared_crc),
+            )
+            .on(&ir.members[index].decoded_name);
+            ir.members[index].mark_failed(finding.code.as_str());
+            findings.push(finding);
+            materialization = abort_and_report(&mut stage, &mut findings, materialization);
+            let cause = first_error(&findings);
+            let verified = members_view.len() as u64;
+            return Ok(with_ir(
+                finish(
                     (snapshot.path_owned(), source_digest, snapshot.kind()),
                     "zip",
                     policy,
@@ -572,46 +624,13 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                         &cause,
                         write,
                     ),
-                ));
-            }
-        };
-        if crc != m.crc {
-            findings.push(
-                Finding::error(
-                    FindingCode::CrcMismatch,
-                    format!("got {crc:08x} want {:08x}", m.crc),
-                )
-                .on(&m.name),
-            );
-            materialization = abort_and_report(&mut stage, &mut findings, materialization);
-            let cause = first_error(&findings);
-            let verified = members_view.len() as u64;
-            return Ok(finish(
-                (snapshot.path_owned(), source_digest, snapshot.kind()),
-                "zip",
-                policy,
-                findings,
-                members_view,
-                materialization,
-                SemanticAxes::admitted_verification_stop(
-                    verified,
-                    planned_count.saturating_sub(verified),
-                    &cause,
-                    write,
                 ),
+                ir,
             ));
         }
         actual_total = actual_total.saturating_add(actual);
-
-        members_view.push(MemberView {
-            path: parts.join("/"),
-            kind,
-            comp_bytes: m.comp_size,
-            uncomp_bytes: actual,
-            method,
-            crc32: format!("{crc:08x}"),
-            sha256: sha,
-        });
+        ir.members[index].mark_file_verified(actual, crc, sha);
+        members_view.push(member_view(&ir.members[index]));
     }
 
     members_view.sort_by(|a, b| a.path.cmp(&b.path));
@@ -620,30 +639,36 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
             findings.push(finding);
             materialization = abort_and_report(&mut stage, &mut findings, materialization);
             let cause = first_error(&findings);
-            return Ok(finish(
-                (snapshot.path_owned(), source_digest, snapshot.kind()),
-                "zip",
-                policy,
-                findings,
-                members_view,
-                materialization,
-                SemanticAxes::admitted_publication_failed(&cause),
+            return Ok(with_ir(
+                finish(
+                    (snapshot.path_owned(), source_digest, snapshot.kind()),
+                    "zip",
+                    policy,
+                    findings,
+                    members_view,
+                    materialization,
+                    SemanticAxes::admitted_publication_failed(&cause),
+                ),
+                ir,
             ));
         }
         materialization = materializer.report();
     }
-    Ok(finish(
-        (snapshot.path_owned(), source_digest, snapshot.kind()),
-        "zip",
-        policy,
-        findings,
-        members_view,
-        materialization,
-        if write {
-            SemanticAxes::materialize_committed()
-        } else {
-            SemanticAxes::inspect_complete()
-        },
+    Ok(with_ir(
+        finish(
+            (snapshot.path_owned(), source_digest, snapshot.kind()),
+            "zip",
+            policy,
+            findings,
+            members_view,
+            materialization,
+            if write {
+                SemanticAxes::materialize_committed()
+            } else {
+                SemanticAxes::inspect_complete()
+            },
+        ),
+        ir,
     ))
 }
 
@@ -893,6 +918,40 @@ fn finish(
         verdict,
         receipt,
         view,
+        archive_ir: None,
+    }
+}
+
+fn with_ir(mut outcome: Outcome, ir: ArchiveIR) -> Outcome {
+    outcome.archive_ir = Some(ir);
+    outcome
+}
+
+fn member_view(member: &IrMember) -> MemberView {
+    let method = if member.method == 0 {
+        "store"
+    } else {
+        "deflate"
+    };
+    MemberView {
+        path: member.canonical_path.clone(),
+        kind: match member.kind {
+            MemberKind::Directory => "dir",
+            MemberKind::File => "file",
+        },
+        comp_bytes: if matches!(member.kind, MemberKind::Directory) {
+            0
+        } else {
+            member.declared_comp_size
+        },
+        uncomp_bytes: member.actual_uncomp_size.unwrap_or(0),
+        method: if matches!(member.kind, MemberKind::Directory) {
+            "store"
+        } else {
+            method
+        },
+        crc32: format!("{:08x}", member.actual_crc.unwrap_or(member.declared_crc)),
+        sha256: member.content_sha256.clone().unwrap_or_default(),
     }
 }
 
@@ -1132,6 +1191,17 @@ mod tests {
         assert_eq!(out.effect, EffectStatus::NotRequested);
         assert_eq!(out.receipt.schema, "sealr.receipt.v2");
         assert_eq!(out.receipt.source_snapshot, SnapshotKind::MemoryBorrowed);
+        let ir = out.archive_ir.as_ref().expect("admitted inspect has IR");
+        assert_eq!(ir.schema, crate::ir::ARCHIVE_IR_SCHEMA);
+        assert_eq!(ir.profile, crate::ir::ZIP_STRICT_ASCII_V1);
+        assert_eq!(ir.members.len(), 1);
+        assert_eq!(ir.members[0].canonical_path, "nested/hello.txt");
+        assert_eq!(ir.members[0].raw_name_bytes, b"nested/hello.txt");
+        assert_eq!(ir.members[0].kind, MemberKind::File);
+        assert_eq!(
+            ir.members[0].verification,
+            crate::ir::MemberVerification::Verified
+        );
         assert_eq!(out.receipt.policy.id, policy.id);
         assert_eq!(
             out.receipt.materialization.schema,
@@ -1205,6 +1275,7 @@ mod tests {
     #[test]
     fn classifies_invalid_deflate_syntax_separately_from_crc_failure() {
         let member = ZipMember {
+            raw_name: b"invalid.txt".to_vec(),
             name: "invalid.txt".to_owned(),
             method: 8,
             flags: 0,
@@ -1284,6 +1355,39 @@ mod tests {
         assert_eq!(mat.verification, VerificationStatus::Complete);
         assert_eq!(mat.effect, EffectStatus::Committed);
         assert!(matches!(mat.verdict, Verdict::Allowed { wrote: true }));
+        let inspect_ir = inspect.archive_ir.as_ref().expect("inspect IR");
+        let mat_ir = mat.archive_ir.as_ref().expect("materialize IR");
+        assert_eq!(inspect_ir.schema, mat_ir.schema);
+        assert_eq!(inspect_ir.profile, mat_ir.profile);
+        assert_eq!(inspect_ir.source_digest, mat_ir.source_digest);
+        let inspect_ids: Vec<_> = inspect_ir
+            .members
+            .iter()
+            .map(|member| {
+                (
+                    &member.canonical_path,
+                    &member.raw_name_bytes,
+                    &member.content_sha256,
+                    member.data_offset,
+                )
+            })
+            .collect();
+        let mat_ids: Vec<_> = mat_ir
+            .members
+            .iter()
+            .map(|member| {
+                (
+                    &member.canonical_path,
+                    &member.raw_name_bytes,
+                    &member.content_sha256,
+                    member.data_offset,
+                )
+            })
+            .collect();
+        assert_eq!(
+            inspect_ids, mat_ids,
+            "inspect and materialize must share one IR"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1312,6 +1416,10 @@ mod tests {
         assert_eq!(out.interpretation, InterpretationStatus::Interpreted);
         assert_eq!(out.admission, AdmissionStatus::Denied);
         assert_eq!(out.effect, EffectStatus::NotRequested);
+        assert!(
+            out.archive_ir.is_none(),
+            "denied archives must not publish an admitted IR"
+        );
         assert!(!dir.join("outside.txt").exists());
         let parent = dir.parent().unwrap();
         assert!(!parent.join("outside.txt").exists());

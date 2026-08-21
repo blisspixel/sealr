@@ -157,7 +157,7 @@ This target decomposition supports results that the current `Verdict` cannot exp
 - a future read-only projection reports a partial verification frontier;
 - a partial rejected view names the phase and cause at which construction stopped.
 
-These axes now exist as Rust types on `Outcome` and as JSON fields on `sealr.receipt.v2`. The inspectable `View` and CLI exit codes still use the compatibility `Verdict`. `SourceSnapshot`, `ArchiveIR`, and type-state methods remain design notation.
+These axes now exist as Rust types on `Outcome` and as JSON fields on `sealr.receipt.v2`. The inspectable `View` and CLI exit codes still use the compatibility `Verdict`. `SourceSnapshot` and `ArchiveIR` exist on the library outcome; type-state methods remain design notation.
 
 ### Type-state flow
 
@@ -173,7 +173,7 @@ verified.materialize(destination)?;
 verified.write_evidence(output)?;
 ```
 
-`SourceSnapshot`, `ArchiveIR`, `AdmittedArchive`, and the methods above are design notation. They do not exist in alpha.2. Their required property is that every operation consumes one immutable interpretation and no operation reparses the original archive through another parser.
+`SourceSnapshot` and `ArchiveIR` exist in alpha.2 as the ingest object and the inspect/materialize member plan. `AdmittedArchive` and the type-state methods remain design notation. Their required property is that every operation consumes one immutable interpretation and no operation reparses the original archive through another parser.
 
 ### Semantic identities
 

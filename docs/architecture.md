@@ -48,7 +48,7 @@ The format parser, path grammar, quota counters, content verification, and polic
 
 Alpha.2's bounded in-memory source is now a named `SourceSnapshot`: path inputs become owned bytes, caller byte inputs remain borrowed, and the recorded digest is SHA-256 of that exact object. ZIP payload reads use checked ranges over the snapshot. Receipt v2 reports `source_snapshot` as `memory-owned`, `memory-borrowed`, or `unavailable`. It does not yet:
 
-- produce a normative `ArchiveIR`, layout root, or content-tree root;
+- produce a layout root or content-tree root; `sealr.archive-ir.v1` now exists as the inspect/materialize member plan;
 - replace whole-archive buffering with a private spool or verified filesystem snapshot;
 - run parsing in a reduced-authority worker;
 - expose a read-only projection or content-addressed store;
