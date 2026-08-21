@@ -2,7 +2,7 @@
 
 > This document describes the target architecture. The current two-crate implementation and its limitations are listed in [README.md](../README.md). Items such as `rawzip`, mmap, rayon, the expanded crate graph, hardware backends, and six-target distribution are not implemented yet.
 
-Rust core is the security boundary (jail, ZipDiff checks, limits: no `unsafe`). Mojo is a later hydrate/hash module, never the path logic ([vision.md](vision.md), [backends.md](backends.md)).
+Rust core is the security boundary for the jail, ZipDiff checks, limits, and materialization. Safe Rust is the default. The only current `unsafe` blocks are isolated in the Apple descriptor-ACL module and Windows native stage/publication module. Those small modules are the explicit platform-FFI audit boundary. Mojo is a later hydrate/hash module, never the path logic ([vision.md](vision.md), [backends.md](backends.md)).
 
 Phase 0/1 is a Rust CPU **inspect + materialize** engine. Optional hardware backends plug into the same scheduler later. If well-formed ZIP materialize does not match `ripunzip` / Cram / Bandizip with the jail on, stop.
 
@@ -20,7 +20,7 @@ sealr/                          # workspace root (this folder)
     sealr-bench/                # corpus hashes + harness vs 7z/ripunzip
 ```
 
-`sealr` (lib) is one function with that type: always `AttestedReceipt × InspectableView`; `Materialization | Rejection` is the fork. `inspect` / `materialize` / `mount` are façades (view-only, write files, view-as-FS). Same interpretation for all three - do not grow a recovery/streaming parser (LibreOffice class of bug). CLI is JSONL dogfood of the crate.
+`sealr` (lib) is one function with that type: always `AttestedReceipt × InspectableView`; `Materialization | Rejection` is the fork. `inspect` / `materialize` / `mount` are façades (view-only, write files, view-as-FS). Same interpretation for all three - do not grow a recovery/streaming parser (LibreOffice class of bug). The current CLI emits one pretty JSON view on stdout and one pretty JSON receipt on stderr. JSONL is a later surface.
 
 `sealr-cli` is thin so benches call the lib without spawning. The process path stays for apples-to-apples vs `7z`.
 
@@ -45,6 +45,21 @@ Empty stubs `nvidia` and `mojo` exist so the feature names are real. They must n
 6. Per member: inflate → bound uncompressed bytes → CRC → write
 7. On CRC mismatch: delete the partial file, fail the member; receipt records it
 ```
+
+## Hardened materialization path
+
+The implemented materializer has one admission and publication sequence:
+
+1. Require the destination parent to exist, canonicalize it once, and retain an opened directory capability. Do not create missing parents.
+2. Refuse an existing destination. On Unix, require parent ownership by the effective user or root and reject group/other write unless the trusted owner has set sticky. On macOS, reject any extended ACL or descriptor ACL query failure.
+3. Create a random 128-bit same-volume stage. Linux and macOS use mode `0700`, then verify effective-user ownership, mode, and the macOS descriptor ACL. Windows uses parent-rooted `NtCreateFile` with exclusive creation and reparse-point-open semantics, retains the handle, and omits delete sharing.
+4. Create each canonical member with component-by-component no-follow directory capabilities and exclusive file creation. Windows additionally checks opened handles for the reparse-point attribute.
+5. Publish without replacement. Linux uses `renameat2(RENAME_NOREPLACE)`, macOS uses `renameatx_np(RENAME_EXCL)`, and Windows calls `NtSetInformationFile` on the retained stage handle with the retained parent as `RootDirectory` and replacement disabled.
+6. On ordinary rejection, attempt cleanup twice before constructing the receipt. Record setup, staging, publication, abort, and final cleanup outcomes. Two cleanup failures leave the stage for explicit recovery and report `cleanup: failed`.
+
+Linux, macOS, and Windows are the supported materialization platforms. Other targets fail closed. The Windows stage inherits the parent ACL, so handle-bound publication prevents stage-name substitution but does not make a broadly writable parent private. Root, administrators, same-principal processes, filesystem-override capabilities, and debugging or handle-duplication rights remain outside the in-process boundary.
+
+The receipt's `materialization` object records `backend`, `stage_mode`, `stage_creation_primitive`, `member_resolution`, `durability`, `publication_primitive`, `outcome`, and `cleanup`. These fields make the active control path inspectable. They do not authenticate an unsigned preview receipt.
 
 Mount hydrates step 6 on `read` (view representation). Same interpretation everywhere.
 
@@ -79,7 +94,7 @@ Deflate64, ZIP zstd (method 93), SFX prefixes: later, do not silently skip-as-su
 2. Else: `flate2` + `zlib-rs`, streaming into the file.
 3. Never ship `miniz_oxide` as the release default.
 
-CRC with `crc32fast` **during** write. Do not re-read from disk. SHA-256 is `--hash`, not default. BLAKE3 is the preferred optional strong hash.
+CRC with `crc32fast` **during** write. Do not re-read from disk. SHA-256 is calculated for every expanded member in the same streaming pass. Hash selection is a later policy surface.
 
 libdeflate is not a streaming library. A 4 GiB member must not try to allocate 4 GiB.
 

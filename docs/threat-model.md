@@ -20,6 +20,14 @@ The attacker crafts bytes (not necessarily a legal ZIP from Info-ZIP) and delive
 
 They win if two components in that pipeline **both succeed** and **disagree** about the tree. ZipDiff explicitly does not count “one parser errors, one succeeds” as exploitable.
 
+For materialization, a concurrent local actor may also race names inside the destination parent or a discovered stage. The destination parent must already exist and is opened as a retained capability. A missing parent is rejected rather than created, and a destination that exists or appears during staging is preserved.
+
+On Unix, cross-principal namespace mutation is in scope. The opened parent is accepted only when its owner is the effective user or root and either its group/other write bits are clear or its sticky bit is set. Sticky does not make an untrusted directory owner safe, so a sticky directory owned by another user is rejected. Root-owned `/tmp` is trusted only because root is outside this in-process adversary boundary. The stage must be owned by the effective user with no group or other permissions. On macOS, any descriptor-reported extended ACL on the parent or stage is rejected, and an ACL query error fails closed, because an extended ACL can grant mutation rights beyond the mode bits.
+
+On Windows, stage creation is an exclusive `NtCreateFile` operation rooted at the opened parent handle. The returned stage handle is retained without delete sharing. Publication uses `NtSetInformationFile` on that retained source handle, names the opened parent handle as the target root, and disables replacement. This closes stage-name substitution and destination clobber races. The stage inherits the parent ACL, so a caller-supplied parent that grants an untrusted principal child-mutation rights is outside this control and must be rejected by deployment policy.
+
+Member operations must not follow a substituted link or reparse point. Root, an administrator, a process running as the same security principal, a process with filesystem-override capabilities, or a process with debugging or handle-duplication rights is outside the containment promise of an in-process library. Containing those actors requires the planned reduced-authority worker. Receipts expose the selected stage, member-resolution, publication, outcome, and cleanup controls, but remain unsigned and therefore are evidence rather than authenticated attestations.
+
 Pipelines that matter for us:
 
 | Pipeline | Why it exists |

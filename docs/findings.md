@@ -58,8 +58,12 @@ Unknown error codes must be treated as rejection by consumers.
 | Code | Meaning |
 |---|---|
 | `materialize.exists` | Destination exists or appeared before publication. |
-| `materialize.io` | Staging, directory, member, flush, sync, or cleanup-related I/O failed. |
+| `materialize.io` | The destination parent is missing or staging, member write, flush, sync, or other materialization I/O failed. |
 | `materialize.commit` | Final same-volume no-replace publication failed. |
+| `materialize.unsafe_parent` | The destination parent or stage failed trusted ownership, Unix mode, or macOS extended-ACL admission checks. |
+| `materialize.unsafe_component` | A canonical member component could not be opened through the required no-follow boundary, including a link, reparse point, non-directory parent, or invalid component. |
+| `materialize.cleanup` | Explicit removal of a staged tree failed. The receipt reports `cleanup: failed`. |
+| `materialize.unsupported` | The platform has no supported atomic no-replace publication primitive, so materialization failed closed. |
 
 ### Quotas
 
@@ -104,4 +108,4 @@ TAR link, permission, dictionary, polyglot, signing, and sandbox findings will b
 
 ## Stability
 
-Finding strings become compatibility commitments at the first supported release. Before that release, registry changes must update this document, golden receipts, and fixture expectations in the same change.
+Finding strings become compatibility commitments at the first stable supported release. During the preview line, registry changes must update this document, receipt tests, and fixture expectations in the same change and must be called out in the changelog.

@@ -3,14 +3,16 @@ resolver = "2"
 members = ["crates/sealr", "crates/sealr-cli"]
 
 [workspace.package]
-version = "0.0.0"
+version = "0.1.0-alpha.1"
 edition = "2021"
+rust-version = "1.98"
 license = "MIT"
 repository = "https://github.com/blisspixel/sealr"
 description = "High-assurance boundary for untrusted archives"
 
 [workspace.dependencies]
 cap-std = "4.0.3"
+cap-fs-ext = "4.0.3"
 crc32fast = "1.4"
 flate2 = { version = "1.1", default-features = false, features = ["zlib-rs"] }
 getrandom = "0.4.3"
@@ -20,3 +22,4 @@ sha2 = "0.11"
 thiserror = "2.0"
 clap = { version = "4.5", features = ["derive"] }
 zip = { version = "8", default-features = false, features = ["deflate"] }
+windows-sys = { version = "0.61.2", features = ["Wdk_Foundation", "Wdk_Storage_FileSystem", "Win32_Foundation", "Win32_Security", "Win32_Storage_FileSystem", "Win32_System_IO"] }

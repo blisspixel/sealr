@@ -2,14 +2,14 @@ use std::borrow::Cow;
 use std::collections::BTreeMap;
 use std::fs::{self, File};
 use std::io::{self, Read, Write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use crate::findings::{Finding, FindingCode, Severity};
 use crate::jail::jail_relative;
+use crate::materialize::{CapabilityMaterializer, MaterializationMeta};
 use crate::policy::{hex_sha256, Policy};
 use crate::zip::{self, ZipMember};
-use cap_std::ambient_authority;
-use cap_std::fs::{Dir as CapDir, File as CapFile, OpenOptions as CapOpenOptions};
+use cap_std::fs::File as CapFile;
 use crc32fast::Hasher as Crc;
 use flate2::read::DeflateDecoder;
 use serde::Serialize;
@@ -79,6 +79,7 @@ pub struct DigestHex {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Receipt {
+    pub schema: &'static str,
     pub verdict: &'static str,
     pub wrote: bool,
     pub source: DigestHex,
@@ -86,6 +87,7 @@ pub struct Receipt {
     pub view_digest: DigestHex,
     pub tool: ToolMeta,
     pub environment: EnvMeta,
+    pub materialization: MaterializationMeta,
     pub signed: bool,
     pub findings: Vec<Finding>,
 }
@@ -123,7 +125,12 @@ impl Outcome {
 pub fn apply(req: Request<'_>) -> Outcome {
     match apply_inner(&req) {
         Ok(o) => o,
-        Err(finding) => reject_only(request_fallback_meta(&req), vec![finding], None),
+        Err(finding) => reject_only(
+            request_fallback_meta(&req),
+            vec![finding],
+            None,
+            MaterializationMeta::not_started(req.dest.is_some(), req.policy.atomic),
+        ),
     }
 }
 
@@ -197,6 +204,8 @@ fn request_fallback_meta(req: &Request<'_>) -> (Option<String>, String, Policy) 
 
 fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
     let policy = req.policy;
+    let initial_materialization =
+        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
     let src = read_source(&req.source, policy)?;
     let source_digest = hex_sha256(&src.bytes);
     let magic = detect_magic(&src.bytes);
@@ -206,6 +215,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
             (src.path.clone(), source_digest, policy.clone()),
             vec![f],
             Some(magic),
+            initial_materialization,
         ));
     }
     if !policy.allows_format("zip") {
@@ -214,6 +224,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
             (src.path.clone(), source_digest, policy.clone()),
             vec![f],
             Some("zip"),
+            initial_materialization,
         ));
     }
 
@@ -224,6 +235,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
                 (src.path.clone(), source_digest, policy.clone()),
                 vec![f],
                 Some("zip"),
+                initial_materialization,
             ));
         }
     };
@@ -237,6 +249,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
             (src.path.clone(), source_digest, policy.clone()),
             vec![f],
             Some("zip"),
+            initial_materialization,
         ));
     }
     if parsed.metadata_bytes > policy.max_metadata_bytes {
@@ -251,6 +264,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
             (src.path.clone(), source_digest, policy.clone()),
             vec![f],
             Some("zip"),
+            initial_materialization,
         ));
     }
 
@@ -357,32 +371,38 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
     let fatal = findings.iter().any(|f| f.severity == Severity::Error);
     if fatal {
         return Ok(finish(
-            src.path,
-            source_digest,
+            (src.path, source_digest),
             "zip",
             policy,
             Verdict::Rejected,
             findings,
             Vec::new(),
+            initial_materialization,
         ));
     }
 
     let mut members_view = Vec::new();
     let mut actual_total: u64 = 0;
+    let mut materialization = initial_materialization;
     let mut stage = match req.dest {
         None => None,
-        Some(dest) => match StageDir::create(dest) {
-            Ok(stage) => Some(stage),
-            Err(finding) => {
-                findings.push(finding);
+        Some(dest) => match CapabilityMaterializer::create(dest, policy.atomic) {
+            Ok(stage) => {
+                materialization = stage.report();
+                Some(stage)
+            }
+            Err(setup_error) => {
+                let (setup_findings, cleanup) = setup_error.into_parts();
+                findings.extend(setup_findings);
+                materialization = MaterializationMeta::setup_failed(policy.atomic, cleanup);
                 return Ok(finish(
-                    src.path,
-                    source_digest,
+                    (src.path, source_digest),
                     "zip",
                     policy,
                     Verdict::Rejected,
                     findings,
                     members_view,
+                    materialization,
                 ));
             }
         },
@@ -394,17 +414,18 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
         let method = if m.method == 0 { "store" } else { "deflate" };
 
         if m.is_dir {
-            if let Some(stage) = stage.as_ref() {
-                if let Err(finding) = stage.create_directory(&parts, &m.name) {
+            if let Some(materializer) = stage.as_ref() {
+                if let Err(finding) = materializer.create_directory(&parts, &m.name) {
                     findings.push(finding);
+                    materialization = abort_and_report(&mut stage, &mut findings, materialization);
                     return Ok(finish(
-                        src.path,
-                        source_digest,
+                        (src.path, source_digest),
                         "zip",
                         policy,
                         Verdict::Rejected,
                         findings,
                         members_view,
+                        materialization,
                     ));
                 }
             }
@@ -424,14 +445,15 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
             Ok(payload) => payload,
             Err(finding) => {
                 findings.push(finding);
+                materialization = abort_and_report(&mut stage, &mut findings, materialization);
                 return Ok(finish(
-                    src.path,
-                    source_digest,
+                    (src.path, source_digest),
                     "zip",
                     policy,
                     Verdict::Rejected,
                     findings,
                     members_view,
+                    materialization,
                 ));
             }
         };
@@ -448,14 +470,15 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
             Ok(result) => result,
             Err(finding) => {
                 findings.push(finding.on(&m.name));
+                materialization = abort_and_report(&mut stage, &mut findings, materialization);
                 return Ok(finish(
-                    src.path,
-                    source_digest,
+                    (src.path, source_digest),
                     "zip",
                     policy,
                     Verdict::Rejected,
                     findings,
                     members_view,
+                    materialization,
                 ));
             }
         };
@@ -467,14 +490,15 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
                 )
                 .on(&m.name),
             );
+            materialization = abort_and_report(&mut stage, &mut findings, materialization);
             return Ok(finish(
-                src.path,
-                source_digest,
+                (src.path, source_digest),
                 "zip",
                 policy,
                 Verdict::Rejected,
                 findings,
                 members_view,
+                materialization,
             ));
         }
         actual_total = actual_total.saturating_add(actual);
@@ -491,29 +515,48 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, Finding> {
     }
 
     members_view.sort_by(|a, b| a.path.cmp(&b.path));
-    if let Some(stage) = stage.as_mut() {
-        if let Err(finding) = stage.commit() {
+    if let Some(materializer) = stage.as_mut() {
+        if let Err(finding) = materializer.commit() {
             findings.push(finding);
+            materialization = abort_and_report(&mut stage, &mut findings, materialization);
             return Ok(finish(
-                src.path,
-                source_digest,
+                (src.path, source_digest),
                 "zip",
                 policy,
                 Verdict::Rejected,
                 findings,
                 members_view,
+                materialization,
             ));
         }
+        materialization = materializer.report();
     }
     Ok(finish(
-        src.path,
-        source_digest,
+        (src.path, source_digest),
         "zip",
         policy,
         Verdict::Allowed { wrote: write },
         findings,
         members_view,
+        materialization,
     ))
+}
+
+fn abort_and_report(
+    stage: &mut Option<CapabilityMaterializer>,
+    findings: &mut Vec<Finding>,
+    fallback: MaterializationMeta,
+) -> MaterializationMeta {
+    let Some(stage) = stage.as_mut() else {
+        return fallback;
+    };
+    if let Err(first_cleanup) = stage.abort() {
+        findings.push(first_cleanup);
+        if let Err(final_cleanup) = stage.abort() {
+            findings.push(final_cleanup);
+        }
+    }
+    stage.report()
 }
 
 fn path_conflict(seen: &BTreeMap<String, bool>, path: &str, is_dir: bool) -> Option<String> {
@@ -532,282 +575,6 @@ fn path_conflict(seen: &BTreeMap<String, bool>, path: &str, is_dir: bool) -> Opt
         }
     }
     None
-}
-
-struct StageDir {
-    parent: CapDir,
-    parent_path: PathBuf,
-    root: Option<CapDir>,
-    stage_name: PathBuf,
-    final_name: PathBuf,
-    committed: bool,
-}
-
-impl StageDir {
-    fn create(dest: &Path) -> Result<Self, Finding> {
-        let file_name = dest.file_name().ok_or_else(|| {
-            Finding::error(
-                FindingCode::MaterializeIo,
-                "destination must name a directory below an existing root",
-            )
-        })?;
-        let parent_input = dest
-            .parent()
-            .filter(|path| !path.as_os_str().is_empty())
-            .unwrap_or_else(|| Path::new("."));
-        fs::create_dir_all(parent_input).map_err(|error| {
-            Finding::error(
-                FindingCode::MaterializeIo,
-                format!("create destination parent: {error}"),
-            )
-        })?;
-        let parent_path = fs::canonicalize(parent_input).map_err(|error| {
-            Finding::error(
-                FindingCode::MaterializeIo,
-                format!("resolve destination parent: {error}"),
-            )
-        })?;
-        let parent =
-            CapDir::open_ambient_dir(&parent_path, ambient_authority()).map_err(|error| {
-                Finding::error(
-                    FindingCode::MaterializeIo,
-                    format!("open destination parent capability: {error}"),
-                )
-            })?;
-        let final_name = PathBuf::from(file_name);
-        if capability_path_exists(&parent, &final_name)? {
-            return Err(Finding::error(
-                FindingCode::MaterializeExists,
-                "destination already exists; replacement is not implemented",
-            ));
-        }
-
-        for _ in 0..128 {
-            let mut random = [0_u8; 16];
-            getrandom::fill(&mut random).map_err(|error| {
-                Finding::error(
-                    FindingCode::MaterializeIo,
-                    format!("generate staging name: {error}"),
-                )
-            })?;
-            let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
-            let stage_name = PathBuf::from(format!(".sealr-stage-{suffix}"));
-            match create_private_stage(&parent, &stage_name) {
-                Ok(()) => match parent.open_dir(&stage_name) {
-                    Ok(root) => {
-                        return Ok(Self {
-                            parent,
-                            parent_path,
-                            root: Some(root),
-                            stage_name,
-                            final_name,
-                            committed: false,
-                        });
-                    }
-                    Err(error) => {
-                        let _ = parent.remove_dir_all(&stage_name);
-                        return Err(Finding::error(
-                            FindingCode::MaterializeIo,
-                            format!("open staging capability: {error}"),
-                        ));
-                    }
-                },
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
-                Err(error) => {
-                    return Err(Finding::error(
-                        FindingCode::MaterializeIo,
-                        format!("create staging directory through capability: {error}"),
-                    ));
-                }
-            }
-        }
-        Err(Finding::error(
-            FindingCode::MaterializeIo,
-            "could not allocate a unique staging directory",
-        ))
-    }
-
-    fn root(&self) -> Result<&CapDir, Finding> {
-        self.root.as_ref().ok_or_else(|| {
-            Finding::error(
-                FindingCode::MaterializeIo,
-                "staging capability is unavailable",
-            )
-        })
-    }
-
-    fn create_directory(&self, parts: &[String], member: &str) -> Result<(), Finding> {
-        let path = relative_parts(parts)?;
-        self.root()?.create_dir_all(&path).map_err(|error| {
-            Finding::error(
-                FindingCode::MaterializeIo,
-                format!("create directory through capability: {error}"),
-            )
-            .on(member)
-        })
-    }
-
-    fn create_file(&self, parts: &[String]) -> Result<CapFile, Finding> {
-        let path = relative_parts(parts)?;
-        if let Some(parent) = path.parent().filter(|path| !path.as_os_str().is_empty()) {
-            self.root()?.create_dir_all(parent).map_err(|error| {
-                Finding::error(
-                    FindingCode::MaterializeIo,
-                    format!("create parent through capability: {error}"),
-                )
-            })?;
-        }
-        let mut options = CapOpenOptions::new();
-        options.write(true).create_new(true);
-        self.root()?.open_with(&path, &options).map_err(|error| {
-            Finding::error(
-                FindingCode::MaterializeIo,
-                format!("create member through capability: {error}"),
-            )
-        })
-    }
-
-    fn commit(&mut self) -> Result<(), Finding> {
-        drop(self.root.take());
-        rename_noreplace(
-            &self.parent,
-            &self.parent_path,
-            &self.stage_name,
-            &self.final_name,
-        )
-        .map_err(|error| {
-            if error.kind() == io::ErrorKind::AlreadyExists {
-                Finding::error(
-                    FindingCode::MaterializeExists,
-                    "destination appeared while materializing",
-                )
-            } else {
-                Finding::error(
-                    FindingCode::MaterializeCommit,
-                    format!("publish staging directory: {error}"),
-                )
-            }
-        })?;
-        self.committed = true;
-        Ok(())
-    }
-}
-
-#[cfg(unix)]
-fn create_private_stage(parent: &CapDir, name: &Path) -> io::Result<()> {
-    use cap_std::fs::{DirBuilder, DirBuilderExt};
-
-    let mut builder = DirBuilder::new();
-    builder.mode(0o700);
-    parent.create_dir_with(name, &builder)
-}
-
-#[cfg(not(unix))]
-fn create_private_stage(parent: &CapDir, name: &Path) -> io::Result<()> {
-    parent.create_dir(name)
-}
-
-impl Drop for StageDir {
-    fn drop(&mut self) {
-        if !self.committed {
-            drop(self.root.take());
-            let _ = self.parent.remove_dir_all(&self.stage_name);
-        }
-    }
-}
-
-fn relative_parts(parts: &[String]) -> Result<PathBuf, Finding> {
-    if parts.is_empty() {
-        return Err(Finding::error(
-            FindingCode::MaterializeIo,
-            "canonical member has no path components",
-        ));
-    }
-    let mut path = PathBuf::new();
-    for part in parts {
-        path.push(part);
-    }
-    Ok(path)
-}
-
-fn capability_path_exists(dir: &CapDir, path: &Path) -> Result<bool, Finding> {
-    match dir.symlink_metadata(path) {
-        Ok(_) => Ok(true),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(Finding::error(
-            FindingCode::MaterializeIo,
-            format!("inspect destination: {error}"),
-        )),
-    }
-}
-
-#[cfg(any(target_os = "android", target_os = "linux", target_vendor = "apple"))]
-fn rename_noreplace(
-    parent: &CapDir,
-    _parent_path: &Path,
-    from: &Path,
-    to: &Path,
-) -> io::Result<()> {
-    Ok(rustix::fs::renameat_with(
-        parent,
-        from,
-        parent,
-        to,
-        rustix::fs::RenameFlags::NOREPLACE,
-    )?)
-}
-
-#[cfg(windows)]
-fn rename_noreplace(parent: &CapDir, parent_path: &Path, from: &Path, to: &Path) -> io::Result<()> {
-    let from = parent_path.join(from);
-    let to_full = parent_path.join(to);
-    let from = from.to_str().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "staging path is not valid Unicode",
-        )
-    })?;
-    let to_full = to_full.to_str().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "destination path is not valid Unicode",
-        )
-    })?;
-    match winsafe::MoveFile(from, to_full) {
-        Ok(()) => Ok(()),
-        Err(error) => match parent.symlink_metadata(to) {
-            Ok(_) => Err(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "destination exists",
-            )),
-            Err(inspect_error) if inspect_error.kind() == io::ErrorKind::NotFound => {
-                Err(io::Error::other(format!("MoveFileW: {error}")))
-            }
-            Err(inspect_error) => Err(inspect_error),
-        },
-    }
-}
-
-#[cfg(not(any(
-    target_os = "android",
-    target_os = "linux",
-    target_vendor = "apple",
-    windows
-)))]
-fn rename_noreplace(
-    parent: &CapDir,
-    _parent_path: &Path,
-    from: &Path,
-    to: &Path,
-) -> io::Result<()> {
-    match parent.symlink_metadata(to) {
-        Ok(_) => Err(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            "destination exists",
-        )),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => parent.rename(from, parent, to),
-        Err(error) => Err(error),
-    }
 }
 
 fn process_member_to_file(
@@ -933,13 +700,13 @@ fn detect_magic(bytes: &[u8]) -> &'static str {
 }
 
 fn finish(
-    path: Option<String>,
-    source_digest: String,
+    (path, source_digest): (Option<String>, String),
     magic: &'static str,
     policy: &Policy,
     verdict: Verdict,
     findings: Vec<Finding>,
     members: Vec<MemberView>,
+    materialization: MaterializationMeta,
 ) -> Outcome {
     let (verdict_s, wrote) = match &verdict {
         Verdict::Allowed { wrote } => ("allowed", *wrote),
@@ -967,6 +734,7 @@ fn finish(
     };
     let view_json = serde_json::to_vec(&view).expect("view json");
     let receipt = Receipt {
+        schema: "sealr.receipt.v1",
         verdict: verdict_s,
         wrote,
         source: DigestHex {
@@ -985,6 +753,7 @@ fn finish(
             arch: std::env::consts::ARCH,
             kernel_jail: "unavailable",
         },
+        materialization,
         signed: false,
         findings,
     };
@@ -999,15 +768,16 @@ fn reject_only(
     (path, digest, policy): (Option<String>, String, Policy),
     findings: Vec<Finding>,
     magic: Option<&'static str>,
+    materialization: MaterializationMeta,
 ) -> Outcome {
     finish(
-        path,
-        digest,
+        (path, digest),
         magic.unwrap_or("unknown"),
         &policy,
         Verdict::Rejected,
         findings,
         Vec::new(),
+        materialization,
     )
 }
 
@@ -1017,6 +787,7 @@ mod tests {
     use ::zip::write::SimpleFileOptions;
     use ::zip::{CompressionMethod, ZipWriter};
     use std::io::{Cursor, Write};
+    use std::path::PathBuf;
 
     fn make_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
         let mut cursor = Cursor::new(Vec::new());
@@ -1057,6 +828,22 @@ mod tests {
             .enumerate()
             .filter_map(|(index, window)| (window == signature).then_some(index))
             .collect()
+    }
+
+    fn make_crc_mismatch_zip() -> Vec<u8> {
+        let mut bytes = make_zip(&[("first.txt", b"first"), ("second.txt", b"second")]);
+        let local_headers = signature_offsets(&bytes, [0x50, 0x4b, 0x03, 0x04]);
+        let central_headers = signature_offsets(&bytes, [0x50, 0x4b, 0x01, 0x02]);
+        assert_eq!(local_headers.len(), 2);
+        assert_eq!(central_headers.len(), 2);
+        let local_crc = local_headers[1] + 14;
+        let central_crc = central_headers[1] + 16;
+        let mut wrong_crc =
+            u32::from_le_bytes(bytes[central_crc..central_crc + 4].try_into().unwrap());
+        wrong_crc ^= 1;
+        bytes[local_crc..local_crc + 4].copy_from_slice(&wrong_crc.to_le_bytes());
+        bytes[central_crc..central_crc + 4].copy_from_slice(&wrong_crc.to_le_bytes());
+        bytes
     }
 
     fn u16_at(bytes: &[u8], offset: usize) -> u16 {
@@ -1139,6 +926,15 @@ mod tests {
         assert_eq!(out.view.members[0].path, "nested/hello.txt");
         assert!(!out.receipt.source.sha256.is_empty());
         assert_eq!(out.receipt.policy.id, policy.id);
+        assert_eq!(
+            out.receipt.materialization.schema,
+            "sealr.materialization.v1"
+        );
+        assert!(!out.receipt.materialization.requested);
+        assert_eq!(out.receipt.materialization.backend, "none");
+        assert_eq!(out.receipt.materialization.stage_creation_primitive, "none");
+        assert_eq!(out.receipt.materialization.outcome, "not-requested");
+        assert_eq!(out.receipt.materialization.cleanup, "not-applicable");
     }
 
     #[test]
@@ -1179,6 +975,21 @@ mod tests {
             .map(|m| (&m.path, &m.sha256))
             .collect();
         assert_eq!(i, m, "inspect and materialize must agree on the tree");
+        assert_eq!(
+            mat.receipt.materialization.backend,
+            "cap-std-component-nofollow-v1"
+        );
+        assert!(mat.receipt.materialization.requested);
+        assert_ne!(mat.receipt.materialization.stage_creation_primitive, "none");
+        assert_eq!(
+            mat.receipt.materialization.member_resolution,
+            "component-handles-nofollow"
+        );
+        assert_eq!(mat.receipt.materialization.outcome, "committed");
+        assert_eq!(
+            mat.receipt.materialization.cleanup,
+            "not-applicable-after-commit"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
@@ -1304,61 +1115,41 @@ mod tests {
             .any(|finding| finding.code == FindingCode::MaterializeExists));
         assert_eq!(fs::read(dir.join("keep.txt")).unwrap(), b"keep");
         assert!(!dir.join("new.txt").exists());
+        assert_eq!(out.receipt.materialization.outcome, "setup-failed");
+        assert_eq!(out.receipt.materialization.cleanup, "not-created");
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn commit_preserves_a_destination_that_appears_after_staging() {
-        let dest = temp_dest("appeared");
-        let mut stage = StageDir::create(&dest).unwrap();
-        let mut file = stage.create_file(&["inside.txt".to_owned()]).unwrap();
-        file.write_all(b"staged").unwrap();
-        drop(file);
+    fn rejects_a_missing_destination_parent_without_creating_it() {
+        let bytes = make_zip(&[("approved.txt", b"approved")]);
+        let policy = Policy::default_v1();
+        let parent = temp_dest("missing-parent");
+        let dir = parent.join("output");
 
-        fs::create_dir(&dest).unwrap();
-        fs::write(dest.join("owner.txt"), b"existing").unwrap();
-        let error = stage.commit().unwrap_err();
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("missing-parent.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: Some(&dir),
+        });
 
-        assert_eq!(error.code, FindingCode::MaterializeExists);
-        assert_eq!(fs::read(dest.join("owner.txt")).unwrap(), b"existing");
-        drop(stage);
-        fs::remove_dir_all(dest).unwrap();
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn capability_writer_refuses_a_symlink_that_leaves_staging() {
-        use std::os::unix::fs::symlink;
-
-        let dest = temp_dest("capability");
-        let outside = temp_dest("outside");
-        fs::create_dir(&outside).unwrap();
-        let stage = StageDir::create(&dest).unwrap();
-        let stage_path = dest.parent().unwrap().join(&stage.stage_name);
-        symlink(&outside, stage_path.join("escape")).unwrap();
-
-        let result = stage.create_file(&["escape".to_owned(), "written.txt".to_owned()]);
-        assert!(result.is_err());
-        assert!(!outside.join("written.txt").exists());
-
-        drop(stage);
-        fs::remove_dir_all(outside).unwrap();
+        assert!(out.rejected());
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::MaterializeIo));
+        assert!(!parent.exists());
+        assert_eq!(out.receipt.materialization.outcome, "setup-failed");
+        assert_eq!(out.receipt.materialization.cleanup, "not-created");
     }
 
     #[test]
     fn late_crc_rejection_never_publishes_the_staged_tree() {
-        let mut bytes = make_zip(&[("first.txt", b"first"), ("second.txt", b"second")]);
-        let local_headers = signature_offsets(&bytes, [0x50, 0x4b, 0x03, 0x04]);
-        let central_headers = signature_offsets(&bytes, [0x50, 0x4b, 0x01, 0x02]);
-        assert_eq!(local_headers.len(), 2);
-        assert_eq!(central_headers.len(), 2);
-        let local_crc = local_headers[1] + 14;
-        let central_crc = central_headers[1] + 16;
-        let mut wrong_crc =
-            u32::from_le_bytes(bytes[central_crc..central_crc + 4].try_into().unwrap());
-        wrong_crc ^= 1;
-        bytes[local_crc..local_crc + 4].copy_from_slice(&wrong_crc.to_le_bytes());
-        bytes[central_crc..central_crc + 4].copy_from_slice(&wrong_crc.to_le_bytes());
+        let bytes = make_crc_mismatch_zip();
         let policy = Policy::default_v1();
         let dir = temp_dest("crc");
         let _ = fs::remove_dir_all(&dir);
@@ -1379,6 +1170,80 @@ mod tests {
             .iter()
             .any(|finding| finding.code == FindingCode::CrcMismatch));
         assert!(!dir.exists(), "rejected output must not become visible");
+        assert_eq!(out.receipt.materialization.outcome, "aborted");
+        assert_eq!(out.receipt.materialization.cleanup, "removed");
+    }
+
+    #[test]
+    fn cleanup_retry_finishes_before_receipt_construction() {
+        let bytes = make_crc_mismatch_zip();
+        let policy = Policy::default_v1();
+        let parent = temp_dest("cleanup-retry-parent");
+        fs::create_dir(&parent).unwrap();
+        let dir = parent.join("output");
+        let _guard = crate::materialize::inject_cleanup_failures_for_current_thread(1);
+
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("cleanup-retry.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: Some(&dir),
+        });
+
+        assert!(out.rejected());
+        assert_eq!(out.receipt.materialization.outcome, "aborted");
+        assert_eq!(out.receipt.materialization.cleanup, "removed");
+        assert_eq!(
+            out.view
+                .findings
+                .iter()
+                .filter(|finding| finding.code == FindingCode::MaterializeCleanup)
+                .count(),
+            1
+        );
+        assert!(fs::read_dir(&parent).unwrap().next().is_none());
+        fs::remove_dir(parent).unwrap();
+    }
+
+    #[test]
+    fn final_cleanup_failure_receipt_matches_remaining_stage() {
+        let bytes = make_crc_mismatch_zip();
+        let policy = Policy::default_v1();
+        let parent = temp_dest("cleanup-failure-parent");
+        fs::create_dir(&parent).unwrap();
+        let dir = parent.join("output");
+        let _guard = crate::materialize::inject_cleanup_failures_for_current_thread(2);
+
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("cleanup-failure.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: Some(&dir),
+        });
+
+        assert!(out.rejected());
+        assert_eq!(out.receipt.materialization.outcome, "aborted");
+        assert_eq!(out.receipt.materialization.cleanup, "failed");
+        assert_eq!(
+            out.view
+                .findings
+                .iter()
+                .filter(|finding| finding.code == FindingCode::MaterializeCleanup)
+                .count(),
+            2
+        );
+        let entries = fs::read_dir(&parent)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(entries.len(), 1);
+        assert!(entries[0].to_string_lossy().starts_with(".sealr-stage-"));
+        assert!(!dir.exists());
+        fs::remove_dir_all(parent).unwrap();
     }
 
     #[test]

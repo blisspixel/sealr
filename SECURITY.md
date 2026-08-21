@@ -1,6 +1,6 @@
 # Security policy
 
-sealr treats archive interpretation and materialization as a security boundary. The project is pre-alpha and has no supported release, but responsible reports are welcome now.
+sealr treats archive interpretation and materialization as a security boundary. The project has an alpha preview line but no stable or production-supported release. Responsible reports are welcome now.
 
 ## Report a vulnerability
 
@@ -21,9 +21,31 @@ Do not include malware or sensitive third-party data. A synthetic proof is prefe
 
 ## Current status
 
-There is no production-ready or supported version. The current limitations are listed in [README.md](README.md). In particular, kernel isolation, the complete ZipDiff corpus, portable Unicode paths, capability-only destination I/O, signed receipts, ZIP64, and non-ZIP formats are not complete.
+There is no production-ready or stable supported version. The current limitations are listed in [README.md](README.md). The complete pinned ZipDiff construction corpus is enforced in CI. Kernel isolation, portable Unicode paths, signed receipts, ZIP64, and non-ZIP formats are not complete.
 
-## Security properties under development
+Materialization is supported on Linux, macOS, and Windows. Other platforms reject materialization with `materialize.unsupported` rather than falling back to a weaker publication primitive.
+
+## Materialization boundary
+
+The destination parent must already exist. sealr opens that directory as a capability, refuses an existing destination, creates a random 128-bit same-volume stage, writes members through retained no-follow component handles, and publishes only with a native no-replace operation. A missing parent is rejected and is not created as a side effect.
+
+On Unix, the opened parent must be owned by the effective user or root. Group-writable or other-writable parents are accepted only when the sticky bit is set. A sticky directory owned by any other user is rejected because that owner can mutate its entries. Root-owned sticky directories are trusted only because root is outside the in-process adversary boundary. The created stage must be owned by the effective user and must not grant group or other permissions.
+
+On macOS, sealr additionally queries the opened parent and stage descriptors with `acl_get_fd_np`. Any extended ACL, or an ACL query whose result cannot be established, rejects materialization with `materialize.unsafe_parent`. This closes grants that are not represented by the BSD mode bits.
+
+On Windows, sealr creates the stage relative to the opened parent handle with `NtCreateFile`, `FILE_CREATE`, and reparse-point-open semantics. It retains the returned stage handle without delete sharing, then publishes that same object relative to the parent handle with `NtSetInformationFile` and replacement disabled. This prevents a raced destination from being overwritten and binds publication to the approved stage object. The stage inherits the parent ACL, so callers must not choose a parent that grants an untrusted principal permission to mutate children.
+
+Receipts record the materialization backend, stage mode, stage-creation primitive, member-resolution primitive, durability choice, publication primitive, outcome, and cleanup result. This is operational evidence, not authentication: receipts remain unsigned in the preview line.
+
+## Platform FFI boundary
+
+The current core's only `unsafe` blocks are isolated in the Apple descriptor-ACL module and the Windows native stage/publication module. These small modules are the explicit platform-FFI audit boundary. Changes to them require platform tests and review of pointer lifetime, structure layout, handle ownership, share modes, no-replace semantics, and operating-system error conversion.
+
+## Residual privilege boundary
+
+The in-process materializer does not claim containment from root, an administrator, a process running as the same security principal, Linux capabilities that override filesystem access checks, debugging rights, or handle-duplication rights. Those actors can act with the library's authority or interfere below its namespace controls. Containing them requires a reduced-authority worker or operating-system sandbox, which is not implemented yet.
+
+## High-value security properties
 
 A high-value report demonstrates that, under the default policy, sealr:
 

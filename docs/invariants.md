@@ -17,8 +17,8 @@ Detail for ZIP differentials: [threat-model.md](threat-model.md). Path grammar: 
 Every extracted (or hydrated) path, with `/` as the only accepted archive separator, canonical Unicode normalization, case-fold where the destination filesystem is case-insensitive, and rejection of backslashes, reserved names, ADS names, and trailing-dot names, MUST be `dest` or a strict child. Phase 0 rejects non-ASCII paths until that canonical Unicode representation exists.
 
 - No symlink or hardlink is followed when computing the dest (`O_NOFOLLOW` / `FILE_FLAG_OPEN_REPARSE_POINT`).
-- Pre-existing reparse points inside `dest` that point outside are hostile.
-- Windows 8.3 short names, `\\?\`, and prefix attacks: pin the dest directory fd/handle at start; do not re-resolve.
+- Pre-existing reparse points inside the private stage are hostile and are never traversed for member creation.
+- Windows 8.3 short names, `\\?\`, and prefix attacks require retained directory handles for member creation. Windows stage creation and final publication are rooted at retained parent and stage handles, not a re-resolved source pathname.
 - Recent GHSA issues in “safe extract” crates show this is still easy to get wrong. Property test: for all member names in a hostile corpus, `open` never yields a path outside dest.
 
 ## I2 - Resource limits (streaming)
@@ -61,9 +61,13 @@ Target state: no whole-archive load. Header-driven allocations go through `try_r
 
 ## I8 - Staged publication and optional durability
 
-Publishing a final destination is all-or-reject. Materialization stages into a private directory on the same volume and renames it to a previously absent destination only after every member passes. A normal failure removes the stage and never publishes the requested destination.
+Publishing a final destination is all-or-reject. Materialization stages into a same-volume directory and renames it to a previously absent destination only after every member passes. Unix stages are private by verified mode and ownership. Windows stage privacy depends on a restrictive inherited parent DACL. A normal failure never publishes the requested destination, attempts cleanup twice, and records whether the stage was removed or remains after both attempts fail.
 
-Durability is a separate policy choice. When `atomic` is true, completed member files are synced before commit. Capability-relative no-clobber publication is implemented on Linux, macOS, and Windows. Directory syncing, crash recovery, per-component no-follow enforcement, and broader platform semantics remain Phase 0.1 gates. Do not describe normal rollback as crash durability.
+The destination parent MUST already exist; materialization MUST NOT create it. On Unix, the opened parent MUST be owned by the effective user or root. Group/other write is safe only with sticky and a trusted owner. A sticky parent owned by any other user MUST be rejected. The stage MUST be owned by the effective user and MUST deny group and other permissions. On macOS, descriptor inspection MUST prove that both parent and stage have no extended ACL; an ACL or query failure MUST reject before publication.
+
+Durability is a separate policy choice. When `atomic` is true, completed member files are synced before commit. Member creation uses retained per-component no-follow directory capabilities. Linux uses `renameat2` no-replace and macOS uses `renameatx_np` exclusive publication. Windows MUST create the stage exclusively with parent-rooted `NtCreateFile`, retain that handle without delete sharing, and publish that same object with parent-rooted `NtSetInformationFile` and replacement disabled. The inherited Windows parent ACL remains a deployment boundary and MUST NOT grant untrusted principals child-mutation rights.
+
+Linux, macOS, and Windows are the supported materialization platforms; every other platform MUST fail closed. The receipt MUST record the selected stage-creation, member-resolution, durability, publication, outcome, and cleanup evidence. Root, administrators, same-principal processes, filesystem-override capabilities, and debugging or handle-duplication rights remain outside the in-process containment claim. Directory syncing, crash recovery, repeated hostile race testing, and a reduced-authority worker remain Phase 0.1 gates. Do not describe normal rollback as crash durability or an unsigned receipt as authentication.
 
 ---
 

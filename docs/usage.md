@@ -16,9 +16,9 @@ The inspectable view is printed as pretty JSON on stdout. The unsigned receipt i
 cargo run --locked -p sealr-cli -- path\to\archive.zip --dest D:\new-output
 ```
 
-The destination must not exist. sealr creates a random hidden stage beside it, opens that stage as a directory capability, and performs member operations relative to that handle. It publishes with the platform's native no-replace move only after every member passes policy, expansion, CRC32, and digest checks.
+The destination must not exist, and its parent must already exist. On Unix, the parent must have a trusted owner and either deny group and other writes or use trusted sticky-directory semantics. Apple extended ACLs fail closed. sealr creates a random hidden stage beside the destination, retains it as a directory capability, and resolves every canonical member component through no-follow directory handles. It publishes with the platform's native no-replace operation only after every member passes policy, expansion limits, CRC32 verification, and SHA-256 calculation.
 
-On a normal rejection, the final destination does not appear. A killed process can leave a hidden `.sealr-stage-*` directory; automatic crash recovery is planned.
+On a normal rejection, the final destination does not appear. sealr attempts cleanup twice and records the final result. A killed process or two cleanup failures can leave a hidden `.sealr-stage-*` directory; automatic crash recovery is planned.
 
 ## Output contract
 
@@ -37,6 +37,7 @@ The receipt binds:
 - view digest;
 - tool name and version;
 - operating system, architecture, and actual kernel-jail status;
+- whether materialization was requested, the component-resolution guarantee, staging and durability modes, stage-creation and publication primitives, and cleanup outcome;
 - verdict, write status, signature status, and findings.
 
 Receipts are currently unsigned and the kernel jail is unavailable.
@@ -60,7 +61,7 @@ Arguments:
   <ARCHIVE>  Archive file
 
 Options:
-      --dest <DEST>  Request materialization into this directory
+      --dest <DEST>  Materialize into a new directory below an existing parent
   -h, --help         Print help
   -V, --version      Print version
 ```

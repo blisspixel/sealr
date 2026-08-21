@@ -81,6 +81,6 @@ Callers must not treat mutating a reserved field as enabling the corresponding b
 
 ## Compatibility rule
 
-Once a policy id is published in a supported release, changing its serialized bytes requires a new id. Before the first supported release, schema and defaults may change, and such changes must be called out in the changelog and golden receipt tests.
+Once a policy id is published in a stable supported release, changing its serialized bytes requires a new id. During the preview line, schema and defaults may change, and such changes must be called out in the changelog and receipt tests.
 
 Normative safety properties are in [invariants.md](invariants.md). Current implementation limitations are in [README.md](../README.md).

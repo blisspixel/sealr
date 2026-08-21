@@ -1,6 +1,6 @@
 # SBOM and extraction receipts
 
-> Current status: `apply()` emits a deterministic unsigned JSON receipt with source, policy, view, tool, environment, verdict, and findings. RFC 8785 canonicalization, DSSE, Sigstore, CycloneDX output, and standardized predicates are planned work.
+> Current status: `apply()` emits a versioned deterministic unsigned JSON receipt with source, policy, view, tool, environment, materialization lifecycle and primitives, verdict, and findings. RFC 8785 canonicalization, DSSE, Sigstore, CycloneDX output, and standardized predicates are planned work.
 
 The receipt is not optional output. It is a factor of the return type, including on **reject**. View (tree + findings) is the other always-on factor. Do not invent envelope formats.
 
@@ -60,7 +60,7 @@ sealr foo.zip --dest D:\out                # materialize if policy yes
 sealr foo.zip --sbom cyclonedx
 ```
 
-`receipt.view_digest` matches the view JSON. If `--atomic` rolls back, `verdict` is `Rejected` and the receipt records the rollback - still emitted.
+`receipt.view_digest` matches the view JSON. If requested materialization rejects after staging, `verdict` is `Rejected` and `receipt.materialization` records the lifecycle and cleanup result. The receipt is still emitted.
 
 ## What we will not do
 
