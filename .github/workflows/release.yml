@@ -350,31 +350,126 @@ jobs:
             echo "::error::missing release notes: ${notes_file}"
             exit 1
           fi
-          release_pages="$(
-            gh api --method GET --paginate --slurp \
-              -H "X-GitHub-Api-Version: 2026-03-10" \
-              "repos/${GITHUB_REPOSITORY}/releases?per_page=100"
-          )"
-          matching_releases="$(
-            jq -ce --arg tag "${GITHUB_REF_NAME}" '
-              if (type == "array" and all(.[]; type == "array")) then
-                [.[][] | select(.tag_name == $tag)]
-              else
-                error("unexpected paginated releases response")
-              end
-            ' <<<"${release_pages}"
-          )"
-          matching_release_count="$(jq -er 'length' <<<"${matching_releases}")"
           mapfile -t local_assets < <(find dist -maxdepth 1 -type f -printf '%f\n' | sort)
           if [[ "${#local_assets[@]}" -ne 4 ]]; then
             echo "::error::expected exactly four local release assets"
             exit 1
           fi
+          local_assets_json="$(
+            printf '%s\n' "${local_assets[@]}" |
+              jq -Rsc 'split("\n")[:-1]'
+          )"
+
+          verify_live_source() {
+            local ref_json tag_json main_json tag_object_id
+            ref_json="$(
+              gh api --method GET \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/${GITHUB_REPOSITORY}/git/ref/tags/${GITHUB_REF_NAME}"
+            )"
+            if [[ "$(jq -r '.object.type' <<<"${ref_json}")" != "tag" ]]; then
+              echo "::error::remote release tag is not annotated"
+              exit 1
+            fi
+            tag_object_id="$(
+              jq -er '.object.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' \
+                <<<"${ref_json}"
+            )"
+            tag_json="$(
+              gh api --method GET \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_id}"
+            )"
+            main_json="$(
+              gh api --method GET \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/${GITHUB_REPOSITORY}/git/ref/heads/main"
+            )"
+            if ! jq -e \
+              --arg tag "${GITHUB_REF_NAME}" \
+              --arg sha "${GITHUB_SHA}" '
+                .tag == $tag and
+                .object.type == "commit" and
+                .object.sha == $sha
+              ' <<<"${tag_json}" >/dev/null ||
+              ! jq -e --arg sha "${GITHUB_SHA}" '
+                .object.type == "commit" and .object.sha == $sha
+              ' <<<"${main_json}" >/dev/null; then
+              echo "::error::remote annotated tag or protected main moved"
+              exit 1
+            fi
+          }
+
+          get_release_pages() {
+            gh api --method GET --paginate --slurp \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases?per_page=100"
+          }
+
+          classify_release_pages() {
+            jq -ce \
+              --arg tag "${GITHUB_REF_NAME}" \
+              --arg name "${release_title}" \
+              --rawfile notes "${notes_file}" \
+              --argjson allowed "${local_assets_json}" \
+              -f scripts/release_candidate.jq
+          }
+
+          require_safe_classification() {
+            local classification="${1}"
+            if ! jq -e '
+              (.exact | length) <= 1 and
+              (.recovery | length) <= 1 and
+              (.suspicious | length) == (.recovery | length) and
+              ((.exact | length) + (.recovery | length)) <= 1
+            ' <<<"${classification}" >/dev/null; then
+              echo "::error::release discovery is ambiguous or contains an unsafe near-match"
+              exit 1
+            fi
+          }
+
+          validate_candidate_state() {
+            local candidate_json="${1}"
+            local candidate_id="${2}"
+            local candidate_pages candidate_classification expected_upload_url
+            candidate_pages="$(jq -cn --argjson candidate "${candidate_json}" '[[$candidate]]')"
+            candidate_classification="$(classify_release_pages <<<"${candidate_pages}")"
+            expected_upload_url="https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${candidate_id}/assets{?name,label}"
+            if ! jq -e \
+              --argjson id "${candidate_id}" \
+              --arg upload_url "${expected_upload_url}" '
+                (.exact | length) <= 1 and
+                (.recovery | length) <= 1 and
+                (.suspicious | length) == (.recovery | length) and
+                ((.valid_exact | length) + (.recovery | length)) == 1 and
+                ((.valid_exact + .recovery)[0].id == $id) and
+                ((.valid_exact + .recovery)[0].upload_url == $upload_url)
+              ' <<<"${candidate_classification}" >/dev/null; then
+              echo "::error::release is not the expected resumable draft"
+              exit 1
+            fi
+          }
+
+          verify_live_source
+          release_pages="$(get_release_pages)"
+          classification="$(classify_release_pages <<<"${release_pages}")"
+          require_safe_classification "${classification}"
+          candidate_count="$(
+            jq -er '(.exact | length) + (.recovery | length)' \
+              <<<"${classification}"
+          )"
 
           existing_release=""
           existing_release_id=""
-          case "${matching_release_count}" in
+          case "${candidate_count}" in
             0)
+              confirmation_pages="$(get_release_pages)"
+              confirmation="$(classify_release_pages <<<"${confirmation_pages}")"
+              require_safe_classification "${confirmation}"
+              if [[ "$(jq -er '(.exact | length) + (.recovery | length)' <<<"${confirmation}")" -ne 0 ]]; then
+                echo "::error::release candidate appeared before creation"
+                exit 1
+              fi
               create_payload="$(
                 jq -cn \
                   --arg tag "${GITHUB_REF_NAME}" \
@@ -405,43 +500,44 @@ jobs:
               ;;
             1)
               existing_release_id="$(
-                jq -er '.[0].id | select(type == "number" and . > 0)' \
-                  <<<"${matching_releases}"
+                jq -er '(.exact + .recovery)[0].id |
+                  select(type == "number" and . > 0)' \
+                  <<<"${classification}"
               )"
-              existing_release="$(
-                gh api --method GET \
-                  -H "X-GitHub-Api-Version: 2026-03-10" \
-                  "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}"
-              )"
-              if ! jq -e \
-                --arg tag "${GITHUB_REF_NAME}" \
-                --argjson id "${existing_release_id}" \
-                '.id == $id and .tag_name == $tag' \
-                <<<"${existing_release}" >/dev/null; then
-                echo "::error::release identity changed during discovery"
-                exit 1
-              fi
               ;;
             *)
-              echo "::error::multiple releases use the expected tag"
+              echo "::error::unexpected release candidate count"
               exit 1
               ;;
           esac
 
-          if [[ "$(jq -r '.id' <<<"${existing_release}")" != "${existing_release_id}" || \
-                "$(jq -r '.tag_name' <<<"${existing_release}")" != "${GITHUB_REF_NAME}" || \
-                "$(jq -r '.draft' <<<"${existing_release}")" != "true" || \
-                "$(jq -r '.prerelease' <<<"${existing_release}")" != "true" || \
-                "$(jq -r '.immutable' <<<"${existing_release}")" != "false" || \
-                "$(jq -r '.author.login' <<<"${existing_release}")" != "github-actions[bot]" ]]; then
-            echo "::error::release is not the expected resumable draft"
+          existing_release="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}"
+          )"
+          validate_candidate_state "${existing_release}" "${existing_release_id}"
+
+          confirmation_pages="$(get_release_pages)"
+          confirmation="$(classify_release_pages <<<"${confirmation_pages}")"
+          require_safe_classification "${confirmation}"
+          if ! jq -e --argjson id "${existing_release_id}" '
+            ((.exact | length) + (.recovery | length)) == 1 and
+            (.exact + .recovery)[0].id == $id
+          ' <<<"${confirmation}" >/dev/null; then
+            echo "::error::release identity changed before numeric rebinding"
             exit 1
           fi
+
           update_payload="$(
             jq -cn \
+              --arg tag "${GITHUB_REF_NAME}" \
+              --arg target "${GITHUB_SHA}" \
               --arg name "${release_title}" \
               --rawfile body "${notes_file}" '
                 {
+                  tag_name: $tag,
+                  target_commitish: $target,
                   name: $name,
                   body: $body,
                   draft: true,
@@ -450,19 +546,59 @@ jobs:
                 }
               '
           )"
-          existing_release="$(
-            gh api --method PATCH \
-              -H "X-GitHub-Api-Version: 2026-03-10" \
-              "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}" \
-              --input - <<<"${update_payload}"
-          )"
-          expected_upload_url="https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}/assets{?name,label}"
-          if [[ "$(jq -r '.id' <<<"${existing_release}")" != "${existing_release_id}" || \
-                "$(jq -r '.tag_name' <<<"${existing_release}")" != "${GITHUB_REF_NAME}" || \
-                "$(jq -r '.upload_url' <<<"${existing_release}")" != "${expected_upload_url}" ]]; then
-            echo "::error::numeric release update changed release identity"
+          rebound=false
+          for attempt in {1..5}; do
+            verify_live_source
+            existing_release="$(
+              gh api --method PATCH \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}" \
+                --input - <<<"${update_payload}"
+            )"
+            validate_candidate_state "${existing_release}" "${existing_release_id}"
+
+            confirmation_pages="$(get_release_pages)"
+            confirmation="$(classify_release_pages <<<"${confirmation_pages}")"
+            require_safe_classification "${confirmation}"
+            if jq -e --argjson id "${existing_release_id}" '
+              (.exact | length) == 1 and
+              (.valid_exact | length) == 1 and
+              (.recovery | length) == 0 and
+              (.suspicious | length) == 0 and
+              .exact[0].id == $id and
+              .valid_exact[0].id == $id
+            ' <<<"${confirmation}" >/dev/null; then
+              rebound=true
+              break
+            fi
+            if ! jq -e --argjson id "${existing_release_id}" '
+              (.exact | length) == 0 and
+              (.recovery | length) == 1 and
+              (.suspicious | length) == 1 and
+              .recovery[0].id == $id
+            ' <<<"${confirmation}" >/dev/null; then
+              echo "::error::release identity changed during numeric rebinding"
+              exit 1
+            fi
+            if [[ "${attempt}" -lt 5 ]]; then
+              sleep 2
+            fi
+          done
+          if [[ "${rebound}" != "true" ]]; then
+            echo "::error::GitHub did not stabilize the numeric release tag binding"
             exit 1
           fi
+          existing_release="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}"
+          )"
+          validate_candidate_state "${existing_release}" "${existing_release_id}"
+          if [[ "$(jq -r '.tag_name' <<<"${existing_release}")" != "${GITHUB_REF_NAME}" ]]; then
+            echo "::error::numeric release did not retain the expected tag"
+            exit 1
+          fi
+          verify_live_source
 
           existing_asset_count="$(jq -er '.assets | length' <<<"${existing_release}")"
           if [[ "${existing_asset_count}" -gt 4 ]] || ! jq -e '
@@ -519,6 +655,18 @@ jobs:
               echo "::error::release asset changed before numeric deletion: ${asset_id}"
               exit 1
             fi
+            asset_name="$(jq -er '.name' <<<"${asset_json}")"
+            local_digest="sha256:$(sha256sum "dist/${asset_name}" | cut -d' ' -f1)"
+            local_size="$(stat -c '%s' -- "dist/${asset_name}")"
+            if jq -e \
+              --arg digest "${local_digest}" \
+              --argjson size "${local_size}" '
+                .state == "uploaded" and
+                .size == $size and
+                .digest == $digest
+              ' <<<"${asset_json}" >/dev/null; then
+              continue
+            fi
             gh api --method DELETE --silent \
               -H "X-GitHub-Api-Version: 2026-03-10" \
               "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
@@ -542,13 +690,41 @@ jobs:
               .prerelease == true and
               .immutable == false and
               .author.login == "github-actions[bot]" and
-              (.assets | length) == 0
+              (.assets | length) <= 4
             ' <<<"${existing_release}" >/dev/null; then
             echo "::error::release changed before numeric asset uploads"
             exit 1
           fi
+          validate_candidate_state "${existing_release}" "${existing_release_id}"
+          mapfile -t retained_assets < <(jq -r '.assets[].name' <<<"${existing_release}")
+          for asset in "${retained_assets[@]}"; do
+            local_digest="sha256:$(sha256sum "dist/${asset}" | cut -d' ' -f1)"
+            local_size="$(stat -c '%s' -- "dist/${asset}")"
+            if ! jq -e \
+              --arg name "${asset}" \
+              --arg digest "${local_digest}" \
+              --argjson size "${local_size}" '
+                [.assets[] |
+                  select(
+                    .name == $name and
+                    .state == "uploaded" and
+                    .size == $size and
+                    .digest == $digest and
+                    .uploader.login == "github-actions[bot]"
+                  )] |
+                length == 1
+              ' <<<"${existing_release}" >/dev/null; then
+              echo "::error::retained release asset differs from the local build: ${asset}"
+              exit 1
+            fi
+          done
 
           for asset in "${local_assets[@]}"; do
+            if jq -e --arg name "${asset}" '
+              [.assets[] | select(.name == $name)] | length == 1
+            ' <<<"${existing_release}" >/dev/null; then
+              continue
+            fi
             local_digest="sha256:$(sha256sum "dist/${asset}" | cut -d' ' -f1)"
             local_size="$(stat -c '%s' -- "dist/${asset}")"
             case "${asset}" in
@@ -590,37 +766,27 @@ jobs:
             fi
           done
 
-          readback_pages="$(
-            gh api --method GET --paginate --slurp \
-              -H "X-GitHub-Api-Version: 2026-03-10" \
-              "repos/${GITHUB_REPOSITORY}/releases?per_page=100"
-          )"
-          readback_matches="$(
-            jq -ce --arg tag "${GITHUB_REF_NAME}" '
-              if (type == "array" and all(.[]; type == "array")) then
-                [.[][] | select(.tag_name == $tag)]
-              else
-                error("unexpected paginated releases response")
-              end
-            ' <<<"${readback_pages}"
-          )"
-          if [[ "$(jq -er 'length' <<<"${readback_matches}")" -ne 1 ]]; then
-            echo "::error::draft release readback did not find exactly one matching release"
+          readback_pages="$(get_release_pages)"
+          readback_classification="$(classify_release_pages <<<"${readback_pages}")"
+          require_safe_classification "${readback_classification}"
+          if ! jq -e --argjson id "${existing_release_id}" '
+            (.exact | length) == 1 and
+            (.valid_exact | length) == 1 and
+            (.recovery | length) == 0 and
+            (.suspicious | length) == 0 and
+            .exact[0].id == $id and
+            .valid_exact[0].id == $id
+          ' <<<"${readback_classification}" >/dev/null; then
+            echo "::error::draft release readback did not preserve the exact numeric identity"
             exit 1
           fi
-          readback_release_id="$(
-            jq -er '.[0].id | select(type == "number" and . > 0)' \
-              <<<"${readback_matches}"
-          )"
-          if [[ "${readback_release_id}" != "${existing_release_id}" ]]; then
-            echo "::error::resumed release identity changed before readback"
-            exit 1
-          fi
+          readback_release_id="${existing_release_id}"
           release_json="$(
             gh api --method GET \
               -H "X-GitHub-Api-Version: 2026-03-10" \
               "repos/${GITHUB_REPOSITORY}/releases/${readback_release_id}"
           )"
+          validate_candidate_state "${release_json}" "${readback_release_id}"
           if [[ "$(jq -r '.draft' <<<"${release_json}")" != "true" || \
                 "$(jq -r '.prerelease' <<<"${release_json}")" != "true" || \
                 "$(jq -r '.immutable' <<<"${release_json}")" != "false" || \
@@ -662,4 +828,5 @@ jobs:
               exit 1
             fi
           done
+          verify_live_source
           echo "verified prerelease draft; publication requires scripts/publish_release.ps1"
