@@ -1,6 +1,6 @@
 # Parser differentials and polyglots
 
-This is the research frontier that separates a good library from a definitive one. Paper and 14 types: [threat-model.md](threat-model.md).
+This is an open assurance problem, not a claim that one implementation is definitive. The paper and 14 current classes are summarized in [threat-model.md](threat-model.md).
 
 ## Single interpretation (default)
 
@@ -29,17 +29,17 @@ Anything that would require guessing is a finding and, under default policy, a h
 
 ## Polyglots and magic
 
-- **Magic-byte authority** over extension. `.zip` that is gzip → treat as gzip or **deny** (default deny + `polyglot.ext_magic`).
-- Mixed containers (ZIP that is also PDF, JAR+APK members, Panakkal-style): report `polyglot.container` and default deny unless policy names the role (`policy: ooxml-v1`, `policy: wheel-v1`).
-- Nested archives: depth default **1** (no recurse). If policy allows, each layer gets the **same** policy; metadata-size cap still applies.
+- Alpha.2 selects the parser from magic bytes and does not assign security meaning to the filename extension. The `magic_vs_extension` policy field is reserved and no extension-mismatch finding is emitted today.
+- Alpha.2 has no mixed-container allow profile. A future consumer such as OOXML, wheel, JAR, or APK needs a versioned interpretation and consumer profile that defines its permitted container structure and identity files.
+- Alpha.2 never recursively opens a nested archive. A future nested-content profile would need a separate resource and evidence design; changing the reserved `nested_depth` field does not enable recursion.
 
 ## Format-specific extras (not ZipDiff, still differentials)
 
 | Format | Extra check |
 |---|---|
-| `.whl` | ZIP members vs `RECORD` (PyPI 2025–2026, uv CVE-2025-54368) |
+| Future `.whl` profile | ZIP members versus `RECORD`, metadata identity, relocation, and installed-tree rules |
 | `.jar` / Spring | Do not implement a second streaming parser |
-| OOXML / ODF / VSIX / CRX / APK | Path of the “identity” file (`[Content_Types].xml`, `extension.vsixmanifest`, …) after our canonicalize; duplicate identity paths → deny |
+| Future OOXML, ODF, VSIX, CRX, or APK profiles | Define identity-file paths and duplicate handling after the canonical path model exists |
 | TAR | PAX/GNU long-name size cap; checksum; no parser-pair paper of ZipDiff quality yet - still jail + metadata bombs |
 
 ## Corpus

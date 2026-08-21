@@ -14,7 +14,7 @@ That gives sealr a concrete regression gate. The library does not need to run 50
 
 The Linux kernel's [Landlock interface](https://docs.kernel.org/userspace-api/landlock.html) lets an unprivileged process restrict its own ambient filesystem and network rights. It is stackable with existing access control and exposes a runtime ABI so software can report exactly which controls are available.
 
-This makes a small worker process practical: open only the archive and destination capabilities, restrict the process, then read the first header. Landlock limits blast radius, while userspace path and quota invariants remain mandatory.
+This makes a small worker process practical as planned work. The proposed design has a trusted supervisor open the archive snapshot and destination parent, create and retain the private stage, then give the worker only bounded archive and stage capabilities. The worker would install its restrictions before reading the first header and would never receive publication authority. Landlock would limit blast radius, while userspace path and quota invariants remain mandatory.
 
 ## Capability-oriented filesystem APIs are mature enough to use
 
@@ -36,7 +36,7 @@ The [Rust Fuzz Book](https://rust-fuzz.github.io/book/) documents cargo-fuzz and
 
 Source digests, policy digests, structured findings, and a view digest can be returned for both allow and reject. in-toto, DSSE, Sigstore, SBOM formats, and GitHub artifact attestations provide established envelopes and signing workflows once sealr's unsigned receipt bytes are stable.
 
-The immediate task is canonical, deterministic evidence. Signing comes after that.
+The immediate task is semantic identity and separate outcomes. Canonical evidence bytes follow those definitions, and signing follows canonicalization.
 
 ## Acceleration is optional
 
@@ -52,7 +52,7 @@ The pieces now line up:
 |---|---|
 | Known differential classes | ZipDiff paper and constructions |
 | Small trusted core | Safe Rust parser and jail plus isolated reviewed platform adapters |
-| Reduced ambient authority | Landlock worker, later AppContainer |
+| Reduced ambient authority | Planned Linux Landlock worker; Windows isolation boundary under evaluation |
 | Path-relative output | Directory-capability filesystem API |
 | Unknown-input discovery | cargo-fuzz with corpus seeds |
 | Bounded proofs | Kani on path and quota properties |

@@ -4,6 +4,7 @@ param()
 $ErrorActionPreference = 'Stop'
 $workspace = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $assetRoot = Join-Path $workspace 'docs/assets/readme-walkthrough'
+$manifestPath = Join-Path $assetRoot 'manifest.json'
 $expected = @(
     'sealr-inspect-allowed-terminal-dark.png',
     'sealr-inspect-allowed-terminal-light.png',
@@ -12,8 +13,77 @@ $expected = @(
     'sealr-reject-parent-path-terminal-dark.png',
     'sealr-reject-parent-path-terminal-light.png'
 )
+$expectedFixtures = @(
+    'allowed.zip',
+    'rejected-parent-path.zip'
+)
+$expectedTranscripts = @(
+    '01-inspect-allowed.txt',
+    '02-reject-parent-path.txt',
+    '03-materialize-allowed.txt'
+)
 $forbiddenChunks = @('eXIf', 'iTXt', 'tEXt', 'tIME', 'zTXt')
 $pngSignature = [byte[]](137, 80, 78, 71, 13, 10, 26, 10)
+
+if (-not [System.IO.File]::Exists($manifestPath)) {
+    throw "missing walkthrough manifest: $manifestPath"
+}
+$manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json -Depth 10
+if ([string]$manifest.schema -ne 'sealr.readme-walkthrough.v1') {
+    throw "unexpected walkthrough manifest schema: $($manifest.schema)"
+}
+$workspaceManifest = Get-Content -Raw -LiteralPath (Join-Path $workspace 'Cargo.toml')
+$versionMatch = [regex]::Match($workspaceManifest, '(?m)^version = "([^"]+)"$')
+if (-not $versionMatch.Success) {
+    throw 'workspace version is unavailable'
+}
+if ([string]$manifest.tool_version -ne $versionMatch.Groups[1].Value) {
+    throw "walkthrough manifest version differs from workspace version: $($manifest.tool_version)"
+}
+if ([string]$manifest.presentation -ne 'rendered-terminal-style-summary') {
+    throw "unexpected walkthrough presentation: $($manifest.presentation)"
+}
+
+function Assert-ManifestHashes {
+    param(
+        [Parameter(Mandatory)][object]$Entries,
+        [Parameter(Mandatory)][string]$Directory,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    foreach ($property in $Entries.PSObject.Properties) {
+        $path = Join-Path $Directory $property.Name
+        if (-not [System.IO.File]::Exists($path)) {
+            throw "missing $Label file from manifest: $path"
+        }
+        $actualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLowerInvariant()
+        if ($actualHash -ne [string]$property.Value) {
+            throw "$Label hash differs from manifest for $($property.Name)"
+        }
+    }
+}
+
+function Assert-ManifestKeys {
+    param(
+        [Parameter(Mandatory)][object]$Entries,
+        [Parameter(Mandatory)][string[]]$ExpectedNames,
+        [Parameter(Mandatory)][string]$Label
+    )
+
+    $actualNames = @($Entries.PSObject.Properties.Name | Sort-Object)
+    $sortedExpectedNames = @($ExpectedNames | Sort-Object)
+    if (($actualNames -join "`n") -ne ($sortedExpectedNames -join "`n")) {
+        throw "$Label manifest entries differ from the expected set`nactual:`n$($actualNames -join "`n")"
+    }
+}
+
+Assert-ManifestKeys -Entries $manifest.fixtures -ExpectedNames $expectedFixtures -Label 'fixture'
+Assert-ManifestKeys -Entries $manifest.transcripts -ExpectedNames $expectedTranscripts -Label 'transcript'
+Assert-ManifestKeys -Entries $manifest.images -ExpectedNames $expected -Label 'image'
+
+Assert-ManifestHashes -Entries $manifest.fixtures -Directory (Join-Path $workspace 'target/readme-walkthrough/fixtures') -Label 'fixture'
+Assert-ManifestHashes -Entries $manifest.transcripts -Directory (Join-Path $workspace 'target/readme-walkthrough/transcripts') -Label 'transcript'
+Assert-ManifestHashes -Entries $manifest.images -Directory $assetRoot -Label 'image'
 
 function Read-UInt32BigEndian {
     param(
@@ -105,4 +175,4 @@ foreach ($name in $expected) {
     }
 }
 
-Write-Host 'walkthrough assets verified: 6 PNGs, 1000x560, 144 DPI, no text metadata, each <= 250 KB'
+Write-Host 'walkthrough assets verified: alpha.2 manifest, fixture and transcript hashes, 6 PNG hashes, 1000x560, 144 DPI, no text metadata, each <= 250 KB'

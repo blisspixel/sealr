@@ -1,70 +1,39 @@
-# Design: what sealr believes
+# Design principles
 
-The **product** is a canonical archive-to-tree admission authority other systems can depend on. The CLI is the current reference surface. Direction: [vision.md](vision.md). Semantic model: [semantic-model.md](semantic-model.md). Jail: [safety.md](safety.md).
+> Current alpha.2 behavior is defined by the [README](../README.md), [API contract](api.md), and [security policy](../SECURITY.md). Product sequencing is defined only by the [roadmap](../ROADMAP.md).
 
-This file is the physics and the engineering beliefs. It is not “we are a nicer unzip.”
+Sealr is trying to become a dependable archive-to-tree admission boundary. It is not trying to be a general unarchiver, codec benchmark, or scheduler.
 
-The beliefs do not depend on the name, but the name is **sealr**.
+## One interpretation
 
-## 1. “Fast extract” is several products sharing a verb
+One bounded source invocation receives one versioned interpretation. Inspect, materialize, evidence, and future consumers must use the same immutable representation. No recovery parser or downstream reparse may assign a second meaning to the archive.
 
-A ZIP of 50,000 tiny Deflate members, one 8 GB `.gz`, a solid `.7z`, and a GDeflate pack headed for VRAM are different bottlenecks. A bench that does not name the row is advertising.
+Alpha.2 implements this rule through one `apply()` path and one planned member set. Phase 0.1 turns that internal plan into a versioned, effect-independent `ArchiveIR` with canonical layout and content-tree identities.
 
-The rows that matter:
+## Admission and effects are different facts
 
-| Workload | Real bottleneck | GPU? |
-|---|---|---|
-| Many independent ZIP members | CPU across members, then filesystem create | Almost never |
-| One huge gzip/zstd stream | Serial codec, or speculative/indexed parallel decode | Only as a fat buffer, not unzip-to-folder |
-| Solid 7z / LZMA2 | Dictionary + whether the encoder emitted chunks | No |
-| 50k tiny files to NTFS | Metadata + AV minifilters | Theater |
-| Dest = GPU memory | PCIe carrying compressed bytes | Yes, by design |
+The current `Allowed { wrote } | Rejected` result is an honest preview contract, but it combines semantic and operational outcomes. The target separates interpretation, admission, verification, effect, and view completeness. A destination I/O failure must not redefine an otherwise admitted archive as unsafe.
 
-If we only ever beat `unzip` on a 200 MB zip in `/tmp`, we built a weekend clone of `ripunzip`.
+## Filesystem access is capability based
 
-## 2. The product is the boundary, not a codec (and not a scheduler)
+Validated path components enter a component-bound materializer. Member creation is relative to retained directory handles, no-follow, and create-new. Publication is same-volume and no-replace on supported Linux, macOS, and Windows filesystems. Unsupported platforms and storage semantics fail closed.
 
-The current type is `UntrustedArchive x Policy -> (Allowed { wrote } | Rejected) x Receipt x View`. The current receipt is deterministic and unsigned. The target separates semantic admission from filesystem effect and gives every destination one immutable admitted tree. Codecs, parallelism, and optional hardware are backend details after that boundary. [vision.md](vision.md), [semantic-model.md](semantic-model.md).
+A future worker reduces parser authority. It does not replace the path grammar, quotas, staged-tree audit, or platform publication controls.
 
-CPU SIMD is the default hydrate because it already saturates consumer NVMe on the workloads people actually extract. GPU, QAT, and Mojo earn a dispatch per member. They do not get a README checkbox until `--why` exists.
+## Evidence names only established facts
 
-## 3. Safety is on the fast path, or it never lands
+Alpha.2 emits deterministic unsigned evidence. It does not emit an authenticated attestation, semantic tree root, or formal proof. Future evidence keeps source, interpretation, layout, content, policy, and effect identities distinct.
 
-szips already has the part most fast unzip tools skip: path jail, zip-bomb limits, CRC, chunked I/O, no nested recursion. Fast CLIs (`ripunzip`, `rapidgzip`) trust the archive. Safe CLIs (`safezip`) are slow. The hole is both.
+## Compatibility is measured
 
-Jail, overlap reject, reserved names, and CRC-during-write are not `--strict`. Caps may be raised by flags. The jail may not.
+Strict rejection is useful only within a named supported domain. Each stable profile needs a hostile conformance corpus and a benign ecosystem corpus, with reproducible acceptance rates and investigated rejection classes.
 
-szips’ `testzip()` then extract then SHA-256-from-disk is three passes. One inflate → bound bytes → CRC → write is stricter per byte and faster. Do not port the pre-pass.
+## Performance follows semantics
 
-## 4. Hardware decompress is real, and it is not GeForce unzip
+Measure structure, full verification, realization, and reuse separately. The strategic result is avoiding a second parse, decompression, or write after one complete verification. Parallelism and alternate codecs are optional backends only after they preserve exact input consumption, output bytes, findings, and tree identities.
 
-True in 2026:
+## Expansion follows consumers
 
-- NVIDIA **datacenter** Blackwell Decompression Engine (B200 / B300 / GB200 / GB300) for Snappy, LZ4, Deflate, Gzip - fused with the copy engine, destination typically device memory.
-- Intel **QAT** for stock gzip/ZIP Deflate into **host** RAM on Linux servers.
-- DirectStorage + GDeflate into **D3D12 resources**. When dest is system memory, Microsoft decompresses on the CPU on purpose.
+Python wheel admission is the first candidate consumer after the semantic core. TAR, OCI, JAR, APK, agent workspaces, projection, bindings, and acceleration follow only when a concrete consumer and its semantics are specified.
 
-False as a product claim:
-
-- RTX 50 “hardware unzip.” Consumer Blackwell does not expose the DE.
-- AMD RDNA lossless DE. hipCOMP is an unoptimized nvCOMP 2.2 preview.
-- Apple GPU lossless inflate. Compression.framework is CPU. Metal “lossless” is textures.
-- nvCOMP “600 GB/s” as extract-to-NTFS. That number is batched device buffers.
-
-Video decode had a standard bitstream and a dest that *is* the GPU. Archives have a hostile bitstream and a dest that *is* the disk.
-
-## 5. Rust is the product. Mojo is a lab.
-
-Rust owns CLI, formats, jail, I/O, shipping a Windows/macOS/Linux binary. Mojo 1.0 (August 2026) is a real portable-SIMT language. It is also WSL-only on Windows, GPU APIs live in MAX (not Apache stdlib), and you will not beat nvCOMP+DE on NVIDIA by writing LZ4 in Mojo.
-
-CubeCL is the more honest *in-crate* portable GPU bet if we ever need one kernel in the product graph. DirectStorage is not an unzip-to-folder API.
-
-## 6. Honesty is a feature
-
-Every public number names: corpus, dest (`/dev/null` vs NVMe vs NTFS-many-files), CRC on/off, backend actually used (`cpu`, `nvcomp-sm`, `nvcomp-de`, `qat`, `unavailable`). If GPU loses, print that.
-
-Do not disable Defender as a “optimization.” Measure with it on.
-
-## Sources
-
-The curated research record is split across [architecture](architecture.md), [backends](backends.md), [formats](formats.md), [safety](safety.md), [competitive](competitive.md), and [usage](usage.md). The [roadmap](../ROADMAP.md#primary-research-behind-the-order) links the primary sources that determine implementation order.
+See [semantic-model.md](semantic-model.md) for the target types and [ROADMAP.md](../ROADMAP.md#active-execution-queue) for the active implementation order.

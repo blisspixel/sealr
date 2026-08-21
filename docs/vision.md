@@ -77,7 +77,7 @@ Add semantic locks, verified content-addressed blobs, read-only projection, and 
 
 Agent workspaces and hermetic build inputs are promising next profiles. OCI layers, TAR, JAR, APK, and other formats follow only when their consumer semantics and compatibility requirements are explicit.
 
-## Product moat
+## Durable project surface
 
 The durable open-source surface is not the number of formats or language bindings. It is:
 
@@ -113,7 +113,7 @@ GPU, hardware codecs, alternate runtimes, mmap, and broad parallelism are backen
 - broad format support without a canonical consumer;
 - a desktop extraction GUI;
 - recursive malware classification in the core;
-- an opaque AI-generated risk score;
+- an opaque numeric risk score;
 - many bindings before one external dependent;
 - a hosted service that requires private archive upload;
 - projection presented as process containment;

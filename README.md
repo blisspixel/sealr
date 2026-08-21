@@ -2,16 +2,16 @@
 
 [![CI](https://github.com/blisspixel/sealr/actions/workflows/ci.yml/badge.svg)](https://github.com/blisspixel/sealr/actions/workflows/ci.yml)
 
-> **One archive. One tree. Evidence.**
+> **Goal: one archive, one tree, and evidence for the decision.**
 
-sealr is becoming the canonical archive-to-tree compiler and admission authority for its supported profiles. Today, it is a high-assurance ZIP32 boundary that gives accepted bytes one versioned Sealr interpretation, verifies every member, and either publishes that interpreted tree without replacement or publishes no destination.
+sealr is an early attempt to make archive ingestion easier to reason about. Alpha.2 implements a deliberately narrow ZIP32 path: it applies one strict interpretation bound to the Sealr tool version, verifies accepted members, and either publishes the requested tree without replacement or publishes no destination. It does not yet provide a separately versioned interpretation profile, canonical tree identity, process sandbox, or production security claim.
 
 ```text
 Untrusted archive x policy
   -> (Allowed { wrote } | Rejected) x receipt x inspectable view
 ```
 
-It is not a safer unzip. The product is the decision, evidence, and constrained view around extraction.
+The longer-term aim is an archive-to-tree admission boundary whose decision and evidence can be reused by other systems. The current release is a small step toward that aim, not proof that the category or design is finished.
 
 > Status: `v0.1.0-alpha.2` is the second development preview of the ZIP boundary. It is useful for evaluation, development, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. The limitations below are security boundaries, not fine print.
 
@@ -19,7 +19,7 @@ It is not a safer unzip. The product is the decision, evidence, and constrained 
 
 Agents, package systems, upload handlers, and data pipelines routinely receive archives from outside their trust boundary. Archive formats encode filesystem topology as well as content, and different parsers can assign different meanings to the same bytes.
 
-The 2025 ZipDiff study compared 50 ZIP parsers across 19 languages, found that almost every parser pair disagreed somewhere, and classified 14 ambiguity types. Its public artifact includes constructors for those cases. A 2025 `uv` advisory then documented that one wheel digest could expand differently across installers, and PyPI added upload-time rejection for several ambiguous ZIP structures. These results make parser agreement a testable security property instead of an assumption.
+The 2025 ZipDiff study compared 50 ZIP parsers across 19 languages, found that almost every parser pair disagreed somewhere, and classified 14 ambiguity types. Its public artifact includes constructors for those cases. A 2025 `uv` advisory then documented that one wheel digest could expand differently across installers, and PyPI added upload-time rejection for several ambiguous ZIP structures. These results motivate testing parser agreement instead of assuming it.
 
 sealr therefore has one operation:
 
@@ -58,7 +58,7 @@ The following work must land before a production-readiness claim:
 - Unicode normalization and CP437 decoding are not implemented, so non-ASCII member paths fail closed.
 - Materialization is supported only on Linux, macOS, and Windows; other targets fail closed. On Linux and macOS, sealr accepts only an existing parent owned by the effective user or root that is not externally writable unless sticky semantics protect entries. macOS also requires extended ACLs to be absent. Filesystems that do not enforce these namespace rules are outside this preview's support boundary.
 - Windows materialization is limited to a non-remote, writable NTFS parent that reports persistent ACL support. ReFS, FAT-family filesystems, remote shares, read-only volumes, and ambiguous volume queries fail closed.
-- Windows atomically creates and retains the stage with `NtCreateFile`, installing a security descriptor whose object owner is the effective token user and whose protected DACL contains one inheritable allow ACE for that SID. The descriptor is verified through the returned handle before any member write. Publication uses `NtSetInformationFile` with the retained stage and parent handles. The native adapters are isolated, tested on 64-bit Windows, and compile-checked for the 32-bit Windows ABI.
+- Windows atomically creates and retains the stage with `NtCreateFile`, installing a security descriptor whose object owner is the effective token user and whose protected DACL contains one inheritable allow ACE for that SID. The descriptor is verified through the returned handle before any member write. Descendants inherit that sole-principal DACL but receive the creating token's default owner; a principal matching that owner SID can change a descendant DACL and is outside the in-process containment promise. Publication uses `NtSetInformationFile` with the retained stage and parent handles. The native adapters are isolated, tested on 64-bit Windows, and compile-checked for the 32-bit Windows ABI.
 - Repeated hostile concurrent mutation stress remains unfinished. Static Unix symlink refusal, Windows generic reparse-point refusal, private-DACL inheritance, and deterministic stage-substitution resistance are covered. A reduced-authority worker will limit a compromised parser's ambient authority, but other processes running as the same user remain outside the containment claim.
 - Normal rejection attempts stage cleanup and retries once after failure, then records `removed` or `failed` in the receipt. Setup failure after stage creation uses the retained stage handle first and a parent-relative retry. A killed process or two cleanup failures can leave a hidden staging directory.
 - The default durability mode is `flush-only`. Setting the Rust policy field `atomic: true` syncs completed member files, but directory syncing, crash recovery, and power-loss durability are not implemented.
@@ -75,9 +75,9 @@ See [SECURITY.md](SECURITY.md), [the threat model](docs/threat-model.md), and [t
 
 The repository pins Rust 1.98.0 in `rust-toolchain.toml`; rustup selects it automatically.
 
-Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.2` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.2), or build from source:
+Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.2` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.2). Runnable checksum and provenance commands are in [release verification](docs/release-verification.md). To build from source:
 
-```powershell
+```text
 git clone https://github.com/blisspixel/sealr.git
 cd sealr
 cargo test --locked --workspace
@@ -89,17 +89,19 @@ cargo run --locked -p sealr-cli -- path/to/archive.zip
 cargo run --locked -p sealr-cli -- path/to/archive.zip --dest ./out
 ```
 
+The library and shipped CLI are Rust. CI runs native tests and release builds on Ubuntu, macOS, and Windows; the platform-specific materializers are release gates, not secondary ports. Some repository maintenance and release scripts are currently PowerShell because the same scripts run on all three GitHub-hosted runner families and the local release operator uses Windows. PowerShell is not a runtime dependency of `sealr`, but this is more scripting surface than the project should keep. Shared deterministic repository tasks are scheduled to move into a small Rust `xtask`, leaving only thin host-specific wrappers where an operating-system or operator boundary requires one.
+
 The CLI exits `0` when policy allows the archive and `2` when it rejects it. Operational command-line errors use the normal Clap exit behavior.
 
 ## Walkthrough
 
-The walkthrough uses two byte-stable fixtures and the direct release binary. The committed terminal captures show Windows PowerShell, so they include the `.exe` suffix; the script selects the native suffix on Linux and macOS. Run the complete scenario from a clean checkout with:
+The walkthrough uses two byte-stable fixtures and a locally built release-profile binary from the checked-out source. The committed rendered terminal-style summaries use Windows PowerShell notation, so they include the `.exe` suffix; the script selects the native suffix on Linux and macOS. Run the complete scenario from a clean checkout with:
 
 ```powershell
 pwsh -NoLogo -NoProfile -File scripts/walkthrough.ps1
 ```
 
-The script builds the locked release binary, verifies both fixture digests, separates stdout view JSON from stderr receipt JSON, asserts the filesystem state, and produces the exact transcripts shown below.
+The script builds the locked release-profile binary, verifies both fixture digests, separates stdout view JSON from stderr receipt JSON, asserts the filesystem state, and produces the transcripts used by the captures below.
 
 ### 1. Inspect without writing
 
@@ -145,7 +147,7 @@ Expected result: exit `0`, verdict `allowed`, `wrote: true`, and exactly the two
   <img alt="Screenshot of sealr materializing two approved members into a new destination after inspection." src="docs/assets/readme-walkthrough/sealr-materialize-allowed-terminal-light.png" width="1000">
 </picture>
 
-The semantic walkthrough is enforced by CLI integration tests. The PNGs are committed documentation assets generated from those verified transcripts. CI regenerates the transcript HTML and validates each PNG's dimensions, format, size, and metadata; it does not perform a flaky pixel comparison.
+The semantic walkthrough is enforced by CLI integration tests on the native platform jobs. The PNGs are rendered terminal-style summaries derived from alpha.2's separate JSON view and receipt streams; they are not literal captures of raw CLI output or the planned human interface. The alpha.1 and alpha.2 visible walkthrough output was unchanged. CI regenerates the fixtures, transcripts, and HTML, checks fixture and transcript SHA-256 values against the committed asset manifest, then verifies every PNG's SHA-256, dimensions, format, size, density, and metadata policy. CI does not claim a pixel comparison.
 
 ## Design rules
 
@@ -158,15 +160,22 @@ The semantic walkthrough is enforced by CLI integration tests. The PNGs are comm
 
 ## What comes next
 
-The next milestone remains the Phase 0.1 trust gate, not another archive format. The immediate priority is semantic identity: a versioned, effect-independent admitted-tree representation; separate interpretation, verification, admission, and effect outcomes; distinct source, interpretation, layout, content-tree, and invocation identities; and one object consumed by every Sealr destination without reparsing the archive.
+The next milestone remains the Phase 0.1 trust gate, not another archive format. The immediate implementation milestone is Step 3, semantic identity:
+
+1. Replace the unavailable digest sentinel and separate interpretation, verification, admission, effect, and view-completeness outcomes.
+2. Introduce `SourceSnapshot` over the current immutable in-memory inputs and build one versioned, effect-independent `ArchiveIR`.
+3. Make inspect, materialize, tests, and future worker messages consume that same IR without reparsing the archive.
+4. Define distinct source, interpretation, layout, content-tree, and invocation identities with byte-identical cross-platform golden vectors.
+
+In parallel, the existing materializer gains deterministic hostile namespace and staged-content mutation tests on Linux, macOS, and Windows. Those tests strengthen the shipped capability boundary without creating a competing semantic representation.
 
 The supervised Linux worker follows that contract because its bounded protocol and the supervisor's final staged-tree audit need the same canonical tree and manifest. The supervisor will own the destination parent, private stage, publication, and cleanup; the worker will receive only the archive snapshot and stage capabilities and install Landlock before reading the first archive byte. Linux is the first enforced worker platform, while macOS and Windows must remain natively green and report isolation honestly until their worker boundaries are implemented.
 
 Authenticated abandoned-stage recovery follows the worker because recovery must be owned by the final supervisor lifecycle. Landlock limits the worker's ambient authority; it does not contain another process running as the same user. A distinct service identity or equivalent mandatory-access-control boundary would be required to bring that actor into scope.
 
-Canonical CP437 and Unicode collision semantics, snapshot-backed bounded random access, fuzz and property suites, small-core proofs, compatibility measurement, an independent evidence verifier, and performance gates based on avoided parsing, decompression, and writes complete Phase 0.1 before TAR begins. Python wheel admission is the preferred first consumer profile after the semantic core, not a claim of current support.
+Canonical CP437 and Unicode collision semantics, snapshot-backed bounded random access, fuzz and property suites, small-core proofs, compatibility measurement, an independent evidence verifier, and performance gates based on avoided parsing, decompression, and writes complete Phase 0.1. Python wheel admission and reusable admitted trees follow before TAR begins; none is a claim of current support.
 
-The order and exit criteria are in [ROADMAP.md](ROADMAP.md).
+The exact active queue, implementation order, and exit criteria are in [ROADMAP.md](ROADMAP.md#active-execution-queue).
 
 ## Research basis
 
@@ -199,6 +208,8 @@ The order and exit criteria are in [ROADMAP.md](ROADMAP.md).
 | [docs/usage.md](docs/usage.md) | Intended CLI surface |
 | [CHANGELOG.md](CHANGELOG.md) | Preview release history |
 | [docs/releasing.md](docs/releasing.md) | Reproducible release process and verification |
+| [docs/release-verification.md](docs/release-verification.md) | Runnable checks for the current immutable prerelease |
+| [docs/tooling.md](docs/tooling.md) | Cross-platform repository tooling and runtime dependency discipline |
 
 ## License
 
