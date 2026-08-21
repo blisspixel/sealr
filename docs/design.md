@@ -1,6 +1,6 @@
 # Design: what sealr believes
 
-The **product** is a high-assurance unarchive *engine* other systems depend on. The CLI is the reference implementation. Ambition: [vision.md](vision.md). Mount/project dest: [bigger.md](bigger.md). Jail: [safety.md](safety.md).
+The **product** is a canonical archive-to-tree admission authority other systems can depend on. The CLI is the current reference surface. Direction: [vision.md](vision.md). Semantic model: [semantic-model.md](semantic-model.md). Jail: [safety.md](safety.md).
 
 This file is the physics and the engineering beliefs. It is not “we are a nicer unzip.”
 
@@ -24,7 +24,7 @@ If we only ever beat `unzip` on a 200 MB zip in `/tmp`, we built a weekend clone
 
 ## 2. The product is the boundary, not a codec (and not a scheduler)
 
-The type is `UntrustedArchive × Policy → (Materialization | Rejection) × AttestedReceipt × InspectableView`. Codecs, rayon, and GPU are how *hydrate* happens after the boundary said yes. A scheduler that prints `--why` is an implementation detail of hydrate, not the product. [vision.md](vision.md), [now.md](now.md).
+The current type is `UntrustedArchive x Policy -> (Allowed { wrote } | Rejected) x Receipt x View`. The current receipt is deterministic and unsigned. The target separates semantic admission from filesystem effect and gives every destination one immutable admitted tree. Codecs, parallelism, and optional hardware are backend details after that boundary. [vision.md](vision.md), [semantic-model.md](semantic-model.md).
 
 CPU SIMD is the default hydrate because it already saturates consumer NVMe on the workloads people actually extract. GPU, QAT, and Mojo earn a dispatch per member. They do not get a README checkbox until `--why` exists.
 

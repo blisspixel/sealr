@@ -10,7 +10,7 @@ ZIP is a container. Each member is independently compressed. That is why ZIP is 
 
 | Format | Par. | GPU | Ship | Notes |
 |---|---|---|---|---|
-| ZIP32 stored + deflate | Per member | Fat Deflate only | **current pre-alpha** | CD-first. Exact layout. Data descriptors. |
+| ZIP32 stored + deflate | Per member | Fat Deflate only | **current alpha preview** | CD-first. Exact layout. Data descriptors. |
 | ZIP64 | Per member | same | Phase 0.2 candidate | Currently rejected with `zip.diff.c5_zip64` |
 | ZIP method 93 zstd | Per member | SM, not DE | v1 | |
 | ZIP lzma / xz / deflate64 | Per member | No | v1 decode | |

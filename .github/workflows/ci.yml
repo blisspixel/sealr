@@ -59,6 +59,10 @@ jobs:
             }
           }
 
+      - name: Verify documentation contracts
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_docs.ps1
+
       - name: Install pinned Rust
         run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal --component clippy,rustfmt
 
@@ -182,3 +186,16 @@ jobs:
 
       - name: Check advisories, licenses, bans, and sources
         run: cargo deny check
+
+      - name: Install cargo-about
+        run: cargo install cargo-about --version 0.9.1 --locked --features cli
+
+      - name: Fetch supported release dependency graphs
+        run: |
+          cargo fetch --locked --target x86_64-unknown-linux-gnu
+          cargo fetch --locked --target aarch64-apple-darwin
+          cargo fetch --locked --target x86_64-pc-windows-msvc
+
+      - name: Verify third-party license bundles
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_third_party_licenses.ps1

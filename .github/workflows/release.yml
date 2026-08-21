@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASE_VERSION: 0.1.0-alpha.1
+  RELEASE_VERSION: 0.1.0-alpha.2
   RUST_VERSION: 1.98.0
 
 jobs:
@@ -224,6 +224,12 @@ jobs:
           Copy-Item -LiteralPath (Join-Path $PWD "README.md") -Destination $packageRoot
           Copy-Item -LiteralPath (Join-Path $PWD "CHANGELOG.md") -Destination $packageRoot
           Copy-Item -LiteralPath (Join-Path $PWD "LICENSE") -Destination $packageRoot
+          $thirdPartyLicenses = Join-Path $PWD "licenses/THIRD_PARTY_LICENSES-$targetTriple.txt"
+          if (-not (Test-Path -LiteralPath $thirdPartyLicenses -PathType Leaf)) {
+            throw "missing third-party license bundle for $targetTriple"
+          }
+          Copy-Item -LiteralPath $thirdPartyLicenses `
+            -Destination (Join-Path $packageRoot "THIRD_PARTY_LICENSES.txt")
           if (-not $IsWindows) {
             chmod 755 (Join-Path $packageRoot $binaryName)
             if ($LASTEXITCODE -ne 0) {
@@ -259,6 +265,17 @@ jobs:
           }
 
           $packagedBinary = Join-Path (Join-Path $smokeRoot $archiveBase) $binaryName
+          $packagedThirdPartyLicenses = Join-Path `
+            (Join-Path $smokeRoot $archiveBase) `
+            "THIRD_PARTY_LICENSES.txt"
+          if (-not (Test-Path -LiteralPath $packagedThirdPartyLicenses -PathType Leaf)) {
+            throw "packaged third-party license bundle is missing"
+          }
+          $expectedLicenseHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $thirdPartyLicenses).Hash
+          $packagedLicenseHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $packagedThirdPartyLicenses).Hash
+          if ($packagedLicenseHash -ne $expectedLicenseHash) {
+            throw "packaged third-party license bundle changed"
+          }
           $reportedVersion = (& $packagedBinary --version | Out-String).Trim()
           if ($LASTEXITCODE -ne 0 -or $reportedVersion -ne "sealr $env:RELEASE_VERSION") {
             throw "packaged binary reported unexpected version: $reportedVersion"
@@ -344,7 +361,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          release_title="sealr ${RELEASE_VERSION}: ZIP boundary preview"
+          release_title="sealr ${RELEASE_VERSION}: hardened materialization preview"
           notes_file="docs/releases/v${RELEASE_VERSION}.md"
           if [[ ! -f "${notes_file}" ]]; then
             echo "::error::missing release notes: ${notes_file}"

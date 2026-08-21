@@ -64,6 +64,8 @@ Unknown error codes must be treated as rejection by consumers.
 | `materialize.unsafe_component` | A canonical member component could not be opened through the required no-follow boundary, including a link, reparse point, non-directory parent, or invalid component. |
 | `materialize.cleanup` | Explicit removal of a staged tree failed. The receipt reports `cleanup: failed`. |
 | `materialize.unsupported` | The platform has no supported atomic no-replace publication primitive, so materialization failed closed. |
+| `materialize.unsupported_filesystem` | The opened Windows parent is remote, read-only, lacks persistent ACLs, is not NTFS, or could not be classified safely. |
+| `materialize.unsafe_stage` | A created Windows stage did not retain the required effective-TokenUser object owner or exact protected effective-TokenUser-only DACL before member writes. |
 
 ### Quotas
 
@@ -98,11 +100,13 @@ Unknown error codes must be treated as rejection by consumers.
 | `zip.encoding` | Invalid UTF-8 name or unsupported non-ASCII CP437 decoding. |
 | `zip.extra` | Extra-field sequence is malformed or repeats an identifier. |
 | `zip.flags` | Non-encryption CDH and LFH flags disagree. |
+| `codec.deflate.invalid_stream` | The declared DEFLATE payload is not one valid raw DEFLATE stream, or decoder accounting is inconsistent. |
+| `codec.deflate.trailing_input` | One valid DEFLATE stream ended before the declared compressed payload ended. Trailing bytes and concatenated streams are rejected. |
 | `crc.mismatch` | Expanded member CRC32 disagrees with the archive. |
 
 ## Reserved registry work
 
-The threat model names B3 canonicalization and B4 case behavior. The current implementation reports specific `path.*` codes for the covered ASCII subset. Phase 0.1 will import the upstream construction corpus and decide whether aliases or dedicated `zip.diff.b3_canon` and `zip.diff.b4_case` codes are needed.
+The pinned 5,927-file upstream construction corpus is already enforced. B3 canonicalization and B4 case constructions currently map to the specific implemented `path.*` codes for the accepted ASCII subset. Phase 0.1 still needs to decide whether the future Unicode and CP437 model requires aliases or dedicated `zip.diff.b3_canon` and `zip.diff.b4_case` codes.
 
 TAR link, permission, dictionary, polyglot, signing, and sandbox findings will be added only with their implementations and tests.
 

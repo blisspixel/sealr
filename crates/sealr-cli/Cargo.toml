@@ -14,6 +14,6 @@ path = "src/main.rs"
 
 [dependencies]
 clap.workspace = true
-sealr = { version = "0.1.0-alpha.1", path = "../sealr" }
+sealr = { version = "0.1.0-alpha.2", path = "../sealr" }
 serde.workspace = true
 serde_json.workspace = true

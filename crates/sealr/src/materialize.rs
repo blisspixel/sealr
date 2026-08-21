@@ -12,12 +12,12 @@ use std::cell::Cell;
 
 use crate::findings::{Finding, FindingCode};
 
-#[cfg(target_vendor = "apple")]
+#[cfg(target_os = "macos")]
 mod apple;
 #[cfg(windows)]
 mod windows;
 
-const SCHEMA: &str = "sealr.materialization.v1";
+const SCHEMA: &str = "sealr.materialization.v2";
 const BACKEND: &str = "cap-std-component-nofollow-v1";
 const MEMBER_RESOLUTION: &str = "component-handles-nofollow";
 #[cfg(windows)]
@@ -76,6 +76,48 @@ pub struct MaterializationMeta {
     pub publication_primitive: &'static str,
     pub outcome: &'static str,
     pub cleanup: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub windows: Option<WindowsMaterializationEvidence>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct WindowsMaterializationEvidence {
+    pub storage_policy: &'static str,
+    pub filesystem: Option<String>,
+    pub device_scope: &'static str,
+    pub persistent_acls: Option<bool>,
+    pub read_only: Option<bool>,
+    pub stage_acl_policy: &'static str,
+    pub stage_acl: &'static str,
+}
+
+#[cfg(windows)]
+fn initial_windows_evidence() -> Option<WindowsMaterializationEvidence> {
+    Some(windows_evidence(
+        windows::StorageObservation::not_observed(),
+        "not-created",
+    ))
+}
+
+#[cfg(not(windows))]
+fn initial_windows_evidence() -> Option<WindowsMaterializationEvidence> {
+    None
+}
+
+#[cfg(windows)]
+fn windows_evidence(
+    observation: windows::StorageObservation,
+    stage_acl: &'static str,
+) -> WindowsMaterializationEvidence {
+    WindowsMaterializationEvidence {
+        storage_policy: windows::STORAGE_POLICY,
+        filesystem: observation.filesystem,
+        device_scope: observation.device_scope,
+        persistent_acls: observation.persistent_acls,
+        read_only: observation.read_only,
+        stage_acl_policy: windows::STAGE_ACL_POLICY,
+        stage_acl,
+    }
 }
 
 impl MaterializationMeta {
@@ -92,6 +134,7 @@ impl MaterializationMeta {
                 publication_primitive: publication_primitive(),
                 outcome: "not-started",
                 cleanup: "not-created",
+                windows: initial_windows_evidence(),
             }
         } else {
             Self {
@@ -105,14 +148,20 @@ impl MaterializationMeta {
                 publication_primitive: "none",
                 outcome: "not-requested",
                 cleanup: "not-applicable",
+                windows: None,
             }
         }
     }
 
-    pub(crate) fn setup_failed(atomic: bool, cleanup: &'static str) -> Self {
+    pub(crate) fn setup_failed(
+        atomic: bool,
+        cleanup: &'static str,
+        windows: Option<WindowsMaterializationEvidence>,
+    ) -> Self {
         let mut report = Self::not_started(true, atomic);
         report.outcome = "setup-failed";
         report.cleanup = cleanup;
+        report.windows = windows;
         report
     }
 }
@@ -121,26 +170,91 @@ impl MaterializationMeta {
 pub(crate) struct MaterializationSetupError {
     findings: Vec<Finding>,
     cleanup: &'static str,
+    windows: Option<Box<WindowsMaterializationEvidence>>,
 }
 
 impl MaterializationSetupError {
-    pub(crate) fn into_parts(self) -> (Vec<Finding>, &'static str) {
-        (self.findings, self.cleanup)
+    fn before_stage(finding: Finding, windows: Option<WindowsMaterializationEvidence>) -> Self {
+        Self {
+            findings: vec![finding],
+            cleanup: "not-created",
+            windows: windows.map(Box::new),
+        }
     }
 
-    fn after_stage(parent: &CapDir, stage_name: &Path, finding: Finding) -> Self {
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        Vec<Finding>,
+        &'static str,
+        Option<WindowsMaterializationEvidence>,
+    ) {
+        (
+            self.findings,
+            self.cleanup,
+            self.windows.map(|evidence| *evidence),
+        )
+    }
+
+    fn after_stage(
+        parent: &CapDir,
+        root: CapDir,
+        stage_name: &Path,
+        windows: Option<WindowsMaterializationEvidence>,
+        finding: Finding,
+    ) -> Self {
+        let mut findings = vec![finding];
+        let cleanup = match root.remove_open_dir_all() {
+            Ok(()) => "removed",
+            Err(first_error) => match parent.remove_dir_all(stage_name) {
+                Ok(()) => "removed",
+                Err(final_error) => {
+                    findings.push(Finding::error(
+                        FindingCode::MaterializeCleanup,
+                        format!(
+                            "remove staging tree after setup failure: retained handle: \
+                             {first_error}; parent-relative retry: {final_error}"
+                        ),
+                    ));
+                    "failed"
+                }
+            },
+        };
+        Self {
+            findings,
+            cleanup,
+            windows: windows.map(Box::new),
+        }
+    }
+
+    fn after_stage_by_name(
+        parent: &CapDir,
+        stage_name: &Path,
+        windows: Option<WindowsMaterializationEvidence>,
+        finding: Finding,
+    ) -> Self {
         let mut findings = vec![finding];
         let cleanup = match parent.remove_dir_all(stage_name) {
             Ok(()) => "removed",
-            Err(error) => {
-                findings.push(Finding::error(
-                    FindingCode::MaterializeCleanup,
-                    format!("remove staging tree after setup failure: {error}"),
-                ));
-                "failed"
-            }
+            Err(first_error) => match parent.remove_dir_all(stage_name) {
+                Ok(()) => "removed",
+                Err(final_error) => {
+                    findings.push(Finding::error(
+                        FindingCode::MaterializeCleanup,
+                        format!(
+                            "remove staging tree after setup failure: first attempt: \
+                             {first_error}; retry: {final_error}"
+                        ),
+                    ));
+                    "failed"
+                }
+            },
         };
-        Self { findings, cleanup }
+        Self {
+            findings,
+            cleanup,
+            windows: windows.map(Box::new),
+        }
     }
 }
 
@@ -149,6 +263,7 @@ impl From<Finding> for MaterializationSetupError {
         Self {
             findings: vec![finding],
             cleanup: "not-created",
+            windows: initial_windows_evidence().map(Box::new),
         }
     }
 }
@@ -163,6 +278,7 @@ pub(crate) struct CapabilityMaterializer {
     atomic: bool,
     outcome: &'static str,
     cleanup: &'static str,
+    windows: Option<WindowsMaterializationEvidence>,
 }
 
 #[derive(Debug)]
@@ -197,22 +313,47 @@ impl CapabilityMaterializer {
                     format!("open destination parent capability: {error}"),
                 )
             })?;
+        #[cfg(not(windows))]
         ensure_parent_namespace_safe(&parent)?;
+        #[cfg(windows)]
+        let mut windows_report = match windows::probe_supported_parent(&parent) {
+            Ok(observation) => Some(windows_evidence(observation, "not-created")),
+            Err(error) => {
+                let evidence = windows_evidence(error.observation, "not-created");
+                return Err(MaterializationSetupError {
+                    findings: vec![Finding::error(
+                        FindingCode::MaterializeUnsupportedFilesystem,
+                        format!("Windows destination parent is unsupported: {}", error.error),
+                    )],
+                    cleanup: "not-created",
+                    windows: Some(Box::new(evidence)),
+                });
+            }
+        };
+        #[cfg(not(windows))]
+        let windows_report = None;
         let final_name = PathBuf::from(file_name);
-        if capability_path_exists(&parent, &final_name)? {
-            return Err(Finding::error(
-                FindingCode::MaterializeExists,
-                "destination already exists; replacement is not implemented",
-            )
-            .into());
+        if capability_path_exists(&parent, &final_name).map_err(|finding| {
+            MaterializationSetupError::before_stage(finding, windows_report.clone())
+        })? {
+            return Err(MaterializationSetupError::before_stage(
+                Finding::error(
+                    FindingCode::MaterializeExists,
+                    "destination already exists; replacement is not implemented",
+                ),
+                windows_report,
+            ));
         }
 
         for _ in 0..128 {
             let mut random = [0_u8; 16];
             getrandom::fill(&mut random).map_err(|error| {
-                Finding::error(
-                    FindingCode::MaterializeIo,
-                    format!("generate staging name: {error}"),
+                MaterializationSetupError::before_stage(
+                    Finding::error(
+                        FindingCode::MaterializeIo,
+                        format!("generate staging name: {error}"),
+                    ),
+                    windows_report.clone(),
                 )
             })?;
             let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
@@ -220,18 +361,28 @@ impl CapabilityMaterializer {
             match create_stage(&parent, &stage_name) {
                 Ok(root) => {
                     if let Err(finding) = ensure_stage_namespace_safe(&root) {
-                        drop(root);
+                        #[cfg(windows)]
+                        if let Some(evidence) = windows_report.as_mut() {
+                            evidence.stage_acl = "verification-failed";
+                        }
                         return Err(MaterializationSetupError::after_stage(
                             &parent,
+                            root,
                             &stage_name,
+                            windows_report,
                             finding,
                         ));
                     }
+                    #[cfg(windows)]
+                    if let Some(evidence) = windows_report.as_mut() {
+                        evidence.stage_acl = "verified";
+                    }
                     if let Err(error) = ensure_directory_handle_is_not_reparse(&root) {
-                        drop(root);
                         return Err(MaterializationSetupError::after_stage(
                             &parent,
+                            root,
                             &stage_name,
+                            windows_report,
                             Finding::error(
                                 FindingCode::MaterializeUnsafeComponent,
                                 format!("staging directory is a reparse point: {error}"),
@@ -248,6 +399,7 @@ impl CapabilityMaterializer {
                         atomic,
                         outcome: "staged",
                         cleanup: "pending",
+                        windows: windows_report,
                     });
                 }
                 Err(error)
@@ -256,9 +408,10 @@ impl CapabilityMaterializer {
                     continue;
                 }
                 Err(error) if error.created => {
-                    return Err(MaterializationSetupError::after_stage(
+                    return Err(MaterializationSetupError::after_stage_by_name(
                         &parent,
                         &stage_name,
+                        windows_report,
                         Finding::error(
                             FindingCode::MaterializeIo,
                             format!(
@@ -269,22 +422,26 @@ impl CapabilityMaterializer {
                     ));
                 }
                 Err(error) => {
-                    return Err(Finding::error(
-                        FindingCode::MaterializeIo,
-                        format!(
-                            "create staging directory through capability: {}",
-                            error.error
+                    return Err(MaterializationSetupError::before_stage(
+                        Finding::error(
+                            FindingCode::MaterializeIo,
+                            format!(
+                                "create staging directory through capability: {}",
+                                error.error
+                            ),
                         ),
-                    )
-                    .into());
+                        windows_report,
+                    ));
                 }
             }
         }
-        Err(Finding::error(
-            FindingCode::MaterializeIo,
-            "could not allocate a unique staging directory",
-        )
-        .into())
+        Err(MaterializationSetupError::before_stage(
+            Finding::error(
+                FindingCode::MaterializeIo,
+                "could not allocate a unique staging directory",
+            ),
+            windows_report,
+        ))
     }
 
     pub(crate) fn create_directory(&self, parts: &[String], member: &str) -> Result<(), Finding> {
@@ -396,6 +553,7 @@ impl CapabilityMaterializer {
             publication_primitive: publication_primitive(),
             outcome: self.outcome,
             cleanup: self.cleanup,
+            windows: self.windows.clone(),
         }
     }
 
@@ -497,22 +655,22 @@ fn durability(atomic: bool) -> &'static str {
     }
 }
 
-#[cfg(any(target_os = "linux", target_vendor = "apple"))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn stage_mode() -> &'static str {
     "same-volume-random-128-mode-0700"
 }
 
 #[cfg(windows)]
 fn stage_mode() -> &'static str {
-    "same-volume-random-128-inherited-acl"
+    "same-volume-random-128-protected-token-user-dacl"
 }
 
-#[cfg(not(any(target_os = "linux", target_vendor = "apple", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn stage_mode() -> &'static str {
     "unsupported"
 }
 
-#[cfg(any(target_os = "linux", target_vendor = "apple"))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn stage_creation_primitive() -> &'static str {
     "mkdirat-mode-0700-openat-nofollow-safe-parent"
 }
@@ -522,7 +680,7 @@ fn stage_creation_primitive() -> &'static str {
     windows::STAGE_CREATION_PRIMITIVE
 }
 
-#[cfg(not(any(target_os = "linux", target_vendor = "apple", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn stage_creation_primitive() -> &'static str {
     "unsupported"
 }
@@ -532,7 +690,7 @@ fn publication_primitive() -> &'static str {
     "renameat2-noreplace"
 }
 
-#[cfg(target_vendor = "apple")]
+#[cfg(target_os = "macos")]
 fn publication_primitive() -> &'static str {
     "renameatx-np-excl"
 }
@@ -542,17 +700,17 @@ fn publication_primitive() -> &'static str {
     windows::PUBLICATION_PRIMITIVE
 }
 
-#[cfg(not(any(target_os = "linux", target_vendor = "apple", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn publication_primitive() -> &'static str {
     "unsupported"
 }
 
-#[cfg(any(target_os = "linux", target_vendor = "apple", windows))]
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
 fn ensure_platform_supported() -> Result<(), Finding> {
     Ok(())
 }
 
-#[cfg(not(any(target_os = "linux", target_vendor = "apple", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn ensure_platform_supported() -> Result<(), Finding> {
     Err(Finding::error(
         FindingCode::MaterializeUnsupported,
@@ -560,7 +718,7 @@ fn ensure_platform_supported() -> Result<(), Finding> {
     ))
 }
 
-#[cfg(any(target_os = "linux", target_vendor = "apple"))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn create_stage(parent: &CapDir, name: &Path) -> Result<CapDir, StageCreateError> {
     use cap_std::fs::{DirBuilder, DirBuilderExt};
 
@@ -588,7 +746,7 @@ fn create_stage(parent: &CapDir, name: &Path) -> Result<CapDir, StageCreateError
     })
 }
 
-#[cfg(not(any(target_os = "linux", target_vendor = "apple", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn create_stage(_parent: &CapDir, _name: &Path) -> Result<CapDir, StageCreateError> {
     Err(StageCreateError {
         error: io::Error::new(
@@ -599,7 +757,7 @@ fn create_stage(_parent: &CapDir, _name: &Path) -> Result<CapDir, StageCreateErr
     })
 }
 
-#[cfg(any(target_os = "linux", target_vendor = "apple"))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn ensure_parent_namespace_safe(parent: &CapDir) -> Result<(), Finding> {
     use cap_std::fs::MetadataExt;
 
@@ -627,7 +785,7 @@ fn ensure_parent_namespace_safe(parent: &CapDir) -> Result<(), Finding> {
     ensure_no_apple_extended_acl(parent, "destination parent")
 }
 
-#[cfg(any(target_os = "linux", target_vendor = "apple"))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn unix_parent_mode_is_safe(owner: u32, effective_uid: u32, mode: u32) -> bool {
     let trusted_owner = owner == effective_uid || owner == 0;
     let externally_writable = mode & 0o022 != 0;
@@ -635,12 +793,12 @@ fn unix_parent_mode_is_safe(owner: u32, effective_uid: u32, mode: u32) -> bool {
     trusted_owner && (!externally_writable || sticky)
 }
 
-#[cfg(not(any(target_os = "linux", target_vendor = "apple")))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn ensure_parent_namespace_safe(_parent: &CapDir) -> Result<(), Finding> {
     Ok(())
 }
 
-#[cfg(any(target_os = "linux", target_vendor = "apple"))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn ensure_stage_namespace_safe(root: &CapDir) -> Result<(), Finding> {
     use cap_std::fs::MetadataExt;
 
@@ -660,12 +818,22 @@ fn ensure_stage_namespace_safe(root: &CapDir) -> Result<(), Finding> {
     ensure_no_apple_extended_acl(root, "staging directory")
 }
 
-#[cfg(not(any(target_os = "linux", target_vendor = "apple")))]
+#[cfg(windows)]
+fn ensure_stage_namespace_safe(root: &CapDir) -> Result<(), Finding> {
+    windows::ensure_private_stage_security(root).map_err(|error| {
+        Finding::error(
+            FindingCode::MaterializeUnsafeStage,
+            format!("staging directory DACL verification failed: {error}"),
+        )
+    })
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn ensure_stage_namespace_safe(_root: &CapDir) -> Result<(), Finding> {
     Ok(())
 }
 
-#[cfg(target_vendor = "apple")]
+#[cfg(target_os = "macos")]
 fn ensure_no_apple_extended_acl(dir: &CapDir, label: &str) -> Result<(), Finding> {
     match apple::has_extended_acl(dir) {
         Ok(false) => Ok(()),
@@ -680,12 +848,12 @@ fn ensure_no_apple_extended_acl(dir: &CapDir, label: &str) -> Result<(), Finding
     }
 }
 
-#[cfg(all(unix, not(target_vendor = "apple")))]
+#[cfg(all(unix, not(target_os = "macos")))]
 fn ensure_no_apple_extended_acl(_dir: &CapDir, _label: &str) -> Result<(), Finding> {
     Ok(())
 }
 
-#[cfg(any(target_os = "linux", target_vendor = "apple"))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn rename_noreplace(parent: &CapDir, _root: &CapDir, from: &Path, to: &Path) -> io::Result<()> {
     Ok(rustix::fs::renameat_with(
         parent,
@@ -701,7 +869,7 @@ fn rename_noreplace(parent: &CapDir, root: &CapDir, _from: &Path, to: &Path) -> 
     windows::rename_noreplace(parent, root, to)
 }
 
-#[cfg(not(any(target_os = "linux", target_vendor = "apple", windows)))]
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn rename_noreplace(_parent: &CapDir, _root: &CapDir, _from: &Path, _to: &Path) -> io::Result<()> {
     Err(io::Error::new(
         io::ErrorKind::Unsupported,
@@ -770,7 +938,7 @@ mod tests {
             Ok(_) => panic!("materializer unexpectedly created a missing parent"),
             Err(error) => error,
         };
-        let (findings, cleanup) = error.into_parts();
+        let (findings, cleanup, _) = error.into_parts();
 
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].code, FindingCode::MaterializeIo);
@@ -778,7 +946,38 @@ mod tests {
         assert!(!parent.exists());
     }
 
-    #[cfg(any(target_os = "linux", target_vendor = "apple"))]
+    #[cfg(not(windows))]
+    #[test]
+    fn non_windows_materialization_reports_never_serialize_windows_evidence() {
+        let not_requested = MaterializationMeta::not_started(false, false);
+        assert!(serde_json::to_value(not_requested)
+            .unwrap()
+            .get("windows")
+            .is_none());
+
+        let dest = temp_dest("non-windows-receipt");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        materializer.commit().unwrap();
+        assert!(serde_json::to_value(materializer.report())
+            .unwrap()
+            .get("windows")
+            .is_none());
+        fs::remove_dir_all(&dest).unwrap();
+
+        let missing_parent = temp_dest("non-windows-missing-parent");
+        let error = match CapabilityMaterializer::create(&missing_parent.join("output"), false) {
+            Ok(_) => panic!("missing parent unexpectedly accepted"),
+            Err(error) => error,
+        };
+        let (_, cleanup, windows) = error.into_parts();
+        let setup_failed = MaterializationMeta::setup_failed(false, cleanup, windows);
+        assert!(serde_json::to_value(setup_failed)
+            .unwrap()
+            .get("windows")
+            .is_none());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn unix_parent_policy_requires_trusted_ownership_and_safe_mode() {
         let effective_uid = 1000;
@@ -802,7 +1001,7 @@ mod tests {
         }
     }
 
-    #[cfg(any(target_os = "linux", target_vendor = "apple"))]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn rejects_nonsticky_shared_writable_parent_before_staging() {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -817,7 +1016,7 @@ mod tests {
                 Ok(_) => panic!("unsafe parent unexpectedly accepted"),
                 Err(error) => error,
             };
-            let (findings, cleanup) = error.into_parts();
+            let (findings, cleanup, _) = error.into_parts();
 
             assert_eq!(findings.len(), 1);
             assert_eq!(findings[0].code, FindingCode::MaterializeUnsafeParent);
@@ -835,7 +1034,7 @@ mod tests {
         }
     }
 
-    #[cfg(any(target_os = "linux", target_vendor = "apple"))]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn accepts_private_and_trusted_sticky_parents() {
         use std::os::unix::fs::PermissionsExt;
@@ -859,7 +1058,7 @@ mod tests {
         }
     }
 
-    #[cfg(target_vendor = "apple")]
+    #[cfg(target_os = "macos")]
     #[test]
     fn rejects_an_apple_extended_acl_before_staging() {
         use std::os::unix::fs::PermissionsExt;
@@ -887,7 +1086,7 @@ mod tests {
             Ok(_) => panic!("extended ACL unexpectedly accepted"),
             Err(error) => error,
         };
-        let (findings, cleanup) = error.into_parts();
+        let (findings, cleanup, _) = error.into_parts();
         assert_eq!(findings[0].code, FindingCode::MaterializeUnsafeParent);
         assert_eq!(cleanup, "not-created");
         assert!(!dest.exists());
@@ -924,8 +1123,16 @@ mod tests {
             b"leaf"
         );
         assert!(dest.join("empty/nested").is_dir());
-        assert_eq!(materializer.report().outcome, "committed");
-        assert_eq!(materializer.report().cleanup, "not-applicable-after-commit");
+        let report = materializer.report();
+        assert_eq!(report.schema, "sealr.materialization.v2");
+        assert_eq!(report.outcome, "committed");
+        assert_eq!(report.cleanup, "not-applicable-after-commit");
+        #[cfg(target_os = "macos")]
+        {
+            assert_eq!(report.stage_creation_primitive, stage_creation_primitive());
+            assert_eq!(report.publication_primitive, "renameatx-np-excl");
+            assert!(report.windows.is_none());
+        }
         fs::remove_dir_all(dest).unwrap();
     }
 
@@ -981,6 +1188,13 @@ mod tests {
 
         assert_eq!(error.code, FindingCode::MaterializeExists);
         assert_eq!(fs::read(dest.join("owner.txt")).unwrap(), b"existing");
+        #[cfg(target_os = "macos")]
+        {
+            let report = materializer.report();
+            assert_eq!(report.schema, "sealr.materialization.v2");
+            assert_eq!(report.publication_primitive, "renameatx-np-excl");
+            assert!(report.windows.is_none());
+        }
         materializer.abort().unwrap();
         fs::remove_dir_all(dest).unwrap();
     }
@@ -1051,6 +1265,104 @@ mod tests {
 
     #[cfg(windows)]
     #[test]
+    fn windows_stage_dacl_is_private_and_inherits_to_descendants() {
+        use std::os::windows::io::AsRawHandle;
+
+        let dest = temp_dest("private-stage-dacl");
+        let mut materializer = CapabilityMaterializer::create(&dest, true).unwrap();
+        let directory = materializer
+            .open_or_create_directories(&["nested".to_owned()])
+            .unwrap();
+        let mut file = materializer
+            .create_file(&["nested".to_owned(), "approved.txt".to_owned()])
+            .unwrap();
+        file.write_all(b"approved").unwrap();
+        file.sync_all().unwrap();
+
+        windows::ensure_private_descendant_security(directory.as_raw_handle(), true).unwrap();
+        windows::ensure_private_descendant_security(file.as_raw_handle(), false).unwrap();
+
+        let report = materializer.report();
+        let serialized = serde_json::to_value(&report).unwrap();
+        assert_eq!(serialized["schema"], "sealr.materialization.v2");
+        assert_eq!(serialized["windows"]["stage_acl"], "verified");
+        let evidence = report.windows.unwrap();
+        assert_eq!(evidence.storage_policy, windows::STORAGE_POLICY);
+        assert_eq!(evidence.filesystem.as_deref(), Some("NTFS"));
+        assert_eq!(evidence.device_scope, "local");
+        assert_eq!(evidence.persistent_acls, Some(true));
+        assert_eq!(evidence.read_only, Some(false));
+        assert_eq!(evidence.stage_acl_policy, windows::STAGE_ACL_POLICY);
+        assert_eq!(evidence.stage_acl, "verified");
+
+        drop(file);
+        drop(directory);
+        materializer.commit().unwrap();
+        assert_eq!(
+            fs::read(dest.join("nested/approved.txt")).unwrap(),
+            b"approved"
+        );
+        fs::remove_dir_all(dest).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_stage_acl_verification_failure_cleans_up_and_reports_evidence() {
+        let parent = temp_dest("acl-verification-failure-parent");
+        fs::create_dir(&parent).unwrap();
+        let dest = parent.join("output");
+        let _guard = windows::inject_stage_security_failure();
+
+        let error = match CapabilityMaterializer::create(&dest, false) {
+            Ok(_) => panic!("injected stage ACL verification unexpectedly succeeded"),
+            Err(error) => error,
+        };
+        let (findings, cleanup, evidence) = error.into_parts();
+
+        assert_eq!(cleanup, "removed");
+        assert!(findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::MaterializeUnsafeStage));
+        let report = MaterializationMeta::setup_failed(false, cleanup, evidence);
+        let serialized = serde_json::to_value(&report).unwrap();
+        assert_eq!(serialized["schema"], "sealr.materialization.v2");
+        assert_eq!(serialized["windows"]["stage_acl"], "verification-failed");
+        let evidence = report.windows.unwrap();
+        assert_eq!(evidence.stage_acl, "verification-failed");
+        assert!(parent.read_dir().unwrap().next().is_none());
+        fs::remove_dir(parent).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_existing_destination_preserves_observed_storage_evidence() {
+        let dest = temp_dest("existing-destination-evidence");
+        fs::create_dir(&dest).unwrap();
+
+        let error = match CapabilityMaterializer::create(&dest, false) {
+            Ok(_) => panic!("existing destination unexpectedly accepted"),
+            Err(error) => error,
+        };
+        let (findings, cleanup, evidence) = error.into_parts();
+
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].code, FindingCode::MaterializeExists);
+        assert_eq!(cleanup, "not-created");
+        let report = MaterializationMeta::setup_failed(false, cleanup, evidence);
+        let serialized = serde_json::to_value(&report).unwrap();
+        assert_eq!(serialized["windows"]["stage_acl"], "not-created");
+        let evidence = report.windows.unwrap();
+        assert_eq!(evidence.filesystem.as_deref(), Some("NTFS"));
+        assert_eq!(evidence.device_scope, "local");
+        assert_eq!(evidence.persistent_acls, Some(true));
+        assert_eq!(evidence.read_only, Some(false));
+        assert_eq!(evidence.stage_acl, "not-created");
+
+        fs::remove_dir(dest).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
     fn windows_publication_supports_non_bmp_destination_names() {
         let parent = temp_dest("unicode-parent");
         fs::create_dir(&parent).unwrap();
@@ -1089,7 +1401,7 @@ mod tests {
         fs::remove_file(dest).unwrap();
     }
 
-    #[cfg(any(target_os = "linux", target_vendor = "apple"))]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn refuses_a_symlink_for_any_parent_component() {
         use std::os::unix::fs::symlink;
@@ -1179,7 +1491,7 @@ mod tests {
         materializer.abort().unwrap();
     }
 
-    #[cfg(any(target_os = "linux", target_vendor = "apple"))]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     #[test]
     fn refuses_a_symlink_as_the_final_component() {
         use std::os::unix::fs::symlink;

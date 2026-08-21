@@ -1,69 +1,109 @@
-# SBOM and extraction receipts
+# Evidence and attestations
 
-> Current status: `apply()` emits a versioned deterministic unsigned JSON receipt with source, policy, view, tool, environment, materialization lifecycle and primitives, verdict, and findings. RFC 8785 canonicalization, DSSE, Sigstore, CycloneDX output, and standardized predicates are planned work.
+> Current status: alpha.2 emits a versioned deterministic unsigned JSON receipt. RFC 8785 canonicalization, canonical tree identities, DSSE, Sigstore, standardized predicates, SBOM output, and an independent verifier are planned work.
 
-The receipt is not optional output. It is a factor of the return type, including on **reject**. View (tree + findings) is the other always-on factor. Do not invent envelope formats.
+The current receipt is always returned, including on rejection. It records source and policy digests when available, the invocation-specific view digest, tool and environment fields, materialization lifecycle evidence, verdict, and findings.
 
-## SBOM of *this unpack*
+It is an **EvidenceRecord**, not an attestation. `signed: false` is explicit. It proves neither signer identity nor freshness, and `view_digest` is not a canonical layout or content-tree identity.
 
-This is not Syft (package graph of a disk image). It is: **these members, these hashes, this archive, this policy.**
+Use **attestation** only for an authenticated claim whose signature, signer identity, and timestamp or freshness policy have been verified.
 
-- Emit **CycloneDX 1.7** JSON (primary; ECMA-424 2nd ed.) and optionally **SPDX 2.3** (GitHub’s common example) / **SPDX 3.0.1**.
-- Align fields with **CISA 2026 Minimum Elements** (published 29 July 2026, replaces NTIA 2021): author, tool name/version, generation context, component names, **component hashes + algorithm**, licenses if known, format name/version, unknowns explicit.
-- Components = archive members (path, size, CRC, SHA-256/BLAKE3, detected type). The archive itself is the parent component (`hash` of the blob).
+## Target evidence decomposition
 
-Unknown license → explicit unknown, not guessed.
+Do not place every fact into one large custom predicate. The target model separates narrowly typed claims.
 
-## Extraction attestation (we may be first)
+### Interpretation record
 
-No widely adopted **“extraction”** in-toto predicate existed as of 2026-08-19 (vetted predicates: SPDX/CDX SBOM, SLSA provenance, vulns). Syft attests package SBOMs, not “this unpack under this policy.” **We’d be first** on that predicate; define it and try to upstream. Do not invent a wrapper envelope.
+Binds exact source bytes to an interpretation profile and canonical `ArchiveIR`. After tree identity is specified, it can bind source identity to layout identity.
 
-Envelope:
+### Verification record
 
-1. **DSSE** payload type `application/vnd.in-toto+json`
-2. **in-toto Statement** v1
-3. Predicate `https://sealr.dev/attestation/extraction/v1` (name TBD) containing:
+States which members and properties were verified, which resource bounds were enforced, and whether verification is structure-only, partial, or complete. A partial result includes its verified and pending frontier.
 
+### Admission record
+
+Binds the interpreted tree to the policy, target filesystem model, consumer profile, rule versions, and admission outcome.
+
+### Effect record
+
+Describes the requested realization, stage controls, component resolution, staged-tree audit, publication primitive, cleanup, durability, and effect outcome. A failed effect does not retroactively change admission.
+
+### Evidence manifest
+
+Contains structured member facts, source ranges, findings, actual sizes, hashes, rule evaluations, and completeness. Human-readable finding messages are presentation. Stable rule identifiers and deterministic fields are the machine contract.
+
+These records may be distributed together, but their independent meanings must remain visible.
+
+## Standard envelopes
+
+The target authenticated form should use existing envelope and identity systems where they fit:
+
+1. DSSE for the signed payload envelope.
+2. in-toto Statement v1 for subject and predicate structure.
+3. An existing in-toto predicate when it can express the claim without ambiguity.
+4. A narrowly scoped Sealr predicate only after the need and compatibility story are validated publicly.
+5. Sigstore keyless identity for GitHub release or workflow claims where appropriate.
+
+GitHub Artifact Attestations are a possible distribution path for standard envelopes, not a separate trust model. A signature alone is insufficient. Consumers must verify the expected signer identity, workflow or issuer constraints, subject digest, and time policy.
+
+The alpha.2 program does not produce DSSE, in-toto, Sigstore, or GitHub Artifact Attestations for archive decisions. Separately, the GitHub release workflow records build provenance attestations for the native release archives. That provenance binds a packaged binary to its source workflow; it does not authenticate an individual Sealr decision receipt.
+
+## Tree subjects
+
+Future authenticated claims should distinguish:
+
+- archive source digest;
+- interpretation profile identity;
+- canonical layout root;
+- complete content-tree root;
+- invocation and effect identity.
+
+The existing `view_digest` cannot stand in for the layout or content-tree root because it covers invocation-specific fields such as source metadata, policy, verdict, findings, and write outcome.
+
+`sealrTreeV1` requires a normative canonical encoding and test vectors before it can be an attestation subject. in-toto `dirHash1`, Git trees, and OCI `DiffID` are interoperability references, not drop-in replacements for all Sealr semantics.
+
+## Independent verifier
+
+A future small verifier should not extract archives. It should validate:
+
+- canonical evidence serialization;
+- profile and rule identities;
+- tree-root derivation from an evidence manifest;
+- source-range non-overlap and coverage claims;
+- policy and admission consistency;
+- effect-record consistency;
+- DSSE signature, signer identity, issuer, and time policy when authenticated.
+
+The verifier may rely on an authenticated producer for expensive codec execution. Its result must not be described as a proof that independently reran decompression.
+
+## File manifest versus SBOM
+
+An arbitrary archive member is not necessarily a software component. For generic ZIP admission, emit an evidence or file manifest.
+
+CycloneDX or SPDX output becomes appropriate only when a consumer profile establishes component or package semantics, such as a Python wheel, JAR, image layer, or model bundle. Unknown license and component facts remain explicitly unknown rather than guessed. SHA-256 is the current cryptographic content hash; CRC32 is an integrity field, not a cryptographic identity. BLAKE3 is not implemented.
+
+This avoids competing with package-graph tools while still allowing package-aware profiles to export interoperable SBOMs.
+
+## Current CLI behavior
+
+Every invocation emits one view on stdout and one unsigned receipt on stderr:
+
+```text
+sealr foo.zip
+sealr foo.zip --dest D:\out
 ```
-source:
-  uri:  ...
-  digest: { sha256: ... }          # archive blob
-policy:
-  id: default | unix-tarball-v1 | ...
-  digest: { sha256: ... }          # canonical policy bytes
-tool:
-  name: sealr
-  version: 0.x.y
-  dest: inspect | materialize | mount
-environment:                       # coarse: os, arch, kernel_jail
-  os, arch
-  kernel_jail: landlock-vN | unavailable
-timestamp: RFC3339
-# The receipt is a return-type factor: policy + digests + environment, including on reject.
-findings: [ { code, severity, member } ]
-members: [ { path, size, crc32, sha256, mime } ]
-```
 
-4. Sign with **Sigstore keyless** (GitHub/OIDC) when available; otherwise a local key. Unsigned receipts are still useful as JSON logs; label `signed: false`.
+The first form is inspect-only and returns `Allowed { wrote: false }` when successful. The second requests transactional materialization. If materialization fails after staging, the current combined verdict is `Rejected` and the materialization object records lifecycle and cleanup details.
 
-Downstream policy engines verify: “this tree came from digest D under policy P with tool V.” That is the sentence enterprises and agent session logs need.
+There is no current `--sbom`, `attest`, `lock`, or signed-output command.
 
-GitHub Artifact Attestations are a **distribution path** for the same DSSE blob, not a different format.
+## What Sealr will not do
 
-## CLI
+- invent a custom signed-JSON cryptosystem;
+- call unsigned output an attestation;
+- imply that CRC32 is a cryptographic hash;
+- label a generic file list as an SBOM without component semantics;
+- claim that a receipt protects a consumer that reparses the original archive;
+- make signature presence equivalent to policy verification.
 
-Façade of [api.md](api.md). Every invocation emits view + receipt.
-
-```
-sealr foo.zip                              # Allowed { wrote: false } + view + receipt
-sealr foo.zip --dest D:\out                # materialize if policy yes
-sealr foo.zip --sbom cyclonedx
-```
-
-`receipt.view_digest` matches the view JSON. If requested materialization rejects after staging, `verdict` is `Rejected` and `receipt.materialization` records the lifecycle and cleanup result. The receipt is still emitted.
-
-## What we will not do
-
-- A custom signed-JSON crypto scheme.
-- Competing with Syft on OS package graphs.
-- Implying CRC32 in the SBOM is a cryptographic hash (CISA wants real hashes; we emit SHA-256/BLAKE3 as the component hash, CRC as extra).
+See [semantic-model.md](semantic-model.md) for the identity model and [API contract](api.md) for current fields.

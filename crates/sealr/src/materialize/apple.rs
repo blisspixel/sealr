@@ -30,3 +30,43 @@ pub(super) fn has_extended_acl(dir: &CapDir) -> io::Result<bool> {
     }
     Ok(true)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use cap_std::ambient_authority;
+    use std::fs;
+    use std::process::Command;
+
+    #[test]
+    fn retained_descriptor_distinguishes_absent_and_present_extended_acl() {
+        let mut random = [0_u8; 12];
+        getrandom::fill(&mut random).unwrap();
+        let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let path = std::env::temp_dir().join(format!("sealr-apple-acl-{suffix}"));
+        fs::create_dir(&path).unwrap();
+        let dir = CapDir::open_ambient_dir(&path, ambient_authority()).unwrap();
+
+        assert!(!has_extended_acl(&dir).unwrap());
+
+        let output = Command::new("chmod")
+            .args([
+                "+a",
+                "everyone allow add_file,add_subdirectory,delete_child",
+            ])
+            .arg(&path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "add test ACL: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(has_extended_acl(&dir).unwrap());
+
+        drop(dir);
+        let output = Command::new("chmod").arg("-N").arg(&path).output().unwrap();
+        assert!(output.status.success());
+        fs::remove_dir(path).unwrap();
+    }
+}

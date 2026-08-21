@@ -6,7 +6,7 @@ Landlock-first is part of [now.md](now.md) §2: drop ambient authority **before*
 
 The engine MUST be correct **without** a kernel jail (invariants are not “hope Landlock is on”). The engine MUST also be usable **inside** a jail.
 
-Reduced authority is **how the process starts**, not a hardening pass you remember later. On Linux, the intended order is: pin dest + archive fds → Landlock/seccomp to those paths → *then* look at the first header. Record `kernel_jail` on the receipt. If Landlock is unavailable, userspace I1 still runs; that is a degraded mode, not a `--no-sandbox` lifestyle.
+Reduced authority is **how the process starts**, not a hardening pass you remember later. On Linux, the supervisor opens the archive and destination parent, creates and retains the private stage, then passes only the archive and stage descriptors to the worker. The worker validates the bounded control frame, installs `no_new_privs` and Landlock, closes the control channel, and only then reads the first archive byte. The worker never receives the destination parent or final name and cannot publish. If Landlock is unavailable, userspace I1 still runs in explicitly reported degraded mode; that execution does not satisfy the reduced-authority release gate.
 
 ## Composition
 
@@ -22,8 +22,8 @@ Inspect-without-write is the first agent API. Mount is the “explore without pr
 
 ## Linux
 
-- **Landlock** is real and unprivileged. **ABI v6** shipped in Linux 6.12 (FS + TCP + IPC scope). Later ABIs exist (v8 in 7.0, v9 in 7.1, v10 UDP). **Probe at runtime**; require no particular ABI. Restrict dest + archive path; deny everything else. Record `kernel_jail: landlock-vN | unavailable` on the receipt. Userspace jail (I1) is always on even when Landlock is unavailable.
-- **seccomp-bpf** (and optionally **seccomp-unotify** for a supervisor): allow `openat`/`read`/`write`/`close`/`mmap` on already-pinned fds; deny `ptrace`, `mount`, `socket` unless the policy is “network unpack.”
+- **Landlock** is real and unprivileged. **Probe the running kernel ABI** and construct the handled-rights set from the rights that ABI actually supports. Grant the stage only the file and directory rights required for materialization. Existing archive and stage descriptors retain their descriptor authority, so the receipt must distinguish inherited descriptor access from path grants.
+- **seccomp-bpf** is deferred until syscall traces cover Store, Deflate, rejection, cleanup, worker crash, and publication handoff. Seccomp is not a replacement for Landlock or userspace invariants, and an architecture-sensitive allowlist must not be guessed.
 - **sandlock, landstrip, ai-jail, ferroday-cage** exist as of 2026. None is an extract engine. Do not vendor them. Implement via `landlock` crate + `seccompiler`.
 - **ouch** now Landlocks and has `--no-sandbox`. We do **not** copy a boolean off switch. If Landlock is unavailable, say so on the receipt; the userspace jail still runs.
 - **bubblewrap** / **Firecracker** / **gVisor**: for *callers* (CI, agent runners). Document a unit file / example; do not vendor a VMM.

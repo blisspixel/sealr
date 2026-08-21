@@ -1,8 +1,10 @@
 # Think bigger
 
-Mount is **not a competing product**. It is one representation of `InspectableView` in
+Read-only projection is **not a competing product**. It is a future representation of the admitted tree described in [semantic-model.md](semantic-model.md), not a current alpha.2 feature.
 
-`UntrustedArchive × Policy → (Materialization | Rejection) × AttestedReceipt × InspectableView`
+The current public outcome remains:
+
+`UntrustedArchive x Policy -> (Allowed { wrote } | Rejected) x Receipt x View`
 
 Cram and Bandizip own “fast files on disk.” GPU unzip-to-NTFS is physics-wrong. The view factor is how we change the destination without abandoning the type.
 

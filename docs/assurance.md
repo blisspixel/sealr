@@ -1,44 +1,172 @@
-# Testing, fuzzing, and assurance
+# Testing, compatibility, and assurance
 
-> This is the assurance target. The deterministic Rust unit suite, strict CI, cargo-deny policy, and pinned 5,927-file ZipDiff construction gate exist today. Property testing, cargo-fuzz targets, Kani harnesses, public fuzzing, and external audit remain Phase 0.1 or later work.
+> This page separates current evidence from the target assurance program. Alpha.2 has a deterministic Rust unit suite, strict cross-platform CI, cargo-deny policy, and a pinned 5,927-file ZipDiff construction gate. Property testing, coverage-guided fuzzing, model checking, benign ecosystem measurement, an independent verifier, and an external audit remain future work.
 
-Trust is the scarce resource. Performance and format breadth come after the invariants are boring.
+Trust is the scarce resource. Format breadth and acceleration follow stable semantics and measured compatibility.
 
-## Layers
+## Current evidence
 
-| Layer | Current evidence | Remaining work |
+| Layer | Current alpha.2 evidence | Remaining work |
 |---|---|---|
-| Unit | ZIP path jail, topology, overlap and layout, quotas, rollback, destination preservation, ZipDiff-driven cases, and deterministic truncation/mutation/noise no-panic coverage | Expand each invariant as the implementation grows |
-| Property | None yet | I1-I8 over generated names, topology, and quota counters |
-| Corpus | All 5,927 pinned ZipDiff constructions plus local generated adversarial fixtures | Fifield quoted-overlap artifacts and package-manifest cases |
-| Fuzz | None yet | `cargo fuzz` targets for ZIP parse, canonical names, and inspect-only `apply()`; oracle checks no panic, no escape, and bounded allocation |
-| Differential | The ZipDiff expectation gate binds strict rejection and documented valid controls | Optional scheduled comparison against independent parsers on well-formed archives only |
-| Audit | `SECURITY.md` reporting process and automated dependency checks | Public external report after the core freezes |
+| Unit | ZIP path grammar, topology, overlap and layout, quotas, inspect/materialize equality, rollback, destination preservation, platform materializer controls, and deterministic truncation, mutation, and noise no-panic coverage | Expand for every new semantic state and backend |
+| Corpus | All 5,927 pinned ZipDiff constructions plus local generated adversarial fixtures | Add codec-boundary, source-race, consumer-profile, and ecosystem fixtures |
+| Differential | ZipDiff expectation gate binds strict rejection and a documented valid-control allowlist | Compare major consumers on well-formed profile inputs and track disagreement frontiers |
+| Property | None yet | Generate paths, topology, ranges, counters, and policy overlays |
+| Fuzz | None yet | `cargo fuzz` targets for interpretation, canonical paths, and inspect-only `apply()` |
+| Formal | None yet | Small Kani or Verus harnesses for pure path, range, and quota properties |
+| Audit | Reporting process and automated dependency checks | Independent review after the semantic core stabilizes |
 
-## ZipDiff as a gate
+## ZipDiff gate
 
-The CI gate regenerates the [ZipDiff](https://github.com/ouuan/ZipDiff) `construction` output at a pinned revision. After revision verification, a committed patch replaces the generator's current-time DOS timestamp defaults with zero. The [manifest](../tests/corpus/zipdiff/expectations.txt) then binds the deterministic fixture bytes through one aggregate digest, exact finding counts, and the valid-control allowlist. The 50-parser Docker farm is not part of CI or the product runtime.
+CI regenerates the [ZipDiff](https://github.com/ouuan/ZipDiff) construction output at a pinned revision. After verifying that revision, a committed patch replaces the generator's current-time DOS timestamp defaults with zero. The [expectation manifest](../tests/corpus/zipdiff/expectations.txt) binds fixture bytes through an aggregate digest, exact finding counts, and a valid-control allowlist.
 
-If ZipDiff adds a 15th type, its changed count and digest fail the gate before the manifest can be updated deliberately.
+The 50-parser Docker farm is not part of CI or the product runtime. If the pinned construction set, bytes, expected findings, or valid controls change, the gate fails until the change is reviewed deliberately.
 
-## Formal / semi-formal - tiny TCB, not the zoo
+## Compatibility is a security property
 
-Do **not** try to verify inflate, 7z, or “the ZIP parser.” That is a career. Verify the **boundary**:
+A strict parser that rejects most ordinary inputs will be bypassed. A permissive recovery mode creates another interpretation. The answer is named profiles plus public compatibility evidence.
 
-| Property | Tooling (2026) | Why this one |
+### Hostile conformance corpus
+
+Every case should bind:
+
+```text
+source digest
+interpretation profile and version
+expected interpretation and admission outcome
+expected finding rule identifiers and source spans
+expected layout and content roots when defined
+```
+
+Include ZipDiff classes, grammar mutations, overlapping ranges, path attacks, quota arithmetic, exact codec stream termination, filesystem races, source mutation, and platform target collisions.
+
+### Benign ecosystem corpus
+
+Measure real artifacts from the domain of each profile. Candidate sources include PyPI wheels and source distributions, Maven and JAR artifacts, Office documents, APKs, GitHub release ZIPs, vendor SDK bundles, and archives produced by common Linux, macOS, and Windows tools.
+
+Publish, per profile and release:
+
+- acceptance rate;
+- top rejection rules;
+- producer and tool distribution;
+- investigated false positives;
+- semantic changes and revocations;
+- differences across supported operating systems and architectures.
+
+The objective is not maximum acceptance. It is rejection of known ambiguous constructions with high acceptance inside the profile's explicitly supported domain.
+
+The benign corpus must respect licenses, privacy, and redistribution rules. Store digests and reproducible acquisition metadata when raw artifacts cannot be redistributed.
+
+## Cross-platform determinism
+
+For a stable interpretation profile:
+
+```text
+same immutable source bytes + same profile
+    -> same ArchiveIR, layout root, and interpretation findings
+on supported Linux, macOS, and Windows targets
+```
+
+Environment-dependent filesystem effects may differ and are recorded separately. The host must not silently choose path decoding, Unicode normalization, case folding, or archive semantics. Platform-specific projection rules belong to an explicit target filesystem model.
+
+Golden semantic fixtures should run across x86_64 and aarch64 where release infrastructure permits. Evidence fields that legitimately vary by environment must be documented and excluded from semantic tree identity.
+
+## Immutable-source tests
+
+The future bounded random-access implementation must retain the whole-buffer guarantee that interpretation and verification use the same byte object.
+
+Test at least:
+
+- truncation after structural interpretation;
+- growth and alternate payload insertion;
+- in-place payload mutation through another handle;
+- path replacement while a snapshot is active;
+- remote object mutation or inconsistent range responses;
+- cache lookup under mismatched source or profile identity.
+
+An arbitrary `ReadAt`, path, file length, or ETag is not sufficient evidence of immutability.
+
+## Codec assurance
+
+For each approved codec backend and version, fixtures must establish:
+
+- valid stream completion;
+- exact declared compressed-input consumption;
+- exact uncompressed-output size;
+- integrity check success;
+- rejection of trailing bytes and concatenated alternate streams where the profile permits only one stream;
+- distinct findings for malformed, truncated, trailing-input, size, and integrity failures;
+- identical accepted output and semantic findings across approved backends.
+
+An acceleration backend cannot change interpretation, accepted bytes, verification completeness, or tree identity.
+
+## Semantic properties
+
+The highest-value generated and machine-checked properties are small:
+
+| Property | Daily evidence | Bounded proof candidate |
 |---|---|---|
-| I1 path containment after normalize | **Kani** on the pure jail function; **Verus** if we keep that module in a Verus-friendly subset | Highest-value, smallest surface |
-| I2/I3 quota monotonicity (never trust headers) | Kani on the counters; proptest as the daily driver | Easy to state, easy to get wrong under concurrency |
-| Fail-closed policy (no implicit allow) | Exhaustive match tests + Kani on the policy enum | The `--insecure` class of bug |
+| Canonical path containment and collision detection | Unit and property tests | Kani or Verus over the pure path core |
+| Range non-overlap and complete referenced layout | Grammar mutations and property tests | Kani over checked interval arithmetic |
+| Monotone quota accounting with no overflow | Property tests using checked arithmetic | Kani over the pure counter core |
+| Fail-closed profile and policy compilation | Exhaustive enum and schema tests | Kani over compiled rule states |
+| Monotone policy overlays | Generated overlay tests | Small rule-graph proof harness |
 
-The rest of the system can be messy. The arrow itself should not be. Do not claim “formally verified unzip.” Claim “the containment and quota core has machine-checked proofs; the codecs are fuzzed.”
+Do not claim a formally verified extractor. A justified future statement would identify the exact pure properties that have machine-checked proofs while stating that parsers and codecs are tested and fuzzed.
 
-## Continuous
+## Verification-state tests
 
-- oss-fuzz once the crate is public.
-- `cargo deny`, `cargo geiger` (the unsafe allowlist is empty by default; every platform exception requires a documented invariant and focused tests).
-- Living threat model: this docs set. Record dated decisions in curated documentation and executable tests.
+The target outcome axes require explicit state-machine tests:
+
+- source read failure is indeterminate, not denied;
+- malformed and unsupported inputs remain distinct;
+- a filesystem commit failure does not change admission;
+- a structure-only result never carries complete content identity;
+- partial results name the verified and pending members and stopping cause;
+- materialize and projection consume the same IR without reparsing;
+- a content-tree root appears only after required content verification completes.
+
+## Filesystem adversarial tests
+
+Continue deterministic and repeated race testing on native Linux, macOS, and Windows filesystems:
+
+- parent and leaf link substitution;
+- Windows junction and generic reparse-point mutation;
+- destination appearance during staging;
+- stage-name and stage-content substitution;
+- missing, extra, linked, reparse, duplicate-identity, size-mismatched, and digest-mismatched staged objects;
+- cleanup failure and retry;
+- crash points before and after each lifecycle transition;
+- preservation of existing destinations and unrelated lookalikes.
+
+Each successful publication should eventually match an independently audited admitted-tree manifest exactly.
+
+## Evidence verifier tests
+
+The future independent verifier needs golden accepted and rejected bundles for:
+
+- canonical serialization;
+- profile and rule versioning;
+- layout and content-root derivation;
+- partial and complete verification states;
+- effect-record consistency;
+- signature, signer identity, issuer, subject, and timestamp checks;
+- tampered manifests, roots, envelopes, and effect fields.
+
+The verifier does not extract the archive and must not imply that it independently executed codecs.
+
+## Continuous program
+
+- Run fast deterministic tests, formatting, strict lints, documentation checks, dependency policy, release-fixture checks, and native platform jobs on every change.
+- Add property tests and fuzz smoke tests once targets are stable.
+- Seed coverage-guided fuzzing with ZipDiff and local adversarial fixtures.
+- Add longer scheduled fuzzing only after runtime and cost are measured.
+- Publish compatibility changes and profile semantics with each release.
+- Add public continuous fuzzing after the crate and fuzz interfaces stabilize.
+- Commission an external review after the target semantic surface freezes.
 
 ## Unsafe policy
 
-The jail, central-directory parser, and limit counters contain no `unsafe`. The current Apple descriptor-ACL and Windows native stage/publication adapters are isolated exceptions with documented pointer, layout, handle, and error-conversion invariants. Archive mmap may require a future `sealr-io` exception; isolate it, document the truncation invariant, and never use mmap for outputs.
+The parser, path grammar, and quota core contain no `unsafe`. The current macOS descriptor-ACL and Windows native storage, stage, security-descriptor, and publication adapters are isolated exceptions with focused invariants and tests.
+
+A future memory-mapped source may require a small I/O exception, but mapping mutable archive storage is not an immutable snapshot. Any such adapter must document source-stability requirements and remain outside output handling.

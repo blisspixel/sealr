@@ -1,213 +1,144 @@
-# Vision: the safe-unarchive primitive
+# Vision: one archive, one tree, evidence
 
-**sealr.** Public positioning: [../README.md](../README.md). The CLI is the reference implementation and the demo.
+> This document describes the product direction. Current alpha.2 behavior and limitations are defined by the [README](../README.md) and [API contract](api.md). The target semantic design is specified in [semantic-model.md](semantic-model.md).
 
-The product is not “files appear in a directory.” It is not a safer unzip. It is the **arrow**:
+Sealr is not a general-purpose unarchiver, archive GUI, malware scanner, agent-execution proxy, model verifier, credential broker, or enterprise control plane.
 
+Its intended category is a canonical archive-to-tree compiler and admission authority:
+
+```text
+untrusted archive bytes
+    -> one immutable, policy-checked logical tree, or no admitted tree
+    -> explicit evidence about interpretation, verification, admission, and effects
 ```
-UntrustedArchive × Policy
-  →  (Materialization | Rejection)
-    × AttestedReceipt
-    × InspectableView
+
+Archive bytes are a weak program in a language with disagreeing interpreters. Path traversal, links, resource exhaustion, and filesystem races are critical hazards, but parser disagreement is the deeper problem. A byte digest proves that two consumers received the same bytes. It does not prove they constructed the same tree.
+
+Sealr owns that semantic boundary first. Materialization, projection, caching, language bindings, consumer integrations, and acceleration are consumers of the boundary.
+
+## The alpha.2 foundation
+
+The current Rust library provides one `apply()` path:
+
+```text
+UntrustedArchive x Policy
+  -> (Allowed { wrote } | Rejected) x Receipt x View
 ```
 
-That is a **product**, not a menu. Every call returns paperwork and a view. The only fork is whether the host also gets files.
+Inspect and materialize share one planned tree. Every outcome includes structured findings, a view, and deterministic unsigned receipt data. Accepted members are content-verified, and requested files are staged and published through capability-relative, native no-replace materialization on the documented Linux, macOS, and Windows filesystem matrix.
 
-| Factor | Always? | What it is |
-|---|---|---|
-| **Materialization \| Rejection** | yes (sum) | Files on disk **or** a fail-closed no. Never both. Never silent. |
-| **AttestedReceipt** | always | Signed (or explicitly `signed: false`) record of archive digest, policy, findings, dest, tool. Exists **on reject**. |
-| **InspectableView** | always | Structured tree + findings. The current CLI emits one pretty JSON document. Mount is one *representation* of this view, not a third dest. |
+This is the foundation, not the finished semantic API. Alpha.2 does not produce `ArchiveIR`, canonical tree roots, semantic locks, signed attestations, read-only projection, content-addressed reuse, wheel admission, or proof certificates.
 
-Findings live in the view and are summarized on the receipt. Inspect-only success is `Allowed { wrote: false }` plus a full view. `materialize` is the same function with writes enabled if policy said yes.
+## The target contract
 
-You never get files without a receipt and a view. You never get a reject without a receipt and a view. That is what makes this a boundary other systems can depend on, instead of `extract() -> ()`.
+The target separates four independent decisions and one completeness signal:
 
-Why this type is newly *shippable* in 2026: [now.md](now.md).
+```text
+Interpret(source, profile)       -> Interpreted | Malformed | Unsupported | Indeterminate
+Evaluate(tree, policy, context)  -> Admitted | Denied | NotEvaluated
+Verify(tree)                     -> StructureOnly | Partial | Complete
+Realize(tree, effect)            -> NotRequested | Committed | Failed
+View                             -> Complete | Partial { phase, cause }
+```
 
-ZIP is not an input format. It is an **attack surface that sometimes contains files** - a non-deterministic language whose meaning depends on which parser you feed. Path traversal, size caps, and ratio limits are mitigations. They are not the problem. The problem is treating parser disagreement as an edge case. The 2025 ZipDiff paper already showed almost every pair of major implementations diverges. Shipping another crate that blocks `../` is cosplay.
+This separation is product semantics, not API decoration. A safe tree can remain admitted when one destination write fails. A source read failure is not a policy denial. A projected tree can be admitted while content verification is partial.
 
-Safety properties are the **type of the operation**. Files are a side effect of `Materialization`. The view and the receipt are the actual return values. Everything else (codecs, rayon, Mojo, GPU) is implementation detail.
+The canonical object between these stages is a versioned `ArchiveIR`. Every downstream path consumes that IR and its immutable `SourceSnapshot`. No downstream integration may reopen the source through another archive parser.
 
-The trusted computing base is tiny: path containment after full normalize, monotonic quotas that never believe headers, fail-closed policy, one interpretation. Point Verus/Kani at *those*, not at the format zoo. Throw away ambient authority **before** the first header (Landlock / AppContainer). Rust owns the part that has to be right. Mojo owns the part that is allowed to be hot and boring.
+## Why this boundary matters
 
-If the receipt, the policy, and the differential resistance are not first-class, this is just another unzip with better marketing. Other systems (package managers, CI, agents) should depend on the **boundary**, not on our CLI.
+The 2025 ZipDiff study compared 50 ZIP parsers across 19 languages, identified 14 ambiguity classes, and found disagreements among almost every parser pair. Real Python wheel advisories have shown that one digest can lead to different installed payloads in different tools.
 
-This is infrastructure. A Mojo+Rust unzip is a learning project.
+Sealr's enduring claim should therefore be:
 
-sealr does not claim to make ZIP/TAR/7z well-specified. It claims a **precise place to stand** while the formats remain hostile - so the choice is no longer “risk the host,” “pay for heavy isolation every time,” or “operate on vibes.”
+> Given exact source bytes and a versioned interpretation profile, construct one canonical tree with explicit verification completeness, or produce no admitted tree.
 
-Doc map (this is the ambition; the rest is how):
+The claim becomes reusable only when consumers receive the admitted representation rather than a receipt beside the original archive.
 
-| Doc | Job |
+## Product priorities
+
+### 1. Semantic identity
+
+Define the canonical `ArchiveIR`, immutable source snapshot, interpretation profiles, target filesystem models, consumer profiles, layout root, content-tree root, and target outcome axes. Stabilize exact codec-consumption and policy-compilation rules.
+
+### 2. Measured trust
+
+Combine the hostile ZipDiff gate with a benign ecosystem corpus, source-mutation tests, cross-platform semantic goldens, fuzzing, small proof harnesses, reduced-authority execution, and a small independent evidence verifier.
+
+### 3. One canonical consumer
+
+Python wheel admission is the first candidate. It has a documented same-bytes, different-installed-tree problem and meaningful consumer semantics beyond ZIP. A future `python-wheel.v1` must validate wheel metadata, `RECORD`, `.data` relocation, target paths, and installed-tree identity. It is not current functionality.
+
+### 4. Reusable admitted trees
+
+Add semantic locks, verified content-addressed blobs, read-only projection, and materialization from verified content. The goal is to avoid reparsing, reinflating, and rewriting the same admitted tree.
+
+### 5. Expansion driven by consumers
+
+Agent workspaces and hermetic build inputs are promising next profiles. OCI layers, TAR, JAR, APK, and other formats follow only when their consumer semantics and compatibility requirements are explicit.
+
+## Product moat
+
+The durable open-source surface is not the number of formats or language bindings. It is:
+
+```text
+normative interpretation profiles
++ canonical ArchiveIR and tree identity
++ hostile and benign corpora
++ consumer-specific policy packs
++ independent evidence verification
++ downstream integrations that consume the admitted representation
+```
+
+That surface compounds semantic knowledge, compatibility data, test fixtures, auditability, and ecosystem trust.
+
+## Evidence discipline
+
+Alpha.2 receipts are deterministic unsigned evidence records. They are not attestations. Future authenticated claims should use standard envelopes and verified identities, keep interpretation, verification, admission, and effect claims distinct, and use SBOM formats only where a consumer profile establishes package or component semantics.
+
+Do not use a numeric risk score. Current findings provide stable codes, severity, member context, and detail. The target finding schema adds explicit rule versions, phases, deterministic evidence, source spans where applicable, and remediation without turning the human message into the machine contract.
+
+Do not claim a proof-carrying tree until a canonical tree specification, certificate format, and independent verifier exist. The current truthful phrase is "One archive. One tree. Evidence."
+
+## Performance discipline
+
+Performance is not one unzip-throughput number. Measure structure, verification, realization, and reuse separately. The strongest future result is that one full verification can serve later consumers without a second parse, inflation, or filesystem write.
+
+GPU, hardware codecs, alternate runtimes, mmap, and broad parallelism are backend decisions. They follow a measured bottleneck and may not alter interpretation, exact input consumption, output bytes, findings, verification state, or tree identity.
+
+## What stays out of scope
+
+- permissive recovery parsing;
+- a generic `--insecure` mode;
+- broad format support without a canonical consumer;
+- a desktop extraction GUI;
+- recursive malware classification in the core;
+- an opaque AI-generated risk score;
+- many bindings before one external dependent;
+- a hosted service that requires private archive upload;
+- projection presented as process containment;
+- signing presented as sufficient verification.
+
+## Documentation map
+
+| Document | Purpose |
 |---|---|
-| [threat-model.md](threat-model.md) | Adversary + ZipDiff 14 types (USENIX Security 2025) |
-| [invariants.md](invariants.md) | I1–I8, testable properties |
-| [differentials.md](differentials.md) | Single interpretation, corpus, normalize |
-| [safety.md](safety.md) | Path grammar, caps, szips parity |
-| [sandbox.md](sandbox.md) | Landlock-first / mount as view |
-| [attestations.md](attestations.md) | CycloneDX + in-toto extraction receipt |
-| [assurance.md](assurance.md) | Fuzz, ZipDiff constructions, unsafe policy |
-| [architecture.md](architecture.md) | Rust core, Mojo secondary, crates |
-| [backends.md](backends.md) | When GPU/Mojo exist |
-| [bigger.md](bigger.md) | Mount as a dest |
-| [now.md](now.md) | What Rust/Mojo made practical in Aug 2026 |
-| [api.md](api.md) | `apply()` contract |
-| [policy.md](policy.md) | Policy object |
-| [findings.md](findings.md) | Code registry |
+| [semantic-model.md](semantic-model.md) | Target outcome axes, `ArchiveIR`, identities, profiles, locks, and sequencing |
+| [api.md](api.md) | Implemented alpha.2 contract and future type-state direction |
+| [architecture.md](architecture.md) | Current trust boundaries and target pipeline |
+| [threat-model.md](threat-model.md) | Adversaries and protected properties |
+| [invariants.md](invariants.md) | Testable safety invariants |
+| [differentials.md](differentials.md) | Single interpretation and ambiguity corpus |
+| [safety.md](safety.md) | Path, quota, layout, and materialization controls |
+| [sandbox.md](sandbox.md) | Process isolation and projection boundaries |
+| [attestations.md](attestations.md) | Unsigned evidence and future authenticated claims |
+| [assurance.md](assurance.md) | Hostile and benign corpora, fuzzing, proofs, and audit |
+| [backends.md](backends.md) | Performance gates for optional backends |
+| [policy.md](policy.md) | Current policy object and limitations |
+| [findings.md](findings.md) | Stable finding registry |
 
-If they fight: this file wins on “what we are”; [invariants.md](invariants.md) wins on safety; [backends.md](backends.md) wins on GPU.
+## Primary references
 
----
-
-## The claim
-
-Untrusted archives are a decades-old, still-burning primitive. Path traversal, zip bombs, polyglots, parser disagreement, and symlink/junction escapes keep producing CVEs in the tools that *already know better*:
-
-- Python `zipfile` / `tarfile` (CVE-2025-8291, CVE-2025-4517, CVE-2024-0450, …)
-- pip tar fallback (CVE-2025-8869)
-- uv wheel/ZIP confusion (CVE-2025-54368)
-- PyPI wheel RECORD vs ZIP disagreement (2025–2026 policy)
-- 7-Zip MOTW / symlink (2025–2026)
-- libarchive, the `zip` crate (CVE-2025-29787), Go `archive/zip`, every language’s DIY `extract()`
-
-The HTML analog is real: once `DOMPurify` / `bleach` existed, “roll your own sanitizer” became malpractice. There is **no DOMPurify for archives**. There is HashiCorp `go-extract` (caps + Zip-Slip, sequential, Go, telemetry, one-archive). There are `safezip` / `safe_unzip` (slow, library-shaped). There is PEP 706 (Python-only, opt-in filters). There is not a fast, fuzzed, C-ABI, structured-findings, receipt-emitting engine that agents and `uv` and CI can all call.
-
-Agentic systems made this urgent instead of merely correct. In 2026 an agent downloads a repo zip, a wheel, a dataset, model weights, a “here’s the dump.” Options today: `unzip` (malpractice) or a VM (too heavy). A primitive that **always** returns `AttestedReceipt × InspectableView`, and only sometimes files, is what those runtimes actually need.
-
----
-
-## Product shape (library first)
-
-```
-                    ┌─────────────────────────────────────────┐
-                    │  sealr engine (Rust)                   │
-                    │  parse → policy → locate → hydrate      │
-                    │  findings + receipts                    │
-                    └───────────────┬─────────────────────────┘
-                                    │ C ABI (the penetration layer)
-          ┌─────────────┬───────────┼────────────┬─────────────┐
-          ▼             ▼           ▼            ▼             ▼
-        CLI           Python      WASM/JS       Go/cgo       MCP/skill
-      (reference)    (agents)    (later)       (later)      (agents)
-```
-
-Return-type factors (see [bigger.md](bigger.md) for mount as a *view representation*):
-
-| Factor | When |
-|---|---|
-| **InspectableView** | Always. JSONL tree; `--mount` (ProjFS/FUSE) is a representation. Policy at `open()`. |
-| **AttestedReceipt** | Always. Policy, digests, environment. |
-| **Materialization** | Only if policy said yes *and* caller passed `--dest`. |
-| **Rejection** | Policy fail, or inspect-only (no dest). Still view+receipt. |
-
-Hydrate into a GPU/process buffer is an optional dest for *members after* the boundary said yes. Never the default. Never a fourth factor of the type.
-
-Ironclad defaults: the only way to use the engine is the safe way. Policy can *name* a relaxation (Unix-tarball symlinks inside the jail, larger caps for a trusted dataset) and that name goes on the receipt. There is no `--insecure`. There is `policy: datasets/huggingface-v1` that an auditor can read.
-
----
-
-## Architecture (hybrid, 2026)
-
-**Rust core is the security boundary.** The jail, ZipDiff checks, and limit counters remain safe Rust. Operating-system functions without a safe equivalent stay in small reviewed platform modules with explicit pointer, layout, handle, and error-conversion invariants. Future archive mmap belongs in an equally isolated `sealr-io` boundary and is never used for outputs.
-
-**Mojo is secondary, high-leverage, not the critical path.** 1.0 + Apache compiler (August 2026) is real. Use it for bulk hash/CRC on multi-GB–TB inspect, high-throughput validation, GPU-accelerable stages when dest is a buffer or mount page cache, later content-addressed select. **Do not** put path containment or limit enforcement in Mojo until its path/I/O story is audited. If Mojo never ships, the primitive still exists. Details: [backends.md](backends.md).
-
-**Surfaces, in order:** crate + CLI JSONL → Python (**PyO3 on this crate**) → C ABI → MCP skill → napi-rs / WASM component. Not four languages on day one. Mojo’s Python interop is for kernel bring-up, not the agent API. JSONL is the agent default. The receipt always carries policy, digests, and environment.
-
-## What is load-bearing vs what is costume
-
-| Piece | Load-bearing? | Notes |
-|---|---|---|
-| Rust core, memory safety, C ABI | **Yes** | This is how you get into `uv`, npm, a container runtime, a WASM agent. |
-| Non-optional jail + bombs + overlap + no-symlink default | **Yes** | The product. [safety.md](safety.md). |
-| Streaming inflate + CRC in one pass | **Yes** | Integrity without a second read. |
-| Structured **findings** (not a 0–100 “risk score”) | **Yes** | Compiler diagnostics. Agents can switch on codes. |
-| InspectableView always (even on reject) | **Yes** | The agent-native return value. |
-| Policy as data, copied onto the receipt | **Yes** | Enterprises and agents. Receipt is a return-type factor. |
-| Python bindings | **Yes** (wave 1) | PyO3 on this crate. |
-| CLI | **Yes**, as reference | Not the business. |
-| Mount | **Yes**, as view representation | Not a third dest. [bigger.md](bigger.md). |
-| Receipts in **in-toto / DSSE / Sigstore**, SBOM as **CycloneDX/SPDX of members** | **Yes**, don’t invent a format | Syft already SBOMs *packages*. We attest *this unpack under this policy*. Different predicate. |
-| JS/TS, WASM, Go | Wave 2 | C ABI makes them cheap. Don’t start there. |
-| Mojo / GPU / nvCOMP | **Backend, not the pitch** | Earn on multi-TB inspect/hash or dest=device. CRC32 is already GB/s on CPU (`crc32fast`). Selling “Mojo safe-unzip” is a learning-project headline. |
-| Next-gen archive format | Later | Become the migration path after the engine is trusted. Cram is already in that graveyard-adjacent lane. |
-| Formal proofs of the jail | After fuzz | oss-fuzz + a million hostile zips first. Coq later if a consumer demands it. |
-
-### Findings, not scores
-
-A 0–100 “risk score” will be bike-shed and gamed. Emit **structured findings**, like a compiler:
-
-```
-code: zip.overlap_bomb
-severity: error          # error | deny | warn | info
-member: payload.bin
-detail: compressed ranges [0x1a00,0x4fff) and [0x1c00,0x5000) overlap
-policy: default
-```
-
-Structural facts (path `..`, overlap, ratio, polyglot ZIP+PDF, local vs CD name mismatch, RECORD vs payload, symlink, ADS `:`) are the engine. “Looks malware” is YARA/EDR’s job; we MAY attach an optional classifier later, labeled as such. Distillr’s rule applies: don’t fake a judgment with a heuristic.
-
-Polyglot / parser-disagreement is a **real differentiator** go-extract does not own. “This is a ZIP to us, a PDF to `file(1)`, and a tar to libarchive” is exactly the class PyPI spent 2025 killing in wheels.
-
-### Mojo, honestly
-
-The language exploration that started this repo is real. It is not co-equal to the primitive.
-
-- Rust is the product because of *trust and penetration*, not because of Deflate GB/s.
-- Mojo is allowed as a hydrate/hash backend for huge scientific/AI archives when dest is a buffer or a mount page cache, and when it beats CPU after copies. Same gate as nvCOMP: [backends.md](backends.md).
-- Do not put Mojo on the user install path. Do not delay the C ABI for MAX.
-
-If Mojo never ships, the product is intact. If Rust never ships, there is no product.
-
----
-
-## Dual audience (without the network-effects slide)
-
-Same engine, two façades.
-
-**Classic:** `uv` / pip / npm / cargo installers, GitHub Actions artifact unzip, container layer unpack, OS extract, EDR “what did this zip contain.” They need: C ABI or language-native, no telemetry surprise, stable findings codes, boring performance, an audit story (fuzz corpus, advisory process).
-
-**Agents:** MCP tool + Python. `inspect(archive) → tree + findings`. `extract(..., policy=)`. `mount(...)`. Receipt path for the session log. They need: JSONL, no TTY assumptions, inspect-without-write as the default.
-
-Adoption is not magic. It is **one canonical dependent**. Until `uv` or a major agent runtime or Actions vendors us, we are a crate. Plan the first dependent explicitly; do not list six ecosystems as launch customers.
-
-Closest existing thing to beat, not clone: **go-extract** (safety, sequential, Go) + **ripunzip** (speed, trusts the archive) + **Syft attest** (receipts for SBOMs, not unpacks) + **ratarmount** (mount, not policy). The hole is the composition plus inspect-as-API plus findings plus a C ABI.
-
----
-
-## Expansion (in order, not a pile)
-
-1. ZIP inspect + materialize, findings, Python, CLI JSONL. Fuzz the jail.
-2. tar / gz / zst. Policy files. Receipts (unsigned first, Sigstore second).
-3. C ABI. One classic dependent (even if it’s us, inside another of our tools).
-4. Mount (ProjFS, then FUSE).
-5. 7z native, jailed. MCP skill.
-6. Optional nvCOMP/QAT/Mojo on fat inspect/hash. Content-addressed selective extract (`--only-hash`).
-7. oss-fuzz continuous. Maybe formal jail.
-8. Native tiled format only if hydrate of stock ZIP is maxed and we have users.
-
----
-
-## What would make this *not* infrastructure
-
-- Shipping a CLI that happens to have `--json` and calling it a platform.
-- `--insecure` because a Unix tarball has a symlink.
-- A risk score dashboard.
-- Four language bindings before one consumer.
-- Leading the README with Mojo or GPU.
-- Inventing an attestation format.
-- Competing with Syft on package graphs, or 7-Zip on RAR, or Cram on a new container.
-
-Infrastructure looks like: **a crate + a `.so` + a findings spec + a policy schema + a receipt predicate + a public hostile-archive corpus**, and then someone who is not us calls it from a package manager.
-
-## Open problems worth owning
-
-- Maintainable defenses against the full ZipDiff set (and new types as the artifact grows).
-- Overlapping-entry bombs at scale without a second full pass.
-- Verified path-containment across POSIX + Windows prefix/8.3/ADS semantics.
-- Standardizing an **extraction** in-toto predicate the industry can adopt (we may be first).
-- Agent tool-calling + sandboxed/mount views that do not destroy performance.
-- Mojo (or any accelerator) on integrity-heavy paths without putting the jail in an unaudited runtime.
-
-Study: ZipDiff paper + artifact, `exarch` / `safe_unzip` / `openpack` SecurityConfigs, Landlock/seccomp, in-toto/SLSA/CISA 2026 SBOM elements. Then build the hybrid that closes the gaps none of those libraries fully close.
+- [ZipDiff, USENIX Security 2025](https://www.usenix.org/conference/usenixsecurity25/presentation/you)
+- [uv ZIP ambiguity advisory, 2025](https://github.com/advisories/GHSA-8qf3-x8v5-2pj8)
+- [Python wheel parser differential advisory, 2026](https://github.com/google/security-research/security/advisories/GHSA-w97x-xxj5-gpjx)

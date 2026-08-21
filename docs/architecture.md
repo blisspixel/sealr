@@ -1,145 +1,125 @@
 # Architecture
 
-> This document describes the target architecture. The current two-crate implementation and its limitations are listed in [README.md](../README.md). Items such as `rawzip`, mmap, rayon, the expanded crate graph, hardware backends, and six-target distribution are not implemented yet.
+> This page separates the implemented alpha.2 architecture from the target semantic architecture. Planned types, profiles, tree roots, projection, process isolation, acceleration, and expanded crate graph are not current features. See [semantic-model.md](semantic-model.md) for the normative target.
 
-Rust core is the security boundary for the jail, ZipDiff checks, limits, and materialization. Safe Rust is the default. The only current `unsafe` blocks are isolated in the Apple descriptor-ACL module and Windows native stage/publication module. Those small modules are the explicit platform-FFI audit boundary. Mojo is a later hydrate/hash module, never the path logic ([vision.md](vision.md), [backends.md](backends.md)).
+## Implemented in alpha.2
 
-Phase 0/1 is a Rust CPU **inspect + materialize** engine. Optional hardware backends plug into the same scheduler later. If well-formed ZIP materialize does not match `ripunzip` / Cram / Bandizip with the jail on, stop.
+Sealr is a two-crate Rust workspace:
 
-## Crate graph
-
-```
-sealr/                          # workspace root (this folder)
-  crates/
-    sealr-cli/                  # clap façade of the type
-    sealr/                      # lib: Archive × Policy → tuple
-    sealr-formats/              # ZIP via rawzip; later tar/gz/7z
-    sealr-safety/               # jail, bomb limits, overlap, ZipDiff A1–C5, policy
-    sealr-cpu/                  # deflate / crc / later zstd
-    sealr-io/                   # mmap, prealloc, long paths, write bound
-    sealr-bench/                # corpus hashes + harness vs 7z/ripunzip
+```text
+crates/sealr      security boundary, parser, policy, verification, evidence, materializer
+crates/sealr-cli  thin command-line facade
 ```
 
-`sealr` (lib) is one function with that type: always `AttestedReceipt × InspectableView`; `Materialization | Rejection` is the fork. `inspect` / `materialize` / `mount` are façades (view-only, write files, view-as-FS). Same interpretation for all three - do not grow a recovery/streaming parser (LibreOffice class of bug). The current CLI emits one pretty JSON view on stdout and one pretty JSON receipt on stderr. JSONL is a later surface.
+The library exposes one `apply()` path for inspect and materialize. Both modes use the same interpreted member plan. There is no recovery parser and no second extraction implementation.
 
-`sealr-cli` is thin so benches call the lib without spawning. The process path stays for apples-to-apples vs `7z`.
+The current input and interpretation boundary is:
 
-Do **not** take `ripunzip` or the batteries-included `zip` crate on the hot path. `zip` 8.x is an interop/fuzz oracle. `rawzip` 0.5 is the structure parser: ZIP64, `Copy + Send` wayfinders, consumer supplies inflate and CRC.
+1. Use a bounded in-memory source. Path inputs are read into owned bytes; borrowed byte inputs remain borrowed for the call.
+2. Locate and validate ZIP32 EOCD and the central directory.
+3. Compare redundant central and local metadata, validate source ranges, reject overlaps and hidden structural records, and apply the strict path grammar.
+4. If a destination was requested, create and retain its private stage after structural planning and before member processing.
+5. Stream accepted Store and Deflate content through resource bounds, exact DEFLATE input-consumption checks, actual size checks, CRC32, and SHA-256. Write the same verified bytes into the private stage when one exists.
+6. Publish the complete stage without replacement only after every member passes. Abort and report cleanup on any member or publication failure.
+7. Emit the versioned view and deterministic unsigned receipt for the actual final outcome.
 
-Default features stay pure Rust (`flate2` + `zlib-rs`, `crc32fast`, `rawzip`) so `cargo dist` does not need nasm/cmake. `libdeflate` / ISA-L / C zstd are extra features.
+Current support is seekable ZIP32 with Store and Deflate members plus validated data descriptors. Encryption, ZIP64, spanned archives, recovery parsing, recursive nested extraction, links, devices, and unsupported structures fail closed. The [README](../README.md) is authoritative for the complete support and limitation list.
 
-Empty stubs `nvidia` and `mojo` exist so the feature names are real. They must not break the default build.
+Safe Rust is the default. The current `unsafe` blocks are isolated in the macOS descriptor-ACL module and the Windows native storage, security-descriptor, stage, and publication module. Those modules are the explicit platform FFI audit boundary.
 
-## Pipeline (one archive)
+## Implemented materialization boundary
 
-```
-0. Drop ambient authority (Landlock/seccomp / AppContainer); pin archive + dest fds
-1. Open + mmap (or cloned File if too big)
-2. Parse central directory (CD-first; ZipDiff C2–C5)
-3. Differential + safety pre-pass (A1–A5, B1–B4, overlap, jail, caps)
-   → always: InspectableView + AttestedReceipt
-   → if policy fail: Rejection (stop)
-   → if no --dest: Rejection of writes (inspect); still return the tuple
-4. Sequential mkdir of unique parents, sorted
-5. rayon over file members, bounded write concurrency
-6. Per member: inflate → bound uncompressed bytes → CRC → write
-7. On CRC mismatch: delete the partial file, fail the member; receipt records it
-```
-
-## Hardened materialization path
-
-The implemented materializer has one admission and publication sequence:
+The materializer applies one admission and publication sequence:
 
 1. Require the destination parent to exist, canonicalize it once, and retain an opened directory capability. Do not create missing parents.
-2. Refuse an existing destination. On Unix, require parent ownership by the effective user or root and reject group/other write unless the trusted owner has set sticky. On macOS, reject any extended ACL or descriptor ACL query failure.
-3. Create a random 128-bit same-volume stage. Linux and macOS use mode `0700`, then verify effective-user ownership, mode, and the macOS descriptor ACL. Windows uses parent-rooted `NtCreateFile` with exclusive creation and reparse-point-open semantics, retains the handle, and omits delete sharing.
-4. Create each canonical member with component-by-component no-follow directory capabilities and exclusive file creation. Windows additionally checks opened handles for the reparse-point attribute.
+2. Refuse an existing destination. On Linux and macOS, require parent ownership by the effective user or root and reject group or other write unless the trusted owner has set sticky. On macOS, reject an extended ACL or descriptor ACL query failure.
+3. Create a random 128-bit same-volume stage. Linux and macOS use mode `0700`, then verify effective-user ownership, mode, and the macOS descriptor ACL. Windows requires non-remote, writable NTFS with persistent ACLs, then uses parent-rooted `NtCreateFile` with exclusive creation, reparse-point-open semantics, and a protected effective-TokenUser-only inheritable DACL. It retains the handle without delete sharing and verifies the owner and exact DACL through that handle before member writes.
+4. Create each validated member with component-by-component no-follow directory capabilities and exclusive file creation. Windows also checks opened handles for the reparse-point attribute.
 5. Publish without replacement. Linux uses `renameat2(RENAME_NOREPLACE)`, macOS uses `renameatx_np(RENAME_EXCL)`, and Windows calls `NtSetInformationFile` on the retained stage handle with the retained parent as `RootDirectory` and replacement disabled.
-6. On ordinary rejection, attempt cleanup twice before constructing the receipt. Record setup, staging, publication, abort, and final cleanup outcomes. Two cleanup failures leave the stage for explicit recovery and report `cleanup: failed`.
+6. On ordinary rejection, attempt cleanup and retry once after failure before constructing the receipt. Setup failure after stage creation uses the retained handle first and a parent-relative retry. Record setup, staging, publication, abort, and final cleanup outcomes. Two failed attempts leave the stage for explicit recovery and report `cleanup: failed`.
 
-Linux, macOS, and Windows are the supported materialization platforms. Other targets fail closed. The Windows stage inherits the parent ACL, so handle-bound publication prevents stage-name substitution but does not make a broadly writable parent private. Root, administrators, same-principal processes, filesystem-override capabilities, and debugging or handle-duplication rights remain outside the in-process boundary.
+Linux, macOS, and Windows on the documented filesystem matrix are the supported materialization platforms. Other targets and unsupported Windows filesystems fail closed. Root, administrators, same-principal processes, filesystem-override capabilities, and debugging or handle-duplication rights remain outside this in-process boundary.
 
-The receipt's `materialization` object records `backend`, `stage_mode`, `stage_creation_primitive`, `member_resolution`, `durability`, `publication_primitive`, `outcome`, and `cleanup`. These fields make the active control path inspectable. They do not authenticate an unsigned preview receipt.
+The receipt's `materialization` object records the selected backend, stage protection, creation primitive, member resolution, durability mode, publication primitive, lifecycle outcome, and cleanup result. Windows also records non-sensitive storage-policy observations and stage-ACL verification. These fields expose which control path ran. They do not authenticate the unsigned receipt.
 
-Mount hydrates step 6 on `read` (view representation). Same interpretation everywhere.
+## Current trust boundaries
 
-Folder of archives: one global rayon pool after a global safety + mkdir pass if they share a dest. Non-recursive scan, like szips.
+The format parser, path grammar, quota counters, content verification, and policy decision share one in-process trust boundary. The materializer receives validated relative components rather than archive-controlled ambient paths.
 
-## Parallelism
+Alpha.2's bounded in-memory source provides invocation-scoped immutability through owned path bytes or a caller-borrowed immutable slice. It does not yet:
 
-| Layer | Granularity | Phase 1 |
-|---|---|---|
-| Outer | archives in a folder | rayon, or one pool of members across archives |
-| Middle | ZIP members | rayon over pre-validated work items |
-| Inner | Deflate blocks inside one member | **not v0** |
-| Write | files into one dest dir | **bounded** (default 8 on Windows, 32 elsewhere) |
+- split interpretation, admission, verification, and effect into independent outcome axes;
+- produce a normative `ArchiveIR`, layout root, or content-tree root;
+- expose a named `SourceSnapshot` abstraction or a private snapshot that supports bounded random access;
+- run parsing in a reduced-authority worker;
+- expose a read-only projection or content-addressed store;
+- sign or independently verify evidence.
 
-No tokio in Phase 1. `tokio::fs` is a blocking pool. Completion I/O (`compio`: io_uring + IOCP) is Phase 2 if writing a few huge files is the limiter.
+## Target semantic pipeline
 
-NTFS serializes MFT updates. Unbounded `CreateFile` into one folder can be slower than modest concurrency. Sequential mkdir, then parallel files.
+The next architecture is centered on one canonical intermediate representation:
 
-## ZIP surface
-
-Current support: in-memory seekable ZIP32, EOCD + CD, methods Store (0) and Deflate (8), and validated data descriptors.
-
-Phase 0.1 changes the source to bounded random-access I/O and keeps the same interpretation. ZIP64 remains rejected until its locator, EOCD, extra-field, offset, count, and corpus rules are implemented together.
-
-Reject: encryption, spanned, overlapping compressed ranges, streamed zip (no CD), nested-archive recursion.
-
-Deflate64, ZIP zstd (method 93), SFX prefixes: later, do not silently skip-as-success.
-
-## Codecs (CPU)
-
-1. Deflate + known uncompressed size + under a RAM gate (e.g. 64 MiB) + `libdeflate` feature: whole-buffer inflate.
-2. Else: `flate2` + `zlib-rs`, streaming into the file.
-3. Never ship `miniz_oxide` as the release default.
-
-CRC with `crc32fast` **during** write. Do not re-read from disk. SHA-256 is calculated for every expanded member in the same streaming pass. Hash selection is a later policy surface.
-
-libdeflate is not a streaming library. A 4 GiB member must not try to allocate 4 GiB.
-
-## I/O
-
-Phase 1, all three OSes:
-
-- `memmap2` the archive up to a cap (default 4 GiB or 50% RAM); else per-worker `File`.
-- Preallocate outputs ≥ 64 KiB (`fs4`).
-- 256 KiB buffered writes. No per-file `fsync` unless `--fsync`.
-- Windows: `\\?\` long paths, longPathAware manifest, `FILE_FLAG_SEQUENTIAL_SCAN` on large outputs.
-- Do not mmap 50k output files.
-
-Later: `compio` if benches show syscall overhead on fat members. DirectStorage is **not** a filesystem extractor (dest is D3D12; GPU path is GDeflate). See [backends](backends.md).
-
-## Scheduler (the actual product, Phase 4)
-
-Per member, after safety:
-
-```
-if dest is device memory:
-    prefer nvCOMP (DE if present) for {lz4, snappy, deflate, gzip, zstd, gdeflate}
-elif QAT live and codec in {deflate, gzip} and size >= S_qat:
-    QAT
-elif nvidia live and member >= S_gpu and codec in {lz4, snappy, zstd} and chunked:
-    nvCOMP, overlap D2H with writer
-else:
-    CPU SIMD
-never:
-    GPU for lzma, tiny members, first-run CUDA on a small zip
+```text
+untrusted source
+    -> immutable SourceSnapshot
+    -> versioned interpretation profile
+    -> canonical ArchiveIR
+    -> admission policy + target model + consumer profile
+    -> AdmittedArchive
+       -> verify
+       -> materialize
+       -> project read-only
+       -> publish to content-addressed storage
+       -> emit evidence
 ```
 
-Thresholds `S_*` are measured on *this* machine. Hard-coding 64 MiB is less wrong than “always GPU.” Print the decision.
+The critical rule is that every operation after interpretation consumes the IR and its immutable source snapshot. No facade, language binding, materializer, projection, or consumer profile may reparse the source archive.
 
-## Ship
+### Source ownership
 
-`cargo-dist`. Six targets: Windows / macOS / Linux × x86_64 / aarch64. Default binary: no C compiler. Optional `sealr-fast` artifact with libdeflate.
+Bounded random access must preserve the security property currently provided by the in-memory source. The target `SourceSnapshot` first names the existing owned and caller-borrowed byte cases, then supports immutable alternatives for the complete interpretation and verification lifetime. A caller path can later be copied, cloned, or reflinked into a private spool or content-addressed object while hashing. Remote metadata such as an ETag or content length does not replace possession of the exact bytes. The bounded random-access implementation is a later memory-scaling milestone, not a prerequisite for defining the semantic abstraction.
 
-## Footguns
+### Canonical intermediate representation
 
-- `zip` crate `extract()` is sequential and not the parallel foundation.
-- `testzip()` doubles CPU; CRC-on-write replaces it.
-- Two archives, one dest, same `readme.txt`: define overwrite policy (default refuse; szips silently overwrote - we are stricter).
-- Archive mmap is `unsafe` if another process truncates the file. Keep the `File` handle alive on Windows.
-- Defender can dwarf inflate. Measure with it on.
-- 7z solid archives are one decoder. Rayon over members is a lie.
+The versioned `ArchiveIR` preserves raw name bytes, decoded and canonical names, source ranges, flags, extra-field dispositions, declared and actual sizes, content commitments, and verification state. It is the source of layout and content-tree identities. Canonical encoding and root derivation require normative test vectors before those identities are stable.
 
-Dependency versions are pinned in `Cargo.lock`; this document records the intended boundaries rather than a second dependency manifest.
+### Separated policy layers
+
+Interpretation profile, deterministic resource budget, target filesystem model, consumer profile, and effect policy are separate compiled inputs. Unknown or unsupported controls fail before source ingestion. Publication atomicity and durability are different effect properties.
+
+### Reduced-authority worker
+
+After semantic types stabilize, a trusted supervisor can own the archive snapshot, destination parent, private stage, lifecycle, staged-tree audit, and publication authority. A worker receives only bounded archive and stage capabilities through a versioned protocol. On Linux, runtime-probed Landlock and `no_new_privs` can restrict that worker before it reads the first archive byte. Equivalent credible packaging boundaries for macOS and Windows require separate work.
+
+The supervisor treats worker output as untrusted and audits the staged tree against the admitted IR before publication. Process isolation strengthens containment, but does not define archive semantics and must not own a second parser.
+
+## Realization and reuse
+
+Materialization, read-only projection, and content-addressed reuse are representations of one admitted tree.
+
+The first projection, when implemented, must be read-only with no links, write overlay, hidden network access, or implicit promotion. Its verification state begins partial and advances as members are read. Projection is not a process sandbox.
+
+A future content-addressed store can amortize verification and filesystem writes across repeated consumers. Reuse is valid only when source identity, interpretation profile, tree identity, policy requirements, and verification completeness match.
+
+## Performance architecture
+
+Measure the boundary as four costs:
+
+```text
+T_structure  construct and evaluate the logical layout
+T_verify     expand and hash required content
+T_realize    build and publish a destination tree
+T_reuse      provide an already verified admitted tree
+```
+
+Avoided parsing, inflation, and writes are the strategic optimization. Parallel member verification, clone or link materialization, alternate codec backends, remote range ingestion, and hardware acceleration follow only after the semantic workload is stable. An optional backend must preserve exact input consumption, output bytes, findings, tree identities, and verification state.
+
+## Format and consumer expansion
+
+Add a format only with a concrete consumer and a profile whose semantics are specified. ZIP remains the semantic core until `ArchiveIR`, tree identity, snapshots, and evidence are stable. Python wheel admission is the first candidate consumer. TAR for hermetic build inputs and OCI layers requires its own link, ownership, sparse-file, extension-header, and application semantics. A generic format checkbox is not sufficient.
+
+## Platform contract
+
+Every semantic change must remain deterministic on supported Linux, macOS, and Windows targets. The host may select an effect backend, but may not silently select name decoding, normalization, path comparison, or archive interpretation. Platform-specific output constraints belong in an explicit target filesystem model.
+
+Dependency versions are pinned in `Cargo.lock`. This page records trust and semantic boundaries rather than serving as a second dependency manifest.

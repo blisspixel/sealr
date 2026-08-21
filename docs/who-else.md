@@ -65,8 +65,8 @@ Phase 1 is only justified as **the CPU backend inside the real product**, with j
 The hole after this pass is the **type**, not a faster `x`:
 
 ```
-UntrustedArchive × Policy
-  → (Materialization | Rejection) × AttestedReceipt × InspectableView
+UntrustedArchive x Policy
+  -> (Allowed { wrote } | Rejected) x Receipt x View
 ```
 
 exarch/go-extract do not return that tuple. Cram/Bandizip do not. ZipDiff is the paper nobody in that table implements.
