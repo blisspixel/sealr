@@ -366,9 +366,56 @@ function Assert-ImmutableReleaseSetting {
     return $settings
 }
 
-function Get-ReleaseByTag {
-    $encodedTag = [System.Uri]::EscapeDataString($ReleaseTag)
-    Invoke-GhApiJson -ApiArguments @("repos/$Repository/releases/tags/$encodedTag")
+function Get-ReleaseById {
+    param([Parameter(Mandatory)][int64]$ReleaseId)
+
+    Assert-True -Condition ($ReleaseId -gt 0) -Message 'release ID must be positive'
+    $release = Invoke-GhApiJson -ApiArguments @(
+        '--method', 'GET',
+        "repos/$Repository/releases/$ReleaseId"
+    )
+    Assert-Equal -Expected $ReleaseId -Actual ([int64]$release.id) -Label 'numeric release ID'
+    Assert-Equal -Expected $ReleaseTag -Actual ([string]$release.tag_name) -Label 'numeric release tag'
+    return $release
+}
+
+function Get-ExactReleaseForTag {
+    param([int64]$ExpectedReleaseId = 0)
+
+    $arguments = @(
+        'api'
+        '-H'
+        'Accept: application/vnd.github+json'
+        '-H'
+        "X-GitHub-Api-Version: $ApiVersion"
+        '--method'
+        'GET'
+        '--paginate'
+        '--slurp'
+        "repos/$Repository/releases?per_page=100"
+    )
+    $result = Invoke-NativeCommand -FilePath 'gh' -Arguments $arguments
+    Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($result.Text)) -Message 'GitHub release list returned an empty response'
+    $pages = ConvertFrom-Json -InputObject $result.Text -Depth 100 -NoEnumerate
+    Assert-True -Condition ($pages -is [System.Array]) -Message 'paginated release response must be an array of pages'
+
+    $matches = @(
+        foreach ($page in $pages) {
+            Assert-True -Condition ($page -is [System.Array]) -Message 'each paginated release page must be an array'
+            foreach ($candidate in $page) {
+                if ([string]$candidate.tag_name -eq $ReleaseTag) {
+                    $candidate
+                }
+            }
+        }
+    )
+    Assert-Equal -Expected 1 -Actual $matches.Count -Label "release count for $ReleaseTag"
+    $releaseId = [int64]$matches[0].id
+    Assert-True -Condition ($releaseId -gt 0) -Message 'discovered release ID must be positive'
+    if ($ExpectedReleaseId -gt 0) {
+        Assert-Equal -Expected $ExpectedReleaseId -Actual $releaseId -Label 'pinned release ID'
+    }
+    return Get-ReleaseById -ReleaseId $releaseId
 }
 
 function Get-ArchiveAssetNames {
@@ -612,7 +659,7 @@ function Get-ImmutablePublishedRelease {
 
     $deadline = [System.DateTimeOffset]::UtcNow.AddMinutes(1)
     while ($true) {
-        $release = Get-ReleaseByTag
+        $release = Get-ReleaseById -ReleaseId $ReleaseId
         if (-not [bool]$release.draft -and [bool]$release.immutable) {
             Assert-Equal -Expected $ReleaseId -Actual ([int64]$release.id) -Label 'published release ID'
             Assert-ReleaseContract -Release $release -ExpectedNotes $ExpectedNotes -State 'published'
@@ -644,7 +691,7 @@ try {
     $releaseWorkflowState = Get-ExactReleaseWorkflowState -Commit $source.Commit
     $immutableSettings = Assert-ImmutableReleaseSetting
 
-    $release = Get-ReleaseByTag
+    $release = Get-ExactReleaseForTag
     $state = if ([bool]$release.draft) { 'draft' } else { 'published' }
     Assert-ReleaseContract -Release $release -ExpectedNotes $source.Notes -State $state
     $snapshot = New-ReleaseSnapshot -Release $release
@@ -688,7 +735,7 @@ try {
     Assert-Equal -Expected $source.Commit -Actual $finalMain -Label 'prepublication main commit'
     Assert-Equal -Expected $source.Commit -Actual $finalTag -Label 'prepublication tag commit'
 
-    $finalDraft = Get-ReleaseByTag
+    $finalDraft = Get-ExactReleaseForTag -ExpectedReleaseId $snapshot.ReleaseId
     Assert-ReleaseContract -Release $finalDraft -ExpectedNotes $source.Notes -State 'draft'
     Assert-ReleaseMatchesSnapshot -Release $finalDraft -Snapshot $snapshot
     Assert-Equal -Expected $ciState.Id -Actual $finalCiState.Id -Label 'prepublication CI run ID'
