@@ -22,6 +22,7 @@ $expectedTranscripts = @(
     '02-reject-parent-path.txt',
     '03-materialize-allowed.txt'
 )
+$expectedTranscriptVariants = @('unix', 'windows')
 $forbiddenChunks = @('eXIf', 'iTXt', 'tEXt', 'tIME', 'zTXt')
 $pngSignature = [byte[]](137, 80, 78, 71, 13, 10, 26, 10)
 
@@ -42,6 +43,9 @@ if ([string]$manifest.tool_version -ne $versionMatch.Groups[1].Value) {
 }
 if ([string]$manifest.presentation -ne 'rendered-terminal-style-summary') {
     throw "unexpected walkthrough presentation: $($manifest.presentation)"
+}
+if ([string]$manifest.image_transcript_variant -ne 'windows') {
+    throw "unexpected walkthrough image transcript variant: $($manifest.image_transcript_variant)"
 }
 
 function Assert-ManifestHashes {
@@ -78,11 +82,15 @@ function Assert-ManifestKeys {
 }
 
 Assert-ManifestKeys -Entries $manifest.fixtures -ExpectedNames $expectedFixtures -Label 'fixture'
-Assert-ManifestKeys -Entries $manifest.transcripts -ExpectedNames $expectedTranscripts -Label 'transcript'
+Assert-ManifestKeys -Entries $manifest.transcripts -ExpectedNames $expectedTranscriptVariants -Label 'transcript variant'
+foreach ($variant in $expectedTranscriptVariants) {
+    Assert-ManifestKeys -Entries $manifest.transcripts.$variant -ExpectedNames $expectedTranscripts -Label "$variant transcript"
+}
 Assert-ManifestKeys -Entries $manifest.images -ExpectedNames $expected -Label 'image'
 
 Assert-ManifestHashes -Entries $manifest.fixtures -Directory (Join-Path $workspace 'target/readme-walkthrough/fixtures') -Label 'fixture'
-Assert-ManifestHashes -Entries $manifest.transcripts -Directory (Join-Path $workspace 'target/readme-walkthrough/transcripts') -Label 'transcript'
+$transcriptVariant = if ([System.OperatingSystem]::IsWindows()) { 'windows' } else { 'unix' }
+Assert-ManifestHashes -Entries $manifest.transcripts.$transcriptVariant -Directory (Join-Path $workspace 'target/readme-walkthrough/transcripts') -Label "$transcriptVariant transcript"
 Assert-ManifestHashes -Entries $manifest.images -Directory $assetRoot -Label 'image'
 
 function Read-UInt32BigEndian {
@@ -175,4 +183,4 @@ foreach ($name in $expected) {
     }
 }
 
-Write-Host 'walkthrough assets verified: alpha.2 manifest, fixture and transcript hashes, 6 PNG hashes, 1000x560, 144 DPI, no text metadata, each <= 250 KB'
+Write-Host "walkthrough assets verified: alpha.2 manifest, fixture and $transcriptVariant transcript hashes, 6 PNG hashes, 1000x560, 144 DPI, no text metadata, each <= 250 KB"

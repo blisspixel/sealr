@@ -147,7 +147,7 @@ Expected result: exit `0`, verdict `allowed`, `wrote: true`, and exactly the two
   <img alt="Screenshot of sealr materializing two approved members into a new destination after inspection." src="docs/assets/readme-walkthrough/sealr-materialize-allowed-terminal-light.png" width="1000">
 </picture>
 
-The semantic walkthrough is enforced by CLI integration tests on the native platform jobs. The PNGs are rendered terminal-style summaries derived from alpha.2's separate JSON view and receipt streams; they are not literal captures of raw CLI output or the planned human interface. The alpha.1 and alpha.2 visible walkthrough output was unchanged. CI regenerates the fixtures, transcripts, and HTML, checks fixture and transcript SHA-256 values against the committed asset manifest, then verifies every PNG's SHA-256, dimensions, format, size, density, and metadata policy. CI does not claim a pixel comparison.
+The semantic walkthrough is enforced by CLI integration tests on the native platform jobs. The PNGs are rendered terminal-style summaries derived from alpha.2's separate JSON view and receipt streams; they are not literal captures of raw CLI output or the planned human interface. The alpha.1 and alpha.2 visible walkthrough output was unchanged. CI regenerates the fixtures, native transcript variant, and HTML, checks fixture and platform-specific transcript SHA-256 values against the committed asset manifest, then verifies every PNG's SHA-256, dimensions, format, size, density, and metadata policy. CI does not claim a pixel comparison.
 
 ## Design rules
 

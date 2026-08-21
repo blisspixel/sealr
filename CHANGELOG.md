@@ -10,7 +10,7 @@ The project is in initial development. Compatibility may change between preview 
 
 - Clarified the post-alpha.2 execution queue and reconciled supporting research documentation with the semantic-identity-first roadmap.
 - Added runnable checksum, provenance, and immutable-release verification commands for the current published prerelease without changing its historical release notes.
-- Added a versioned walkthrough manifest that binds regenerated fixture and transcript hashes to the six committed PNG hashes, and clarified that the images are rendered summaries rather than literal raw CLI captures.
+- Added a versioned walkthrough manifest that binds regenerated fixture and platform-specific transcript hashes to the six committed PNG hashes, and clarified that the images are rendered summaries rather than literal raw CLI captures.
 
 ## [0.1.0-alpha.2] - 2026-08-21
 

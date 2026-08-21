@@ -105,7 +105,7 @@ Job-oriented verbs such as `gate`, `verify`, `materialize`, and `explain` follow
 
 The committed images are rendered terminal-style summaries derived from the current alpha.2 JSON view and receipt streams. They remain paired with copyable commands and expected text. They were first captured for alpha.1; the visible walkthrough output did not change in alpha.2. Whenever visible output changes, the walkthrough fixtures and transcripts must be regenerated from the locally built release-profile binary, semantic assertions must run first, and both light and dark screenshots must be recaptured.
 
-Current CI regenerates fixture and transcript inputs, checks their SHA-256 values against the committed manifest, and verifies the exact PNG hashes, asset set, format, dimensions, density, and metadata policy. A future pixel-level renderer comparison is deliberately not claimed.
+Current CI regenerates fixture and native transcript inputs, checks their SHA-256 values against the manifest's Unix or Windows variant, and verifies the exact PNG hashes, asset set, format, dimensions, density, and metadata policy. A future pixel-level renderer comparison is deliberately not claimed.
 
 Screenshots demonstrate released behavior. They are never the only instructions and are not updated to show planned commands before those commands exist.
 
