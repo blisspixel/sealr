@@ -548,8 +548,8 @@ jobs:
             confirmation="$(classify_release_pages <<<"${confirmation_pages}")"
             require_safe_classification "${confirmation}"
             if jq -e --argjson id "${existing_release_id}" '
-              ((.exact | length) + (.recovery | length)) == 1 and
-              (.exact + .recovery)[0].id == $id
+              ((.valid_exact | length) + (.recovery | length)) == 1 and
+              (.valid_exact + .recovery)[0].id == $id
             ' <<<"${confirmation}" >/dev/null; then
               list_identity_stable=true
               break
