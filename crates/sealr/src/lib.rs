@@ -7,6 +7,7 @@ mod apply;
 mod covering;
 mod findings;
 mod identity;
+mod interval;
 mod ir;
 mod jail;
 mod materialize;
