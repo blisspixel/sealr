@@ -1,6 +1,6 @@
 # Documentation
 
-Start with the [README](../README.md) for the supported alpha.3 boundary and a short walkthrough. This index separates current contracts from plans and research notes.
+Start with the [README](../README.md) for the published alpha.3 boundary, the current-main delta, and a short walkthrough. This index separates current contracts from plans and research notes.
 
 ## Start and integrate
 
@@ -19,6 +19,7 @@ Start with the [README](../README.md) for the supported alpha.3 boundary and a s
 | [Threat model](threat-model.md) | Adversaries, exclusions, and parser-differential threats |
 | [Invariants](invariants.md) | Properties that implementation and evidence must preserve |
 | [Assurance](assurance.md) | Current evidence and the layered verification program |
+| [Identity conformance](identity-conformance.md) | Current vectors, standalone verifier, exact root bytes, and bounded claims |
 | [Differentials](differentials.md) | Single-interpretation rules and the ZipDiff corpus |
 | [Reduced-authority execution](sandbox.md) | Supervisor and worker design |
 | [Finding registry](findings.md) | Stable machine finding codes |

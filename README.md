@@ -15,6 +15,8 @@ The longer-term aim is an archive-to-tree admission boundary whose decision and 
 
 > Status: `v0.1.0-alpha.3` is the third development preview of the ZIP boundary. It is useful for evaluation, development, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. The limitations below are security boundaries, not fine print.
 
+> Repository status: current `main` is ahead of the published alpha.3 artifacts. `VerifiedArchive`, the extracted-package consumer, two finite-domain property families, and independent identity conformance are recorded under [Unreleased](CHANGELOG.md#unreleased). The [alpha.3 release notes](docs/releases/v0.1.0-alpha.3.md) remain the authority for downloaded alpha.3 binaries.
+
 ## Why this exists
 
 Agents, package systems, upload handlers, and data pipelines routinely receive archives from outside their trust boundary. Archive formats encode filesystem topology as well as content, and different parsers can assign different meanings to the same bytes.
@@ -49,6 +51,7 @@ The current Rust implementation supports classic ZIP32 archives with stored or D
 - Fully verified admitted outcomes expose an opaque `VerifiedArchive`. It retains the exact source snapshot and existing IR, looks up canonical members without another ZIP parse or path reopen, checks a caller byte ceiling before reserving memory, and revalidates size, CRC32, and SHA-256 before returning bytes.
 - A pinned 5,927-file, 14-class ZipDiff construction gate with a deterministically generated aggregate corpus digest, exact finding-count expectations, and an explicit 73-file control allowlist.
 - An adversarial unit suite, an external-crate API fixture, a separate consumer that runs against the extracted packaged crate, strict Clippy, rustfmt, documentation checks, cross-platform tests, and cargo-deny policy in CI.
+- A versioned four-case identity-conformance bundle checked by both the production API and a standalone workspace verifier that has no dependency on the Sealr crate. It hashes exact source and profile bytes, checks the claimed covering without searching or inflating, and independently reproduces three layout and three content roots.
 
 ## Security limitations
 
@@ -67,6 +70,7 @@ The following work must land before a production-readiness claim:
 - When the complete source bytes are held, the receipt records their SHA-256. A failure before a complete snapshot is available records `{ "status": "unavailable" }` instead of a digest. Receipts also carry separate interpretation, admission, verification, effect, and view-completeness axes; the alpha.2 `Allowed`/`Rejected` shape remains a compatibility adapter and still maps an admitted archive with a failed destination to `Rejected`.
 - Receipts are unsigned, and their JSON digest is deterministic for the current Rust structs but is not yet RFC 8785 JCS.
 - The inspectable `View` remains invocation evidence. Its digest covers verdict, write state, findings, and members. Receipts now also carry separate `sealrTreeV1` layout and content-tree identities derived from `ArchiveIR`. Those roots are unsigned, preview-line encodings; they are not yet a lock, an authenticated subject, or a claim that every extra-field payload is semantic. Materialization failures still map into the end-to-end `Rejected` verdict.
+- The independent identity verifier establishes internal consistency for the finite committed vectors. It does not run a second ZIP interpretation, execute codecs, recompute member hashes from compressed payloads, prove SHA-256, authenticate evidence, or establish correctness outside those cases.
 - ZIP64, TAR, compressed TAR, gzip, zstd, and 7z are not implemented.
 - There is no external security audit or stable production-supported release.
 
@@ -170,7 +174,7 @@ The next milestone remains the Phase 0.1 ZIP trust gate, not another archive for
 
 Assurance now advances with each increment rather than waiting for a late phase. A non-shipping wheel laboratory also starts now to measure real compatibility and pressure-test the generic verified-member API, while supported `python-wheel.v1` admission remains gated on its exact UTF-8 ZIP profile, canonical paths, retained semantic-member budget, consumer budgets, and identities.
 
-See the [near-term execution plan](docs/near-term.md) for release-sized work and acceptance gates, the [roadmap](ROADMAP.md) for the full trust gate, and the [wheel profile draft](docs/profiles/python-wheel-v1.md) for the first-consumer design. None of those planned capabilities is current support.
+See the [near-term execution plan](docs/near-term.md) for release-sized work and acceptance gates, the [identity-conformance contract](docs/identity-conformance.md) for the independent root checks, the [roadmap](ROADMAP.md) for the full trust gate, and the [wheel profile draft](docs/profiles/python-wheel-v1.md) for the first-consumer design. None of the planned consumer capabilities is current support.
 
 ## Research basis
 
@@ -190,6 +194,7 @@ See the [near-term execution plan](docs/near-term.md) for release-sized work and
 |---|---|
 | [Documentation index](docs/index.md) | Guided map of current contracts, security material, plans, and operations |
 | [Near-term execution plan](docs/near-term.md) | Alpha.4 through alpha.6 work packages and measurable gates |
+| [Identity conformance](docs/identity-conformance.md) | Independent profile, covering, and tree-root vectors with exact nonclaims |
 | [Roadmap](ROADMAP.md) | Full capability order, release gate, and non-goals |
 | [Safety specification](docs/safety.md) | Normative safety rules and supported boundary |
 | [API contract](docs/api.md) | Current alpha.3 Rust and JSON surface |

@@ -1,6 +1,6 @@
 # Evidence and attestations
 
-> Current status: alpha.3 emits a versioned deterministic unsigned JSON receipt and preview `sealrTreeV1` identities. RFC 8785 canonicalization, stable lock semantics, DSSE, Sigstore, standardized predicates, SBOM output, and an independent verifier are planned work.
+> Current status: alpha.3 emits a versioned deterministic unsigned JSON receipt and preview `sealrTreeV1` identities. Current main adds an independent verifier for finite identity-conformance vectors. RFC 8785 canonicalization, stable lock semantics, DSSE, Sigstore, standardized predicates, SBOM output, and a general authenticated-evidence verifier remain planned work.
 
 The current receipt is always returned, including on rejection. `sealr.receipt.v2` records source digest availability, interpretation/admission/verification/effect/completeness axes, the invocation-specific view digest, tool and environment fields, materialization lifecycle evidence, the compatibility verdict, and findings.
 
@@ -60,11 +60,11 @@ Future authenticated claims should distinguish:
 
 The existing `view_digest` cannot stand in for the layout or content-tree root because it covers invocation-specific fields such as source metadata, policy, verdict, findings, and write outcome.
 
-`sealrTreeV1` now has a documented canonical encoding and committed cross-platform preview vectors. It still requires profile closure, stability rules, and an independent verifier before it can be an authenticated subject. in-toto `dirHash1`, Git trees, and OCI `DiffID` are interoperability references, not drop-in replacements for all Sealr semantics.
+`sealrTreeV1` now has a documented canonical encoding, committed cross-platform preview vectors, and a separate tool that independently reproduces those finite vectors. It still requires profile closure, stability rules, canonical claim bytes, and authenticated-envelope verification before it can be an authenticated subject. in-toto `dirHash1`, Git trees, and OCI `DiffID` are interoperability references, not drop-in replacements for all Sealr semantics.
 
 ## Independent verifier
 
-A future small verifier should not extract archives. It should validate:
+The current [identity-conformance verifier](identity-conformance.md) validates profile and tree-root derivation, exact small source fixtures, finite semantic-axis consistency, and their claimed structural covering without extracting. A future general verifier should add:
 
 - canonical evidence serialization;
 - profile and rule identities;
@@ -74,7 +74,7 @@ A future small verifier should not extract archives. It should validate:
 - effect-record consistency;
 - DSSE signature, signer identity, issuer, and time policy when authenticated.
 
-The verifier may rely on an authenticated producer for expensive codec execution. Its result must not be described as a proof that independently reran decompression.
+The general verifier may rely on an authenticated producer for expensive codec execution. Its result must not be described as a proof that independently reran decompression.
 
 ## File manifest versus SBOM
 

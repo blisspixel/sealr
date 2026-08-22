@@ -61,6 +61,8 @@ Rust dependencies are locked and covered by repository license and advisory chec
 
 The single required `CI` workflow verifies the library package with `cargo package --locked -p sealr` after tests, optimized builds, the README walkthrough, and rustdoc. It then runs `tests/packaged-consumer` against Cargo's extracted package directory. This catches missing packaged files, package-only compilation failures, accidental workspace-only APIs, and capability regressions while the crate remains intentionally unpublished. An external integration test also compiles against the public crate boundary from outside the library module.
 
+`sealr-identity-verifier` is a separate non-published workspace tool, not the future general `xtask`. It intentionally has no dependency on `sealr`, uses only the existing Serde, serde_json, and SHA-256 dependency families, and independently checks the committed [identity-conformance bundle](identity-conformance.md). Required CI names that check explicitly in addition to running its tamper tests through the workspace suite. It is not included in native release archives.
+
 ## CLI rule
 
 The CLI is a thin presentation layer over typed library outcomes. Human formatting can improve, but machine JSON, rule identities, and exit classes remain versioned contracts. No UI dependency may become a second policy engine or parser.

@@ -104,7 +104,7 @@ Alpha.3 receipts are deterministic unsigned evidence records. They are not attes
 
 Do not use a numeric risk score. Current findings provide stable codes, severity, member context, and detail. The target finding schema adds explicit rule versions, phases, deterministic evidence, source spans where applicable, and remediation without turning the human message into the machine contract.
 
-Do not claim a proof-carrying tree until a canonical tree specification, certificate format, and independent verifier exist. The current truthful phrase is "One archive. One tree. Evidence."
+Do not claim a proof-carrying tree until the tree specification and profile are stable, a general certificate format exists, and the broader evidence verifier covers it. The current identity verifier reproduces finite preview vectors only. The truthful phrase remains "One archive. One tree. Evidence."
 
 ## Performance discipline
 

@@ -36,7 +36,7 @@ The [Rust Fuzz Book](https://rust-fuzz.github.io/book/) documents cargo-fuzz and
 
 Source digests, policy digests, structured findings, and a view digest can be returned for both allow and reject. in-toto, DSSE, Sigstore, SBOM formats, and GitHub artifact attestations provide established envelopes and signing workflows once sealr's unsigned receipt bytes are stable.
 
-Separate outcome axes, a named `SourceSnapshot`, `sealr.archive-ir.v1`, typed policy compilation, and preview `sealrTreeV1` layout and content identities now exist. Inspect and materialize consume that IR. Current main also wraps a completely verified IR and its exact snapshot in an opaque `VerifiedArchive`, allowing bounded canonical-member reads without reopening the source or running another structural parser. Canonical evidence JSON (RFC 8785), an independent verifier, bounded retained semantic bytes, and signing follow those identities. The supervised worker consumes the same tree contract.
+Separate outcome axes, a named `SourceSnapshot`, `sealr.archive-ir.v1`, typed policy compilation, and preview `sealrTreeV1` layout and content identities now exist. Inspect and materialize consume that IR. Current main also wraps a completely verified IR and its exact snapshot in an opaque `VerifiedArchive`, allowing bounded canonical-member reads without reopening the source or running another structural parser. A separate identity verifier now checks the committed profile and tree vectors without depending on Sealr or executing codecs. Canonical evidence JSON (RFC 8785), the broader evidence verifier, bounded retained semantic bytes, and signing follow those identities. The supervised worker consumes the same tree contract.
 
 ## Acceleration is optional
 

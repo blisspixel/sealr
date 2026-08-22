@@ -14,6 +14,8 @@ use sealr::{
 #[path = "../../../scripts/walkthrough_fixtures.rs"]
 mod walkthrough_fixtures;
 
+const IDENTITY_VECTORS: &str = include_str!("conformance/identity-v1.json");
+
 const ALLOWED_SOURCE: &str = "580606f3b53229ab60ff1d786bac90c91f75c054269c11142cd971f380d3fc25";
 const REJECTED_SOURCE: &str = "5039cccff40a5df0d0b61a2734b5dafeb8224f914603cae870f1638990f58140";
 const PROFILE_DIGEST: &str = "da3a2145d48decf8f8995ea01f1ddd0adb587f7f3544d4642bb8bb07b8f039f5";
@@ -45,6 +47,201 @@ fn apply_bytes(bytes: &[u8], dest: Option<&std::path::Path>) -> sealr::Outcome {
         policy: &policy,
         dest,
     })
+}
+
+fn decode_hex(value: &str) -> Vec<u8> {
+    let (pairs, remainder) = value.as_bytes().as_chunks::<2>();
+    assert!(remainder.is_empty(), "vector hex has even length");
+    pairs
+        .iter()
+        .map(|pair| {
+            let text = std::str::from_utf8(pair).expect("vector hex is ASCII");
+            u8::from_str_radix(text, 16).expect("vector hex is valid")
+        })
+        .collect()
+}
+
+fn feature_complete_identity_zip() -> Vec<u8> {
+    fn push_u16(bytes: &mut Vec<u8>, value: u16) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn push_u32(bytes: &mut Vec<u8>, value: u32) {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn local_header(
+        bytes: &mut Vec<u8>,
+        name: &[u8],
+        flags: u16,
+        crc: u32,
+        size: u32,
+        extra: &[u8],
+    ) {
+        push_u32(bytes, 0x0403_4b50);
+        push_u16(bytes, 20);
+        push_u16(bytes, flags);
+        push_u16(bytes, 0);
+        push_u16(bytes, 0);
+        push_u16(bytes, 0x0021);
+        push_u32(bytes, crc);
+        push_u32(bytes, size);
+        push_u32(bytes, size);
+        push_u16(bytes, name.len() as u16);
+        push_u16(bytes, extra.len() as u16);
+        bytes.extend_from_slice(name);
+        bytes.extend_from_slice(extra);
+    }
+
+    struct Central<'a> {
+        name: &'a [u8],
+        flags: u16,
+        crc: u32,
+        size: u32,
+        extra: &'a [u8],
+        external_attributes: u32,
+        local_offset: u32,
+    }
+
+    fn central_header(bytes: &mut Vec<u8>, entry: &Central<'_>) {
+        push_u32(bytes, 0x0201_4b50);
+        push_u16(bytes, 0x0314);
+        push_u16(bytes, 20);
+        push_u16(bytes, entry.flags);
+        push_u16(bytes, 0);
+        push_u16(bytes, 0);
+        push_u16(bytes, 0x0021);
+        push_u32(bytes, entry.crc);
+        push_u32(bytes, entry.size);
+        push_u32(bytes, entry.size);
+        push_u16(bytes, entry.name.len() as u16);
+        push_u16(bytes, entry.extra.len() as u16);
+        push_u16(bytes, 0);
+        push_u16(bytes, 0);
+        push_u16(bytes, 0);
+        push_u32(bytes, entry.external_attributes);
+        push_u32(bytes, entry.local_offset);
+        bytes.extend_from_slice(entry.name);
+        bytes.extend_from_slice(entry.extra);
+    }
+
+    const DIRECTORY_NAME: &[u8] = b"pkg/";
+    const FILE_NAME: &[u8] = b"./pkg/data.txt";
+    const DATA: &[u8] = b"abc";
+    const CRC32_ABC: u32 = 0x3524_41c2;
+    const EXTRA: &[u8] = &[0x55, 0x78, 0, 0];
+
+    let mut archive = Vec::new();
+    local_header(&mut archive, DIRECTORY_NAME, 0, 0, 0, EXTRA);
+    let file_offset = archive.len() as u32;
+    local_header(&mut archive, FILE_NAME, 0x0008, 0, 0, EXTRA);
+    archive.extend_from_slice(DATA);
+    push_u32(&mut archive, 0x0807_4b50);
+    push_u32(&mut archive, CRC32_ABC);
+    push_u32(&mut archive, DATA.len() as u32);
+    push_u32(&mut archive, DATA.len() as u32);
+
+    let central_offset = archive.len() as u32;
+    central_header(
+        &mut archive,
+        &Central {
+            name: DIRECTORY_NAME,
+            flags: 0,
+            crc: 0,
+            size: 0,
+            extra: EXTRA,
+            external_attributes: (0o040755_u32 << 16) | 0x10,
+            local_offset: 0,
+        },
+    );
+    central_header(
+        &mut archive,
+        &Central {
+            name: FILE_NAME,
+            flags: 0x0008,
+            crc: CRC32_ABC,
+            size: DATA.len() as u32,
+            extra: EXTRA,
+            external_attributes: 0o100644_u32 << 16,
+            local_offset: file_offset,
+        },
+    );
+    let central_size = archive.len() as u32 - central_offset;
+    push_u32(&mut archive, 0x0605_4b50);
+    push_u16(&mut archive, 0);
+    push_u16(&mut archive, 0);
+    push_u16(&mut archive, 2);
+    push_u16(&mut archive, 2);
+    push_u32(&mut archive, central_size);
+    push_u32(&mut archive, central_offset);
+    push_u16(&mut archive, 0);
+    archive
+}
+
+#[test]
+fn identity_conformance_manifest_matches_production_evidence() {
+    let manifest: serde_json::Value =
+        serde_json::from_str(IDENTITY_VECTORS).expect("identity vectors are JSON");
+    let cases = manifest["cases"]
+        .as_array()
+        .expect("identity vectors contain cases");
+    assert!(!cases.is_empty());
+
+    for case in cases {
+        let id = case["id"].as_str().expect("case id");
+        let bytes = decode_hex(
+            case["source_bytes_hex"]
+                .as_str()
+                .expect("case source bytes"),
+        );
+        if id == "layout-features" {
+            assert_eq!(
+                bytes,
+                feature_complete_identity_zip(),
+                "{id} source construction"
+            );
+        }
+        let out = apply_bytes(&bytes, None);
+        let actual_axes = serde_json::json!({
+            "interpretation": &out.interpretation,
+            "admission": &out.admission,
+            "verification": &out.verification,
+            "effect": &out.effect,
+            "view_completeness": &out.view_completeness,
+        });
+
+        assert_eq!(
+            serde_json::to_value(&out.receipt.source).unwrap(),
+            case["source"],
+            "{id} source identity"
+        );
+        assert_eq!(
+            serde_json::to_value(&out.receipt.identities.interpretation).unwrap(),
+            case["interpretation"],
+            "{id} interpretation identity"
+        );
+        assert_eq!(actual_axes, case["axes"], "{id} semantic axes");
+        assert_eq!(
+            serde_json::to_value(&out.view.findings).unwrap(),
+            case["findings"],
+            "{id} findings"
+        );
+        assert_eq!(
+            serde_json::to_value(out.archive_ir()).unwrap(),
+            case["archive_ir"],
+            "{id} ArchiveIR"
+        );
+        assert_eq!(
+            serde_json::to_value(&out.receipt.identities.layout).unwrap(),
+            case["layout_root"],
+            "{id} layout root"
+        );
+        assert_eq!(
+            serde_json::to_value(&out.receipt.identities.content).unwrap(),
+            case["content_root"],
+            "{id} content root"
+        );
+    }
 }
 
 #[test]

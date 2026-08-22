@@ -1,6 +1,6 @@
 # Testing, compatibility, and assurance
 
-> This page separates current evidence from the target assurance program. The published Alpha.3 has a deterministic Rust unit suite, strict cross-platform CI, cargo-deny policy, and a pinned 5,927-file ZipDiff construction gate. Current main adds two finite-domain property families, an opaque bounded-read capability, and a consumer that runs against the extracted packaged crate. Broader property families, coverage-guided fuzzing, model checking, benign ecosystem measurement, an independent verifier, and an external audit remain future work.
+> This page separates current evidence from the target assurance program. The published Alpha.3 has a deterministic Rust unit suite, strict cross-platform CI, cargo-deny policy, and a pinned 5,927-file ZipDiff construction gate. Current main adds two finite-domain property families, an opaque bounded-read capability, a consumer that runs against the extracted packaged crate, and an independent verifier for four identity-conformance cases. Broader property families, coverage-guided fuzzing, model checking, benign ecosystem measurement, the general authenticated-evidence verifier, and an external audit remain future work.
 
 Trust is the scarce resource. Format breadth and acceleration follow stable semantics and measured compatibility.
 
@@ -14,7 +14,7 @@ Trust is the scarce resource. Format breadth and acceleration follow stable sema
 | Differential | ZipDiff expectation gate binds strict rejection and a documented valid-control allowlist | Compare major consumers on well-formed profile inputs and track disagreement frontiers |
 | Property | Compression-ratio comparison exhaustively agrees with an independent quotient-and-remainder oracle for `uncomp` 0 through 255 and `comp` and `max_ratio` 0 through 64; verified-member limits agree with `limit >= measured_size` for Store and Deflate sizes and limits 0 through 64 | Add independent bounded models for ranges, remaining quotas, strict-profile path topology, and lifecycle transitions |
 | Fuzz | None yet | `cargo fuzz` targets for interpretation, canonical paths, and inspect-only `apply()` |
-| Executable specification | None yet | Compare production kernels with simpler independent bounded models |
+| Executable specification | A no-Sealr-dependency verifier agrees with production evidence on four exact identity cases and independently checks their covering, profile digest, and roots | Add independent bounded models for ranges, quotas, paths, and lifecycle transitions; extend identity cases with each published profile and encoding branch |
 | Model checking | None yet | Add Kani harnesses with explicit domains, assumptions, and unwind bounds |
 | Audit | Reporting process and automated dependency checks | Independent review after the semantic core stabilizes |
 
@@ -162,7 +162,9 @@ Each successful publication should eventually match an independently audited adm
 
 ## Evidence verifier tests
 
-The future independent verifier needs golden accepted and rejected bundles for:
+The [identity-conformance verifier](identity-conformance.md) now covers source and profile bytes, semantic-axis coherence, exact findings and IR, the claimed ZIP32 covering, and layout/content root derivation for four finite cases. Its tamper tests cover source, profile bytes, covering, roots, object shape, root availability, and duplicate case identity.
+
+The future general evidence verifier still needs golden accepted and rejected bundles for:
 
 - canonical serialization;
 - profile and rule versioning;
@@ -172,7 +174,7 @@ The future independent verifier needs golden accepted and rejected bundles for:
 - signature, signer identity, issuer, subject, and timestamp checks;
 - tampered manifests, roots, envelopes, and effect fields.
 
-The verifier does not extract the archive and must not imply that it independently executed codecs.
+Neither verifier extracts the archive, and neither may imply that it independently executed codecs.
 
 ## Near-term execution increments
 

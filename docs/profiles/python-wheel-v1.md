@@ -166,7 +166,7 @@ A GitHub Action that checks a wheel and then lets another tool unzip the origina
 - a platform-independent claim about final installed bytes;
 - patching pip internals;
 - treating `RECORD.jws` or `RECORD.p7s` as current trust evidence;
-- package signing before unsigned consumer claim bytes and an independent verifier stabilize.
+- package signing before unsigned consumer claim bytes and the broader evidence verifier stabilize.
 
 ## Promotion gates
 

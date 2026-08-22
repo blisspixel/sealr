@@ -281,7 +281,7 @@ Shorter: uniqueness modulo a profile that rejects most of APPNOTE is a **smaller
 Ranked. Trusted code means production TCB, not tests.
 
 1. **Serialize the covering onto the IR and into the layout preimage.** `ArchiveIR.covering` records the local prefix, central directory, EOCD, and comment. `sealrTreeV1` layout hashes those ranges. A nonempty remainder is already a parse error via `check_layout`.
-2. **A codec-free range-oracle checker.** `audit_covering` is that checker: snapshot digest, signatures at claimed offsets, local and central partitions, header/payload abutment. It does not search for an EOCD and does not inflate. If it re-found the EOCD, it would be a second parser and must not exist. Layout-root recomputation by a separate verifier is still Step 4.
+2. **A codec-free range-oracle checker.** `audit_covering` is the production checker: snapshot digest, signatures at claimed offsets, local and central partitions, and header/payload abutment. It does not search for an EOCD and does not inflate. The separate identity verifier now independently repeats this bounded certificate check for committed vectors and recomputes their roots without depending on Sealr. Neither checker interprets ZIP again or executes codecs.
 3. **Abolish ignored extras in a later profile.** Every extra ID is semantic (bound into layout) or denied. “Ignored” looks conservative and is how unique parse dies.
 4. **Treat codecs as slice morphisms.** They see a payload interval the covering already named. Exact input consumption is the empty-remainder obligation one level down. They cannot re-enter discovery, jail, or publish.
 5. **Worker as untrusted inhabitant-finder; supervisor as covering auditor.** Two coverings: source bytes and staged tree. Publish iff both check and the content root matches. The supervisor must not reparse ZIP.
@@ -299,7 +299,7 @@ Do not mix these. A Kani harness on ranges is not a SHA-256 proof. A corpus gate
 
 **Systems, adversarial.** Inspect/materialize stay one parser after a worker exists; snapshot immutability under concurrent writers; no-replace publication; host does not select Unicode; ZipDiff gate covers known constructions, not \(\mathbb{B}^*\).
 
-The independent verifier of the [roadmap](../ROADMAP.md) should check the covering certificate without inflating. That verifier proves combinatorial covering, not codec execution. Say so every time.
+The current independent identity verifier checks committed covering certificates without inflating and reproduces their profile and tree digests. That establishes combinatorial and encoding agreement for those finite vectors, not codec execution, parser correctness outside the vectors, or a cryptographic proof. The broader signed-evidence verifier in the [roadmap](../ROADMAP.md) remains future work.
 
 ## What this page must not become
 

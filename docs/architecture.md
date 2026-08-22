@@ -82,7 +82,7 @@ Bounded random access must preserve the security property currently provided by 
 
 ### Canonical intermediate representation
 
-The versioned `ArchiveIR` preserves raw name bytes, decoded and canonical names, source ranges, flags, extra-field dispositions, declared and actual sizes, content commitments, and verification state. It is the source of preview layout and content-tree identities. The encoding and committed cross-platform test vectors now exist, but the roots remain explicitly unstable until the profile's extra-field rules close and an independent verifier reproduces them.
+The versioned `ArchiveIR` preserves raw name bytes, decoded and canonical names, source ranges, flags, extra-field dispositions, declared and actual sizes, content commitments, and verification state. It is the source of preview layout and content-tree identities. The encoding, committed cross-platform vectors, and [independent identity verifier](identity-conformance.md) now exist. The roots remain explicitly unstable until the profile's extra-field rules close and the semantic surface freezes.
 
 ### Separated policy layers
 

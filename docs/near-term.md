@@ -36,7 +36,7 @@ Version labels are delivery targets, not permission to cut a release with a red 
 
 Alpha.4 closes the contract before another public surface becomes accidental API.
 
-Current main has removed public `ArchiveIR` construction and mutation, exposed it through a read-only `Outcome` accessor, made evolving evidence outputs non-exhaustive and nameable, and added independent finite-domain ratio and verified-member limit oracles. It now also returns an opaque `VerifiedArchive` after complete verification, enforces a caller byte ceiling on canonical-path member reads, revalidates returned content, and runs a separate consumer against the extracted packaged crate. This is substantial progress toward the adopter-safe boundary and property gates, not completion: retained semantic-member caching, at least three more named property families, the new strict profile, identity verifier, and wheel compatibility report are still open.
+Current main has removed public `ArchiveIR` construction and mutation, exposed it through a read-only `Outcome` accessor, made evolving evidence outputs non-exhaustive and nameable, and added independent finite-domain ratio and verified-member limit oracles. It now also returns an opaque `VerifiedArchive` after complete verification, enforces a caller byte ceiling on canonical-path member reads, revalidates returned content, and runs a separate consumer against the extracted packaged crate. A separate workspace verifier with no Sealr dependency checks a four-case conformance bundle, validates the recorded covering without discovery or inflation, and independently reproduces the current profile digest plus three layout and three content roots. This is substantial progress toward the adopter-safe boundary and executable-conformance gates, not completion: retained semantic-member caching, at least three more named property families, the new strict profile, and wheel compatibility report are still open.
 
 ### Semantic profile
 
@@ -58,8 +58,8 @@ The first capability increment is now implemented on main. `VerifiedArchive` is 
 
 ### Executable conformance
 
-1. Define a versioned conformance-case manifest that binds source digest, profile ID and digest, semantic axes, findings, member manifest, layout root, and content root when available.
-2. Add an independent identity verifier that implements the documented preimages without calling the production encoder. It verifies evidence; it does not parse or inflate ZIP.
+1. Define a versioned conformance-case manifest that binds source digest, profile ID and digest, semantic axes, findings, member manifest, layout root, and content root when available. **Initial bundle landed:** `sealr.identity-conformance.v1` embeds exact bytes for four small cases and the complete serializable IR evidence when available.
+2. Add an independent identity verifier that implements the documented preimages without calling the production encoder. It verifies evidence; it does not parse or inflate ZIP. **Landed for identity v1:** the standalone workspace tool has no Sealr dependency, follows only claimed ranges, checks the ZIP32 covering certificate, and reproduces every committed profile and tree vector. It does not independently execute interpretation or codecs.
 3. Extract pure checked kernels for ranges and partitions, quota transitions, strict-profile path topology, and outcome or materialization lifecycle transitions.
 4. Test each kernel against a deliberately simpler independent oracle. Discovered counterexamples become committed deterministic regressions.
 5. Keep the added required-CI cost bounded and measured. Tool-only dependencies do not enter the release binary.

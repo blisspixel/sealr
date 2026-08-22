@@ -163,7 +163,7 @@ On reject, `members` in the view may be partial; `view_digest` still covers exac
 - `interpretation` binds `sealr.profile.zip.strict-ascii.v1` and the SHA-256 of that profile's method, flag, extra-field, and name rules.
 - `layout` is `sealrTreeV1` over canonical paths, kinds, raw names, flags, methods, declared sizes, complete local-header, payload, optional-descriptor, and central-header ranges, extra-field dispositions, and normalization actions. It is present once an `ArchiveIR` exists. It is `{ "status": "unavailable" }` when planning never produced a tree.
 - `content` is `sealrTreeV1` over canonical paths, kinds, actual sizes, and member SHA-256 digests. It is present only when verification is complete. An admitted archive whose destination fails keeps its layout root and does not claim a content root until members are verified.
-- Layout and content encodings are Git-style domain-separated preimages (`sealr.tree.layout.v1` and `sealr.tree.content.v1`) over little-endian length-prefixed covering ranges and member records. They do not use JSON, so they are independent of `view_digest` and of later RFC 8785 work. The interpretation profile is a sibling identity, not mixed into the tree bytes. Empty-tree and walkthrough-fixture roots are pinned in `crates/sealr/tests/golden_identity.rs` so Linux, macOS, and Windows cannot silently diverge. Layout identity includes the source covering (local prefix, central directory, EOCD, comment). Content identity does not. An internal codec-free audit rechecks that covering against the snapshot without inflating; materialization audits the staged tree against the same IR before publication.
+- Layout and content encodings are Git-style domain-separated preimages (`sealr.tree.layout.v1` and `sealr.tree.content.v1`) over little-endian length-prefixed covering ranges and member records. They do not use JSON, so they are independent of `view_digest` and of later RFC 8785 work. The interpretation profile is a sibling identity, not mixed into the tree bytes. The production golden test and a standalone no-Sealr-dependency verifier consume the same [identity-conformance bundle](identity-conformance.md), independently reproducing the current profile digest plus three layout and three content roots. Layout identity includes the source covering (local prefix, central directory, EOCD, comment). Content identity does not. The standalone checker and internal codec-free audit follow claimed ranges without searching or inflating; materialization audits the staged tree against the same IR before publication.
 
 ## Target semantic API
 
@@ -234,7 +234,7 @@ The current MSRV is Rust 1.98, declared by the package `rust-version` and exerci
 
 ### Semantic identities
 
-Receipts now return separate source, interpretation, layout, and content-tree identities. `view_digest` remains invocation evidence. A future `sealr.lock` still waits for these encodings to freeze and for an independent verifier.
+Receipts now return separate source, interpretation, layout, and content-tree identities. `view_digest` remains invocation evidence. The first independent identity verifier and vectors have landed, but a future `sealr.lock` still waits for the profile and encodings to freeze and for the broader evidence verifier and consumer identity to exist.
 
 ---
 

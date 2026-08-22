@@ -1,0 +1,14 @@
+[package]
+name = "sealr-identity-verifier"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Independent verifier for Sealr identity conformance vectors"
+publish = false
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
