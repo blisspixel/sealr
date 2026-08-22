@@ -10,6 +10,9 @@ mod walkthrough_fixtures;
 
 const ALLOWED_SHA256: &str = "580606f3b53229ab60ff1d786bac90c91f75c054269c11142cd971f380d3fc25";
 const REJECTED_SHA256: &str = "5039cccff40a5df0d0b61a2734b5dafeb8224f914603cae870f1638990f58140";
+const PROFILE_DIGEST: &str = "da3a2145d48decf8f8995ea01f1ddd0adb587f7f3544d4642bb8bb07b8f039f5";
+const ALLOWED_LAYOUT: &str = "9986381ec4a61fd34452fb759ccaf44b82ee58c8147ee032f077722c1ccac3a3";
+const ALLOWED_CONTENT: &str = "ccae362a7daa3508aace90d589c4538c27f13ff517a82a049e47005724073f38";
 
 static RUN_SEQUENCE: AtomicU64 = AtomicU64::new(0);
 
@@ -80,6 +83,9 @@ fn assert_allowed_streams(output: &Output, wrote: bool) -> (Value, Value) {
     assert_eq!(receipt["schema"], "sealr.receipt.v2");
     assert_eq!(view["verdict"], "allowed");
     assert_eq!(view["wrote"], wrote);
+    assert_eq!(view["interpretation"]["status"], "interpreted");
+    assert_eq!(view["admission"]["status"], "admitted");
+    assert_eq!(view["verification"]["status"], "complete");
     assert_eq!(receipt["verdict"], "allowed");
     assert_eq!(receipt["wrote"], wrote);
     assert_eq!(receipt["interpretation"]["status"], "interpreted");
@@ -95,6 +101,26 @@ fn assert_allowed_streams(output: &Output, wrote: bool) -> (Value, Value) {
     assert_eq!(receipt["source"], view["source"]["digest"]);
     assert_eq!(receipt["policy"], view["policy"]);
     assert!(receipt["source"].get("status").is_none());
+    assert_eq!(
+        receipt["identities"]["interpretation"]["id"],
+        "sealr.profile.zip.strict-ascii.v1"
+    );
+    assert_eq!(
+        receipt["identities"]["interpretation"]["digest"]["sha256"],
+        PROFILE_DIGEST
+    );
+    assert_eq!(
+        receipt["identities"]["layout"]["sealrTreeV1"],
+        ALLOWED_LAYOUT
+    );
+    assert_eq!(
+        receipt["identities"]["content"]["sealrTreeV1"],
+        ALLOWED_CONTENT
+    );
+    assert_ne!(
+        receipt["identities"]["layout"]["sealrTreeV1"],
+        receipt["view_digest"]["sha256"]
+    );
     (view, receipt)
 }
 
@@ -199,6 +225,19 @@ fn materialization_exits_zero_and_matches_the_inspected_members() {
     let (materialized_view, receipt) = assert_allowed_streams(&materialize, true);
 
     assert_eq!(inspect_view["members"], materialized_view["members"]);
+    let inspect_receipt = json(&inspect.stderr, "inspect stderr");
+    assert_eq!(
+        inspect_receipt["identities"]["layout"],
+        receipt["identities"]["layout"]
+    );
+    assert_eq!(
+        inspect_receipt["identities"]["content"],
+        receipt["identities"]["content"]
+    );
+    assert_ne!(
+        inspect_receipt["view_digest"], receipt["view_digest"],
+        "view_digest covers the invocation, not the tree"
+    );
     assert_eq!(receipt["source"]["sha256"], ALLOWED_SHA256);
     assert_eq!(
         fs::read(destination.join(walkthrough_fixtures::CONFIG_PATH))
@@ -221,13 +260,17 @@ fn missing_destination_parent_rejects_without_creating_it() {
 
     let output = sealr(&[&fixtures.allowed, Path::new("--dest"), &destination]);
 
-    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(output.status.code(), Some(3));
     let view = json(&output.stdout, "stdout");
     let receipt = json(&output.stderr, "stderr");
     assert_eq!(view["verdict"], "rejected");
     assert_eq!(view["wrote"], false);
+    assert_eq!(view["admission"]["status"], "admitted");
+    assert_eq!(view["effect"]["status"], "failed");
     assert_eq!(receipt["verdict"], "rejected");
     assert_eq!(receipt["wrote"], false);
+    assert_eq!(receipt["admission"]["status"], "admitted");
+    assert_eq!(receipt["effect"]["status"], "failed");
     assert_eq!(receipt["materialization"]["outcome"], "setup-failed");
     assert_eq!(receipt["materialization"]["cleanup"], "not-created");
     assert_eq!(view["findings"][0]["code"], "materialize.io");

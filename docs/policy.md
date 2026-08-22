@@ -2,7 +2,7 @@
 
 Policy is an input to `apply()` and is bound into every receipt by id and SHA-256 digest. Caps and behavioral choices must not live only in command-line state.
 
-The current schema is pre-release `sealr.policy.v1`. The Rust API constructs `Policy` directly. Loading arbitrary JSON policy documents, rejecting unknown fields, derived policy ids, and RFC 8785 canonical hashing are planned but not implemented.
+The current schema is pre-release `sealr.policy.v1`. The Rust API constructs `Policy` directly. `apply()` compiles that constructor into typed supported controls before reading archive bytes. Loading arbitrary JSON policy documents, rejecting unknown serde fields, derived policy ids, and RFC 8785 canonical hashing are planned but not implemented.
 
 There is no insecure mode.
 
@@ -42,12 +42,12 @@ Rust struct field order is deterministic, so the current implementation produces
 
 | Field | Current behavior |
 |---|---|
-| `formats` | ZIP must be present. ZIP is the only implemented format. |
+| `formats` | Must equal `["zip"]`. No other format or mixed format list compiles. |
 | `max_archive_bytes` | Bounds path reads and borrowed byte inputs before parsing. Path reads use a capped reader so file growth cannot exceed the cap. |
 | `max_files` | Checked from EOCD before member-vector growth. |
 | `max_member_bytes` | Checked against declared size and actual bytes while expanding. |
 | `max_total_bytes` | Checked against declared total and actual running total. |
-| `max_ratio` | Checked against declared and actual expanded bytes when compressed size is nonzero. `null` disables the ratio check. |
+| `max_ratio` | Integer uncompressed:compressed bound, compared with widened `u128` arithmetic. The default `100` rejects when uncompressed bytes strictly exceed `100 ×` compressed bytes. `null` disables the ratio check. `0` is not “off”: any positive expansion with a positive compressed size fails. A member with uncompressed size `> 0` and compressed size `0` is an infinite ratio. |
 | `max_path_depth` | Checked after rejecting backslashes and removing dot components. |
 | `max_metadata_bytes` | Bounds the central directory, EOCD comment, and referenced local name and extra bytes during parsing. |
 | `overwrite` | Existing destinations are refused. Replacement is not implemented even if a caller mutates this field. |
@@ -55,29 +55,32 @@ Rust struct field order is deterministic, so the current implementation produces
 
 ## Reserved fields
 
-The following fields are present so the receipt describes the intended policy shape, but the current ZIP32 subset either denies the feature unconditionally or has no relevant implementation yet:
+The following constructor fields exist so the receipt-hashed `Policy` object keeps a stable shape. They are **not** copied into compiled controls. Mutating any of them away from the default is `policy.unsupported` and fails before source ingestion:
 
 - `max_dict_bytes`: reserved for zstd and LZMA windows.
 - `symlinks` and `hardlinks`: archive links are not created. ZIP external attributes are checked for file/directory agreement, and entries described as special file types are rejected. Mode bits and link targets are not preserved.
+- `overwrite`: only `"refuse"` compiles. Replacement is not implemented.
 - `setuid`: new files do not preserve archive mode bits.
 - `nested_depth`: nested archives are never recursively opened.
-- `ambiguity`: known structural ambiguity is always rejected.
-- `case_fold_collision`: ASCII case-fold collisions are always rejected.
+- `ambiguity`: known structural ambiguity is always rejected by the interpretation profile.
+- `case_fold_collision`: ASCII case-fold collisions are always rejected by the path grammar.
 - `magic_vs_extension`: the parser uses magic and does not interpret filename extensions.
-- `encrypted`: encrypted ZIP members are always rejected.
+- `encrypted`: encrypted ZIP members are always rejected by the interpretation profile.
 
-Callers must not treat mutating a reserved field as enabling the corresponding behavior.
+Callers must not treat mutating a reserved field as enabling the corresponding behavior. Compilation fails closed instead of silently ignoring the mutation.
 
 ## Evaluation order
 
-1. Bound and read the archive source.
-2. Detect format magic and check the allow-list.
-3. Parse one exact ZIP layout and apply file-count and metadata caps.
-4. Validate member method, declared sizes, declared ratio, path, duplicates, and topology.
-5. Create a private staging directory only when materialization was requested.
-6. Stream each member through actual size, total, ratio, CRC32, and SHA-256 checks.
-7. Publish the staged tree only after every member passes.
-8. Build the view and receipt for both allow and reject.
+1. Compile the constructor `Policy` into typed supported controls. Unknown or reserved combinations fail closed without reading the archive.
+2. Bound and read the archive source.
+3. Detect format magic and check the allow-list.
+4. Parse one exact ZIP layout and apply file-count and metadata caps.
+5. Validate member method, declared sizes, declared ratio, path, duplicates, and topology.
+6. Create a private staging directory only when materialization was requested.
+7. Stream each member through actual size, total, ratio, CRC32, and SHA-256 checks.
+8. Audit the staged tree against the admitted IR when materialization was requested.
+9. Publish the staged tree only after every member and the audit pass.
+10. Build the view, receipt, and tree identities for both allow and reject.
 
 ## Compatibility rule
 

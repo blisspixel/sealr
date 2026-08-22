@@ -6,18 +6,42 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+## [0.1.0-alpha.3] - 2026-08-22
+
 ### Added
 
-- `sealr.archive-ir.v1` is the versioned ZIP interpretation. Inspect and materialize consume the same IR under `sealr.profile.zip.strict-ascii.v1` instead of reparsing archive bytes.
+- `sealr.archive-ir.v1` is the versioned ZIP interpretation. Inspect and materialize consume the same IR under `sealr.profile.zip.strict-ascii.v1` instead of reparsing archive bytes. The IR now records source ranges, extra-field dispositions, and path-normalization actions.
 - `SourceSnapshot` is the named immutable in-memory source. Path inputs are process-owned; caller byte slices stay borrowed. ZIP payload reads go through checked snapshot ranges, and receipts record `source_snapshot` as `memory-owned`, `memory-borrowed`, or `unavailable`.
 - Receipts now use `sealr.receipt.v2` and record separate interpretation, admission, verification, effect, and view-completeness axes. The alpha.2 `Allowed`/`Rejected` verdict remains a derived compatibility adapter, so an admitted archive whose destination fails is still `Rejected` at the CLI.
+- Receipts record distinct source, interpretation-profile, `sealrTreeV1` layout, and `sealrTreeV1` content-tree identities. `view_digest` remains invocation evidence and is not a tree root.
+- `Policy::compile()` produces typed supported controls before source ingestion. Unknown formats and reserved-field mutations fail closed with `policy.unsupported`.
+- The interpretation profile has a digest covering its method, flag, extra-field, and name rules, stored on `ArchiveIR` and the receipt.
 
 ### Changed
 
+- `Policy.max_ratio` is now `Option<u64>`. The default remains 100:1 using integer comparison. `null` disables the check; `0` is not off. A member with uncompressed size greater than zero and compressed size zero is an infinite ratio.
+- Quota, metadata, and remaining-total counters use checked arithmetic. Overflow is `quota.overflow` rather than a saturating admit.
 - Source digest unavailability is explicit. When archive bytes were never held, `receipt.source` and `view.source.digest` are `{ "status": "unavailable" }` instead of a 64-zero SHA-256 sentinel. Held bytes, including over-cap `Source::Bytes` inputs, are hashed.
 - Clarified the post-alpha.2 execution queue and reconciled supporting research documentation with the semantic-identity-first roadmap.
+- Recorded the reliability bar, minimal trusted-computing-base rule, and common ZIP/TAR codec-adapter destination in the roadmap without changing current Store/Deflate support.
+- Added research notes on unique covering, partial interpretation, and named conjectures in `docs/theory.md`. They are not proofs.
+- Documented sequential unique covering versus parallel independent-member verification. The ZipDiff classifier now uses `std::thread` and optional `SEALR_JOBS` without adding a runtime dependency.
+- Recorded the usefulness test: Sealr is an admission boundary other software calls, not an unzip. A receipt does not prove the category until a consumer (wheels first) stops reparsing.
+- Pinned cross-platform `sealrTreeV1` golden roots for the empty tree and the walkthrough allowed fixture. Inspect, materialize, and a failed destination share the same layout root; a denied parent-path archive has none. Layout identity now includes the ZIP32 source covering (local prefix, central directory, EOCD, comment).
+- The inspectable view serializes the same interpretation, admission, verification, effect, and completeness axes as the receipt. The CLI exits `3` when an admitted archive cannot publish a destination. The compatibility `verdict` remains `rejected` on that path.
+- Added deterministic materializer tests for destination-as-file, destination-as-link, and replacing a created directory component with a symlink or junction before the next member.
 - Added runnable checksum, provenance, and immutable-release verification commands for the current published prerelease without changing its historical release notes.
 - Added a versioned walkthrough manifest that binds regenerated fixture and platform-specific transcript hashes to the six committed PNG hashes, and clarified that the images are rendered summaries rather than literal raw CLI captures.
+- Added a codec-free covering checker: after IR construction, Sealr verifies that the claimed local, central, EOCD, and comment ranges partition the snapshot and that LFH/CDH/EOCD signatures sit at the recorded offsets. The checker does not search for an EOCD or inflate. Mutated covering claims fail with `covering.inconsistent`.
+- Materialization now audits the staged tree against the admitted IR before no-replace publication: member sizes, content digests, implicit parent directories, and the exact path set. Divergence is `materialize.audit`, aborts the stage, and does not publish. Test-only hooks cover intra-call directory-component replacement and staged-content mutation.
+
+### Fixed
+
+- The staged-tree audit now hashes files with a fixed 64 KiB buffer instead of loading each expanded file into memory.
+- Layout roots now bind every member's complete local-header, payload, optional descriptor, and central-header ranges. Public content-root calculation returns unavailable for unverified members or malformed digests.
+- Directory entries now require Store, zero sizes, and the CRC32 of empty content. LFH and CDH CRC fields must agree when no data descriptor is present.
+- Malformed and unsupported inputs report a partial structure view instead of claiming a complete member inventory.
+- Over-cap caller byte slices retain an honest `memory-borrowed` snapshot classification. A path that grows beyond the cap no longer reports a digest of only the bounded prefix as if it covered the complete archive.
 
 ## [0.1.0-alpha.2] - 2026-08-21
 
@@ -55,6 +79,7 @@ First public development preview of the ZIP boundary.
 
 This preview is not a production-ready security boundary and has not received an external security audit. See the security limitations in the README and the reporting policy in `SECURITY.md` before evaluating it.
 
-[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.2...HEAD
+[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.3...HEAD
+[0.1.0-alpha.3]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.2...v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.1

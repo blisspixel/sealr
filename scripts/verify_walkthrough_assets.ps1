@@ -183,4 +183,4 @@ foreach ($name in $expected) {
     }
 }
 
-Write-Host "walkthrough assets verified: alpha.2 manifest, fixture and $transcriptVariant transcript hashes, 6 PNG hashes, 1000x560, 144 DPI, no text metadata, each <= 250 KB"
+Write-Host "walkthrough assets verified: current manifest, fixture and $transcriptVariant transcript hashes, 6 PNG hashes, 1000x560, 144 DPI, no text metadata, each <= 250 KB"

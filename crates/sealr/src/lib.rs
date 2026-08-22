@@ -1,10 +1,12 @@
 //! `UntrustedArchive × Policy → (Materialization | Rejection) × Receipt × InspectableView`
 //!
-//! Ingest produces an immutable [`SourceSnapshot`]. Parse and payload reads use that
+//! Ingest produces an immutable `SourceSnapshot`. Parse and payload reads use that
 //! snapshot; they do not reopen the caller path.
 
 mod apply;
+mod covering;
 mod findings;
+mod identity;
 mod ir;
 mod jail;
 mod materialize;
@@ -14,15 +16,18 @@ mod snapshot;
 mod zip;
 
 pub use apply::{apply, MemberView, Outcome, Receipt, Request, Source, Verdict, View};
+pub use covering::audit_covering;
 pub use findings::{Finding, FindingCode, Severity};
+pub use identity::{content_root, layout_root, OutcomeIdentities, TreeRoot, TREE_ENCODING_ID};
 pub use ir::{
-    ArchiveIR, IrMember, MemberKind, MemberVerification, ARCHIVE_IR_SCHEMA, ZIP_STRICT_ASCII_V1,
+    zip_strict_ascii_v1_digest, ArchiveCovering, ArchiveIR, ByteRange, ExtraDisposition,
+    ExtraFieldRecord, ExtraSite, IrMember, MemberKind, MemberSourceRanges, MemberVerification,
+    NormalizationAction, ARCHIVE_IR_SCHEMA, ZIP_STRICT_ASCII_V1,
 };
-pub use jail::{jail_relative, join_under_dest};
+pub use jail::{jail_name, jail_relative, join_under_dest, JailedName};
 pub use materialize::{MaterializationMeta, WindowsMaterializationEvidence};
 pub use outcome::{
-    AdmissionStatus, EffectStatus, InterpretationStatus, SourceDigest, StoppingPhase,
+    AdmissionStatus, DigestHex, EffectStatus, InterpretationStatus, SourceDigest, StoppingPhase,
     VerificationStatus, ViewCompleteness,
 };
-pub use policy::{hex_sha256, Policy};
-pub use snapshot::{SnapshotKind, SourceSnapshot};
+pub use policy::{hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget};

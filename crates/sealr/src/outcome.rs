@@ -3,6 +3,11 @@ use serde::Serialize;
 
 use crate::findings::Finding;
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct DigestHex {
+    pub sha256: String,
+}
+
 /// SHA-256 of the archive bytes, or an explicit gap when those bytes were never held.
 ///
 /// Available sources serialize as `{ "sha256": "..." }` so the alpha.2 inspect and
@@ -152,20 +157,12 @@ impl SemanticAxes {
         admission: AdmissionStatus,
         finding: &Finding,
     ) -> Self {
-        let completeness = if matches!(
-            interpretation,
-            InterpretationStatus::Unsupported | InterpretationStatus::Malformed
-        ) {
-            ViewCompleteness::Complete
-        } else {
-            partial(StoppingPhase::Structure, finding)
-        };
         Self {
             interpretation,
             admission,
             verification: VerificationStatus::StructureOnly,
             effect: EffectStatus::NotRequested,
-            view_completeness: completeness,
+            view_completeness: partial(StoppingPhase::Structure, finding),
         }
     }
 
@@ -235,6 +232,16 @@ impl SemanticAxes {
             view_completeness: ViewCompleteness::Complete,
         }
     }
+
+    pub fn policy_compile_failed(finding: &Finding) -> Self {
+        Self {
+            interpretation: InterpretationStatus::Indeterminate,
+            admission: AdmissionStatus::Denied,
+            verification: VerificationStatus::StructureOnly,
+            effect: EffectStatus::NotRequested,
+            view_completeness: partial(StoppingPhase::Admission, finding),
+        }
+    }
 }
 
 fn partial(phase: StoppingPhase, finding: &Finding) -> ViewCompleteness {
@@ -270,5 +277,27 @@ mod tests {
         assert_eq!(axes.interpretation, InterpretationStatus::Indeterminate);
         assert_eq!(axes.admission, AdmissionStatus::NotEvaluated);
         assert_eq!(axes.effect, EffectStatus::NotRequested);
+    }
+
+    #[test]
+    fn malformed_and_unsupported_structure_views_are_partial() {
+        for interpretation in [
+            InterpretationStatus::Malformed,
+            InterpretationStatus::Unsupported,
+        ] {
+            let finding = Finding::error(FindingCode::FormatUnsupported, "stop");
+            let axes = SemanticAxes::structure_stop(
+                interpretation,
+                AdmissionStatus::NotEvaluated,
+                &finding,
+            );
+            assert_eq!(
+                axes.view_completeness,
+                ViewCompleteness::Partial {
+                    phase: StoppingPhase::Structure,
+                    cause: "format.unsupported".into(),
+                }
+            );
+        }
     }
 }

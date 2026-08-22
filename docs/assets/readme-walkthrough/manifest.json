@@ -1,6 +1,6 @@
 {
   "schema": "sealr.readme-walkthrough.v1",
-  "tool_version": "0.1.0-alpha.2",
+  "tool_version": "0.1.0-alpha.3",
   "presentation": "rendered-terminal-style-summary",
   "fixtures": {
     "allowed.zip": "580606f3b53229ab60ff1d786bac90c91f75c054269c11142cd971f380d3fc25",
@@ -8,14 +8,14 @@
   },
   "transcripts": {
     "unix": {
-      "01-inspect-allowed.txt": "ed76e8ef90f5502b95f45f77f711c7864df2db14c3b146ed8e08d2c32de3d2a1",
+      "01-inspect-allowed.txt": "11900e2fb90e27ec99db704cf9b6f071e5f985b84ca69e9e136a568c865051c8",
       "02-reject-parent-path.txt": "3fbba4a3392dab0d26ba39f8f8d7bf4151776fbcd1aef76b149532947408d11b",
-      "03-materialize-allowed.txt": "f5bf0c121744ffdb829bc15be0142314e67a921447915c1938895cf941964785"
+      "03-materialize-allowed.txt": "93917f6c70c6702e75b0d94fef2d602c9d9c8793b3ef7d71911d26a9919b1e1b"
     },
     "windows": {
-      "01-inspect-allowed.txt": "97c5556d9595473e89c3b95d065f388a524bbf4e365755eee58f52ce6570d9c7",
+      "01-inspect-allowed.txt": "e8ce3eec0c28a583abf0bea6303118135f547b8de7ef93b3cc7163fb6bd74cf0",
       "02-reject-parent-path.txt": "7ea457fceb3efae6b316fe8eba90f477bdb49d607e4bb982d756841af932477b",
-      "03-materialize-allowed.txt": "52f95d21c84f010d096d6d049e2f5a45ad3fe8b569817f71dcdd2a8f737e34c3"
+      "03-materialize-allowed.txt": "7d4830c39ae4b483828046c1c3701af58a5525a14514234934dcdcbfb038fab9"
     }
   },
   "image_transcript_variant": "windows",

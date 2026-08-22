@@ -15,11 +15,13 @@ Policy evaluation, content verification, materialization, projection, caching, a
 
 This is a stronger and narrower claim than safe extraction. Archive formats contain redundant metadata and consumer-specific semantics. The same byte digest can produce different trees when parsers disagree. The ZipDiff study found 14 ambiguity classes across 50 ZIP parsers in 19 languages, and Python wheel advisories have demonstrated same-bytes, different-installation behavior in practice.
 
+The intended mathematics of that statement, including unique covering, partial interpretation, and effect independence, is sketched in [theory.md](theory.md). That sketch is a research program, not a claim that alpha.3 has a uniqueness proof.
+
 The short product statement is:
 
 > One archive. One tree. Evidence.
 
-Do not use "proven" in current product claims. Alpha.2 emits deterministic unsigned evidence, but does not yet emit a canonical tree root, an authenticated attestation, or a formal proof.
+Do not use "proven" in current product claims. Alpha.3 emits deterministic unsigned evidence and a preview `sealrTreeV1` encoding. It does not emit an authenticated attestation or a formal uniqueness proof.
 
 ## Research disposition
 
@@ -30,10 +32,10 @@ The architecture review produced useful priorities, speculative extensions, and 
 | Canonical archive-to-tree admission authority | Adopted as product direction | It best matches the existing single-interpretation parser, shared inspect/materialize plan, findings, and evidence boundary. |
 | Exact compressed-input consumption and distinct codec findings | Adopted for immediate hardening | This is required by the current one-interpretation claim and has direct differential-parser precedent. |
 | Unsigned evidence terminology | Adopted now | Current JSON is an EvidenceRecord or receipt, not an authenticated attestation. |
-| Separate interpretation, admission, verification, effect, and completeness axes | Scheduled for semantic identity gate | The current `Allowed` or `Rejected` verdict cannot express these independent facts without a schema change. |
-| Versioned `ArchiveIR` and separate source, interpretation, layout, content, and effect identities | ArchiveIR landed; tree identities scheduled | `sealr.archive-ir.v1` is the inspect/materialize member plan. Layout and content-tree roots remain unspecified. |
+| Separate interpretation, admission, verification, effect, and completeness axes | Landed in receipt v2 and the view | The `Allowed` or `Rejected` compatibility verdict remains, but the axes and CLI exit classes expose the independent facts. |
+| Versioned `ArchiveIR` and separate source, interpretation, layout, content, and effect identities | ArchiveIR landed; preview tree identities landed | `sealr.archive-ir.v1` is the inspect/materialize member plan and now records ranges, extra-field dispositions, and normalization actions. Receipts carry `sealrTreeV1` layout and content roots. Golden ZIP fixtures and lock semantics remain. |
 | Immutable `SourceSnapshot` abstraction | Landed for in-memory sources | Path inputs become owned whole-buffer bytes and byte inputs are borrowed immutably for the call. Bounded random access can follow later. |
-| Typed interpretation, budget, target, consumer, and effect profiles | Scheduled for semantic identity gate | External policy must not blur byte interpretation with operational or consumer choices. |
+| Typed interpretation, budget, target, consumer, and effect profiles | Preview compilation landed | `Policy::compile()` produces typed supported controls before ingest. The long-term external five-layer document is still unspecified. |
 | Semantic lock | Scheduled after canonical encoding and roots | A lock is useful only when profile and tree identities are normative and stable. |
 | Hostile and benign compatibility corpora | Scheduled for trust gate | Strictness must be measured within named supported domains on all release platforms. |
 | Python wheel admission | Selected first consumer candidate | It has a concrete parser-differential problem and artifact semantics beyond generic ZIP. It follows the semantic core. |
@@ -48,9 +50,9 @@ The architecture review produced useful priorities, speculative extensions, and 
 | Numeric risk scoring, permissive recovery, or best-effort interpretation | Rejected | These weaken deterministic, explainable, fail-closed admission. |
 | Malware, prompt-injection, model-identity, or credential governance in the core | Out of scope | Sealr establishes archive structure, resource, namespace, content-integrity, and provenance properties. |
 
-## Current alpha.2 baseline
+## Current alpha.3 baseline
 
-Alpha.2 has one Rust `apply()` path for inspect and materialize. It uses one bounded in-memory ZIP32 source: path inputs become owned bytes, while byte inputs are borrowed immutably for the call. It applies a strict ASCII path and ZIP interpretation, verifies accepted Store and Deflate members, emits a view and unsigned receipt, and optionally realizes the same planned members through a capability-relative staged materializer.
+Alpha.3 has one Rust `apply()` path for inspect and materialize. It uses one bounded in-memory ZIP32 source: path inputs become owned bytes, while byte inputs are borrowed immutably for the call. It applies a strict ASCII path and ZIP interpretation, builds one `ArchiveIR`, verifies accepted Store and Deflate members, emits a view and unsigned receipt, and optionally realizes and audits the same planned members through a capability-relative staged materializer.
 
 The current public outcome is:
 
@@ -59,7 +61,7 @@ UntrustedArchive x Policy
   -> axes x (Allowed { wrote } | Rejected) x Receipt v2 x View v1
 ```
 
-`Outcome` and `sealr.receipt.v2` now carry interpretation, admission, verification, effect, and view-completeness. The inspectable view and CLI still serialize the compatibility `Allowed`/`Rejected` adapter, so an admitted archive with a failed destination remains `verdict: rejected`. `view_digest` binds that invocation-specific view. It is not a semantic layout root or content-tree root.
+`Outcome`, `sealr.view.v1`, and `sealr.receipt.v2` carry interpretation, admission, verification, effect, and view-completeness. The compatibility `Allowed`/`Rejected` adapter remains, so an admitted archive with a failed destination is still `verdict: rejected`, while CLI exit `3` and the axes preserve the precise state. `view_digest` binds that invocation-specific view. Layout and content-tree roots are separate `sealrTreeV1` identities on the receipt.
 
 ## Target outcome model
 
@@ -94,7 +96,7 @@ ViewCompleteness
 
 These axes prevent operational failures from changing semantic claims. For example, a destination publication error can be `Interpreted + Admitted + Complete + Failed`. The archive did not become unsafe because one filesystem operation failed. A source read error is `Indeterminate`, not a policy denial. A lazy read-only projection can be admitted while its verification state remains partial.
 
-The axes are visible in Rust types and receipt JSON. CLI stdout still emits the compatibility view, and exit `2` still covers both denial and effect failure. Future authenticated claims and a job-oriented CLI should consume the axes rather than freeze `Verdict`.
+The axes are visible in Rust types, view JSON, and receipt JSON. CLI exit `2` means admission did not succeed, while exit `3` means admission succeeded but the requested effect failed. Future authenticated claims and a job-oriented CLI should consume the axes rather than freeze `Verdict`.
 
 ## Canonical `ArchiveIR`
 
@@ -144,7 +146,7 @@ Sealr should keep these identities distinct:
 4. **Content-tree identity**: a normative root over canonical paths, kinds, content hashes, and security-relevant metadata after required content verification completes.
 5. **Invocation and effect identity**: policy, environment, destination controls, findings, lifecycle, and realization outcome.
 
-`sealrTreeV1` must be specified with canonical byte encoding, ordering, domain separation, empty-directory behavior, path representation, metadata coverage, and test vectors before it becomes a product claim. Existing schemes such as in-toto `dirHash1`, Git trees, and OCI `DiffID` are useful interoperability references, but do not commit to every semantic fact Sealr needs.
+`sealrTreeV1` now specifies canonical byte encoding, ordering, domain separation, empty-tree behavior, path representation, metadata coverage, and preview vectors. It remains unstable until the interpretation profile closes its extra-field rules and an independent verifier reproduces the roots. Existing schemes such as in-toto `dirHash1`, Git trees, and OCI `DiffID` are useful interoperability references, but do not commit to every semantic fact Sealr needs.
 
 ## Immutable source snapshots
 
@@ -199,7 +201,7 @@ Target operations establish different facts:
 | `materialize` | complete | complete while writing | transactional publication |
 | `project` | complete | partial, advancing on read | read-only namespace |
 
-Alpha.2 `inspect` currently verifies accepted members fully rather than performing a structure-only pass. The target operation names above are not current CLI verbs.
+Alpha.3 `inspect` currently verifies accepted members fully rather than performing a structure-only pass. The target operation names above are not current CLI verbs.
 
 A partial view must say where and why it stopped. A partial member list must never look complete. A projected tree receives a complete content-tree identity only after all required members have been verified.
 
@@ -229,7 +231,7 @@ This example is a target schema only. The lock must not ship before canonical en
 
 ## The consumption rule
 
-Evidence is not enough if a downstream consumer opens the original archive with another parser. The parser differential then returns.
+Evidence is not enough if a downstream consumer opens the original archive with another parser. The parser differential then returns. That is the [usefulness test](usefulness.md): a receipt without a dependent that consumes the admitted tree does not prove the category.
 
 Consumers of a successful admission must receive one of:
 
@@ -261,7 +263,7 @@ Build one canonical consumer after semantic identity is stable.
 3. **Hermetic build inputs**: make the canonical tree, not a second extraction, the build input and cache key.
 4. **OCI layers and other rich formats**: later, because whiteouts, ownership, xattrs, links, devices, and ordered application require a dedicated consumer model.
 
-No wheel profile, projection, content-addressed store, semantic lock, or GitHub admission action exists in alpha.2.
+No wheel profile, projection, content-addressed store, semantic lock, or GitHub admission action exists in alpha.3.
 
 ## Compatibility is part of assurance
 
@@ -285,7 +287,7 @@ T_realize    create and transactionally publish the destination tree
 T_reuse      provide an already verified tree without reparsing or reinflating
 ```
 
-The strategic performance result is reuse of the exact admitted tree. Benchmark cold and warm cache, large and tiny-member workloads, local and network storage, antivirus-enabled Windows, peak memory, open handles, cancellation latency, and adversarial inputs. Hardware acceleration follows a demonstrated named workload and may not change interpretation or exact-consumption rules.
+The strategic performance result is reuse of the exact admitted tree. Cores belong on independent member verification and on reuse copies after one covering exists, not on a second parse. Benchmark cold and warm cache, large and tiny-member workloads, local and network storage, antivirus-enabled Windows, peak memory, open handles, cancellation latency, worker count, and adversarial inputs. Hardware acceleration follows a demonstrated named workload and may not change interpretation or exact-consumption rules.
 
 ## Delivery gates
 

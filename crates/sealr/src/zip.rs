@@ -1,6 +1,10 @@
 //! CD-first ZIP reader. One interpretation. Disagreement is a finding.
 
 use crate::findings::{Finding, FindingCode};
+use crate::ir::{
+    is_denied_extra_id, ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite,
+    MemberSourceRanges,
+};
 use crate::snapshot::SourceSnapshot;
 use std::collections::BTreeSet;
 
@@ -25,10 +29,13 @@ pub struct ZipMember {
     pub data_offset: u64,
     pub record_end: u64,
     pub is_dir: bool,
+    pub extra_fields: Vec<ExtraFieldRecord>,
+    pub source_ranges: MemberSourceRanges,
 }
 
 struct LocalHeader<'a> {
     data_offset: usize,
+    extra_offset: usize,
     name: &'a [u8],
     method: u16,
     flags: u16,
@@ -44,7 +51,20 @@ pub struct ZipArchive<'a> {
     pub members: Vec<ZipMember>,
     pub cd_offset: u64,
     pub cd_size: u64,
+    pub eocd_offset: u64,
+    pub comment_len: u64,
     pub metadata_bytes: u64,
+}
+
+impl ZipArchive<'_> {
+    pub fn covering(&self) -> crate::ir::ArchiveCovering {
+        crate::ir::ArchiveCovering::from_zip32(
+            self.cd_offset,
+            self.cd_size,
+            self.eocd_offset,
+            self.comment_len,
+        )
+    }
 }
 
 pub fn parse_zip(
@@ -90,7 +110,9 @@ pub fn parse_zip(
     }
     let cd_offset = cd_offset as u64;
     let cd_size = cd_size as u64;
-    let mut metadata_bytes = (comment_len as u64).saturating_add(cd_size);
+    let mut metadata_bytes = (comment_len as u64).checked_add(cd_size).ok_or_else(|| {
+        Finding::error(FindingCode::QuotaOverflow, "ZIP metadata counter overflow")
+    })?;
     if metadata_bytes > max_metadata_bytes {
         return Err(Finding::error(
             FindingCode::QuotaMetadata,
@@ -148,14 +170,27 @@ pub fn parse_zip(
             ));
         }
         let name_bytes = &bytes[name_off..name_off + name_len];
-        let central_extra = &bytes[name_off + name_len..name_off + name_len + extra_len];
+        let central_extra_off = name_off + name_len;
+        let central_extra = &bytes[central_extra_off..central_extra_off + extra_len];
         let central_comment =
-            &bytes[name_off + name_len + extra_len..name_off + name_len + extra_len + comment_len];
-        validate_extra_fields(central_extra, "central directory", name_bytes)?;
+            &bytes[central_extra_off + extra_len..central_extra_off + extra_len + comment_len];
+        let mut extra_fields = classify_extra_fields(
+            central_extra,
+            central_extra_off as u64,
+            ExtraSite::Central,
+            "central directory",
+            name_bytes,
+        )?;
         reject_structural_metadata(central_comment, "central-directory comment")?;
         let lfh = lfh_offset as usize;
         let local = parse_lfh(bytes, lfh)?;
-        validate_extra_fields(local.extra, "local header", name_bytes)?;
+        extra_fields.extend(classify_extra_fields(
+            local.extra,
+            local.extra_offset as u64,
+            ExtraSite::Local,
+            "local header",
+            name_bytes,
+        )?);
         let display_name = String::from_utf8_lossy(name_bytes);
         if local.name != name_bytes {
             return Err(
@@ -184,7 +219,7 @@ pub fn parse_zip(
                     .on(display_name.as_ref()),
             );
         }
-        if !gp3 && local.crc != crc && crc != 0 {
+        if !gp3 && local.crc != crc {
             // CRC stored in both; mismatch is A2-adjacent integrity confusion.
             return Err(
                 Finding::error(FindingCode::ZipDiffA2Size, "CDH CRC != LFH CRC")
@@ -203,7 +238,15 @@ pub fn parse_zip(
             .on(display_name.as_ref()));
         }
         let name = decode_name(name_bytes, flags)?;
-        validate_directory_metadata(&name, version_made_by, external_attributes, comp, uncomp)?;
+        validate_directory_metadata(
+            &name,
+            version_made_by,
+            external_attributes,
+            method,
+            crc,
+            comp,
+            uncomp,
+        )?;
         let is_dir = name.ends_with('/');
         let payload_end = (local.data_offset as u64).saturating_add(comp as u64);
         if gp3 && method == 0 {
@@ -239,22 +282,67 @@ pub fn parse_zip(
         } else {
             payload_end
         };
+        let local_header_len = (local.data_offset as u64)
+            .checked_sub(lfh_offset as u64)
+            .ok_or_else(|| {
+                Finding::error(
+                    FindingCode::ZipDiffC4Offset,
+                    "local header length underflow",
+                )
+                .on(&name)
+            })?;
+        let payload_len = comp as u64;
+        let descriptor_range = if gp3 {
+            let start = local.data_offset as u64 + payload_len;
+            Some(ByteRange {
+                offset: start,
+                len: record_end.checked_sub(start).ok_or_else(|| {
+                    Finding::error(
+                        FindingCode::ZipDiffC4Offset,
+                        "data descriptor length underflow",
+                    )
+                    .on(&name)
+                })?,
+            })
+        } else {
+            None
+        };
+        let cdh_len = 46_u64 + name_len as u64 + extra_len as u64 + comment_len as u64;
         members.push(ZipMember {
             raw_name: name_bytes.to_vec(),
             name,
             method,
             flags,
             crc,
-            comp_size: comp as u64,
+            comp_size: payload_len,
             uncomp_size: uncomp as u64,
             lfh_offset: lfh_offset as u64,
             data_offset: local.data_offset as u64,
             record_end,
             is_dir,
+            extra_fields,
+            source_ranges: MemberSourceRanges {
+                local_header: ByteRange {
+                    offset: lfh_offset as u64,
+                    len: local_header_len,
+                },
+                compressed_payload: ByteRange {
+                    offset: local.data_offset as u64,
+                    len: payload_len,
+                },
+                data_descriptor: descriptor_range,
+                central_header: ByteRange {
+                    offset: pos as u64,
+                    len: cdh_len,
+                },
+            },
         });
         metadata_bytes = metadata_bytes
-            .saturating_add(name_len as u64)
-            .saturating_add(local.extra.len() as u64);
+            .checked_add(name_len as u64)
+            .and_then(|value| value.checked_add(local.extra.len() as u64))
+            .ok_or_else(|| {
+                Finding::error(FindingCode::QuotaOverflow, "ZIP metadata counter overflow")
+            })?;
         if metadata_bytes > max_metadata_bytes {
             return Err(Finding::error(
                 FindingCode::QuotaMetadata,
@@ -275,13 +363,22 @@ pub fn parse_zip(
         members,
         cd_offset,
         cd_size,
+        eocd_offset: eocd_off as u64,
+        comment_len: comment_len as u64,
         metadata_bytes,
     })
 }
 
-fn validate_extra_fields(extra: &[u8], context: &str, name: &[u8]) -> Result<(), Finding> {
+fn classify_extra_fields(
+    extra: &[u8],
+    extra_start: u64,
+    site: ExtraSite,
+    context: &str,
+    name: &[u8],
+) -> Result<Vec<ExtraFieldRecord>, Finding> {
     let mut position = 0usize;
     let mut ids = BTreeSet::new();
+    let mut records = Vec::new();
     while position < extra.len() {
         if extra.len() - position < 4 {
             return Err(Finding::error(
@@ -314,26 +411,37 @@ fn validate_extra_fields(extra: &[u8], context: &str, name: &[u8]) -> Result<(),
             )
             .on(String::from_utf8_lossy(name)));
         }
-        match id {
-            0x0001 => {
-                return Err(Finding::error(
-                    FindingCode::ZipDiffC5Zip64,
-                    format!("ZIP64 extra field in {context}"),
-                )
+        if is_denied_extra_id(id) {
+            let code = if id == 0x0001 {
+                FindingCode::ZipDiffC5Zip64
+            } else {
+                FindingCode::ZipDiffA3Name
+            };
+            let label = if id == 0x0001 {
+                "ZIP64 extra field"
+            } else {
+                "alternate Unicode path extra field"
+            };
+            return Err(Finding::error(code, format!("{label} in {context}"))
                 .on(String::from_utf8_lossy(name)));
-            }
-            0x7075 => {
-                return Err(Finding::error(
-                    FindingCode::ZipDiffA3Name,
-                    format!("alternate Unicode path extra field in {context}"),
-                )
-                .on(String::from_utf8_lossy(name)));
-            }
-            _ => {}
         }
+        let header_offset = extra_start + position as u64;
+        records.push(ExtraFieldRecord {
+            site,
+            id,
+            header_range: ByteRange {
+                offset: header_offset,
+                len: 4,
+            },
+            data_range: ByteRange {
+                offset: header_offset + 4,
+                len: size as u64,
+            },
+            disposition: ExtraDisposition::Ignored,
+        });
         position = end;
     }
-    Ok(())
+    Ok(records)
 }
 
 fn reject_structural_metadata(data: &[u8], context: &str) -> Result<(), Finding> {
@@ -374,6 +482,8 @@ fn validate_directory_metadata(
     name: &str,
     version_made_by: u16,
     external_attributes: u32,
+    method: u16,
+    crc: u32,
     compressed_size: u32,
     uncompressed_size: u32,
 ) -> Result<(), Finding> {
@@ -412,6 +522,13 @@ fn validate_directory_metadata(
         return Err(
             Finding::error(FindingCode::ZipDiffA4Dir, "directory with nonzero size").on(name),
         );
+    }
+    if name_is_directory && (method != 0 || crc != 0) {
+        return Err(Finding::error(
+            FindingCode::ZipDiffA4Dir,
+            "directory entries must use Store with the CRC32 of empty content",
+        )
+        .on(name));
     }
     Ok(())
 }
@@ -489,6 +606,7 @@ fn parse_lfh(bytes: &[u8], off: usize) -> Result<LocalHeader<'_>, Finding> {
     let data_offset = extra_offset + extra_len;
     Ok(LocalHeader {
         data_offset,
+        extra_offset,
         name,
         method,
         flags,

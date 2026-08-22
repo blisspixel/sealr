@@ -2,7 +2,7 @@
 
 These are **properties**, not features. They are the *type* of `inspect` / `materialize` / `mount`. Files on disk are a side effect that is only allowed if this boundary returns yes.
 
-This document is the target safety contract. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) are authoritative for current implementation status. Alpha.2 intentionally fails closed where canonical Unicode handling is unfinished, and it does not yet satisfy every filesystem-race, fuzzing, proof, isolation, or bounded-input obligation below.
+This document is the target safety contract. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) are authoritative for current implementation status. Alpha.3 intentionally fails closed where canonical Unicode handling is unfinished, and it does not yet satisfy every filesystem-race, fuzzing, proof, isolation, or bounded-input obligation below.
 
 Each MUST have tests, fuzz targets, and a finding code when violated. Machine-checked arguments (Kani/Verus) belong on I1, I2, and fail-closed policy first - not on the format zoo. Full verification of a multi-format extractor is still research.
 
@@ -14,7 +14,7 @@ Detail for ZIP differentials: [threat-model.md](threat-model.md). Path grammar: 
 
 ## I1 - Path containment
 
-Every extracted (or hydrated) path, with `/` as the only accepted archive separator, canonical Unicode normalization, case-fold where the destination filesystem is case-insensitive, and rejection of backslashes, reserved names, ADS names, and trailing-dot names, MUST be `dest` or a strict child. Alpha.2 rejects non-ASCII paths until that canonical Unicode representation exists.
+Every extracted (or hydrated) path, with `/` as the only accepted archive separator, canonical Unicode normalization, case-fold where the destination filesystem is case-insensitive, and rejection of backslashes, reserved names, ADS names, and trailing-dot names, MUST be `dest` or a strict child. Alpha.3 rejects non-ASCII paths until that canonical Unicode representation exists.
 
 - No symlink or hardlink is followed when computing the dest (`O_NOFOLLOW` / `FILE_FLAG_OPEN_REPARSE_POINT`).
 - Pre-existing reparse points inside the private stage are hostile and are never traversed for member creation.
@@ -35,7 +35,7 @@ Hard caps, enforced **as bytes arrive**, not after the fact:
 | Metadata (TAR PAX / GNU long-name, ZIP extra, comment) | 4 MiB | exarch’s TAR bomb bound; keep |
 | Dictionary / window | 64 MiB LZMA; 8 MiB zstd rec | Reject insane frames |
 
-Flags may **raise** caps. They may not default unlimited. Ratio 0 = off only under a named policy.
+Flags may **raise** caps. They may not default unlimited. `max_ratio: null` disables the ratio check. `max_ratio: 0` is not off.
 
 ## I3 - Never trust declared sizes
 
@@ -57,11 +57,11 @@ The inspect API and the materialize API MUST NOT diverge (LibreOffice recovery-m
 
 ## I7 - Streaming + bounded allocation
 
-Target state: no whole-archive load. Header-driven allocations go through `try_reserve` and I2. Expanded bytes stream in bounded chunks. A future whole-buffer codec is allowed only under a RAM gate. Alpha.2 still reads the archive into one input buffer capped at 512 MiB; removing that buffer is an explicit Phase 0.1 gate.
+Target state: no whole-archive load. Header-driven allocations go through `try_reserve` and I2. Expanded bytes stream in bounded chunks. A future whole-buffer codec is allowed only under a RAM gate. Alpha.3 still reads the archive into one input buffer capped at 512 MiB; removing that buffer is an explicit Phase 0.1 gate.
 
 ## I8 - Staged publication and optional durability
 
-Publishing a final destination is all-or-reject. Materialization stages into a same-volume directory and renames it to a previously absent destination only after every member passes. Unix stages are private by verified mode and ownership. Windows stages on supported local NTFS parents are created with the effective token user as object owner and one protected allow ACE for that SID, with DACL inheritance to descendants. Descendants receive the creating token's default owner, which is independent of the inherited sole-TokenUser DACL. A normal failure never publishes the requested destination, attempts cleanup and one retry, and records whether the stage was removed or remains after both attempts fail.
+Publishing a final destination is all-or-reject. Materialization stages into a same-volume directory, audits that staged tree against the admitted IR (sizes, content digests, and the exact path set, including implicit parent directories), and renames it to a previously absent destination only after every member passes and that audit succeeds. Unix stages are private by verified mode and ownership. Windows stages on supported local NTFS parents are created with the effective token user as object owner and one protected allow ACE for that SID, with DACL inheritance to descendants. Descendants receive the creating token's default owner, which is independent of the inherited sole-TokenUser DACL. A normal failure never publishes the requested destination, attempts cleanup and one retry, and records whether the stage was removed or remains after both attempts fail.
 
 The destination parent MUST already exist; materialization MUST NOT create it. On Linux and macOS, the opened parent MUST be owned by the effective user or root. Group/other write is safe only with sticky and a trusted owner. A sticky parent owned by any other user MUST be rejected. The stage MUST be owned by the effective user and MUST deny group and other permissions. On macOS, descriptor inspection MUST prove that both parent and stage have no extended ACL; an ACL or query failure MUST reject before publication.
 

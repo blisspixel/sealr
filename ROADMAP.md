@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-08-21.
+Updated 2026-08-22.
 
 sealr's product is the boundary:
 
@@ -12,15 +12,83 @@ All stages                                  -> evidence
 
 The current `apply()` API is a sound one-entry-point preview, but its `Verdict`, `View`, and `view_digest` still combine admission, effect, and diagnostic facts. Phase 0.1 must separate those axes before external consumers depend on them.
 
+The mathematical object this order is protecting is named in [docs/theory.md](docs/theory.md): a profile-indexed partial function from bytes to one covering and one IR, or to nothing. That page is research notes, not a proof.
+
+## Reliability bar
+
+Sealr is built for high-consequence ingest. The intended user is a pipeline that cannot afford a second meaning of the same bytes: package admission, hermetic builds, agent workspaces, and the class of systems that treat archive extraction as a trust boundary rather than a convenience.
+
+The bar is fail-closed, evidence-bearing, small-TCB behavior that a flight-software or planetary-operations pipeline could put in front of a destination tree. That is an engineering requirement, not a current qualification claim. Do not write "NASA-grade," "flight-proven," or "safe for Mars" into a release note until the gates below are green and an independent review has happened.
+
+Earned reliability means:
+
+- one interpretation, no recovery parser, no `--insecure` mode, no silent overwrite;
+- every allow and reject carries structured evidence;
+- declared sizes never authorize allocation or output;
+- every codec consumes exactly the declared compressed input or fails closed;
+- path, quota, and publication invariants hold on Linux, macOS, and Windows;
+- the trusted computing base stays small enough to review;
+- README limitations match executable behavior.
+
+Breadth that cannot meet this bar does not ship.
+
+## Minimal trusted computing base
+
+Every runtime dependency is in the trust boundary. Sealr prefers a tiny, reviewable graph over codec coverage bought with libarchive, a vendor unarchiver, or a second parser.
+
+Standing rules for the shipped library and CLI:
+
+- no new runtime dependency without a written capability need, license and advisory review, transitive-size review, and evidence that `std` or an existing crate is insufficient;
+- prefer pure-Rust, already-reviewed implementations that Sealr can bound and consume exactly;
+- never shell out to 7-Zip, bsdtar, unzip, or another extractor;
+- never add an async runtime, TUI framework, telemetry client, or network stack to the release binary without a measured requirement;
+- unknown or unimplemented codecs fail closed with a stable finding, they do not pull in a fallback library.
+
+A codec that needs a large C library, an unbounded window, or a recovery mode is not ready. Common compression support is in scope. A codec zoo is not.
+
+## Common compression, one boundary
+
+The destination is not "Deflate forever." It is every common lossless method that real ZIP and TAR producers emit, implemented as **codec adapters around one tested boundary**.
+
+In-scope ZIP methods, once each adapter meets the reliability bar:
+
+| Method | Typical producers | Current status |
+|---|---|---|
+| Store (0) | universal | Implemented |
+| Deflate (8) | zip, wheels, jars, most tools | Implemented, exact single-stream consumption |
+| Deflate64 (9) | Windows Explorer and some ZIP64 tools | Planned adapter |
+| BZip2 (12) | older ZIP toolchains | Planned adapter |
+| LZMA (14) | 7-Zip ZIP files | Planned adapter |
+| XZ (95) | newer ZIP toolchains | Planned adapter |
+| Zstandard (93) | modern ZIP and package tools | Planned adapter |
+
+In-scope TAR wrappers, after the ZIP trust gate and as reuse of the same adapters:
+
+| Wrapper | Current status |
+|---|---|
+| uncompressed TAR | Planned format adapter |
+| gzip | Planned wrapper |
+| bzip2 | Planned wrapper |
+| xz | Planned wrapper |
+| zstd | Planned wrapper |
+
+Each adapter must preserve exact compressed-input consumption, bounded windows and dictionaries, quota accounting, the same `ArchiveIR`, the same path and publication core, and the same findings discipline. Inspect and materialize must still agree. A method that cannot be consumed exactly is `unsupported`, not best-effort.
+
+Out of scope for the default binary: PPMd, JPEG/WavPack-style specialized methods, encrypted ZIP methods, RAR, and becoming a 7-Zip replacement. ZIP64 remains a separate structural profile, not a codec.
+
+Codec breadth follows the ZIP trust gate. Adding Zstd today would multiply trusted code before identity, isolation, Unicode paths, and assurance are done. The order is what makes common compression compatible with the reliability bar.
+
 ## Executive decision
 
 The next milestone is **Phase 0.1: the ZIP trust gate**.
 
 Sealr is an archive-ingress boundary. It is not a general agent-execution proxy, model verifier, credential broker, or enterprise control plane.
 
-Do not add TAR, 7z, MCP, language bindings, accelerators, or archive-decision signing first. The current implementation has a strict but incomplete ZIP32 parser, an executable ZipDiff gate, and component-bound output. The next work is a versioned admitted-tree identity and separate outcome axes, followed by reduced-authority filesystem isolation, canonical Unicode paths, snapshot-backed bounded input, and layered adversarial assurance.
+Do not add TAR, 7z, MCP, language bindings, accelerators, extra ZIP methods, a desktop CLI, or archive-decision signing first. Those are not substitutes for a dependent. The current implementation has a strict but incomplete ZIP32 parser, an executable ZipDiff gate, and component-bound output. The next work is finishing semantic identity, then reduced-authority filesystem isolation, canonical Unicode paths, snapshot-backed bounded input, and layered adversarial assurance.
 
-This order matters because format breadth multiplies every unresolved parser, path, resource, and materialization mistake. Testing one narrow format thoroughly gives later formats a clearer boundary to reuse.
+This order matters because format and codec breadth multiply every unresolved parser, path, resource, and materialization mistake. Testing one narrow ZIP profile thoroughly gives later codecs and formats a boundary they can reuse instead of a second extractor.
+
+The [usefulness test](docs/usefulness.md) is the product gate: same bytes and policy produce one tree or no tree on Linux, macOS, and Windows, and the next tool consumes that admitted tree instead of opening the ZIP again. Until a consumer does that, the receipt does not prove the category. Wheel admission is the first consumer that would. CI protects the boundary (corpus, lockfile, cargo-deny, native materialize). Walkthrough PNGs do not.
 
 ## Current baseline
 
@@ -42,19 +110,19 @@ The repository now has:
 - pinned Rust 1.98.0 plus strict format, Clippy, debug test, optimized build, cross-platform release test, Rustdoc build, documentation, and supply-chain CI gates;
 - dependency update automation and an explicit permissive-license policy;
 - protected `main` requiring pull requests, linear history, resolved conversations, and all five current required CI checks;
-- the `v0.1.0-alpha.2` hardened-materialization preview line, built from protected `main` through all five required main CI checks and the release workflow, with immutable releases enabled.
+- the `v0.1.0-alpha.3` semantic-identity preview line, built from protected `main` through all five required main CI checks and the release workflow, with immutable releases enabled.
 
-This is the current second-alpha baseline. It is incomplete and is not a production security boundary.
+This is the current third-alpha baseline. It is incomplete and is not a production security boundary.
 
 ## Active execution queue
 
 There is one primary implementation stream and one parallel assurance stream:
 
-1. **Primary: Step 3, semantic identity.** First separate outcome and completeness axes, then introduce `SourceSnapshot` and the versioned `ArchiveIR`, then make inspect and materialize consume that one object, and finally specify layout and content-tree identities with cross-platform golden bytes.
-2. **Parallel: finish the Step 2 adversarial matrix.** Add deterministic namespace and staged-content mutation seams on Linux, macOS, and Windows. These tests may strengthen the existing materializer, but they must not invent a second tree or manifest representation.
+1. **Primary: Step 3, semantic identity.** Outcome axes, `SourceSnapshot`, `ArchiveIR` with a source covering certificate, codec-free covering checker, typed policy compilation, integer ratio and checked counters, extra-field classification, preview `sealrTreeV1` identities, walkthrough golden roots, view axes, and CLI exit `3` for admitted-but-failed effect have landed. Remaining: extra-field allowlist tightening only under a new profile id. The compatibility `verdict` still maps effect failure to `rejected`; axes and exit `3` are the honest record.
+2. **Parallel: finish the Step 2 adversarial matrix.** Destination appearance as a file or link, directory-component substitution after the first member, intra-call create-then-open replacement, and staged-content mutation versus the admitted IR now have deterministic tests. Same-process staged-tree audit runs before publication. Remaining: repeated hostile races, and the independent supervisor audit that arrives with the Step 4 worker. Do not invent a second tree or manifest representation.
 3. **Next after the semantic contract: Step 4, the supervised Linux worker.** The worker protocol and supervisor audit consume the Step 3 tree and manifest. macOS and Windows stay native release gates and report process isolation unavailable until credible platform-specific worker boundaries exist.
 
-Steps 5 through 10 then proceed in order: authenticated recovery and durability, canonical Unicode paths, snapshot-backed bounded random access, layered assurance, stable evidence plus avoided-work performance, and the stable CLI experience. After Phase 0.1, the Python wheel consumer and reusable-tree gate come before TAR or any other format expansion.
+Steps 5 through 10 then proceed in order: authenticated recovery and durability, canonical Unicode paths, snapshot-backed bounded random access, layered assurance, stable evidence plus avoided-work performance, and the stable CLI experience. After Phase 0.1, common ZIP codec adapters (Zstd, XZ/LZMA, BZip2, Deflate64) land on that same boundary. The Python wheel consumer can proceed on Store and Deflate without waiting for every method. TAR begins only after it can reuse those codec adapters rather than grow a second decompression stack.
 
 ## Repository tooling and dependency rule
 
@@ -70,7 +138,7 @@ Shared deterministic tasks will move into a small Rust `xtask` surface in this o
 4. release-candidate classification and archive inspection;
 5. release promotion after the Rust implementation reproduces every numeric-ID, provenance, and fail-closed gate in the current operator script.
 
-Thin host-specific wrappers may remain only where an operating-system or operator boundary requires them. New runtime dependencies require a written capability need, license and advisory review, transitive-size review, and evidence that the standard library or an existing dependency is insufficient. UI work must not add an async runtime, TUI framework, telemetry client, or network stack to the release binary without a measured requirement.
+Thin host-specific wrappers may remain only where an operating-system or operator boundary requires them. New runtime dependencies require a written capability need, license and advisory review, transitive-size review, and evidence that the standard library or an existing dependency is insufficient. UI work must not add an async runtime, TUI framework, telemetry client, or network stack to the release binary without a measured requirement. Codec crates are reviewed under the same rule: one bounded implementation per method, no fallback extractor, no optional "use system unzip" path.
 
 ## Phase 0.1: ZIP trust gate
 
@@ -111,14 +179,14 @@ Completed through 2026-08-21:
 - Final publication uses `RENAME_NOREPLACE` on Linux, `RENAME_EXCL` on macOS, and `NtSetInformationFile` with the retained source and parent handles on Windows. All three are no-replace operations.
 - Materialization receipt v2 reports non-sensitive Windows storage observations and stage-ACL verification in addition to the common lifecycle primitives.
 - Unsupported publication platforms fail closed instead of using a check-then-rename fallback.
-- Deterministic tests preserve a destination that appears after staging, refuse parent and leaf symlinks, reject non-component input and non-directory parents, preserve outside bytes, verify explicit cleanup, and require inspect and materialize member equality.
+- Deterministic tests preserve a destination that appears after staging as a directory or a file, refuse a destination that is already a symlink or junction, refuse parent and leaf links, refuse a directory component replaced by a symlink or junction before the next member, reject non-component input and non-directory parents, preserve outside bytes, verify explicit cleanup, and require inspect and materialize member equality.
 
 Remaining deliverables:
 
-1. Add deterministic race seams and repeated Linux symlink swaps, macOS link swaps, Windows junction or reparse-point mutation, leaf replacement, destination appearance, and staged-content mutation tests.
-2. Require every successful publication to match an independently audited staged-tree manifest exactly.
+1. Repeated hostile race stress beyond the deterministic intra-call create-then-open and staged-content mutation hooks.
+2. Independent supervisor audit of the staged tree in the Step 4 worker. Same-process `audit_against` already refuses publication unless the stage matches the admitted IR; the supervisor must repeat that check without reparsing ZIP.
 
-These materializer tests remain active release gates while Step 3 defines semantic identity. The final staged-tree manifest audit depends on that admitted-tree contract and completes with the worker boundary in Step 4.
+These materializer tests remain active release gates while Step 3 defines semantic identity. The independent staged-tree audit completes with the worker boundary in Step 4.
 
 Why this remains active: archive-controlled names now cross a component-bound no-follow materializer, and all three release platforms have native no-replace publication. Windows stage creation additionally installs and verifies a private DACL. The remaining risks are parser authority, adversarial mutation evidence, and crash lifecycle, not ordinary lexical traversal.
 
@@ -133,15 +201,15 @@ Exit proof:
 - receipts report the actual platform publication primitive and every post-stage cleanup outcome;
 - crash-recovery behavior is documented and tested separately from normal rollback.
 
-### 3. Establish semantic identity and separate outcomes: immediate implementation milestone
+### 3. Establish semantic identity and separate outcomes: preview foundation landed, closure active
 
 Implementation order inside this step:
 
 1. Replace the unavailable all-zero source digest with explicit digest availability, add separate outcome and completeness types, and preserve a compatibility adapter for the alpha.2 public shape. **Landed:** `SourceDigest` omits SHA-256 when bytes were never held; `Outcome` and receipt v2 expose interpretation, admission, verification, effect, and view-completeness; `Verdict` remains the alpha.2 adapter. The inspectable `View` still serializes `allowed`/`rejected`.
 2. Introduce `SourceSnapshot` over the current owned and caller-borrowed in-memory bytes, then build the versioned `ArchiveIR` once from that snapshot. **Landed:** path inputs become `memory-owned` and caller byte inputs stay `memory-borrowed`; payload reads are checked ranges over that object. Receipts record `source_snapshot`. `sealr.archive-ir.v1` is built once after path admission under `sealr.profile.zip.strict-ascii.v1`.
 3. Make inspect serialization, materialization, tests, and future worker messages consume the same immutable IR without reparsing source bytes. **Landed for inspect and materialize:** both walk the same `ArchiveIR`. Worker messages still wait for Step 4.
-4. Compile interpretation, budget, target, consumer, and effect inputs into typed supported controls. Replace floating-point ratios and saturating security counters before their external formats stabilize.
-5. Specify canonical layout and content-tree bytes with domain separation and golden vectors, then require byte-identical results on every supported release platform.
+4. Compile interpretation, budget, target, consumer, and effect inputs into typed supported controls. Replace floating-point ratios and saturating security counters before their external formats stabilize. **Landed:** `Policy::compile()` runs before source ingestion; reserved constructor fields fail closed; `max_ratio` is `Option<u64>`; declared and actual ratio checks use integer `u128` comparison; quota and metadata totals use checked addition with `quota.overflow`.
+5. Specify canonical layout and content-tree bytes with domain separation and golden vectors, then require byte-identical results on every supported release platform. **Landed for the preview encoding:** `sealrTreeV1` is a domain-separated binary form over `ArchiveIR`. Receipts record source, interpretation-profile, layout, and content identities separately from `view_digest`. Encoder unit tests pin empty-tree preimages. `crates/sealr/tests/golden_identity.rs` pins the walkthrough allowed fixture's source, layout, and content roots and asserts inspect, materialize, and failed-destination layout agreement. Extra-field allowlist tightening still needs a new profile id.
 
 Deliverables:
 
@@ -313,7 +381,7 @@ Deliverables:
 9. Enforce the runtime dependency rule above. Prefer standard formatting and the existing argument parser over a TUI or rendering framework.
 10. Regenerate README walkthrough transcripts and light and dark screenshots from a release-profile binary built from the exact release candidate whenever visible output changes. Keep copyable commands and expected text beside every image, and bind committed screenshots to a checked transcript and asset manifest.
 
-Why tenth: polishing the alpha.2 combined verdict first would make a pleasant interface around the wrong semantic model. The CLI should expose the independent facts established in Step 3 and the evidence stabilized in Step 9. It is still a Phase 0.1 gate because users must be able to understand a security decision without reading raw internal JSON.
+Why tenth: polishing the compatibility verdict first would make a pleasant interface around the wrong semantic model. The CLI should expose the independent facts established in Step 3 and the evidence stabilized in Step 9. It is still a Phase 0.1 gate because users must be able to understand a security decision without reading raw internal JSON.
 
 Exit proof:
 
@@ -342,7 +410,26 @@ Phase 0.1 is complete only when every row is green.
 | Portability | Current baseline green; every new gate must keep native Linux, macOS, and Windows CI green |
 | Performance | Reproducible baseline with memory and throughput budgets |
 | CLI experience | Stable human and machine output, cross-platform goldens, quiet defaults, screenshot provenance, and reviewed dependency budget |
-| Honesty | README limitations match executable behavior |
+| Honesty | README limitations match executable behavior. Walkthrough PNGs are not the usefulness gate. |
+| Usefulness | Phase 0.1 makes the ZIP32 boundary strict and cross-platform. The category is proven only in Phase 0.2, when a consumer imports the crate and does not reparse. |
+| Trusted computing base | No unreviewed runtime dependency; no fallback extractor; Store and Deflate remain the only ZIP methods until their exact-consumption bar is cloned per adapter |
+
+## After Phase 0.1: common codec adapters
+
+Still ZIP. Still one IR, one path core, one materializer, one worker. Each method is a bounded adapter with exact input consumption, a hostile codec corpus, and a written dependency justification.
+
+Deliverables:
+
+1. Zstandard (ZIP method 93) with a bounded window, exact frame consumption, and no concatenated-frame surprises inside one declared member payload.
+2. XZ and LZMA (methods 95 and 14) with explicit dictionary caps already reserved as `max_dict_bytes`.
+3. BZip2 (method 12) with bounded block accounting.
+4. Deflate64 (method 9) only if it can share the Deflate exact-consumption discipline without a second policy language.
+5. Receipts and findings name the codec and why it was selected or rejected. Unknown methods stay `method.unsupported`.
+6. No new codec may add libarchive, a C toolkit, or a subprocess. Prefer a small pure-Rust implementation that Sealr drives byte-for-byte.
+
+Done when a representative ZIP from ordinary producers using those methods admits to the same tree on Linux, macOS, and Windows, and every rejected method still returns evidence.
+
+The Python wheel consumer does not wait on this list. Wheels today are Store and Deflate. TAR does wait, because its wrappers should call the same adapters.
 
 ## Phase 0.2: one canonical consumer
 
@@ -355,7 +442,7 @@ Only after Phase 0.1:
 - one external package publisher, registry, build backend, or installer that consumes Sealr's admitted representation rather than reparsing the ZIP;
 - Sigstore keyless signing of Sealr semantic admission records only after their unsigned claim bytes and independent verifier are stable. Release archives already carry GitHub build-provenance attestations.
 
-Done when one external consumer treats Sealr's admitted tree and semantic lock as its canonical decision.
+Done when one external consumer treats Sealr's admitted tree and semantic lock as its canonical decision and does not reparse the original ZIP. That is the [usefulness test](docs/usefulness.md). A receipt beside a second unzip does not pass.
 
 ## Phase 0.3: reusable admitted trees
 
@@ -370,12 +457,12 @@ Done when repeated consumers can reuse one admitted tree without a second parser
 ## Phase 1: TAR without weakening the gate
 
 - TAR, PAX, and GNU long-name parsing through the same canonical path and quota core;
-- gzip and zstd wrappers with bounded window and metadata policy;
+- gzip, bzip2, xz, and zstd wrappers that call the ZIP codec adapters, with bounded window and metadata policy;
 - default denial of symlinks, hardlinks, devices, sparse surprises, and unsafe modes;
 - TAR checksum, duplicate path, extension-header, and truncation fixtures;
 - the same capability materializer, receipt schema, isolation worker, and fuzz expectations.
 
-Done when ZIP and TAR are format adapters around one tested boundary rather than separate extractors.
+Done when ZIP and TAR are format adapters around one tested boundary rather than separate extractors, and TAR gzip/bzip2/xz/zstd wrappers reuse the ZIP codec adapters instead of adding a second decompression stack.
 
 ## Phase 2: ecosystem and audit
 
@@ -395,9 +482,25 @@ Done when ZIP and TAR are format adapters around one tested boundary rather than
 - ZipDiff-style TAR and 7z differential research;
 - a possible unambiguous next-generation container and converters.
 
+## Parallelism
+
+Machines have many cores. Using all of them on the wrong cut is how a security boundary grows a second parser.
+
+**Sequential on purpose.** Unique covering, CD/LFH agreement, path injectivity, and policy compilation are one chain. Two EOCD scans or two member plans are two interpretations. The current `apply()` stays on that chain.
+
+**Parallel after the IR exists.** Independent file members have disjoint payload ranges over an immutable snapshot. Verifying them concurrently is a morphism of `T_verify`, not of `T_structure`. Directory members are constant time. Declared totals are already admitted; actual totals combine with checked addition. Findings that stop verification are reported in central-directory order so roots and receipts do not depend on thread schedule.
+
+**Realize carefully.** Create parent components first. Independent files may then write in parallel. Publication remains one no-replace rename of the stage. Do not publish from workers.
+
+**No new runtime for cores.** `std::thread` and an explicit job bound. Not Tokio, not Rayon, not OpenMP, not a GPU scheduler, unless a measured named workload proves `std` insufficient under the dependency rule. Intra-codec SIMD in `zlib-rs` is already allowed. `SEALR_JOBS` is a tool/process cap, not a policy field, and must not change trees.
+
+**Tools first.** The ZipDiff classifier is thousands of independent `apply()` calls. It may use all cores today because each call is its own covering. Library-internal member parallelism waits until inspect/materialize still agree under a concurrent verify, including quota overflow, first-error identity, and Windows/macOS/Linux.
+
+See [architecture.md](docs/architecture.md#performance-architecture) and [backends.md](docs/backends.md).
+
 ## Deferred performance track
 
-Optional codec, I/O, and hardware backends remain experiments until the Phase 0.1 workload taxonomy proves a bottleneck. Avoided parsing, decompression, and writes take priority over faster extraction.
+Optional codec, I/O, and hardware backends remain experiments until the Phase 0.1 workload taxonomy proves a bottleneck. Avoided parsing, decompression, and writes take priority over faster extraction. Multi-core verification of independent members is the first performance cut that is compatible with unique covering; it is still not a Phase 0.1 gate.
 
 Any backend must:
 
@@ -418,6 +521,8 @@ Any backend must:
 - an insecure mode
 - GPU as the default
 - a 7-Zip replacement
+- libarchive, subprocess unzip, or any recovery parser
+- pulling a large codec framework to skip writing exact-consumption adapters
 
 ## Primary research behind the order
 
@@ -434,4 +539,4 @@ Any backend must:
 
 ## Decision rule
 
-When choosing the next task, prefer the work that most increases justified trust in the boundary per unit of trusted code. Breadth, bindings, signing, and acceleration follow that rule.
+When choosing the next task, prefer the work that most increases justified trust in the boundary per unit of trusted code. Common compression is in scope as adapters on that boundary. Breadth that grows the trusted computing base without a matching corpus, exact-consumption proof, and dependency justification waits. Bindings, signing, acceleration, TAR, 7z, and a richer CLI follow a real dependent, not the other way around. See [usefulness.md](docs/usefulness.md).

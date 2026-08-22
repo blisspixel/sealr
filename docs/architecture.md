@@ -1,8 +1,8 @@
 # Architecture
 
-> This page separates the implemented alpha.2 architecture from the target semantic architecture. Planned types, profiles, tree roots, projection, process isolation, acceleration, and expanded crate graph are not current features. See [semantic-model.md](semantic-model.md) for the normative target.
+> This page separates the implemented alpha.3 architecture from the target semantic architecture. Projection, process isolation, acceleration, stable lock semantics, and an expanded crate graph are not current features. See [semantic-model.md](semantic-model.md) for the normative target.
 
-## Implemented in alpha.2
+## Implemented in alpha.3
 
 Sealr is a two-crate Rust workspace:
 
@@ -20,8 +20,9 @@ The current input and interpretation boundary is:
 3. Compare redundant central and local metadata, validate source ranges, reject overlaps and hidden structural records, and apply the strict path grammar.
 4. If a destination was requested, create and retain its private stage after structural planning and before member processing.
 5. Stream accepted Store and Deflate content through resource bounds, exact DEFLATE input-consumption checks, actual size checks, CRC32, and SHA-256. Write the same verified bytes into the private stage when one exists.
-6. Publish the complete stage without replacement only after every member passes. Abort and report cleanup on any member or publication failure.
-7. Emit the versioned view and deterministic unsigned receipt for the actual final outcome.
+6. Audit the stage against the admitted IR with streaming size and SHA-256 verification plus an exact path-set comparison.
+7. Publish the complete stage without replacement only after every member and the audit pass. Abort and report cleanup on any member, audit, or publication failure.
+8. Emit the versioned view and deterministic unsigned receipt for the actual final outcome.
 
 Current support is seekable ZIP32 with Store and Deflate members plus validated data descriptors. Encryption, ZIP64, spanned archives, recovery parsing, recursive nested extraction, links, devices, and unsupported structures fail closed. The [README](../README.md) is authoritative for the complete support and limitation list.
 
@@ -46,9 +47,9 @@ The receipt's `materialization` object records the selected backend, stage prote
 
 The format parser, path grammar, quota counters, content verification, and policy decision share one in-process trust boundary. The materializer receives validated relative components rather than archive-controlled ambient paths.
 
-Alpha.2's bounded in-memory source is now a named `SourceSnapshot`: path inputs become owned bytes, caller byte inputs remain borrowed, and the recorded digest is SHA-256 of that exact object. ZIP payload reads use checked ranges over the snapshot. Receipt v2 reports `source_snapshot` as `memory-owned`, `memory-borrowed`, or `unavailable`. It does not yet:
+Alpha.3's bounded in-memory source is a named `SourceSnapshot`: path inputs become owned bytes, caller byte inputs remain borrowed, and the recorded digest is SHA-256 of the complete object. ZIP payload reads use checked ranges over the snapshot. Receipt v2 reports `source_snapshot` as `memory-owned`, `memory-borrowed`, or `unavailable`. It does not yet:
 
-- produce a layout root or content-tree root; `sealr.archive-ir.v1` now exists as the inspect/materialize member plan;
+- freeze preview `sealrTreeV1` roots as a stable lock or authenticated subject; committed cross-platform golden fixtures now pin the preview encoding;
 - replace whole-archive buffering with a private spool or verified filesystem snapshot;
 - run parsing in a reduced-authority worker;
 - expose a read-only projection or content-addressed store;
@@ -80,7 +81,7 @@ Bounded random access must preserve the security property currently provided by 
 
 ### Canonical intermediate representation
 
-The versioned `ArchiveIR` preserves raw name bytes, decoded and canonical names, source ranges, flags, extra-field dispositions, declared and actual sizes, content commitments, and verification state. It is the source of layout and content-tree identities. Canonical encoding and root derivation require normative test vectors before those identities are stable.
+The versioned `ArchiveIR` preserves raw name bytes, decoded and canonical names, source ranges, flags, extra-field dispositions, declared and actual sizes, content commitments, and verification state. It is the source of preview layout and content-tree identities. The encoding and committed cross-platform test vectors now exist, but the roots remain explicitly unstable until the profile's extra-field rules close and an independent verifier reproduces them.
 
 ### Separated policy layers
 
@@ -111,7 +112,20 @@ T_realize    build and publish a destination tree
 T_reuse      provide an already verified admitted tree
 ```
 
-Avoided parsing, inflation, and writes are the strategic optimization. Parallel member verification, clone or link materialization, alternate codec backends, remote range ingestion, and hardware acceleration follow only after the semantic workload is stable. An optional backend must preserve exact input consumption, output bytes, findings, tree identities, and verification state.
+Avoided parsing, inflation, and writes are the strategic optimization. Cores are not wasted by keeping interpretation on one thread. The covering is a chain: EOCD selection, central-directory walk, local-record abutment, and path injectivity are data-dependent. Running two of those walks is a second parser. Independent work starts after one IR exists. `audit_covering` rechecks the claimed ranges and signatures without searching or inflating. Materialization audits the staged tree against that IR before the no-replace rename.
+
+```text
+T_structure   sequential unique covering and jail   (one core is correct)
+T_verify      independent members over an immutable snapshot
+T_realize     directories in topological order, then independent file writes
+T_reuse       no inflate; cores only if many blobs are copied
+```
+
+`T_verify` is the first honest multi-core cut: each admitted file member is a codec morphism over a disjoint payload range. Directory members are O(1). Quota combining is checked addition of per-member actuals after the declared total has already been admitted. Findings and partial-stop identity stay in central-directory order so receipts remain deterministic. Realization may write independent files in parallel only after parent components exist; publication stays a single no-replace rename.
+
+Do not add Rayon, Tokio, or a GPU runtime to the library to get that cut. `std::thread` and an explicit worker bound are enough. `SEALR_JOBS` may cap parallelism for tools; it is not a policy field and must not change trees, findings, or roots. Intra-codec SIMD already present in `zlib-rs` is fine. Hardware offload remains a named, optional backend after a measured bottleneck.
+
+Parallel member verification, clone or link materialization, alternate codec backends, remote range ingestion, and hardware acceleration follow only after the semantic workload is stable. An optional backend must preserve exact input consumption, output bytes, findings, tree identities, and verification state.
 
 ## Format and consumer expansion
 

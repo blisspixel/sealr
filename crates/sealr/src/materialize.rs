@@ -6,9 +6,10 @@ use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::ambient_authority;
 use cap_std::fs::{Dir as CapDir, File as CapFile, OpenOptions as CapOpenOptions};
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
 #[cfg(test)]
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 use crate::findings::{Finding, FindingCode};
 
@@ -24,8 +25,16 @@ const MEMBER_RESOLUTION: &str = "component-handles-nofollow";
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
 
 #[cfg(test)]
+enum InjectedStageMutation {
+    Overwrite { relative: String, bytes: Vec<u8> },
+    ExtraFile { relative: String, bytes: Vec<u8> },
+}
+
+#[cfg(test)]
 std::thread_local! {
     static INJECTED_CLEANUP_FAILURES: Cell<u32> = const { Cell::new(0) };
+    static AFTER_DIR_COMPONENT: RefCell<Option<(String, PathBuf)>> = const { RefCell::new(None) };
+    static STAGE_MUTATION: RefCell<Option<InjectedStageMutation>> = const { RefCell::new(None) };
 }
 
 #[cfg(test)]
@@ -62,6 +71,109 @@ fn injected_cleanup_failure() -> Option<io::Error> {
 #[cfg(not(test))]
 fn injected_cleanup_failure() -> Option<io::Error> {
     None
+}
+
+#[cfg(test)]
+pub(crate) struct DirComponentSeamGuard;
+
+#[cfg(test)]
+impl Drop for DirComponentSeamGuard {
+    fn drop(&mut self) {
+        AFTER_DIR_COMPONENT.with(|slot| slot.replace(None));
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn inject_directory_component_replacement(
+    component: impl Into<String>,
+    outside: PathBuf,
+) -> DirComponentSeamGuard {
+    AFTER_DIR_COMPONENT.with(|slot| {
+        slot.replace(Some((component.into(), outside)));
+    });
+    DirComponentSeamGuard
+}
+
+#[cfg(test)]
+fn injected_after_directory_component(path: &Path) {
+    AFTER_DIR_COMPONENT.with(|slot| {
+        let slot = slot.borrow();
+        let Some((name, outside)) = slot.as_ref() else {
+            return;
+        };
+        if path.file_name().and_then(|value| value.to_str()) != Some(name.as_str()) {
+            return;
+        }
+        let _ = fs::remove_dir_all(path);
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            let _ = std::os::unix::fs::symlink(outside, path);
+        }
+        #[cfg(windows)]
+        {
+            let _ = std::process::Command::new("cmd")
+                .args(["/d", "/c", "mklink", "/J"])
+                .arg(path)
+                .arg(outside)
+                .status();
+        }
+    });
+}
+
+#[cfg(test)]
+pub(crate) struct StageMutationGuard;
+
+#[cfg(test)]
+impl Drop for StageMutationGuard {
+    fn drop(&mut self) {
+        STAGE_MUTATION.with(|slot| slot.replace(None));
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn inject_staged_content_overwrite(
+    relative: impl Into<String>,
+    bytes: Vec<u8>,
+) -> StageMutationGuard {
+    STAGE_MUTATION.with(|slot| {
+        slot.replace(Some(InjectedStageMutation::Overwrite {
+            relative: relative.into(),
+            bytes,
+        }));
+    });
+    StageMutationGuard
+}
+
+#[cfg(test)]
+pub(crate) fn inject_staged_extra_file(
+    relative: impl Into<String>,
+    bytes: Vec<u8>,
+) -> StageMutationGuard {
+    STAGE_MUTATION.with(|slot| {
+        slot.replace(Some(InjectedStageMutation::ExtraFile {
+            relative: relative.into(),
+            bytes,
+        }));
+    });
+    StageMutationGuard
+}
+
+#[cfg(test)]
+fn apply_injected_stage_mutation(stage: &Path) {
+    STAGE_MUTATION.with(|slot| {
+        let slot = slot.borrow();
+        let Some(mutation) = slot.as_ref() else {
+            return;
+        };
+        match mutation {
+            InjectedStageMutation::Overwrite { relative, bytes } => {
+                let _ = fs::write(stage.join(relative), bytes);
+            }
+            InjectedStageMutation::ExtraFile { relative, bytes } => {
+                let _ = fs::write(stage.join(relative), bytes);
+            }
+        }
+    });
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -573,6 +685,8 @@ impl CapabilityMaterializer {
                 format!("clone staging capability: {error}"),
             )
         })?;
+        #[cfg(test)]
+        let mut relative = PathBuf::new();
         for part in parts {
             validate_component(part)?;
             let component = Path::new(part);
@@ -585,6 +699,11 @@ impl CapabilityMaterializer {
                         format!("create directory component {part:?}: {error}"),
                     ));
                 }
+            }
+            #[cfg(test)]
+            {
+                relative.push(part);
+                injected_after_directory_component(&self.stage_path().join(&relative));
             }
             current = current.open_dir_nofollow(component).map_err(|error| {
                 Finding::error(
@@ -602,9 +721,253 @@ impl CapabilityMaterializer {
         Ok(current)
     }
 
+    fn open_existing_directories(&self, parts: &[String]) -> Result<CapDir, Finding> {
+        let mut current = self.root()?.try_clone().map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("clone staging capability: {error}"),
+            )
+        })?;
+        for part in parts {
+            validate_component(part)?;
+            current = current
+                .open_dir_nofollow(Path::new(part))
+                .map_err(|error| {
+                    Finding::error(
+                        FindingCode::MaterializeAudit,
+                        format!("audit open directory {part:?}: {error}"),
+                    )
+                })?;
+            ensure_directory_handle_is_not_reparse(&current).map_err(|error| {
+                Finding::error(
+                    FindingCode::MaterializeAudit,
+                    format!("audited directory {part:?} is a reparse point: {error}"),
+                )
+            })?;
+        }
+        Ok(current)
+    }
+
+    pub(crate) fn audit_against(&self, ir: &crate::ir::ArchiveIR) -> Result<(), Finding> {
+        use std::collections::BTreeSet;
+
+        #[cfg(test)]
+        apply_injected_stage_mutation(&self.stage_path());
+
+        let mut expected_dirs = BTreeSet::new();
+        let mut expected_files = BTreeSet::new();
+        for member in &ir.members {
+            match member.kind {
+                crate::ir::MemberKind::Directory => {
+                    expected_dirs.insert(member.components.clone());
+                    for index in 1..member.components.len() {
+                        expected_dirs.insert(member.components[..index].to_vec());
+                    }
+                    self.open_existing_directories(&member.components)?;
+                }
+                crate::ir::MemberKind::File => {
+                    expected_files.insert(member.components.clone());
+                    for index in 1..member.components.len() {
+                        expected_dirs.insert(member.components[..index].to_vec());
+                    }
+                    let Some(expected_sha) = member.content_sha256.as_deref() else {
+                        return Err(Finding::error(
+                            FindingCode::MaterializeAudit,
+                            "file member is missing a content digest",
+                        )
+                        .on(&member.decoded_name));
+                    };
+                    let Some(expected_size) = member.actual_uncomp_size else {
+                        return Err(Finding::error(
+                            FindingCode::MaterializeAudit,
+                            "file member is missing a verified size",
+                        )
+                        .on(&member.decoded_name));
+                    };
+                    let (leaf, parents) = member.components.split_last().ok_or_else(|| {
+                        Finding::error(
+                            FindingCode::MaterializeAudit,
+                            "file member has no path components",
+                        )
+                        .on(&member.decoded_name)
+                    })?;
+                    let parent = self.open_existing_directories(parents)?;
+                    let mut options = CapOpenOptions::new();
+                    options.read(true).follow(FollowSymlinks::No);
+                    let mut file =
+                        parent
+                            .open_with(Path::new(leaf), &options)
+                            .map_err(|error| {
+                                Finding::error(
+                                    FindingCode::MaterializeAudit,
+                                    format!("audit open file: {error}"),
+                                )
+                                .on(&member.decoded_name)
+                            })?;
+                    ensure_file_handle_is_not_reparse(&file).map_err(|error| {
+                        Finding::error(
+                            FindingCode::MaterializeAudit,
+                            format!("audited file is a reparse point: {error}"),
+                        )
+                        .on(&member.decoded_name)
+                    })?;
+                    let (actual_size, actual_sha) = hash_staged_file(&mut file, expected_size)
+                        .map_err(|error| {
+                            Finding::error(
+                                FindingCode::MaterializeAudit,
+                                format!("audit read file: {error}"),
+                            )
+                            .on(&member.decoded_name)
+                        })?;
+                    if actual_size != expected_size {
+                        return Err(Finding::error(
+                            FindingCode::MaterializeAudit,
+                            "staged size does not match the admitted IR",
+                        )
+                        .on(&member.decoded_name));
+                    }
+                    if actual_sha != expected_sha {
+                        return Err(Finding::error(
+                            FindingCode::MaterializeAudit,
+                            "staged content does not match the admitted IR",
+                        )
+                        .on(&member.decoded_name));
+                    }
+                }
+            }
+        }
+
+        let mut actual_dirs = BTreeSet::new();
+        let mut actual_files = BTreeSet::new();
+        collect_stage_tree(
+            self.root()?,
+            Vec::new(),
+            &mut actual_dirs,
+            &mut actual_files,
+        )?;
+        if actual_dirs != expected_dirs || actual_files != expected_files {
+            return Err(Finding::error(
+                FindingCode::MaterializeAudit,
+                "staged tree paths do not match the admitted IR",
+            ));
+        }
+        Ok(())
+    }
+
     #[cfg(test)]
     fn stage_path(&self) -> PathBuf {
         self.parent_path.join(&self.stage_name)
+    }
+}
+
+fn hash_staged_file(file: &mut CapFile, expected_size: u64) -> io::Result<(u64, String)> {
+    use std::io::Read;
+
+    let mut size = 0_u64;
+    let mut digest = Sha256::new();
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        let remaining = expected_size.saturating_sub(size);
+        let read_limit = remaining.saturating_add(1).min(buffer.len() as u64) as usize;
+        let read = file.read(&mut buffer[..read_limit])?;
+        if read == 0 {
+            break;
+        }
+        size = size
+            .checked_add(read as u64)
+            .ok_or_else(|| io::Error::other("staged file size overflowed u64"))?;
+        digest.update(&buffer[..read]);
+        if size > expected_size {
+            break;
+        }
+    }
+    let hex = digest
+        .finalize()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    Ok((size, hex))
+}
+
+fn collect_stage_tree(
+    dir: &CapDir,
+    prefix: Vec<String>,
+    dirs: &mut std::collections::BTreeSet<Vec<String>>,
+    files: &mut std::collections::BTreeSet<Vec<String>>,
+) -> Result<(), Finding> {
+    let entries = dir.entries().map_err(|error| {
+        Finding::error(
+            FindingCode::MaterializeAudit,
+            format!("audit list directory: {error}"),
+        )
+    })?;
+    for entry in entries {
+        let entry = entry.map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeAudit,
+                format!("audit read directory entry: {error}"),
+            )
+        })?;
+        let os_name = entry.file_name();
+        let name = os_name.to_str().ok_or_else(|| {
+            Finding::error(FindingCode::MaterializeAudit, "staged name is not UTF-8")
+        })?;
+        if name == "." || name == ".." {
+            continue;
+        }
+        let metadata = dir.symlink_metadata(Path::new(name)).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeAudit,
+                format!("audit metadata for {name:?}: {error}"),
+            )
+        })?;
+        if metadata_is_reparse(&metadata) {
+            return Err(Finding::error(
+                FindingCode::MaterializeAudit,
+                format!("staged tree contains a reparse point at {name:?}"),
+            ));
+        }
+        let mut path = prefix.clone();
+        path.push(name.to_owned());
+        if metadata.file_type().is_dir() {
+            dirs.insert(path.clone());
+            let child = dir.open_dir_nofollow(Path::new(name)).map_err(|error| {
+                Finding::error(
+                    FindingCode::MaterializeAudit,
+                    format!("audit open staged directory {name:?}: {error}"),
+                )
+            })?;
+            ensure_directory_handle_is_not_reparse(&child).map_err(|error| {
+                Finding::error(
+                    FindingCode::MaterializeAudit,
+                    format!("audited directory {name:?} is a reparse point: {error}"),
+                )
+            })?;
+            collect_stage_tree(&child, path, dirs, files)?;
+        } else if metadata.file_type().is_file() {
+            files.insert(path);
+        } else {
+            return Err(Finding::error(
+                FindingCode::MaterializeAudit,
+                format!("staged tree contains a non-file, non-directory entry at {name:?}"),
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn metadata_is_reparse(metadata: &cap_std::fs::Metadata) -> bool {
+    if metadata.file_type().is_symlink() {
+        return true;
+    }
+    #[cfg(windows)]
+    {
+        use cap_fs_ext::OsMetadataExt;
+        metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0
+    }
+    #[cfg(not(windows))]
+    {
+        false
     }
 }
 
@@ -1510,5 +1873,428 @@ mod tests {
         assert_eq!(fs::read(&outside).unwrap(), b"outside");
         materializer.abort().unwrap();
         fs::remove_file(outside).unwrap();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn unix_publication_preserves_a_destination_file() {
+        let dest = temp_dest("appeared-file");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let mut file = materializer
+            .create_file(&["approved.txt".to_owned()])
+            .unwrap();
+        file.write_all(b"approved").unwrap();
+        drop(file);
+        fs::write(&dest, b"existing-file").unwrap();
+
+        let error = materializer.commit().unwrap_err();
+
+        assert_eq!(error.code, FindingCode::MaterializeExists);
+        assert_eq!(fs::read(&dest).unwrap(), b"existing-file");
+        materializer.abort().unwrap();
+        fs::remove_file(dest).unwrap();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn refuses_a_destination_symlink_at_commit() {
+        use std::os::unix::fs::symlink;
+
+        let dest = temp_dest("dest-symlink-commit");
+        let outside = temp_dest("dest-symlink-outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("sentinel.txt"), b"outside").unwrap();
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let mut file = materializer
+            .create_file(&["approved.txt".to_owned()])
+            .unwrap();
+        file.write_all(b"approved").unwrap();
+        drop(file);
+        symlink(&outside, &dest).unwrap();
+
+        let error = materializer.commit().unwrap_err();
+
+        assert_eq!(error.code, FindingCode::MaterializeExists);
+        assert_eq!(fs::read(outside.join("sentinel.txt")).unwrap(), b"outside");
+        assert!(!outside.join("approved.txt").exists());
+        materializer.abort().unwrap();
+        fs::remove_file(&dest).unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn refuses_a_destination_symlink_at_create() {
+        use std::os::unix::fs::symlink;
+
+        let dest = temp_dest("dest-symlink-create");
+        let outside = temp_dest("dest-symlink-create-outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("sentinel.txt"), b"outside").unwrap();
+        symlink(&outside, &dest).unwrap();
+
+        let error = match CapabilityMaterializer::create(&dest, false) {
+            Ok(_) => panic!("destination symlink unexpectedly accepted"),
+            Err(error) => error,
+        };
+        let (findings, cleanup, _) = error.into_parts();
+        assert_eq!(findings[0].code, FindingCode::MaterializeExists);
+        assert_eq!(cleanup, "not-created");
+        assert_eq!(fs::read(outside.join("sentinel.txt")).unwrap(), b"outside");
+        fs::remove_file(&dest).unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn refuses_a_directory_component_replaced_by_a_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let dest = temp_dest("component-swap");
+        let outside = temp_dest("component-swap-outside");
+        fs::create_dir(&outside).unwrap();
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let mut first = materializer
+            .create_file(&["tree".to_owned(), "a.txt".to_owned()])
+            .unwrap();
+        first.write_all(b"a").unwrap();
+        drop(first);
+
+        let tree = materializer.stage_path().join("tree");
+        fs::remove_dir_all(&tree).unwrap();
+        symlink(&outside, &tree).unwrap();
+
+        let error = materializer
+            .create_file(&["tree".to_owned(), "b.txt".to_owned()])
+            .unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeUnsafeComponent);
+        assert!(!outside.join("b.txt").exists());
+
+        materializer.abort().unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn symlink_refusals_remain_stable_across_repeats() {
+        for round in 0..32 {
+            let dest = temp_dest(&format!("repeat-leaf-{round}"));
+            let outside = temp_dest(&format!("repeat-leaf-outside-{round}"));
+            fs::write(&outside, b"outside").unwrap();
+            let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+            std::os::unix::fs::symlink(&outside, materializer.stage_path().join("leaf.txt"))
+                .unwrap();
+            let error = materializer
+                .create_file(&["leaf.txt".to_owned()])
+                .unwrap_err();
+            assert_eq!(error.code, FindingCode::MaterializeUnsafeComponent);
+            assert_eq!(fs::read(&outside).unwrap(), b"outside");
+            materializer.abort().unwrap();
+            fs::remove_file(outside).unwrap();
+        }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn refuses_a_destination_junction_at_commit() {
+        use std::process::Command;
+
+        let dest = temp_dest("dest-junction-commit");
+        let outside = temp_dest("dest-junction-outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("sentinel.txt"), b"outside").unwrap();
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let mut file = materializer
+            .create_file(&["approved.txt".to_owned()])
+            .unwrap();
+        file.write_all(b"approved").unwrap();
+        drop(file);
+        let output = Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&dest)
+            .arg(&outside)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "create dest junction: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let error = materializer.commit().unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeExists);
+        assert_eq!(fs::read(outside.join("sentinel.txt")).unwrap(), b"outside");
+        assert!(!outside.join("approved.txt").exists());
+        materializer.abort().unwrap();
+        fs::remove_dir(&dest).unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn refuses_a_destination_junction_at_create() {
+        use std::process::Command;
+
+        let dest = temp_dest("dest-junction-create");
+        let outside = temp_dest("dest-junction-create-outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("sentinel.txt"), b"outside").unwrap();
+        let output = Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&dest)
+            .arg(&outside)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "create dest junction: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let error = match CapabilityMaterializer::create(&dest, false) {
+            Ok(_) => panic!("destination junction unexpectedly accepted"),
+            Err(error) => error,
+        };
+        let (findings, cleanup, _) = error.into_parts();
+        assert_eq!(findings[0].code, FindingCode::MaterializeExists);
+        assert_eq!(cleanup, "not-created");
+        assert_eq!(fs::read(outside.join("sentinel.txt")).unwrap(), b"outside");
+        fs::remove_dir(&dest).unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn refuses_a_directory_component_replaced_by_a_junction() {
+        use std::process::Command;
+
+        let dest = temp_dest("component-swap-junction");
+        let outside = temp_dest("component-swap-junction-outside");
+        fs::create_dir(&outside).unwrap();
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let mut first = materializer
+            .create_file(&["tree".to_owned(), "a.txt".to_owned()])
+            .unwrap();
+        first.write_all(b"a").unwrap();
+        drop(first);
+
+        let tree = materializer.stage_path().join("tree");
+        fs::remove_dir_all(&tree).unwrap();
+        let output = Command::new("cmd")
+            .args(["/d", "/c", "mklink", "/J"])
+            .arg(&tree)
+            .arg(&outside)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "create component junction: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+
+        let error = materializer
+            .create_file(&["tree".to_owned(), "b.txt".to_owned()])
+            .unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeUnsafeComponent);
+        assert!(!outside.join("b.txt").exists());
+        materializer.abort().unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn refuses_a_windows_file_symlink_as_the_final_component() {
+        use std::process::Command;
+
+        let dest = temp_dest("leaf-reparse");
+        let outside = temp_dest("leaf-reparse-outside");
+        fs::write(&outside, b"outside").unwrap();
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let leaf = materializer.stage_path().join("leaf.txt");
+        let output = Command::new("cmd")
+            .args(["/d", "/c", "mklink"])
+            .arg(&leaf)
+            .arg(&outside)
+            .output()
+            .unwrap();
+        if !output.status.success() {
+            materializer.abort().unwrap();
+            fs::remove_file(outside).unwrap();
+            eprintln!(
+                "skipping file-symlink leaf test; mklink needs privilege: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+
+        let error = materializer
+            .create_file(&["leaf.txt".to_owned()])
+            .unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeUnsafeComponent);
+        assert_eq!(fs::read(&outside).unwrap(), b"outside");
+        materializer.abort().unwrap();
+        fs::remove_file(outside).unwrap();
+    }
+
+    fn verified_file(name: &str, components: &[&str], body: &[u8]) -> crate::ir::IrMember {
+        let mut member = crate::ir::IrMember {
+            raw_name_bytes: name.as_bytes().to_vec(),
+            decoded_name: name.to_owned(),
+            canonical_path: components.join("/"),
+            components: components.iter().map(|part| (*part).to_owned()).collect(),
+            kind: crate::ir::MemberKind::File,
+            method: 0,
+            flags: 0,
+            declared_crc: 0,
+            declared_comp_size: body.len() as u64,
+            declared_uncomp_size: body.len() as u64,
+            source_ranges: crate::ir::MemberSourceRanges {
+                local_header: crate::ir::ByteRange { offset: 0, len: 30 },
+                compressed_payload: crate::ir::ByteRange {
+                    offset: 30,
+                    len: body.len() as u64,
+                },
+                data_descriptor: None,
+                central_header: crate::ir::ByteRange { offset: 0, len: 46 },
+            },
+            extra_fields: Vec::new(),
+            actual_uncomp_size: None,
+            actual_crc: None,
+            content_sha256: None,
+            verification: crate::ir::MemberVerification::Pending,
+            normalization_actions: Vec::new(),
+        };
+        member.mark_file_verified(body.len() as u64, 0, crate::policy::hex_sha256(body));
+        member
+    }
+
+    fn verified_directory(name: &str, components: &[&str]) -> crate::ir::IrMember {
+        let mut member = verified_file(name, components, b"");
+        member.kind = crate::ir::MemberKind::Directory;
+        member.mark_directory_verified();
+        member
+    }
+
+    #[test]
+    fn audit_accepts_a_stage_that_matches_the_admitted_ir() {
+        let dest = temp_dest("audit-match");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        materializer
+            .create_directory(&["empty".to_owned()], "empty/")
+            .unwrap();
+        let mut file = materializer
+            .create_file(&["tree".to_owned(), "leaf.txt".to_owned()])
+            .unwrap();
+        file.write_all(b"leaf").unwrap();
+        drop(file);
+
+        let ir = crate::ir::ArchiveIR::new(
+            crate::outcome::SourceDigest::available("test"),
+            vec![
+                verified_directory("empty/", &["empty"]),
+                verified_file("tree/leaf.txt", &["tree", "leaf.txt"], b"leaf"),
+            ],
+        );
+        materializer.audit_against(&ir).expect("matching stage");
+        materializer.commit().unwrap();
+        assert_eq!(fs::read(dest.join("tree/leaf.txt")).unwrap(), b"leaf");
+        assert!(dest.join("empty").is_dir());
+        fs::remove_dir_all(dest).unwrap();
+    }
+
+    #[test]
+    fn audit_rejects_mutated_staged_content() {
+        let dest = temp_dest("audit-mutate");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let mut file = materializer.create_file(&["hello.txt".to_owned()]).unwrap();
+        file.write_all(b"hello").unwrap();
+        drop(file);
+        fs::write(materializer.stage_path().join("hello.txt"), b"mutated").unwrap();
+
+        let ir = crate::ir::ArchiveIR::new(
+            crate::outcome::SourceDigest::available("test"),
+            vec![verified_file("hello.txt", &["hello.txt"], b"hello")],
+        );
+        let error = materializer.audit_against(&ir).unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeAudit);
+        materializer.abort().unwrap();
+        assert!(!dest.exists());
+    }
+
+    #[test]
+    fn audit_rejects_an_extra_staged_file() {
+        let dest = temp_dest("audit-extra");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let mut file = materializer.create_file(&["hello.txt".to_owned()]).unwrap();
+        file.write_all(b"hello").unwrap();
+        drop(file);
+        fs::write(materializer.stage_path().join("extra.txt"), b"nope").unwrap();
+
+        let ir = crate::ir::ArchiveIR::new(
+            crate::outcome::SourceDigest::available("test"),
+            vec![verified_file("hello.txt", &["hello.txt"], b"hello")],
+        );
+        let error = materializer.audit_against(&ir).unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeAudit);
+        materializer.abort().unwrap();
+        assert!(!dest.exists());
+    }
+
+    #[test]
+    fn audit_rejects_a_staged_reparse_point() {
+        let dest = temp_dest("audit-reparse");
+        let outside = temp_dest("audit-reparse-outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("sentinel.txt"), b"outside").unwrap();
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let mut file = materializer.create_file(&["hello.txt".to_owned()]).unwrap();
+        file.write_all(b"hello").unwrap();
+        drop(file);
+        let planted = materializer.stage_path().join("link");
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        std::os::unix::fs::symlink(&outside, &planted).unwrap();
+        #[cfg(windows)]
+        {
+            let output = std::process::Command::new("cmd")
+                .args(["/d", "/c", "mklink", "/J"])
+                .arg(&planted)
+                .arg(&outside)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "create audit junction: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+
+        let ir = crate::ir::ArchiveIR::new(
+            crate::outcome::SourceDigest::available("test"),
+            vec![verified_file("hello.txt", &["hello.txt"], b"hello")],
+        );
+        let error = materializer.audit_against(&ir).unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeAudit);
+        assert_eq!(fs::read(outside.join("sentinel.txt")).unwrap(), b"outside");
+        materializer.abort().unwrap();
+        fs::remove_dir_all(outside).unwrap();
+        assert!(!dest.exists());
+    }
+
+    #[test]
+    fn refuses_an_intra_call_directory_component_replacement() {
+        let dest = temp_dest("intra-call");
+        let outside = temp_dest("intra-call-outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("sentinel.txt"), b"outside").unwrap();
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let _guard = inject_directory_component_replacement("tree", outside.clone());
+        let error = materializer
+            .create_file(&["tree".to_owned(), "leaf.txt".to_owned()])
+            .unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeUnsafeComponent);
+        assert!(!outside.join("leaf.txt").exists());
+        assert_eq!(fs::read(outside.join("sentinel.txt")).unwrap(), b"outside");
+        materializer.abort().unwrap();
+        fs::remove_dir_all(outside).unwrap();
     }
 }
