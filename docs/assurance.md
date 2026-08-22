@@ -1,6 +1,6 @@
 # Testing, compatibility, and assurance
 
-> This page separates current evidence from the target assurance program. The published Alpha.3 has a deterministic Rust unit suite, strict cross-platform CI, cargo-deny policy, and a pinned 5,927-file ZipDiff construction gate. Current main adds two finite-domain property families, an opaque bounded-read capability, a consumer that runs against the extracted packaged crate, and an independent verifier for four identity-conformance cases. Broader property families, coverage-guided fuzzing, model checking, benign ecosystem measurement, the general authenticated-evidence verifier, and an external audit remain future work.
+> This page separates current evidence from the target assurance program. The published Alpha.3 has a deterministic Rust unit suite, strict cross-platform CI, cargo-deny policy, and a pinned 5,927-file ZipDiff construction gate. Current main adds four finite-domain property families, an opaque bounded-read capability, a consumer that runs against the extracted packaged crate, and an independent verifier for four identity-conformance cases. Broader property families, coverage-guided fuzzing, model checking, benign ecosystem measurement, the general authenticated-evidence verifier, and an external audit remain future work.
 
 Trust is the scarce resource. Format breadth and acceleration follow stable semantics and measured compatibility.
 
@@ -12,7 +12,7 @@ Trust is the scarce resource. Format breadth and acceleration follow stable sema
 | Public API and package | External-crate fixture exercises evidence types and `VerifiedArchive`; a separate Cargo consumer runs against the extracted packaged crate in required quality CI | Add semantic compatibility checks after publication and retain bounded wheel metadata without repeat inflation |
 | Corpus | All 5,927 pinned ZipDiff constructions plus local generated adversarial fixtures | Add codec-boundary, source-race, consumer-profile, and ecosystem fixtures |
 | Differential | ZipDiff expectation gate binds strict rejection and a documented valid-control allowlist | Compare major consumers on well-formed profile inputs and track disagreement frontiers |
-| Property | Compression-ratio comparison exhaustively agrees with an independent quotient-and-remainder oracle for `uncomp` 0 through 255 and `comp` and `max_ratio` 0 through 64; verified-member limits agree with `limit >= measured_size` for Store and Deflate sizes and limits 0 through 64 | Add independent bounded models for ranges, remaining quotas, strict-profile path topology, and lifecycle transitions |
+| Property | Four finite-domain families: compression ratio against quotient and remainder; verified-member limits against `limit >= measured_size`; checked `offset + len` against `u128` over 4,624 boundary pairs; exact partitions against a per-byte bitmap over 1,055,758 lists of zero through three intervals | Add independent bounded models for remaining quotas, strict-profile path topology, and lifecycle transitions |
 | Fuzz | None yet | `cargo fuzz` targets for interpretation, canonical paths, and inspect-only `apply()` |
 | Executable specification | A no-Sealr-dependency verifier agrees with production evidence on four exact identity cases and independently checks their covering, profile digest, and roots | Add independent bounded models for ranges, quotas, paths, and lifecycle transitions; extend identity cases with each published profile and encoding branch |
 | Model checking | None yet | Add Kani harnesses with explicit domains, assumptions, and unwind bounds |
@@ -126,7 +126,7 @@ The highest-value generated and machine-checked properties are small:
 | Property | Daily evidence | Bounded proof candidate |
 |---|---|---|
 | Canonical path containment and collision detection | Unit and property tests | Kani or Verus over the pure path core |
-| Range non-overlap and complete referenced layout | Grammar mutations and property tests | Kani over checked interval arithmetic |
+| Range non-overlap and complete referenced layout | Shared production kernel, grammar mutations, and 1,055,758 bounded bitmap-oracle cases | Kani over checked interval arithmetic |
 | Monotone quota accounting with no overflow | Property tests using checked arithmetic | Kani over the pure counter core |
 | Fail-closed supported policy compilation | Exhaustive reserved-control tests | Finite-state model checking after controls become typed |
 | Monotone policy overlays | Deferred until an overlay type exists | Generated and machine-checked properties only after semantics are defined |
@@ -178,7 +178,7 @@ Neither verifier extracts the archive, and neither may imply that it independent
 
 ## Near-term execution increments
 
-1. **Executable assurance kernel.** Unify checked interval and partition logic, quota transitions, strict-profile path and topology planning, and outcome lifecycle transitions into pure functions. Test each against an independent bounded oracle in required CI.
+1. **Executable assurance kernel.** Checked interval and partition logic is now shared by ZIP discovery and covering audit and tested against independent wide-integer and bitmap oracles. Quota transitions, strict-profile path and topology planning, and outcome lifecycle transitions remain to be extracted and checked.
 2. **Bounded model checking.** Check scalar range, ratio, quota, and outcome properties for full integer domains where feasible, plus explicitly bounded adjacent partitions. Run scheduled until cost and stability justify promotion.
 3. **Coverage-guided fuzzing.** Fuzz inspect-only ZIP bytes, raw path and topology processing, and covering plus codec boundaries. Apply explicit input, time, memory, and output bounds. Persist every reproducible failure as a deterministic regression.
 4. **Systems stress.** Exercise native namespace races, worker failures, stage mutation, audit, cleanup, and no-replace publication repeatedly. Compare every receipt with the executable lifecycle model.

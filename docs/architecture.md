@@ -113,7 +113,7 @@ T_realize    build and publish a destination tree
 T_reuse      provide an already verified admitted tree
 ```
 
-Avoided parsing, inflation, and writes are the strategic optimization. Cores are not wasted by keeping interpretation on one thread. The covering is a chain: EOCD selection, central-directory walk, local-record abutment, and path injectivity are data-dependent. Running two of those walks is a second parser. Independent work starts after one IR exists. `audit_covering` rechecks the claimed ranges and signatures without searching or inflating. Materialization audits the staged tree against that IR before the no-replace rename.
+Avoided parsing, inflation, and writes are the strategic optimization. Cores are not wasted by keeping interpretation on one thread. The covering is a chain: EOCD selection, central-directory walk, local-record abutment, and path injectivity are data-dependent. Running two of those walks is a second parser. Independent work starts after one IR exists. ZIP discovery and `audit_covering` share one pure checked interval and exact-partition kernel, while the audit rechecks the claimed ranges and signatures without searching or inflating. Materialization audits the staged tree against that IR before the no-replace rename.
 
 ```text
 T_structure   sequential unique covering and jail   (one core is correct)

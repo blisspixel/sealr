@@ -147,7 +147,7 @@ Fix \(\pi\). For every \(b \in \mathbb{B}^n\) there is at most one labeled parti
 
 **Not a refutation.** ZipDiff pairs where Info-ZIP and Python disagree: those parsers are not \(\pi\). Bytes outside \(L(\pi)\).
 
-**Code.** `check_layout`, CD land, last exact-suffix EOCD, extra denylist. `ArchiveIR.covering` records the local prefix, central directory, EOCD, and comment ranges, `sealrTreeV1` layout hashes them, and `audit_covering` rechecks the certificate without a second parse. Extra-field allowlist still waits on a new profile id.
+**Code.** `check_layout`, CD land, last exact-suffix EOCD, extra denylist. `ArchiveIR.covering` records the local prefix, central directory, EOCD, and comment ranges, `sealrTreeV1` layout hashes them, and `audit_covering` rechecks the certificate without a second parse. Discovery and audit use one checked half-open interval and exact-partition kernel. Its arithmetic is exhaustively compared with a wide-integer oracle over 4,624 boundary pairs, and its partition predicate is exhaustively compared with a per-byte bitmap oracle over 1,055,758 bounded interval lists. These are finite executable checks, not an unbounded proof. Extra-field allowlist still waits on a new profile id.
 
 ### Redundant-Metadata Agreement
 
@@ -281,7 +281,7 @@ Shorter: uniqueness modulo a profile that rejects most of APPNOTE is a **smaller
 Ranked. Trusted code means production TCB, not tests.
 
 1. **Serialize the covering onto the IR and into the layout preimage.** `ArchiveIR.covering` records the local prefix, central directory, EOCD, and comment. `sealrTreeV1` layout hashes those ranges. A nonempty remainder is already a parse error via `check_layout`.
-2. **A codec-free range-oracle checker.** `audit_covering` is the production checker: snapshot digest, signatures at claimed offsets, local and central partitions, and header/payload abutment. It does not search for an EOCD and does not inflate. The separate identity verifier now independently repeats this bounded certificate check for committed vectors and recomputes their roots without depending on Sealr. Neither checker interprets ZIP again or executes codecs.
+2. **A codec-free range-oracle checker.** `audit_covering` is the production checker: snapshot digest, signatures at claimed offsets, local and central partitions, and header/payload abutment. It shares checked interval and partition arithmetic with ZIP discovery, does not search for an EOCD, and does not inflate. A bounded bitmap oracle independently checks the partition predicate, while the separate identity verifier independently repeats the covering certificate check for committed vectors and recomputes their roots without depending on Sealr. Neither checker interprets ZIP again or executes codecs.
 3. **Abolish ignored extras in a later profile.** Every extra ID is semantic (bound into layout) or denied. “Ignored” looks conservative and is how unique parse dies.
 4. **Treat codecs as slice morphisms.** They see a payload interval the covering already named. Exact input consumption is the empty-remainder obligation one level down. They cannot re-enter discovery, jail, or publish.
 5. **Worker as untrusted inhabitant-finder; supervisor as covering auditor.** Two coverings: source bytes and staged tree. Publish iff both check and the content root matches. The supervisor must not reparse ZIP.

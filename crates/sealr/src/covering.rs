@@ -5,6 +5,7 @@
 //! second parser.
 
 use crate::findings::{Finding, FindingCode};
+use crate::interval::{exact_partition, CheckedInterval, IntervalError, PartitionError};
 use crate::ir::{ArchiveIR, ByteRange};
 use crate::snapshot::SourceSnapshot;
 
@@ -21,33 +22,33 @@ pub(crate) fn audit_covering(snapshot: &SourceSnapshot<'_>, ir: &ArchiveIR) -> R
     }
 
     let covering = &ir.covering;
-    if covering.local_records.offset != 0 {
+    let local_cover = checked_interval(covering.local_records, "local-record covering")?;
+    let central_cover = checked_interval(covering.central_directory, "central-directory covering")?;
+    let eocd_cover = checked_interval(covering.eocd, "EOCD covering")?;
+    let comment_cover = checked_interval(covering.comment, "comment covering")?;
+
+    if local_cover.start() != 0 {
         return Err(inconsistent("local-record covering must start at offset 0"));
     }
     if covering.eocd.len != 22 {
         return Err(inconsistent("EOCD covering length must be 22"));
     }
-    if covering.local_records.end() != covering.central_directory.offset {
+    if local_cover.end() != central_cover.start() {
         return Err(inconsistent(
             "local records do not abut the central directory",
         ));
     }
-    if covering.central_directory.end() != covering.eocd.offset {
+    if central_cover.end() != eocd_cover.start() {
         return Err(inconsistent("central directory does not abut the EOCD"));
     }
-    if covering.eocd.end() != covering.comment.offset {
+    if eocd_cover.end() != comment_cover.start() {
         return Err(inconsistent("EOCD does not abut its comment"));
     }
-    if covering.comment.end() != snapshot.len() {
+    if comment_cover.end() != snapshot.len() {
         return Err(inconsistent(
             "covering comment end is not the snapshot length",
         ));
     }
-
-    let _ = checked_end(covering.local_records, "local-record covering")?;
-    let _ = checked_end(covering.central_directory, "central-directory covering")?;
-    let _ = checked_end(covering.eocd, "EOCD covering")?;
-    let _ = checked_end(covering.comment, "comment covering")?;
 
     let eocd = snapshot
         .range(covering.eocd.offset, covering.eocd.len)
@@ -93,24 +94,26 @@ pub(crate) fn audit_covering(snapshot: &SourceSnapshot<'_>, ir: &ArchiveIR) -> R
         ));
     }
 
-    let mut local_ranges: Vec<(u64, u64)> = Vec::new();
-    let mut central_ranges: Vec<(u64, u64)> = Vec::new();
+    let mut local_ranges = Vec::new();
+    let mut central_ranges = Vec::new();
     for member in &ir.members {
-        for (range, label) in [
-            (member.source_ranges.local_header, "local header"),
-            (
-                member.source_ranges.compressed_payload,
-                "compressed payload",
-            ),
-            (member.source_ranges.central_header, "central header"),
-        ] {
-            let _ =
-                checked_end(range, label).map_err(|finding| finding.on(&member.decoded_name))?;
-        }
-        if let Some(descriptor) = member.source_ranges.data_descriptor {
-            let _ = checked_end(descriptor, "data descriptor")
+        let local_header = checked_interval(member.source_ranges.local_header, "local header")
+            .map_err(|finding| finding.on(&member.decoded_name))?;
+        let payload = checked_interval(
+            member.source_ranges.compressed_payload,
+            "compressed payload",
+        )
+        .map_err(|finding| finding.on(&member.decoded_name))?;
+        let central_header =
+            checked_interval(member.source_ranges.central_header, "central header")
                 .map_err(|finding| finding.on(&member.decoded_name))?;
-        }
+        let descriptor = member
+            .source_ranges
+            .data_descriptor
+            .map(|range| checked_interval(range, "data descriptor"))
+            .transpose()
+            .map_err(|finding| finding.on(&member.decoded_name))?;
+
         if member.source_ranges.local_header.len < 30 {
             return Err(
                 inconsistent("local header is shorter than 30 bytes").on(&member.decoded_name)
@@ -143,63 +146,48 @@ pub(crate) fn audit_covering(snapshot: &SourceSnapshot<'_>, ir: &ArchiveIR) -> R
             )
             .on(&member.decoded_name));
         }
-        if !contains_range(
-            covering.central_directory,
-            member.source_ranges.central_header,
-        ) {
+        if !central_cover.contains(central_header) {
             return Err(
                 inconsistent("central header is outside the CD covering").on(&member.decoded_name)
             );
         }
-        if member.source_ranges.local_header.end() != member.source_ranges.compressed_payload.offset
-        {
+        if local_header.end() != payload.start() {
             return Err(
                 inconsistent("local header does not abut its payload").on(&member.decoded_name)
             );
         }
-        if let Some(descriptor) = member.source_ranges.data_descriptor {
-            if member.source_ranges.compressed_payload.end() != descriptor.offset {
+        if let Some(descriptor) = descriptor {
+            if payload.end() != descriptor.start() {
                 return Err(inconsistent("payload does not abut its data descriptor")
                     .on(&member.decoded_name));
             }
         }
-        let local_start = member.source_ranges.local_header.offset;
-        let local_end = member.source_ranges.record_end();
-        if local_start >= local_end {
+        let local_end = descriptor.map_or_else(|| payload.end(), CheckedInterval::end);
+        let local_record = CheckedInterval::from_bounds(local_header.start(), local_end)
+            .map_err(|_| inconsistent("local record length underflow").on(&member.decoded_name))?;
+        if local_record.is_empty() {
             return Err(inconsistent("empty local record range").on(&member.decoded_name));
         }
-        let local_len = local_end.checked_sub(local_start).ok_or_else(|| {
-            inconsistent("local record length underflow").on(&member.decoded_name)
-        })?;
-        let local_record = ByteRange {
-            offset: local_start,
-            len: local_len,
-        };
-        if !contains_range(covering.local_records, local_record) {
+        if !local_cover.contains(local_record) {
             return Err(
                 inconsistent("local record is outside the local covering").on(&member.decoded_name)
             );
         }
-        if !contains_range(local_record, member.source_ranges.compressed_payload) {
+        if !local_record.contains(payload) {
             return Err(
                 inconsistent("payload range is outside its local record").on(&member.decoded_name)
             );
         }
-        if let Some(descriptor) = member.source_ranges.data_descriptor {
-            if !contains_range(local_record, descriptor) {
+        if let Some(descriptor) = descriptor {
+            if !local_record.contains(descriptor) {
                 return Err(inconsistent("data descriptor is outside its local record")
                     .on(&member.decoded_name));
             }
         }
-        local_ranges.push((local_start, local_end));
-        central_ranges.push((
-            member.source_ranges.central_header.offset,
-            member.source_ranges.central_header.end(),
-        ));
+        local_ranges.push(local_record);
+        central_ranges.push(central_header);
     }
 
-    local_ranges.sort_by_key(|range| range.0);
-    central_ranges.sort_by_key(|range| range.0);
     if local_ranges.is_empty() {
         if covering.local_records.len != 0 {
             return Err(inconsistent(
@@ -213,52 +201,32 @@ pub(crate) fn audit_covering(snapshot: &SourceSnapshot<'_>, ir: &ArchiveIR) -> R
         }
         return Ok(());
     }
-    if local_ranges[0].0 != covering.local_records.offset {
-        return Err(inconsistent(
-            "first local record does not start the local covering",
-        ));
-    }
-    for window in local_ranges.windows(2) {
-        if window[0].1 != window[1].0 {
-            return Err(inconsistent(
-                "local records do not form a partition of the covering",
-            ));
+    exact_partition(local_cover, &local_ranges).map_err(|error| match error {
+        PartitionError::GapBeforeFirst { .. } => {
+            inconsistent("first local record does not start the local covering")
         }
-    }
-    if local_ranges.last().expect("nonempty").1 != covering.local_records.end() {
-        return Err(inconsistent(
-            "last local record does not end the local covering",
-        ));
-    }
-    if central_ranges[0].0 != covering.central_directory.offset {
-        return Err(inconsistent(
-            "first central header does not start the CD covering",
-        ));
-    }
-    for window in central_ranges.windows(2) {
-        if window[0].1 != window[1].0 {
-            return Err(inconsistent(
-                "central headers do not form a partition of the covering",
-            ));
+        PartitionError::GapAfterLast { .. } => {
+            inconsistent("last local record does not end the local covering")
         }
-    }
-    if central_ranges.last().expect("nonempty").1 != covering.central_directory.end() {
-        return Err(inconsistent(
-            "last central header does not end the CD covering",
-        ));
-    }
+        _ => inconsistent("local records do not form a partition of the covering"),
+    })?;
+    exact_partition(central_cover, &central_ranges).map_err(|error| match error {
+        PartitionError::GapBeforeFirst { .. } => {
+            inconsistent("first central header does not start the CD covering")
+        }
+        PartitionError::GapAfterLast { .. } => {
+            inconsistent("last central header does not end the CD covering")
+        }
+        _ => inconsistent("central headers do not form a partition of the covering"),
+    })?;
     Ok(())
 }
 
-fn contains_range(outer: ByteRange, inner: ByteRange) -> bool {
-    inner.offset >= outer.offset && inner.end() <= outer.end()
-}
-
-fn checked_end(range: ByteRange, what: &str) -> Result<u64, Finding> {
-    range
-        .offset
-        .checked_add(range.len)
-        .ok_or_else(|| inconsistent(&format!("{what} overflow")))
+fn checked_interval(range: ByteRange, what: &str) -> Result<CheckedInterval, Finding> {
+    CheckedInterval::from_offset_len(range.offset, range.len).map_err(|error| match error {
+        IntervalError::EndOverflow => inconsistent(&format!("{what} overflow")),
+        IntervalError::Reversed => unreachable!("offset-plus-length cannot produce reversal"),
+    })
 }
 
 fn le_u16(bytes: &[u8], offset: usize) -> u16 {

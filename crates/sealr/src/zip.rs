@@ -1,6 +1,7 @@
 //! CD-first ZIP reader. One interpretation. Disagreement is a finding.
 
 use crate::findings::{Finding, FindingCode};
+use crate::interval::{exact_partition, CheckedInterval, IntervalError, PartitionError};
 use crate::ir::{
     is_denied_extra_id, ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite,
     MemberSourceRanges,
@@ -690,51 +691,64 @@ fn check_layout(members: &[ZipMember], cd_off: u64) -> Result<(), Finding> {
         }
         return Ok(());
     }
-    let mut ranges: Vec<(u64, u64, &str)> = Vec::new();
+    let outer = CheckedInterval::from_bounds(0, cd_off)
+        .expect("zero cannot exceed an unsigned central-directory offset");
+    let mut ranges = Vec::with_capacity(members.len());
     for m in members {
         let start = m.lfh_offset;
         let end = m.record_end;
+        let range = CheckedInterval::from_bounds(start, end).map_err(|error| match error {
+            IntervalError::Reversed => {
+                Finding::error(FindingCode::ZipDiffC4Offset, "empty local record range").on(&m.name)
+            }
+            IntervalError::EndOverflow => {
+                unreachable!("a bounds interval does not perform addition")
+            }
+        })?;
         if end > cd_off {
             return Err(
                 Finding::error(FindingCode::ZipOverlap, "local record overlaps the CD").on(&m.name),
             );
         }
-        if start >= end {
+        if range.is_empty() {
             return Err(
                 Finding::error(FindingCode::ZipDiffC4Offset, "empty local record range")
                     .on(&m.name),
             );
         }
-        ranges.push((start, end, &m.name));
+        ranges.push(range);
     }
-    ranges.sort_by_key(|r| r.0);
-    if ranges[0].0 != 0 {
-        return Err(Finding::error(
+    exact_partition(outer, &ranges).map_err(|error| match error {
+        PartitionError::GapBeforeFirst { .. } => Finding::error(
             FindingCode::ZipDiffC1Stream,
             "bytes exist before the first referenced local record",
-        ));
-    }
-    for w in ranges.windows(2) {
-        if w[0].1 > w[1].0 {
-            return Err(
-                Finding::error(FindingCode::ZipOverlap, "overlapping compressed ranges").on(w[1].2),
-            );
+        ),
+        PartitionError::Overlap { index } => {
+            Finding::error(FindingCode::ZipOverlap, "overlapping compressed ranges")
+                .on(&members[index].name)
         }
-        if w[0].1 < w[1].0 {
-            return Err(Finding::error(
-                FindingCode::ZipDiffC1Stream,
-                "unreferenced bytes between records",
-            )
-            .on(w[1].2));
-        }
-    }
-    if ranges.last().is_some_and(|range| range.1 != cd_off) {
-        return Err(Finding::error(
+        PartitionError::Gap { index } => Finding::error(
+            FindingCode::ZipDiffC1Stream,
+            "unreferenced bytes between records",
+        )
+        .on(&members[index].name),
+        PartitionError::GapAfterLast { .. } => Finding::error(
             FindingCode::ZipDiffC1Stream,
             "unreferenced bytes before the central directory",
-        ));
-    }
-    Ok(())
+        ),
+        PartitionError::EmptyPart { index } => {
+            Finding::error(FindingCode::ZipDiffC4Offset, "empty local record range")
+                .on(&members[index].name)
+        }
+        PartitionError::PartOutside { index } => {
+            Finding::error(FindingCode::ZipOverlap, "local record overlaps the CD")
+                .on(&members[index].name)
+        }
+        PartitionError::MissingParts => Finding::error(
+            FindingCode::ZipDiffC1Stream,
+            "unreferenced bytes before the central directory",
+        ),
+    })
 }
 
 pub fn payload<'s>(snapshot: &'s SourceSnapshot<'_>, m: &ZipMember) -> Result<&'s [u8], Finding> {

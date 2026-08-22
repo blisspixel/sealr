@@ -15,7 +15,7 @@ The longer-term aim is an archive-to-tree admission boundary whose decision and 
 
 > Status: `v0.1.0-alpha.3` is the third development preview of the ZIP boundary. It is useful for evaluation, development, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. The limitations below are security boundaries, not fine print.
 
-> Repository status: current `main` is ahead of the published alpha.3 artifacts. `VerifiedArchive`, the extracted-package consumer, two finite-domain property families, and independent identity conformance are recorded under [Unreleased](CHANGELOG.md#unreleased). The [alpha.3 release notes](docs/releases/v0.1.0-alpha.3.md) remain the authority for downloaded alpha.3 binaries.
+> Repository status: current `main` is ahead of the published alpha.3 artifacts. `VerifiedArchive`, the extracted-package consumer, four finite-domain property families, and independent identity conformance are recorded under [Unreleased](CHANGELOG.md#unreleased). The [alpha.3 release notes](docs/releases/v0.1.0-alpha.3.md) remain the authority for downloaded alpha.3 binaries.
 
 ## Why this exists
 
