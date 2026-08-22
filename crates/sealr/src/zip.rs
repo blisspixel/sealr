@@ -96,16 +96,16 @@ pub fn parse_zip(
             "this-disk count != total",
         ));
     }
-    if total_count as u64 > max_files {
-        return Err(Finding::error(
-            FindingCode::QuotaFiles,
-            format!("{total_count} entries; cap is {max_files}"),
-        ));
-    }
     if cd_size == 0xFFFF_FFFF || cd_offset == 0xFFFF_FFFF || total_count == 0xFFFF {
         return Err(Finding::error(
             FindingCode::ZipDiffC5Zip64,
             "ZIP64 fields not implemented",
+        ));
+    }
+    if u64::from(total_count) > max_files {
+        return Err(Finding::error(
+            FindingCode::QuotaFiles,
+            format!("{total_count} entries; cap is {max_files}"),
         ));
     }
     let cd_offset = cd_offset as u64;
@@ -137,6 +137,18 @@ pub fn parse_zip(
     let mut pos = cd_offset as usize;
     let cd_end = cd_offset as usize + cd_size as usize;
     while pos < cd_end {
+        let parsed_count = u64::try_from(members.len()).map_err(|_| {
+            Finding::error(
+                FindingCode::QuotaOverflow,
+                "parsed member count does not fit u64",
+            )
+        })?;
+        if parsed_count >= max_files {
+            return Err(Finding::error(
+                FindingCode::QuotaFiles,
+                format!("central directory contains more than {max_files} entries"),
+            ));
+        }
         if pos + 46 > cd_end {
             return Err(Finding::error(FindingCode::ZipDiffC3Count, "truncated CDH"));
         }
@@ -351,7 +363,13 @@ pub fn parse_zip(
         }
         pos = name_off + name_len + extra_len + comment_len;
     }
-    if members.len() as u16 != total_count {
+    let parsed_count = u64::try_from(members.len()).map_err(|_| {
+        Finding::error(
+            FindingCode::QuotaOverflow,
+            "parsed member count does not fit u64",
+        )
+    })?;
+    if parsed_count != u64::from(total_count) {
         return Err(Finding::error(
             FindingCode::ZipDiffC3Count,
             format!("parsed {} CDHs, EOCD says {total_count}", members.len()),
@@ -577,9 +595,10 @@ fn find_eocd(bytes: &[u8]) -> Result<(usize, u16), Finding> {
 }
 
 fn parse_lfh(bytes: &[u8], off: usize) -> Result<LocalHeader<'_>, Finding> {
-    if off + 30 > bytes.len() {
-        return Err(Finding::error(FindingCode::ZipDiffC4Offset, "LFH past EOF"));
-    }
+    let fixed_end = off
+        .checked_add(30)
+        .filter(|end| *end <= bytes.len())
+        .ok_or_else(|| Finding::error(FindingCode::ZipDiffC4Offset, "LFH past EOF"))?;
     let sig = u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
     if sig != LFH_SIG {
         return Err(Finding::error(
@@ -594,16 +613,15 @@ fn parse_lfh(bytes: &[u8], off: usize) -> Result<LocalHeader<'_>, Finding> {
     let uncomp = u32::from_le_bytes(bytes[off + 22..off + 26].try_into().unwrap());
     let name_len = u16::from_le_bytes(bytes[off + 26..off + 28].try_into().unwrap()) as usize;
     let extra_len = u16::from_le_bytes(bytes[off + 28..off + 30].try_into().unwrap()) as usize;
-    let name_off = off + 30;
-    if name_off + name_len + extra_len > bytes.len() {
-        return Err(Finding::error(
-            FindingCode::ZipDiffC4Offset,
-            "LFH name past EOF",
-        ));
-    }
-    let name = &bytes[name_off..name_off + name_len];
-    let extra_offset = name_off + name_len;
-    let data_offset = extra_offset + extra_len;
+    let name_off = fixed_end;
+    let extra_offset = name_off
+        .checked_add(name_len)
+        .ok_or_else(|| Finding::error(FindingCode::ZipDiffC4Offset, "LFH name past EOF"))?;
+    let data_offset = extra_offset
+        .checked_add(extra_len)
+        .filter(|end| *end <= bytes.len())
+        .ok_or_else(|| Finding::error(FindingCode::ZipDiffC4Offset, "LFH name past EOF"))?;
+    let name = &bytes[name_off..extra_offset];
     Ok(LocalHeader {
         data_offset,
         extra_offset,
@@ -723,4 +741,84 @@ pub fn payload<'s>(snapshot: &'s SourceSnapshot<'_>, m: &ZipMember) -> Result<&'
     snapshot
         .range(m.data_offset, m.comp_size)
         .map_err(|finding| finding.on(&m.name))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ::zip::write::SimpleFileOptions;
+    use ::zip::{CompressionMethod, ZipWriter};
+    use std::io::{Cursor, Write};
+
+    fn zip_with_files(names: &[&str]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        {
+            let mut writer = ZipWriter::new(Cursor::new(&mut bytes));
+            let options =
+                SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+            for name in names {
+                writer.start_file(*name, options).unwrap();
+                writer.write_all(b"x").unwrap();
+            }
+            writer.finish().unwrap();
+        }
+        bytes
+    }
+
+    fn eocd_offset(bytes: &[u8]) -> usize {
+        bytes
+            .windows(4)
+            .rposition(|window| window == EOCD_SIG.to_le_bytes())
+            .expect("test ZIP has an EOCD")
+    }
+
+    fn set_eocd_counts(bytes: &mut [u8], count: u16) {
+        let eocd = eocd_offset(bytes);
+        bytes[eocd + 8..eocd + 10].copy_from_slice(&count.to_le_bytes());
+        bytes[eocd + 10..eocd + 12].copy_from_slice(&count.to_le_bytes());
+    }
+
+    fn rejected(bytes: &[u8], max_files: u64) -> Finding {
+        match parse_zip(bytes, max_files, 4 * 1024 * 1024) {
+            Ok(_) => panic!("test archive unexpectedly parsed"),
+            Err(finding) => finding,
+        }
+    }
+
+    #[test]
+    fn zip64_count_sentinel_is_not_misclassified_as_a_file_quota() {
+        let mut bytes = zip_with_files(&[]);
+        set_eocd_counts(&mut bytes, u16::MAX);
+
+        let finding = rejected(&bytes, 10_000);
+        assert_eq!(finding.code, FindingCode::ZipDiffC5Zip64);
+    }
+
+    #[test]
+    fn actual_central_header_count_cannot_exceed_the_file_cap() {
+        let mut bytes = zip_with_files(&["a", "b"]);
+        set_eocd_counts(&mut bytes, 1);
+
+        let finding = rejected(&bytes, 1);
+        assert_eq!(finding.code, FindingCode::QuotaFiles);
+    }
+
+    #[test]
+    fn actual_central_header_count_is_compared_without_truncation() {
+        let mut bytes = zip_with_files(&["a", "b"]);
+        set_eocd_counts(&mut bytes, 1);
+
+        let finding = rejected(&bytes, 2);
+        assert_eq!(finding.code, FindingCode::ZipDiffC3Count);
+        assert!(finding.detail.contains("parsed 2 CDHs"));
+    }
+
+    #[test]
+    fn local_header_offset_overflow_is_a_structured_error() {
+        let finding = match parse_lfh(&[], usize::MAX - 1) {
+            Ok(_) => panic!("overflowing LFH offset unexpectedly parsed"),
+            Err(finding) => finding,
+        };
+        assert_eq!(finding.code, FindingCode::ZipDiffC4Offset);
+    }
 }

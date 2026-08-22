@@ -44,7 +44,7 @@ Rust struct field order is deterministic, so the current implementation produces
 |---|---|
 | `formats` | Must equal `["zip"]`. No other format or mixed format list compiles. |
 | `max_archive_bytes` | Bounds path reads and borrowed byte inputs before parsing. Path reads use a capped reader so file growth cannot exceed the cap. |
-| `max_files` | Checked from EOCD before member-vector growth. |
+| `max_files` | Checked against both the declared EOCD count and the number of central headers actually parsed. A false low EOCD count cannot authorize member-vector growth beyond the cap. |
 | `max_member_bytes` | Checked against declared size and actual bytes while expanding. |
 | `max_total_bytes` | Checked against declared total and actual running total. |
 | `max_ratio` | Integer uncompressed:compressed bound, compared with widened `u128` arithmetic. The default `100` rejects when uncompressed bytes strictly exceed `100 ×` compressed bytes. `null` disables the ratio check. `0` is not “off”: any positive expansion with a positive compressed size fails. A member with uncompressed size `> 0` and compressed size `0` is an infinite ratio. |

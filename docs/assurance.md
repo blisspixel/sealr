@@ -1,17 +1,17 @@
 # Testing, compatibility, and assurance
 
-> This page separates current evidence from the target assurance program. Alpha.3 has a deterministic Rust unit suite, strict cross-platform CI, cargo-deny policy, and a pinned 5,927-file ZipDiff construction gate. Property testing, coverage-guided fuzzing, model checking, benign ecosystem measurement, an independent verifier, and an external audit remain future work.
+> This page separates current evidence from the target assurance program. The published Alpha.3 has a deterministic Rust unit suite, strict cross-platform CI, cargo-deny policy, and a pinned 5,927-file ZipDiff construction gate. Current main adds the first independent finite-domain compression-ratio oracle. Broader property families, coverage-guided fuzzing, model checking, benign ecosystem measurement, an independent verifier, and an external audit remain future work.
 
 Trust is the scarce resource. Format breadth and acceleration follow stable semantics and measured compatibility.
 
 ## Current evidence
 
-| Layer | Current alpha.3 evidence | Remaining work |
+| Layer | Current evidence | Remaining work |
 |---|---|---|
 | Unit | ZIP path grammar, topology, overlap and layout, quotas, inspect/materialize equality, rollback, destination preservation, platform materializer controls, and deterministic truncation, mutation, and noise no-panic coverage | Expand for every new semantic state and backend |
 | Corpus | All 5,927 pinned ZipDiff constructions plus local generated adversarial fixtures | Add codec-boundary, source-race, consumer-profile, and ecosystem fixtures |
 | Differential | ZipDiff expectation gate binds strict rejection and a documented valid-control allowlist | Compare major consumers on well-formed profile inputs and track disagreement frontiers |
-| Property | None yet | Add independent bounded models for ranges, quotas, strict-profile path topology, and lifecycle transitions |
+| Property | Compression-ratio comparison exhaustively agrees with an independent quotient-and-remainder oracle for `uncomp` 0 through 255 and `comp` and `max_ratio` 0 through 64 | Add independent bounded models for ranges, remaining quotas, strict-profile path topology, and lifecycle transitions |
 | Fuzz | None yet | `cargo fuzz` targets for interpretation, canonical paths, and inspect-only `apply()` |
 | Executable specification | None yet | Compare production kernels with simpler independent bounded models |
 | Model checking | None yet | Add Kani harnesses with explicit domains, assumptions, and unwind bounds |

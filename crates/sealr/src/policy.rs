@@ -196,7 +196,8 @@ pub fn ratio_exceeds(uncomp: u64, comp: u64, max_ratio: u64) -> bool {
     if comp == 0 {
         return uncomp > 0;
     }
-    let product = u128::from(max_ratio).saturating_mul(u128::from(comp));
+    // The product of two u64 values always fits in u128 exactly.
+    let product = u128::from(max_ratio) * u128::from(comp);
     u128::from(uncomp) > product
 }
 
@@ -290,5 +291,29 @@ mod tests {
         ));
         let mantissa = (1_u64 << 53) + 1;
         assert!(ratio_exceeds(mantissa, 1, 1_u64 << 53));
+    }
+
+    #[test]
+    fn ratio_exceeds_matches_an_independent_small_domain_oracle() {
+        fn oracle(uncomp: u64, comp: u64, max_ratio: u64) -> bool {
+            if comp == 0 {
+                return uncomp > 0;
+            }
+            let quotient = uncomp / comp;
+            let remainder = uncomp % comp;
+            quotient > max_ratio || (quotient == max_ratio && remainder > 0)
+        }
+
+        for uncomp in 0..=255 {
+            for comp in 0..=64 {
+                for max_ratio in 0..=64 {
+                    assert_eq!(
+                        ratio_exceeds(uncomp, comp, max_ratio),
+                        oracle(uncomp, comp, max_ratio),
+                        "uncomp={uncomp}, comp={comp}, max_ratio={max_ratio}"
+                    );
+                }
+            }
+        }
     }
 }

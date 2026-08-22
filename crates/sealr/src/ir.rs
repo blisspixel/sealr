@@ -12,6 +12,7 @@ const DENIED_EXTRA_UNICODE_PATH: u16 = 0x7075;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum MemberKind {
     File,
     Directory,
@@ -19,6 +20,7 @@ pub enum MemberKind {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "status", rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum MemberVerification {
     Pending,
     Verified,
@@ -39,6 +41,7 @@ impl ByteRange {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum ExtraSite {
     Local,
     Central,
@@ -46,6 +49,7 @@ pub enum ExtraSite {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum ExtraDisposition {
     Semantic,
     Ignored,
@@ -53,6 +57,7 @@ pub enum ExtraDisposition {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub struct ExtraFieldRecord {
     pub site: ExtraSite,
     pub id: u16,
@@ -62,6 +67,7 @@ pub struct ExtraFieldRecord {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub struct MemberSourceRanges {
     pub local_header: ByteRange,
     pub compressed_payload: ByteRange,
@@ -79,6 +85,7 @@ impl MemberSourceRanges {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "action", rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum NormalizationAction {
     StripDirectoryTrailingSlash,
     DropDotComponent { component_index: u32 },
@@ -130,6 +137,7 @@ pub fn is_denied_extra_id(id: u16) -> bool {
 
 /// One member of a versioned, effect-independent ZIP interpretation.
 #[derive(Clone, Debug, Serialize)]
+#[non_exhaustive]
 pub struct IrMember {
     pub raw_name_bytes: Vec<u8>,
     pub decoded_name: String,
@@ -151,7 +159,7 @@ pub struct IrMember {
 }
 
 impl IrMember {
-    pub fn from_planned(
+    pub(crate) fn from_planned(
         zip: ZipMember,
         components: Vec<String>,
         normalization_actions: Vec<NormalizationAction>,
@@ -182,7 +190,7 @@ impl IrMember {
         }
     }
 
-    pub fn as_zip_member(&self) -> ZipMember {
+    pub(crate) fn as_zip_member(&self) -> ZipMember {
         ZipMember {
             raw_name: self.raw_name_bytes.clone(),
             name: self.decoded_name.clone(),
@@ -200,21 +208,21 @@ impl IrMember {
         }
     }
 
-    pub fn mark_directory_verified(&mut self) {
+    pub(crate) fn mark_directory_verified(&mut self) {
         self.actual_uncomp_size = Some(0);
         self.actual_crc = Some(self.declared_crc);
         self.content_sha256 = Some(hex_sha256(&[]));
         self.verification = MemberVerification::Verified;
     }
 
-    pub fn mark_file_verified(&mut self, actual: u64, crc: u32, sha256: String) {
+    pub(crate) fn mark_file_verified(&mut self, actual: u64, crc: u32, sha256: String) {
         self.actual_uncomp_size = Some(actual);
         self.actual_crc = Some(crc);
         self.content_sha256 = Some(sha256);
         self.verification = MemberVerification::Verified;
     }
 
-    pub fn mark_failed(&mut self, cause: &str) {
+    pub(crate) fn mark_failed(&mut self, cause: &str) {
         self.verification = MemberVerification::Failed {
             cause: cause.to_owned(),
         };
@@ -223,6 +231,7 @@ impl IrMember {
 
 /// Labeled partition of the source interval under the current ZIP32 profile.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub struct ArchiveCovering {
     pub local_records: ByteRange,
     pub central_directory: ByteRange,
@@ -231,7 +240,8 @@ pub struct ArchiveCovering {
 }
 
 impl ArchiveCovering {
-    pub fn synthetic() -> Self {
+    #[cfg(test)]
+    pub(crate) fn synthetic() -> Self {
         Self {
             local_records: ByteRange { offset: 0, len: 0 },
             central_directory: ByteRange { offset: 0, len: 0 },
@@ -240,7 +250,12 @@ impl ArchiveCovering {
         }
     }
 
-    pub fn from_zip32(cd_offset: u64, cd_size: u64, eocd_offset: u64, comment_len: u64) -> Self {
+    pub(crate) fn from_zip32(
+        cd_offset: u64,
+        cd_size: u64,
+        eocd_offset: u64,
+        comment_len: u64,
+    ) -> Self {
         Self {
             local_records: ByteRange {
                 offset: 0,
@@ -263,22 +278,34 @@ impl ArchiveCovering {
 }
 
 /// Effect-independent interpretation of one ZIP snapshot under a named profile.
+///
+/// The value is produced only by Sealr. Callers can inspect and serialize it,
+/// but cannot construct or mutate an object that purports to be Sealr's
+/// interpretation.
+///
+/// ```compile_fail
+/// use sealr::{ArchiveIR, SourceDigest};
+///
+/// let _forged = ArchiveIR::new(SourceDigest::available("not-an-archive"), Vec::new());
+/// ```
 #[derive(Clone, Debug, Serialize)]
+#[non_exhaustive]
 pub struct ArchiveIR {
-    pub schema: &'static str,
-    pub profile: &'static str,
-    pub profile_digest: String,
-    pub source_digest: SourceDigest,
-    pub covering: ArchiveCovering,
-    pub members: Vec<IrMember>,
+    pub(crate) schema: &'static str,
+    pub(crate) profile: &'static str,
+    pub(crate) profile_digest: String,
+    pub(crate) source_digest: SourceDigest,
+    pub(crate) covering: ArchiveCovering,
+    pub(crate) members: Vec<IrMember>,
 }
 
 impl ArchiveIR {
-    pub fn new(source_digest: SourceDigest, members: Vec<IrMember>) -> Self {
+    #[cfg(test)]
+    pub(crate) fn new(source_digest: SourceDigest, members: Vec<IrMember>) -> Self {
         Self::with_covering(source_digest, ArchiveCovering::synthetic(), members)
     }
 
-    pub fn with_covering(
+    pub(crate) fn with_covering(
         source_digest: SourceDigest,
         covering: ArchiveCovering,
         members: Vec<IrMember>,
@@ -291,6 +318,30 @@ impl ArchiveIR {
             covering,
             members,
         }
+    }
+
+    pub fn schema(&self) -> &'static str {
+        self.schema
+    }
+
+    pub fn profile(&self) -> &'static str {
+        self.profile
+    }
+
+    pub fn profile_digest(&self) -> &str {
+        &self.profile_digest
+    }
+
+    pub fn source_digest(&self) -> &SourceDigest {
+        &self.source_digest
+    }
+
+    pub fn covering(&self) -> &ArchiveCovering {
+        &self.covering
+    }
+
+    pub fn members(&self) -> &[IrMember] {
+        &self.members
     }
 }
 
