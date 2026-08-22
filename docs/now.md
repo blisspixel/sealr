@@ -1,6 +1,6 @@
 # Why this is practical now
 
-Reviewed 2026-08-21.
+Reviewed 2026-08-22.
 
 The problem is old: archives encode content and filesystem topology, and extraction bugs repeatedly cross trust boundaries. What changed is that several pieces needed for a measurable boundary now exist together.
 
@@ -36,7 +36,7 @@ The [Rust Fuzz Book](https://rust-fuzz.github.io/book/) documents cargo-fuzz and
 
 Source digests, policy digests, structured findings, and a view digest can be returned for both allow and reject. in-toto, DSSE, Sigstore, SBOM formats, and GitHub artifact attestations provide established envelopes and signing workflows once sealr's unsigned receipt bytes are stable.
 
-Separate outcome axes, a named `SourceSnapshot`, and `sealr.archive-ir.v1` now exist. Inspect and materialize consume that IR. The next semantic-identity tasks are typed policy controls and canonical layout/content-tree identities. Canonical evidence bytes follow those definitions, and signing follows canonicalization.
+Separate outcome axes, a named `SourceSnapshot`, `sealr.archive-ir.v1`, typed policy compilation, and preview `sealrTreeV1` layout and content identities now exist. Inspect and materialize consume that IR. Canonical evidence JSON (RFC 8785), an independent verifier, and signing follow those identities. The supervised worker consumes the same tree contract.
 
 ## Acceleration is optional
 
@@ -58,4 +58,4 @@ The pieces now line up:
 | Bounded proofs | Kani on path and quota properties |
 | Auditable result | Versioned view and receipt |
 
-The roadmap therefore prioritizes justified trust in one ZIP interpretation before format breadth or acceleration. See [ROADMAP.md](../ROADMAP.md).
+The roadmap therefore prioritizes justified trust in one ZIP interpretation before format breadth or acceleration. Common ZIP and TAR codecs are a later adapter destination on that same boundary, not a reason to grow the trusted computing base now. Usefulness is a dependent that consumes the admitted tree, not a larger CLI. See [usefulness.md](usefulness.md) and [ROADMAP.md](../ROADMAP.md).

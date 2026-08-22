@@ -4,16 +4,16 @@
 
 > **Goal: one archive, one tree, and evidence for the decision.**
 
-sealr is an early attempt to make archive ingestion easier to reason about. Alpha.2 implements a deliberately narrow ZIP32 path: it applies one strict interpretation bound to the Sealr tool version, verifies accepted members, and either publishes the requested tree without replacement or publishes no destination. It does not yet provide a separately versioned interpretation profile, canonical tree identity, process sandbox, or production security claim.
+sealr is an early attempt to make archive ingestion easier to reason about. Alpha.3 implements a deliberately narrow ZIP32 path: it builds one versioned interpretation from an immutable source snapshot, verifies accepted members, and either publishes the requested tree without replacement or publishes no destination. Receipts record separate outcome axes and unsigned layout and content identities. It does not yet provide a process sandbox or production security claim.
 
 ```text
 Untrusted archive x policy
   -> (Allowed { wrote } | Rejected) x receipt x inspectable view
 ```
 
-The longer-term aim is an archive-to-tree admission boundary whose decision and evidence can be reused by other systems. The current release is a small step toward that aim, not proof that the category or design is finished.
+The longer-term aim is an archive-to-tree admission boundary whose decision and evidence can be reused by other systems. The current release is a small step toward that aim, not proof that the category or design is finished. Usefulness is not “more unzip.” It is: same bytes and policy produce one tree or no tree on Linux, macOS, and Windows, and the next tool consumes that tree instead of opening the ZIP again. Until a dependent does that, a receipt is just a receipt. The [usefulness test](docs/usefulness.md) is the quality bar.
 
-> Status: `v0.1.0-alpha.2` is the second development preview of the ZIP boundary. It is useful for evaluation, development, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. The limitations below are security boundaries, not fine print.
+> Status: `v0.1.0-alpha.3` is the third development preview of the ZIP boundary. It is useful for evaluation, development, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. The limitations below are security boundaries, not fine print.
 
 ## Why this exists
 
@@ -43,7 +43,7 @@ The current Rust implementation supports classic ZIP32 archives with stored or D
 - Pure lexical path jailing for absolute paths, parent traversal, ADS colons, reserved Windows names, trailing dots and spaces, control characters, empty components, depth, duplicates, case-fold collisions, and file/directory topology conflicts.
 - Strict filename handling. Invalid UTF-8 and non-ASCII CP437 names are rejected until the canonical Unicode path design is complete.
 - Bounded source reads, metadata, file count, declared and actual member size, total expanded size, and declared and actual compression ratio.
-- Streaming Deflate, exact compressed-input consumption, CRC32, and SHA-256 calculation without buffering an expanded member in memory. Trailing bytes and concatenated raw DEFLATE streams inside one declared member payload are rejected.
+- Streaming Deflate, exact compressed-input consumption, CRC32, and SHA-256 calculation without buffering an expanded member in memory. The staged-tree audit also hashes through a fixed 64 KiB buffer. Trailing bytes and concatenated raw DEFLATE streams inside one declared member payload are rejected.
 - Component-bound, same-volume staging with 128-bit random names. Every member component is opened no-follow from a retained directory handle, files use create-new handles, and the requested destination is published with native no-replace semantics only after every member passes.
 - Deterministic JSON view and versioned unsigned receipt on allow and reject paths. Receipts record the materializer backend, stage mode, stage-creation primitive, component-resolution guarantee, durability, publication primitive, outcome, and cleanup state.
 - A pinned 5,927-file, 14-class ZipDiff construction gate with a deterministically generated aggregate corpus digest, exact finding-count expectations, and an explicit 73-file control allowlist.
@@ -63,9 +63,9 @@ The following work must land before a production-readiness claim:
 - Normal rejection attempts stage cleanup and retries once after failure, then records `removed` or `failed` in the receipt. Setup failure after stage creation uses the retained stage handle first and a parent-relative retry. A killed process or two cleanup failures can leave a hidden staging directory.
 - The default durability mode is `flush-only`. Setting the Rust policy field `atomic: true` syncs completed member files, but directory syncing, crash recovery, and power-loss durability are not implemented.
 - Landlock, seccomp, AppContainer, and other process sandboxes are not implemented. Receipts report `kernel_jail: unavailable`.
-- After a source is read, its receipt digest is the archive SHA-256. A failure before the bytes are available records `{ "status": "unavailable" }` instead of a digest. Receipts now also carry separate interpretation, admission, verification, effect, and view-completeness axes; the alpha.2 `Allowed`/`Rejected` verdict remains a compatibility adapter and still maps an admitted archive with a failed destination to `Rejected`.
+- When the complete source bytes are held, the receipt records their SHA-256. A failure before a complete snapshot is available records `{ "status": "unavailable" }` instead of a digest. Receipts also carry separate interpretation, admission, verification, effect, and view-completeness axes; the alpha.2 `Allowed`/`Rejected` shape remains a compatibility adapter and still maps an admitted archive with a failed destination to `Rejected`.
 - Receipts are unsigned, and their JSON digest is deterministic for the current Rust structs but is not yet RFC 8785 JCS.
-- The current `View` is invocation evidence, not an effect-independent tree artifact. Its digest covers verdict, write state, findings, and members, so it is not a semantic tree identity. Materialization failures also currently map into the end-to-end `Rejected` verdict. A versioned admitted-tree schema, separate admission and effect outcomes, layout and content roots, and explicit view completeness are the next semantic gate.
+- The inspectable `View` remains invocation evidence. Its digest covers verdict, write state, findings, and members. Receipts now also carry separate `sealrTreeV1` layout and content-tree identities derived from `ArchiveIR`. Those roots are unsigned, preview-line encodings; they are not yet a lock, an authenticated subject, or a claim that every extra-field payload is semantic. Materialization failures still map into the end-to-end `Rejected` verdict.
 - ZIP64, TAR, compressed TAR, gzip, zstd, and 7z are not implemented.
 - There is no external security audit or stable production-supported release.
 
@@ -75,7 +75,7 @@ See [SECURITY.md](SECURITY.md), [the threat model](docs/threat-model.md), and [t
 
 The repository pins Rust 1.98.0 in `rust-toolchain.toml`; rustup selects it automatically.
 
-Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.2` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.2). Runnable checksum and provenance commands are in [release verification](docs/release-verification.md). To build from source:
+Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.3` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.3). Runnable checksum and provenance commands are in [release verification](docs/release-verification.md). To build from source:
 
 ```text
 git clone https://github.com/blisspixel/sealr.git
@@ -91,7 +91,7 @@ cargo run --locked -p sealr-cli -- path/to/archive.zip --dest ./out
 
 The library and shipped CLI are Rust. CI runs native tests and release builds on Ubuntu, macOS, and Windows; the platform-specific materializers are release gates, not secondary ports. Some repository maintenance and release scripts are currently PowerShell because the same scripts run on all three GitHub-hosted runner families and the local release operator uses Windows. PowerShell is not a runtime dependency of `sealr`, but this is more scripting surface than the project should keep. Shared deterministic repository tasks are scheduled to move into a small Rust `xtask`, leaving only thin host-specific wrappers where an operating-system or operator boundary requires one.
 
-The CLI exits `0` when policy allows the archive and `2` when it rejects it. Operational command-line errors use the normal Clap exit behavior.
+The CLI exits `0` when the archive is admitted, `2` when it is not admitted, and `3` when it is admitted but a requested destination effect fails. The inspectable view now includes the same interpretation, admission, verification, effect, and completeness axes as the receipt. The compatibility `verdict` still maps an admitted archive with a failed destination to `rejected`. Operational command-line errors use the normal Clap exit behavior.
 
 ## Walkthrough
 
@@ -147,7 +147,7 @@ Expected result: exit `0`, verdict `allowed`, `wrote: true`, and exactly the two
   <img alt="Screenshot of sealr materializing two approved members into a new destination after inspection." src="docs/assets/readme-walkthrough/sealr-materialize-allowed-terminal-light.png" width="1000">
 </picture>
 
-The semantic walkthrough is enforced by CLI integration tests on the native platform jobs. The PNGs are rendered terminal-style summaries derived from alpha.2's separate JSON view and receipt streams; they are not literal captures of raw CLI output or the planned human interface. The alpha.1 and alpha.2 visible walkthrough output was unchanged. CI regenerates the fixtures, native transcript variant, and HTML, checks fixture and platform-specific transcript SHA-256 values against the committed asset manifest, then verifies every PNG's SHA-256, dimensions, format, size, density, and metadata policy. CI does not claim a pixel comparison.
+The semantic walkthrough is enforced by CLI integration tests on the native platform jobs. The PNGs are rendered terminal-style summaries derived from alpha.3's separate JSON view and receipt streams; they are not literal captures of raw CLI output or the planned human interface. The visible summary intentionally uses the stable decision, finding, and member subset. CI regenerates the fixtures, native transcript variant, and HTML, checks fixture and platform-specific transcript SHA-256 values against the committed asset manifest, then verifies every PNG's SHA-256, dimensions, format, size, density, and metadata policy. CI does not claim a pixel comparison.
 
 ## Design rules
 
@@ -156,24 +156,30 @@ The semantic walkthrough is enforced by CLI integration tests on the native plat
 - Unknown or unsupported structure fails closed.
 - Declared sizes never authorize allocation or output. Actual bytes are counted as they arrive.
 - Rejection is evidence-bearing. It still returns a view and receipt.
-- Format breadth and acceleration come after the boundary is measurable.
+- Format breadth and acceleration come after the boundary is measurable. Common ZIP/TAR codecs are in scope as adapters on that boundary, not as a second extractor or a large codec framework.
+- Do not add TAR, 7z, or a richer CLI as a substitute for a dependent that imports the crate and stops unzipping. Wheel admission is the first consumer that would prove the category.
+- Unique covering is sequential. Independent member verification may use many cores after one IR exists. A second parse is not a use of extra cores.
+- The shipped library keeps a small trusted computing base. New runtime dependencies need a written capability need; unknown methods fail closed.
 
 ## What comes next
 
-The next milestone remains the Phase 0.1 trust gate, not another archive format. The immediate implementation milestone is Step 3, semantic identity:
+The next milestone remains the Phase 0.1 trust gate, not another archive format. Step 3 semantic identity now has a preview-line contract:
 
 1. Outcome axes and explicit digest availability have landed in the library and `sealr.receipt.v2`. The inspectable `View` still serializes the compatibility verdict.
-2. `SourceSnapshot` now names the current owned and caller-borrowed in-memory bytes. Parse, payload reads, and digest recording use that one object.
-3. A versioned `sealr.archive-ir.v1` is built once from that snapshot after path admission. Inspect and materialize consume the same IR; they do not reparse the archive. Layout and content-tree identities are next.
-4. Define distinct source, interpretation, layout, content-tree, and invocation identities with byte-identical cross-platform golden vectors.
+2. `SourceSnapshot` names the current owned and caller-borrowed in-memory bytes. Parse, payload reads, and digest recording use that one object.
+3. A versioned `sealr.archive-ir.v1` is built once from that snapshot after path admission. Inspect and materialize consume the same IR; they do not reparse the archive.
+4. Constructor `Policy` compiles into typed supported controls before source ingestion. Ratio checks use integer arithmetic. Security counters use checked addition. Reserved policy fields fail closed instead of appearing enforced.
+5. Distinct source, interpretation, layout, and content-tree identities are recorded on the receipt. `sealrTreeV1` is a domain-separated binary encoding over the IR. `view_digest` remains invocation evidence.
 
-In parallel, the existing materializer gains deterministic hostile namespace and staged-content mutation tests on Linux, macOS, and Windows. Those tests strengthen the shipped capability boundary without creating a competing semantic representation.
+Cross-platform golden ZIP fixtures now pin the preview encodings. The remaining Step 3 work is to replace ignored extra fields with an explicit allowlist under a new profile identifier. The compatibility verdict remains for the preview line; the independent axes and CLI exit `3` are authoritative when a destination effect fails. That identity is what a wheel consumer would reuse.
+
+In parallel, the materializer now refuses intra-call directory-component replacement and staged-content mutation, and audits the staged tree against the admitted IR before publication. Repeated hostile races and the independent supervisor audit remain Step 2/4 work. Those tests strengthen the shipped capability boundary without creating a competing semantic representation.
 
 The supervised Linux worker follows that contract because its bounded protocol and the supervisor's final staged-tree audit need the same canonical tree and manifest. The supervisor will own the destination parent, private stage, publication, and cleanup; the worker will receive only the archive snapshot and stage capabilities and install Landlock before reading the first archive byte. Linux is the first enforced worker platform, while macOS and Windows must remain natively green and report isolation honestly until their worker boundaries are implemented.
 
 Authenticated abandoned-stage recovery follows the worker because recovery must be owned by the final supervisor lifecycle. Landlock limits the worker's ambient authority; it does not contain another process running as the same user. A distinct service identity or equivalent mandatory-access-control boundary would be required to bring that actor into scope.
 
-Canonical CP437 and Unicode collision semantics, snapshot-backed bounded random access, fuzz and property suites, small-core proofs, compatibility measurement, an independent evidence verifier, and performance gates based on avoided parsing, decompression, and writes complete Phase 0.1. Python wheel admission and reusable admitted trees follow before TAR begins; none is a claim of current support.
+Canonical CP437 and Unicode collision semantics, snapshot-backed bounded random access, fuzz and property suites, small-core proofs, compatibility measurement, an independent evidence verifier, and performance gates based on avoided parsing, decompression, and writes complete Phase 0.1. After that gate, common ZIP codec adapters (Zstd, XZ/LZMA, BZip2, Deflate64) land on the same boundary with exact input consumption and no extra extractor. Python wheel admission can proceed on Store and Deflate. TAR begins only when it can reuse those adapters. None of this is a claim of current support.
 
 The exact active queue, implementation order, and exit criteria are in [ROADMAP.md](ROADMAP.md#active-execution-queue).
 
@@ -194,8 +200,10 @@ The exact active queue, implementation order, and exit criteria are in [ROADMAP.
 |---|---|
 | [ROADMAP.md](ROADMAP.md) | Ordered work, gates, and rationale |
 | [docs/vision.md](docs/vision.md) | Product direction and priorities |
+| [docs/usefulness.md](docs/usefulness.md) | Admission-boundary test: one tree, one consumer that does not reparse |
 | [docs/semantic-model.md](docs/semantic-model.md) | Current semantics and target admitted-tree model |
-| [docs/api.md](docs/api.md) | Current alpha.2 contract and target outcome axes |
+| [docs/theory.md](docs/theory.md) | Research notes: unique covering, partial interpretation, named conjectures |
+| [docs/api.md](docs/api.md) | Current alpha.3 contract and target API direction |
 | [docs/policy.md](docs/policy.md) | Policy schema and defaults |
 | [docs/findings.md](docs/findings.md) | Stable finding-code registry |
 | [docs/threat-model.md](docs/threat-model.md) | Adversary and ZipDiff classes |

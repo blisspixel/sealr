@@ -1,6 +1,14 @@
 use std::path::{Path, PathBuf};
 
 use crate::findings::{Finding, FindingCode};
+use crate::ir::NormalizationAction;
+
+/// Jailed relative components plus the recorded normalization actions.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct JailedName {
+    pub components: Vec<String>,
+    pub actions: Vec<NormalizationAction>,
+}
 
 const RESERVED: &[&str] = &[
     "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
@@ -9,6 +17,11 @@ const RESERVED: &[&str] = &[
 
 /// Jail a member name to a relative component list. Pure: no filesystem.
 pub fn jail_relative(raw: &str, max_depth: u32) -> Result<Vec<String>, Finding> {
+    Ok(jail_name(raw, max_depth)?.components)
+}
+
+/// Jail a member name and record silent normalizations for the IR.
+pub fn jail_name(raw: &str, max_depth: u32) -> Result<JailedName, Finding> {
     if raw.contains('\0') {
         return Err(Finding::error(FindingCode::PathNul, "NUL in member name").on(raw));
     }
@@ -31,11 +44,15 @@ pub fn jail_relative(raw: &str, max_depth: u32) -> Result<Vec<String>, Finding> 
     }
 
     let mut out = Vec::new();
-    for part in raw.split('/') {
+    let mut actions = Vec::new();
+    for (component_index, part) in raw.split('/').enumerate() {
         if part.is_empty() {
             return Err(Finding::error(FindingCode::PathEmpty, "empty path component").on(raw));
         }
         if part == "." {
+            actions.push(NormalizationAction::DropDotComponent {
+                component_index: component_index as u32,
+            });
             continue;
         }
         if part == ".." {
@@ -64,7 +81,10 @@ pub fn jail_relative(raw: &str, max_depth: u32) -> Result<Vec<String>, Finding> 
     if out.len() as u32 > max_depth {
         return Err(Finding::error(FindingCode::PathDepth, "path too deep").on(raw));
     }
-    Ok(out)
+    Ok(JailedName {
+        components: out,
+        actions,
+    })
 }
 
 /// Join jailed components under dest. Dest must already be absolute.
@@ -163,5 +183,10 @@ mod tests {
     fn drops_dot_components() {
         let p = jail_relative("a/./b.txt", 32).unwrap();
         assert_eq!(p, ["a", "b.txt"]);
+        let jailed = jail_name("a/./b.txt", 32).unwrap();
+        assert_eq!(
+            jailed.actions,
+            [NormalizationAction::DropDotComponent { component_index: 1 }]
+        );
     }
 }

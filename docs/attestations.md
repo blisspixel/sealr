@@ -1,10 +1,10 @@
 # Evidence and attestations
 
-> Current status: alpha.2 emits a versioned deterministic unsigned JSON receipt. RFC 8785 canonicalization, canonical tree identities, DSSE, Sigstore, standardized predicates, SBOM output, and an independent verifier are planned work.
+> Current status: alpha.3 emits a versioned deterministic unsigned JSON receipt and preview `sealrTreeV1` identities. RFC 8785 canonicalization, stable lock semantics, DSSE, Sigstore, standardized predicates, SBOM output, and an independent verifier are planned work.
 
 The current receipt is always returned, including on rejection. `sealr.receipt.v2` records source digest availability, interpretation/admission/verification/effect/completeness axes, the invocation-specific view digest, tool and environment fields, materialization lifecycle evidence, the compatibility verdict, and findings.
 
-It is an **EvidenceRecord**, not an attestation. `signed: false` is explicit. It proves neither signer identity nor freshness, and `view_digest` is not a canonical layout or content-tree identity.
+It is an **EvidenceRecord**, not an attestation. `signed: false` is explicit. It proves neither signer identity nor freshness. `view_digest` is still invocation evidence. Receipts also carry unsigned preview `sealrTreeV1` layout and content-tree identities derived from `ArchiveIR`.
 
 Use **attestation** only for an authenticated claim whose signature, signer identity, and timestamp or freshness policy have been verified.
 
@@ -46,7 +46,7 @@ The target authenticated form should use existing envelope and identity systems 
 
 GitHub Artifact Attestations are a possible distribution path for standard envelopes, not a separate trust model. A signature alone is insufficient. Consumers must verify the expected signer identity, workflow or issuer constraints, subject digest, and time policy.
 
-The alpha.2 program does not produce DSSE, in-toto, Sigstore, or GitHub Artifact Attestations for archive decisions. Separately, the GitHub release workflow records build provenance attestations for the native release archives. That provenance binds a packaged binary to its source workflow; it does not authenticate an individual Sealr decision receipt.
+The alpha.3 program does not produce DSSE, in-toto, Sigstore, or GitHub Artifact Attestations for archive decisions. Separately, the GitHub release workflow records build provenance attestations for the native release archives. That provenance binds a packaged binary to its source workflow; it does not authenticate an individual Sealr decision receipt.
 
 ## Tree subjects
 
@@ -60,7 +60,7 @@ Future authenticated claims should distinguish:
 
 The existing `view_digest` cannot stand in for the layout or content-tree root because it covers invocation-specific fields such as source metadata, policy, verdict, findings, and write outcome.
 
-`sealrTreeV1` requires a normative canonical encoding and test vectors before it can be an attestation subject. in-toto `dirHash1`, Git trees, and OCI `DiffID` are interoperability references, not drop-in replacements for all Sealr semantics.
+`sealrTreeV1` now has a documented canonical encoding and committed cross-platform preview vectors. It still requires profile closure, stability rules, and an independent verifier before it can be an authenticated subject. in-toto `dirHash1`, Git trees, and OCI `DiffID` are interoperability references, not drop-in replacements for all Sealr semantics.
 
 ## Independent verifier
 
@@ -93,7 +93,7 @@ sealr foo.zip
 sealr foo.zip --dest D:\out
 ```
 
-The first form is inspect-only and returns `Allowed { wrote: false }` when successful. The second requests transactional materialization. If materialization fails after staging, the current combined verdict is `Rejected` and the materialization object records lifecycle and cleanup details.
+The first form is inspect-only and returns `Allowed { wrote: false }` when successful. The second requests transactional materialization. If materialization fails, the compatibility verdict is `Rejected`, the precise axes record `admission: admitted` and `effect: failed` when applicable, the CLI exits `3`, and the materialization object records lifecycle and cleanup details.
 
 There is no current `--sbom`, `attest`, `lock`, or signed-output command.
 

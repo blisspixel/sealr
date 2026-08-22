@@ -25,6 +25,8 @@ cd /path/to/sealr
 cargo run --locked --release -p sealr --example classify_zipdiff -- /path/to/constructions --expect tests/corpus/zipdiff/expectations.txt
 ```
 
+Classification is embarrassingly parallel: each construction is an independent `apply()`. The example uses `std::thread` and `std::thread::available_parallelism`. Set `SEALR_JOBS=1` to force a single worker. Aggregate counts, the allowlist, and the corpus digest are still combined in sorted path order, so the gate does not depend on thread schedule.
+
 Source provenance:
 
 - Repository: <https://github.com/ouuan/ZipDiff>

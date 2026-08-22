@@ -1,6 +1,6 @@
 # Design principles
 
-> Current alpha.2 behavior is defined by the [README](../README.md), [API contract](api.md), and [security policy](../SECURITY.md). Product sequencing is defined only by the [roadmap](../ROADMAP.md).
+> Current alpha.3 behavior is defined by the [README](../README.md), [API contract](api.md), and [security policy](../SECURITY.md). Product sequencing is defined only by the [roadmap](../ROADMAP.md).
 
 Sealr is trying to become a dependable archive-to-tree admission boundary. It is not trying to be a general unarchiver, codec benchmark, or scheduler.
 
@@ -8,11 +8,11 @@ Sealr is trying to become a dependable archive-to-tree admission boundary. It is
 
 One bounded source invocation receives one versioned interpretation. Inspect, materialize, evidence, and future consumers must use the same immutable representation. No recovery parser or downstream reparse may assign a second meaning to the archive.
 
-Alpha.2 implements this rule through one `apply()` path and one planned member set. Phase 0.1 turns that internal plan into a versioned, effect-independent `ArchiveIR` with canonical layout and content-tree identities.
+Alpha.3 implements this rule through one `apply()` path and one versioned, effect-independent `ArchiveIR`. Inspect and materialize consume the same IR, and preview layout and content-tree identities are derived from it.
 
 ## Admission and effects are different facts
 
-The current `Allowed { wrote } | Rejected` result is an honest preview contract, but it combines semantic and operational outcomes. The target separates interpretation, admission, verification, effect, and view completeness. A destination I/O failure must not redefine an otherwise admitted archive as unsafe.
+The compatibility `Allowed { wrote } | Rejected` result combines semantic and operational outcomes. Alpha.3 also exposes separate interpretation, admission, verification, effect, and view-completeness axes, and CLI exit `3` identifies an admitted archive whose requested destination effect failed.
 
 ## Filesystem access is capability based
 
@@ -22,7 +22,7 @@ A future worker reduces parser authority. It does not replace the path grammar, 
 
 ## Evidence names only established facts
 
-Alpha.2 emits deterministic unsigned evidence. It does not emit an authenticated attestation, semantic tree root, or formal proof. Future evidence keeps source, interpretation, layout, content, policy, and effect identities distinct.
+Alpha.3 emits deterministic unsigned evidence plus preview semantic tree roots. It does not emit an authenticated attestation, stable lock, or formal proof. Future evidence keeps source, interpretation, layout, content, policy, and effect identities distinct.
 
 ## Compatibility is measured
 
@@ -32,8 +32,8 @@ Strict rejection is useful only within a named supported domain. Each stable pro
 
 Measure structure, full verification, realization, and reuse separately. The strategic result is avoiding a second parse, decompression, or write after one complete verification. Parallelism and alternate codecs are optional backends only after they preserve exact input consumption, output bytes, findings, and tree identities.
 
-## Expansion follows consumers
+## Expansion follows the boundary, then consumers
 
-Python wheel admission is the first candidate consumer after the semantic core. TAR, OCI, JAR, APK, agent workspaces, projection, bindings, and acceleration follow only when a concrete consumer and its semantics are specified.
+Python wheel admission is the first candidate consumer after the semantic core and can stay on Store and Deflate. Common ZIP methods (Zstd, XZ/LZMA, BZip2, Deflate64) and TAR wrappers are codec adapters on the same boundary, added only with exact consumption, bounded windows, and a justified tiny dependency. OCI, JAR, APK, agent workspaces, projection, bindings, and acceleration follow when a concrete consumer and its semantics are specified. A second unarchiver is never the expansion strategy.
 
 See [semantic-model.md](semantic-model.md) for the target types and [ROADMAP.md](../ROADMAP.md#active-execution-queue) for the active implementation order.

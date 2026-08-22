@@ -25,7 +25,7 @@ The working hypothesis is modest:
 4. downstream consumers use the admitted representation instead of reparsing the source;
 5. Linux, macOS, and Windows produce the same semantic tree evidence for the same profile.
 
-Alpha.2 establishes pieces of the first two points for a narrow ZIP32 subset. It does not yet establish canonical tree identity, reusable admission, a stable consumer profile, or the complete cross-platform semantic contract.
+Alpha.3 establishes the first preview interpretation and tree identities for a narrow ZIP32 subset. It does not yet establish stable lock semantics, reusable admission, a stable consumer profile, or the complete cross-platform semantic contract.
 
 ## What not to optimize for first
 

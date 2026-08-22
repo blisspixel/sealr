@@ -36,11 +36,7 @@ fn main() -> ExitCode {
         let _ = writeln!(io::stderr().lock(), "sealr: write receipt: {error}");
         return ExitCode::FAILURE;
     }
-    if out.rejected() {
-        ExitCode::from(2)
-    } else {
-        ExitCode::SUCCESS
-    }
+    ExitCode::from(out.cli_exit_code())
 }
 
 fn write_json(writer: &mut impl Write, value: &impl Serialize) -> io::Result<()> {

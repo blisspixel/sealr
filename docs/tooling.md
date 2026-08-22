@@ -6,7 +6,7 @@
 
 The first release pipeline was developed from Windows, and PowerShell 7 is available on the standard Ubuntu, macOS, and Windows GitHub-hosted runners. It therefore provided one implementation for walkthrough generation, documentation checks, license bundles, and the local release operator while the product boundary was still changing.
 
-That choice helped the first two alpha releases ship consistently, but it is not the desired long-term ownership boundary. Deterministic repository logic is easier to test, reuse, and run everywhere when it is implemented in Rust.
+That choice helped the first three alpha releases ship consistently, but it is not the desired long-term ownership boundary. Deterministic repository logic is easier to test, reuse, and run everywhere when it is implemented in Rust.
 
 ## Target tooling shape
 
@@ -51,10 +51,12 @@ A new dependency in the shipped library or CLI needs:
 5. deterministic and offline behavior for the security path;
 6. cross-platform tests on every supported release target.
 
-Rust dependencies are locked and covered by repository license and advisory checks, and GitHub Actions are pinned by commit SHA. Runner-provided host tools are part of the documented CI environment but are not shipped runtime dependencies. Convenience alone does not justify adding an async runtime, terminal UI framework, network client, telemetry library, or second serialization stack to the release binary.
+Rust dependencies are locked and covered by repository license and advisory checks, and GitHub Actions are pinned by commit SHA. Runner-provided host tools are part of the documented CI environment but are not shipped runtime dependencies. Convenience alone does not justify adding an async runtime, terminal UI framework, network client, telemetry library, or second serialization stack to the release binary. Codec coverage does not justify libarchive, a vendor unarchiver, or a subprocess. Each new decompression crate is a trusted-computing-base change and is reviewed as such.
 
 ## CLI rule
 
 The CLI is a thin presentation layer over typed library outcomes. Human formatting can improve, but machine JSON, rule identities, and exit classes remain versioned contracts. No UI dependency may become a second policy engine or parser.
+
+Repository tools may use `std::thread` and `std::thread::available_parallelism` for independent jobs such as ZipDiff classification. `SEALR_JOBS` caps that parallelism. It is not a `Policy` field and must not change trees, findings, or roots. A thread pool crate is not justified for that.
 
 The Rust task-runner shape follows the small-workspace pattern described by [`cargo-xtask`](https://github.com/matklad/cargo-xtask); Sealr does not need to depend on that repository or a task-runner framework.

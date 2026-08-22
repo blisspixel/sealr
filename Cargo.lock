@@ -443,7 +443,7 @@ dependencies = [
 
 [[package]]
 name = "sealr"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "cap-fs-ext",
  "cap-std",
@@ -461,7 +461,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-cli"
-version = "0.1.0-alpha.2"
+version = "0.1.0-alpha.3"
 dependencies = [
  "clap",
  "sealr",

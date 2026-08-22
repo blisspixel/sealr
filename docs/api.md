@@ -1,8 +1,8 @@
 # API contract
 
-This page distinguishes the implemented alpha.2 contract from the target semantic API. Current callers must pin to the implemented section. The target is specified further in [semantic-model.md](semantic-model.md).
+This page distinguishes the implemented alpha.3 contract from the target semantic API. Current callers must pin to the implemented section. The target is specified further in [semantic-model.md](semantic-model.md).
 
-## Implemented in alpha.2
+## Implemented in alpha.3
 
 ```
 UntrustedArchive x Policy
@@ -53,8 +53,8 @@ Invariants:
 
 - `receipt.view_digest` is currently SHA-256 of deterministic `serde_json` bytes for the versioned Rust struct. RFC 8785 JCS is a Phase 0.1 gate.
 - `receipt.policy.digest` uses the same current deterministic struct serialization. It is not yet a cross-encoder canonical JSON promise.
-- After the source bytes are available, `receipt.source` is `{ "sha256": "..." }`. A source open, read, or pre-read size rejection uses `{ "status": "unavailable" }` and omits `sha256`. Bytes that were held, including an over-cap `Source::Bytes` input, are hashed. The inspectable view keeps the same digest object so `receipt.source` equals `view.source.digest`.
-- `receipt.source_snapshot` is `memory-owned` for path inputs, `memory-borrowed` for caller byte slices, and `unavailable` when ingest failed before a snapshot was retained. Parse and payload reads use that snapshot; they do not reopen the caller path.
+- After the complete source bytes are available, `receipt.source` is `{ "sha256": "..." }`. A source open, read, pre-read path-size rejection, or path growth beyond the bounded read uses `{ "status": "unavailable" }` and omits `sha256`. An over-cap `Source::Bytes` input is complete caller-owned data, so it is hashed. The inspectable view keeps the same digest object so `receipt.source` equals `view.source.digest`.
+- `receipt.source_snapshot` is `memory-owned` for accepted path inputs and `memory-borrowed` for caller byte slices, including an over-cap slice rejected before parsing. It is `unavailable` when no complete snapshot was retained. Parse and payload reads use that snapshot; they do not reopen the caller path.
 - The same source bytes, source metadata, and policy produce the same interpreted member tree and findings. Materialization may add an I/O finding, but it must not reinterpret archive bytes. **This is the LibreOffice bug we refuse:** inspect and materialize cannot disagree about the archive tree.
 
 No second function that “recovers” a broken zip.
@@ -70,6 +70,11 @@ One document. The current CLI emits pretty JSON; JSONL is planned. The current d
   "schema": "sealr.view.v1",
   "source": { "path": "foo.zip", "digest": { "sha256": "..." }, "magic": "zip" },
   "policy": { "id": "sealr:policy/default/v1", "digest": { "sha256": "..." } },
+  "interpretation": { "status": "interpreted" },
+  "admission": { "status": "admitted" },
+  "verification": { "status": "complete" },
+  "effect": { "status": "not-requested" },
+  "view_completeness": { "status": "complete" },
   "verdict": "allowed",
   "wrote": false,
   "findings": [],
@@ -87,9 +92,9 @@ One document. The current CLI emits pretty JSON; JSONL is planned. The current d
 }
 ```
 
-`verdict`: `allowed` or `rejected`. `wrote` is Boolean. A rejection before member processing has an empty member list. A later payload or materialization rejection retains every member completed before the failure. The finding that caused rejection is always present. The current schema does not mark that member list as partial, so callers must use the verdict and findings rather than assuming a rejected view is complete.
+`verdict`: `allowed` or `rejected` compatibility adapter. `wrote` is Boolean. The axes are the precise record: an admitted archive whose destination fails is `admission: admitted`, `effect: failed`, and still `verdict: rejected`. A rejection before member processing has an empty member list. A later payload or materialization rejection retains every member completed before the failure. The finding that caused rejection is always present. Callers must use `view_completeness` plus the axes rather than assuming a rejected view is a complete member inventory.
 
-Projection and hydration on read are target surfaces. They are not part of alpha.2.
+Projection and hydration on read are target surfaces. They are not part of alpha.3.
 
 ---
 
@@ -110,8 +115,17 @@ The current receipt is versioned unsigned JSON (`signed: false`). DSSE and in-to
   "source": { "sha256": "..." },
   "source_snapshot": "memory-owned",
   "policy": { "id": "sealr:policy/default/v1", "digest": { "sha256": "..." } },
+  "identities": {
+    "source": { "sha256": "..." },
+    "interpretation": {
+      "id": "sealr.profile.zip.strict-ascii.v1",
+      "digest": { "sha256": "..." }
+    },
+    "layout": { "sealrTreeV1": "..." },
+    "content": { "sealrTreeV1": "..." }
+  },
   "view_digest": { "sha256": "..." },
-  "tool": { "name": "sealr", "version": "0.1.0-alpha.2" },
+  "tool": { "name": "sealr", "version": "0.1.0-alpha.3" },
   "environment": { "os": "windows", "arch": "x86_64", "kernel_jail": "unavailable" },
   "materialization": {
     "schema": "sealr.materialization.v2",
@@ -132,7 +146,15 @@ The current receipt is versioned unsigned JSON (`signed: false`). DSSE and in-to
 
 When materialization is requested, the materialization object reports the component-bound backend, stage protection, exact stage-creation primitive, durability mode, exact platform publication primitive, lifecycle outcome, and cleanup result. Windows reports `ntcreatefile-parent-handle-create-directory-explicit-dacl-nofollow` for creation and `ntsetinformationfile-retained-source-parent-noreplace` for publication. Its optional `windows` object records the `windows-local-ntfs-v1` storage policy, observed filesystem and device scope, persistent-ACL and read-only flags, the `windows-protected-token-user-v1` ACL policy, and whether both the stage object owner and exact protected DACL were verified. No SID, volume serial, label, or path is serialized.
 
-On reject, `members` in the view may be partial; `view_digest` still covers exactly that invocation-specific view. It is not a canonical tree identity. The strongest current statement is: source digest D under policy P produced serialized view V in this invocation.
+On reject, `members` in the view may be partial; `view_digest` still covers exactly that invocation-specific view. It is not a canonical tree identity.
+
+`receipt.identities` is separate from `view_digest`:
+
+- `source` is the archive SHA-256, or `{ "status": "unavailable" }`.
+- `interpretation` binds `sealr.profile.zip.strict-ascii.v1` and the SHA-256 of that profile's method, flag, extra-field, and name rules.
+- `layout` is `sealrTreeV1` over canonical paths, kinds, raw names, flags, methods, declared sizes, complete local-header, payload, optional-descriptor, and central-header ranges, extra-field dispositions, and normalization actions. It is present once an `ArchiveIR` exists. It is `{ "status": "unavailable" }` when planning never produced a tree.
+- `content` is `sealrTreeV1` over canonical paths, kinds, actual sizes, and member SHA-256 digests. It is present only when verification is complete. An admitted archive whose destination fails keeps its layout root and does not claim a content root until members are verified.
+- Layout and content encodings are Git-style domain-separated preimages (`sealr.tree.layout.v1` and `sealr.tree.content.v1`) over little-endian length-prefixed covering ranges and member records. They do not use JSON, so they are independent of `view_digest` and of later RFC 8785 work. The interpretation profile is a sibling identity, not mixed into the tree bytes. Empty-tree and walkthrough-fixture roots are pinned in `crates/sealr/tests/golden_identity.rs` so Linux, macOS, and Windows cannot silently diverge. Layout identity includes the source covering (local prefix, central directory, EOCD, comment). Content identity does not. `audit_covering` rechecks that covering against the snapshot without inflating; materialization audits the staged tree against the same IR before publication.
 
 ## Target semantic API
 
@@ -173,11 +195,11 @@ verified.materialize(destination)?;
 verified.write_evidence(output)?;
 ```
 
-`SourceSnapshot` and `ArchiveIR` exist in alpha.2 as the ingest object and the inspect/materialize member plan. `AdmittedArchive` and the type-state methods remain design notation. Their required property is that every operation consumes one immutable interpretation and no operation reparses the original archive through another parser.
+`SourceSnapshot` and `ArchiveIR` exist in alpha.3 as the ingest object and the inspect/materialize member plan. `AdmittedArchive` and the type-state methods remain design notation. Their required property is that every operation consumes one immutable interpretation and no operation reparses the original archive through another parser.
 
 ### Semantic identities
 
-The target API returns separate source, interpretation, layout, content-tree, and effect identities. Alpha.2 returns source, policy, and invocation-specific view digests only. A future `sealr.lock` depends on the canonical `ArchiveIR` and `sealrTreeV1` specifications and must not precede them.
+Receipts now return separate source, interpretation, layout, and content-tree identities. `view_digest` remains invocation evidence. A future `sealr.lock` still waits for these encodings to freeze and for an independent verifier.
 
 ---
 

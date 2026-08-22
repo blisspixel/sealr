@@ -66,6 +66,7 @@ Unknown error codes must be treated as rejection by consumers.
 | `materialize.unsupported` | The platform has no supported atomic no-replace publication primitive, so materialization failed closed. |
 | `materialize.unsupported_filesystem` | The opened Windows parent is remote, read-only, lacks persistent ACLs, is not NTFS, or could not be classified safely. |
 | `materialize.unsafe_stage` | A created Windows stage did not retain the required effective-TokenUser object owner or exact protected effective-TokenUser-only DACL before member writes. |
+| `materialize.audit` | The staged tree diverged from the admitted IR before publication: size, content digest, path set, or a reparse point. The destination is not published. |
 
 ### Quotas
 
@@ -76,8 +77,10 @@ Unknown error codes must be treated as rejection by consumers.
 | `quota.member` | Declared or actual member size exceeds its cap. |
 | `quota.total` | Declared or actual running total exceeds its cap. |
 | `quota.ratio` | Declared or actual compression ratio exceeds policy. |
+| `quota.overflow` | A checked security counter could not be represented in `u64`. |
 | `quota.metadata` | ZIP structural metadata exceeds its cap. |
 | `quota.declared_lie` | Actual expanded size disagrees with the declared size. |
+| `policy.unsupported` | The constructor policy names an unimplemented or reserved control. Compilation fails before source ingestion. |
 
 ### ZIP structure and differentials
 
@@ -96,9 +99,10 @@ Unknown error codes must be treated as rejection by consumers.
 | `zip.diff.c4_offset` | Invalid central, local, payload, or descriptor offset. |
 | `zip.diff.c5_zip64` | ZIP64 marker encountered. ZIP64 is not implemented. |
 | `zip.overlap` | Referenced local records overlap each other or the central directory. |
+| `covering.inconsistent` | The IR covering is not a labeled partition of the snapshot, or a claimed LFH/CDH/EOCD offset does not hold the recorded signature. The checker does not search for an EOCD or inflate. |
 | `zip.encrypted` | Encrypted member. |
 | `zip.encoding` | Invalid UTF-8 name or unsupported non-ASCII CP437 decoding. |
-| `zip.extra` | Extra-field sequence is malformed or repeats an identifier. |
+| `zip.extra` | Extra-field sequence is malformed or repeats an identifier. Well-formed extras other than ZIP64 and Unicode Path are recorded on the IR as ignored. |
 | `zip.flags` | Non-encryption CDH and LFH flags disagree. |
 | `codec.deflate.invalid_stream` | The declared DEFLATE payload is not one valid raw DEFLATE stream, or decoder accounting is inconsistent. |
 | `codec.deflate.trailing_input` | One valid DEFLATE stream ended before the declared compressed payload ended. Trailing bytes and concatenated streams are rejected. |

@@ -26,9 +26,12 @@ The view contains:
 
 - source path, detected magic, and either `{ "sha256": "..." }` or `{ "status": "unavailable" }` when source bytes could not be read;
 - policy id and digest;
-- verdict and whether materialization committed;
+- interpretation, admission, verification, effect, and view-completeness axes;
+- the compatibility `verdict` adapter and whether materialization committed;
 - structured findings;
 - canonical member paths, kinds, sizes, methods, CRC32, and SHA-256.
+
+The axes are the precise record. `verdict: rejected` still covers denial, indeterminate source, and an admitted archive whose destination failed. Use `admission` and `effect` to tell those apart.
 
 The receipt binds:
 
@@ -49,11 +52,12 @@ Receipts are currently unsigned and the kernel jail is unavailable.
 
 | Code | Meaning |
 |---|---|
-| `0` | Policy allowed the archive. `wrote` says whether a destination was committed. |
-| `2` | The archive or materialization request was rejected. View and receipt are still emitted. |
+| `0` | The archive was admitted. `wrote` says whether a destination was committed. |
+| `2` | The archive was not admitted (denied, malformed, unsupported, or indeterminate). View and receipt are still emitted. |
+| `3` | The archive was admitted but the requested destination effect failed. View and receipt still record `admission: admitted`. |
 | Clap default | Command-line syntax or argument error. |
 
-Source open and read failures currently become a structured rejection and therefore exit `2`. Receipts mark those failures as `interpretation: indeterminate` with an unavailable source digest. An admitted archive whose destination cannot be published is still exit `2` through the compatibility verdict, while the receipt records `admission: admitted` and `effect: failed`.
+Source open and read failures currently become a structured rejection and therefore exit `2`. Receipts mark those failures as `interpretation: indeterminate` with an unavailable source digest. An admitted archive whose destination cannot be published exits `3`. The compatibility `verdict` remains `rejected` on that path so older adapters keep working.
 
 ## Current CLI surface
 
@@ -73,7 +77,7 @@ Policy files, JSONL output, receipt paths, mounts, folder scans, force replaceme
 
 ## Target CLI experience
 
-Alpha.2 intentionally exposes the underlying JSON contract. It is useful for validation but is not the finished human interface.
+Alpha.3 intentionally exposes the underlying JSON contract. It is useful for validation but is not the finished human interface.
 
 After the semantic outcome model stabilizes, the default terminal experience should be concise and task-oriented:
 
@@ -105,7 +109,7 @@ Job-oriented verbs such as `gate`, `verify`, `materialize`, and `explain` follow
 
 ## README capture policy
 
-The committed images are rendered terminal-style summaries derived from the current alpha.2 JSON view and receipt streams. They remain paired with copyable commands and expected text. They were first captured for alpha.1; the visible walkthrough output did not change in alpha.2. Whenever visible output changes, the walkthrough fixtures and transcripts must be regenerated from the locally built release-profile binary, semantic assertions must run first, and both light and dark screenshots must be recaptured.
+The committed images are rendered terminal-style summaries derived from the current alpha.3 JSON view and receipt streams. They remain paired with copyable commands and expected text. The visible summary uses a stable subset even though alpha.3 adds outcome axes and identities to the underlying JSON. Whenever visible output changes, the walkthrough fixtures and transcripts must be regenerated from the locally built release-profile binary, semantic assertions must run first, and both light and dark screenshots must be recaptured.
 
 Current CI regenerates fixture and native transcript inputs, checks their SHA-256 values against the manifest's Unix or Windows variant, and verifies the exact PNG hashes, asset set, format, dimensions, density, and metadata policy. A future pixel-level renderer comparison is deliberately not claimed.
 

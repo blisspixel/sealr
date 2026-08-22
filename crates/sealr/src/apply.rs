@@ -3,15 +3,17 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::path::Path;
 
+use crate::covering::audit_covering;
 use crate::findings::{Finding, FindingCode, Severity};
-use crate::ir::{ArchiveIR, IrMember, MemberKind};
-use crate::jail::jail_relative;
+use crate::identity::OutcomeIdentities;
+use crate::ir::{ArchiveIR, IrMember, MemberKind, NormalizationAction};
+use crate::jail::jail_name;
 use crate::materialize::{CapabilityMaterializer, MaterializationMeta};
 use crate::outcome::{
-    AdmissionStatus, EffectStatus, InterpretationStatus, SemanticAxes, SourceDigest,
+    AdmissionStatus, DigestHex, EffectStatus, InterpretationStatus, SemanticAxes, SourceDigest,
     VerificationStatus, ViewCompleteness,
 };
-use crate::policy::{hex_sha256, Policy};
+use crate::policy::{hex_sha256, ratio_exceeds, Policy, ResourceBudget};
 use crate::snapshot::{SnapshotKind, SourceSnapshot};
 use crate::zip::{self, ZipMember};
 use cap_std::fs::File as CapFile;
@@ -58,6 +60,11 @@ pub struct View {
     pub schema: &'static str,
     pub source: SourceMeta,
     pub policy: PolicyMeta,
+    pub interpretation: InterpretationStatus,
+    pub admission: AdmissionStatus,
+    pub verification: VerificationStatus,
+    pub effect: EffectStatus,
+    pub view_completeness: ViewCompleteness,
     pub verdict: &'static str,
     pub wrote: bool,
     pub findings: Vec<Finding>,
@@ -78,11 +85,6 @@ pub struct PolicyMeta {
 }
 
 #[derive(Clone, Debug, Serialize)]
-pub struct DigestHex {
-    pub sha256: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
 pub struct Receipt {
     pub schema: &'static str,
     pub verdict: &'static str,
@@ -95,6 +97,7 @@ pub struct Receipt {
     pub source: SourceDigest,
     pub source_snapshot: SnapshotKind,
     pub policy: PolicyMeta,
+    pub identities: OutcomeIdentities,
     pub view_digest: DigestHex,
     pub tool: ToolMeta,
     pub environment: EnvMeta,
@@ -140,10 +143,36 @@ impl Outcome {
     pub fn wrote(&self) -> bool {
         matches!(self.verdict, Verdict::Allowed { wrote: true })
     }
+
+    /// Process exit class: 0 admitted without effect failure, 2 not admitted, 3 admitted but effect failed.
+    pub fn cli_exit_code(&self) -> u8 {
+        if self.admission == AdmissionStatus::Admitted {
+            match self.effect {
+                EffectStatus::Failed => 3,
+                EffectStatus::Committed | EffectStatus::NotRequested => 0,
+            }
+        } else {
+            2
+        }
+    }
 }
 
 pub fn apply(req: Request<'_>) -> Outcome {
-    match apply_inner(&req) {
+    let compiled = match req.policy.compile() {
+        Ok(compiled) => compiled,
+        Err(finding) => {
+            return reject_only(
+                (None, SourceDigest::unavailable(), req.policy.clone()),
+                vec![finding.clone()],
+                None,
+                MaterializationMeta::not_started(req.dest.is_some(), req.policy.atomic),
+                SemanticAxes::policy_compile_failed(&finding),
+                SnapshotKind::Unavailable,
+                OutcomeIdentities::without_source(),
+            );
+        }
+    };
+    match apply_inner(&req, compiled.budget) {
         Ok(o) => o,
         Err(failure) => {
             let admission = if failure.finding.code == FindingCode::QuotaArchive {
@@ -151,13 +180,15 @@ pub fn apply(req: Request<'_>) -> Outcome {
             } else {
                 AdmissionStatus::NotEvaluated
             };
+            let digest = failure.digest.clone();
             reject_only(
                 (failure.path, failure.digest, req.policy.clone()),
                 vec![failure.finding.clone()],
                 None,
                 MaterializationMeta::not_started(req.dest.is_some(), req.policy.atomic),
                 SemanticAxes::source_failure(&failure.finding, admission),
-                SnapshotKind::Unavailable,
+                failure.snapshot_kind,
+                OutcomeIdentities::unavailable(digest),
             )
         }
     }
@@ -167,11 +198,12 @@ struct SourceFailure {
     path: Option<String>,
     digest: SourceDigest,
     finding: Finding,
+    snapshot_kind: SnapshotKind,
 }
 
 fn read_source<'a>(
     src: &'a Source<'a>,
-    policy: &Policy,
+    budget: ResourceBudget,
 ) -> Result<SourceSnapshot<'a>, SourceFailure> {
     match src {
         Source::Path(p) => {
@@ -180,6 +212,7 @@ fn read_source<'a>(
                 path: path.clone(),
                 digest: SourceDigest::unavailable(),
                 finding,
+                snapshot_kind: SnapshotKind::Unavailable,
             };
             let len = fs::metadata(p)
                 .map_err(|e| {
@@ -189,12 +222,12 @@ fn read_source<'a>(
                     ))
                 })?
                 .len();
-            if len > policy.max_archive_bytes {
+            if len > budget.max_archive_bytes {
                 return Err(unavailable(Finding::error(
                     FindingCode::QuotaArchive,
                     format!(
                         "archive is {len} bytes; cap is {}",
-                        policy.max_archive_bytes
+                        budget.max_archive_bytes
                     ),
                 )));
             }
@@ -205,27 +238,29 @@ fn read_source<'a>(
                 .unwrap_or(usize::MAX)
                 .min(8 * 1024 * 1024);
             let mut bytes = Vec::with_capacity(initial_capacity);
+            let take_limit = budget.max_archive_bytes.saturating_add(1);
             (&mut file)
-                .take(policy.max_archive_bytes.saturating_add(1))
+                .take(take_limit)
                 .read_to_end(&mut bytes)
                 .map_err(|e| {
                     unavailable(Finding::error(FindingCode::SourceIo, format!("read: {e}")))
                 })?;
-            if bytes.len() as u64 > policy.max_archive_bytes {
+            if bytes.len() as u64 > budget.max_archive_bytes {
                 return Err(SourceFailure {
                     path,
-                    digest: SourceDigest::available(hex_sha256(&bytes)),
+                    digest: SourceDigest::unavailable(),
                     finding: Finding::error(
                         FindingCode::QuotaArchive,
                         "archive grew beyond the input cap while being read",
                     ),
+                    snapshot_kind: SnapshotKind::Unavailable,
                 });
             }
             Ok(SourceSnapshot::owned(path, bytes))
         }
         Source::Bytes { path, data } => {
             let path = path.map(|s| s.to_string());
-            if data.len() as u64 > policy.max_archive_bytes {
+            if data.len() as u64 > budget.max_archive_bytes {
                 return Err(SourceFailure {
                     path,
                     digest: SourceDigest::available(hex_sha256(data)),
@@ -234,9 +269,10 @@ fn read_source<'a>(
                         format!(
                             "archive is {} bytes; cap is {}",
                             data.len(),
-                            policy.max_archive_bytes
+                            budget.max_archive_bytes
                         ),
                     ),
+                    snapshot_kind: SnapshotKind::MemoryBorrowed,
                 });
             }
             Ok(SourceSnapshot::borrowed(path, data))
@@ -244,11 +280,12 @@ fn read_source<'a>(
     }
 }
 
-fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
+fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, SourceFailure> {
     let policy = req.policy;
     let initial_materialization =
         MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
-    let snapshot = read_source(&req.source, policy)?;
+    let snapshot = read_source(&req.source, budget)?;
+    let identities_base = OutcomeIdentities::unavailable(snapshot.digest().clone());
     let source_digest = snapshot.digest().clone();
     let source_meta = (snapshot.path_owned(), source_digest.clone(), policy.clone());
     let magic = detect_magic(snapshot.as_bytes());
@@ -265,6 +302,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                 &f,
             ),
             snapshot.kind(),
+            identities_base.clone(),
         ));
     }
     if !policy.allows_format("zip") {
@@ -280,13 +318,14 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                 &f,
             ),
             snapshot.kind(),
+            identities_base.clone(),
         ));
     }
 
     let parsed = match zip::parse_zip(
         snapshot.as_bytes(),
-        policy.max_files,
-        policy.max_metadata_bytes,
+        budget.max_files,
+        budget.max_metadata_bytes,
     ) {
         Ok(z) => z,
         Err(f) => {
@@ -297,11 +336,12 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                 initial_materialization,
                 parse_failure_axes(&f),
                 snapshot.kind(),
+                identities_base.clone(),
             ));
         }
     };
 
-    if parsed.members.len() as u64 > policy.max_files {
+    if parsed.members.len() as u64 > budget.max_files {
         let f = Finding::error(
             FindingCode::QuotaFiles,
             format!("{} entries", parsed.members.len()),
@@ -317,14 +357,15 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                 &f,
             ),
             snapshot.kind(),
+            identities_base.clone(),
         ));
     }
-    if parsed.metadata_bytes > policy.max_metadata_bytes {
+    if parsed.metadata_bytes > budget.max_metadata_bytes {
         let f = Finding::error(
             FindingCode::QuotaMetadata,
             format!(
                 "ZIP metadata is {} bytes; cap is {}",
-                parsed.metadata_bytes, policy.max_metadata_bytes
+                parsed.metadata_bytes, budget.max_metadata_bytes
             ),
         );
         return Ok(reject_only(
@@ -338,11 +379,13 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                 &f,
             ),
             snapshot.kind(),
+            identities_base.clone(),
         ));
     }
 
+    let covering = parsed.covering();
     let mut findings = Vec::new();
-    let mut planned: Vec<(ZipMember, Vec<String>)> = Vec::new();
+    let mut planned: Vec<(ZipMember, Vec<String>, Vec<NormalizationAction>)> = Vec::new();
     let mut dest_seen: BTreeMap<String, bool> = BTreeMap::new();
     let mut fold_seen: BTreeMap<String, bool> = BTreeMap::new();
     let mut declared_total: u64 = 0;
@@ -363,26 +406,38 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
             );
             continue;
         }
-        if m.uncomp_size > policy.max_member_bytes {
+        if m.uncomp_size > budget.max_member_bytes {
             findings.push(
                 Finding::error(FindingCode::QuotaMember, "declared member too large").on(&m.name),
             );
             continue;
         }
-        if m.comp_size > 0 {
-            if let Some(max_r) = policy.max_ratio {
-                let ratio = m.uncomp_size as f64 / m.comp_size as f64;
-                if ratio > max_r {
-                    findings.push(
-                        Finding::error(FindingCode::QuotaRatio, format!("ratio {ratio:.1}"))
-                            .on(&m.name),
-                    );
-                    continue;
-                }
+        if let Some(max_r) = budget.max_ratio {
+            if ratio_exceeds(m.uncomp_size, m.comp_size, max_r) {
+                findings.push(
+                    Finding::error(
+                        FindingCode::QuotaRatio,
+                        format!(
+                            "declared {}:{} exceeds {max_r}:1",
+                            m.uncomp_size, m.comp_size
+                        ),
+                    )
+                    .on(&m.name),
+                );
+                continue;
             }
         }
-        declared_total = declared_total.saturating_add(m.uncomp_size);
-        if declared_total > policy.max_total_bytes {
+        declared_total = match declared_total.checked_add(m.uncomp_size) {
+            Some(total) => total,
+            None => {
+                findings.push(Finding::error(
+                    FindingCode::QuotaOverflow,
+                    "declared uncompressed total overflowed u64",
+                ));
+                break;
+            }
+        };
+        if declared_total > budget.max_total_bytes {
             findings.push(Finding::error(
                 FindingCode::QuotaTotal,
                 "declared total too large",
@@ -390,13 +445,18 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
             break;
         }
 
+        let mut actions = Vec::new();
         let jailed_name = if m.is_dir {
+            actions.push(NormalizationAction::StripDirectoryTrailingSlash);
             m.name.strip_suffix('/').unwrap_or(&m.name)
         } else {
             &m.name
         };
-        match jail_relative(jailed_name, policy.max_path_depth) {
-            Ok(parts) => {
+        match jail_name(jailed_name, budget.max_path_depth) {
+            Ok(jailed) => {
+                let mut actions = actions;
+                actions.extend(jailed.actions);
+                let parts = jailed.components;
                 let joined = parts.join("/");
                 let fold = joined.to_ascii_lowercase();
                 if dest_seen.contains_key(&joined) {
@@ -435,7 +495,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                 }
                 dest_seen.insert(joined, m.is_dir);
                 fold_seen.insert(fold, m.is_dir);
-                planned.push((m, parts));
+                planned.push((m, parts, actions));
             }
             Err(f) => findings.push(f),
         }
@@ -452,16 +512,39 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
             Vec::new(),
             initial_materialization,
             SemanticAxes::denied_at_admission(&cause),
+            identities_base.clone(),
         ));
     }
 
-    let mut ir = ArchiveIR::new(
+    let mut ir = ArchiveIR::with_covering(
         source_digest.clone(),
+        covering,
         planned
             .into_iter()
-            .map(|(zip, components)| IrMember::from_planned(zip, components))
+            .map(|(zip, components, actions)| IrMember::from_planned(zip, components, actions))
             .collect(),
     );
+    if let Err(finding) = audit_covering(&snapshot, &ir) {
+        findings.push(finding);
+        let cause = first_error(&findings);
+        return Ok(with_ir(
+            finish(
+                (snapshot.path_owned(), source_digest, snapshot.kind()),
+                "zip",
+                policy,
+                findings,
+                Vec::new(),
+                initial_materialization,
+                SemanticAxes::structure_stop(
+                    InterpretationStatus::Malformed,
+                    AdmissionStatus::Denied,
+                    &cause,
+                ),
+                identities_base.clone(),
+            ),
+            ir,
+        ));
+    }
     let planned_count = ir.members.len() as u64;
     let mut members_view = Vec::new();
     let mut actual_total: u64 = 0;
@@ -488,6 +571,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                         members_view,
                         materialization,
                         SemanticAxes::admitted_setup_failed(&cause),
+                        identities_base.clone(),
                     ),
                     ir,
                 ));
@@ -522,6 +606,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                                 &cause,
                                 write,
                             ),
+                            identities_base.clone(),
                         ),
                         ir,
                     ));
@@ -555,21 +640,58 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                             &cause,
                             write,
                         ),
+                        identities_base.clone(),
                     ),
                     ir,
                 ));
             }
         };
-        let remaining = policy.max_total_bytes.saturating_sub(actual_total);
+        let remaining = match budget.max_total_bytes.checked_sub(actual_total) {
+            Some(remaining) => remaining,
+            None => {
+                let finding =
+                    Finding::error(FindingCode::QuotaOverflow, "remaining total underflowed");
+                ir.members[index].mark_failed(finding.code.as_str());
+                findings.push(finding);
+                materialization = abort_and_report(&mut stage, &mut findings, materialization);
+                let cause = first_error(&findings);
+                let verified = members_view.len() as u64;
+                return Ok(with_ir(
+                    finish(
+                        (snapshot.path_owned(), source_digest, snapshot.kind()),
+                        "zip",
+                        policy,
+                        findings,
+                        members_view,
+                        materialization,
+                        SemanticAxes::admitted_verification_stop(
+                            verified,
+                            planned_count.saturating_sub(verified),
+                            &cause,
+                            write,
+                        ),
+                        identities_base.clone(),
+                    ),
+                    ir,
+                ));
+            }
+        };
         let processed = if let Some(stage) = stage.as_ref() {
             stage
                 .create_file(&ir.members[index].components)
                 .and_then(|file| {
-                    process_member_to_file(payload, &zip_member, policy, remaining, file)
+                    process_member_to_file(
+                        payload,
+                        &zip_member,
+                        budget,
+                        remaining,
+                        policy.atomic,
+                        file,
+                    )
                 })
         } else {
             let mut sink = io::sink();
-            process_member(payload, &zip_member, policy, remaining, &mut sink)
+            process_member(payload, &zip_member, budget, remaining, &mut sink)
         };
         let (actual, crc, sha) = match processed {
             Ok(result) => result,
@@ -594,6 +716,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                             &cause,
                             write,
                         ),
+                        identities_base.clone(),
                     ),
                     ir,
                 ));
@@ -624,17 +747,68 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                         &cause,
                         write,
                     ),
+                    identities_base.clone(),
                 ),
                 ir,
             ));
         }
-        actual_total = actual_total.saturating_add(actual);
+        actual_total = match actual_total.checked_add(actual) {
+            Some(total) => total,
+            None => {
+                let finding = Finding::error(
+                    FindingCode::QuotaOverflow,
+                    "actual uncompressed total overflowed u64",
+                )
+                .on(&ir.members[index].decoded_name);
+                ir.members[index].mark_failed(finding.code.as_str());
+                findings.push(finding);
+                materialization = abort_and_report(&mut stage, &mut findings, materialization);
+                let cause = first_error(&findings);
+                let verified = members_view.len() as u64;
+                return Ok(with_ir(
+                    finish(
+                        (snapshot.path_owned(), source_digest, snapshot.kind()),
+                        "zip",
+                        policy,
+                        findings,
+                        members_view,
+                        materialization,
+                        SemanticAxes::admitted_verification_stop(
+                            verified,
+                            planned_count.saturating_sub(verified),
+                            &cause,
+                            write,
+                        ),
+                        identities_base.clone(),
+                    ),
+                    ir,
+                ));
+            }
+        };
         ir.members[index].mark_file_verified(actual, crc, sha);
         members_view.push(member_view(&ir.members[index]));
     }
 
     members_view.sort_by(|a, b| a.path.cmp(&b.path));
     if let Some(materializer) = stage.as_mut() {
+        if let Err(finding) = materializer.audit_against(&ir) {
+            findings.push(finding);
+            materialization = abort_and_report(&mut stage, &mut findings, materialization);
+            let cause = first_error(&findings);
+            return Ok(with_ir(
+                finish(
+                    (snapshot.path_owned(), source_digest, snapshot.kind()),
+                    "zip",
+                    policy,
+                    findings,
+                    members_view,
+                    materialization,
+                    SemanticAxes::admitted_publication_failed(&cause),
+                    identities_base.clone(),
+                ),
+                ir,
+            ));
+        }
         if let Err(finding) = materializer.commit() {
             findings.push(finding);
             materialization = abort_and_report(&mut stage, &mut findings, materialization);
@@ -648,6 +822,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
                     members_view,
                     materialization,
                     SemanticAxes::admitted_publication_failed(&cause),
+                    identities_base.clone(),
                 ),
                 ir,
             ));
@@ -667,6 +842,7 @@ fn apply_inner(req: &Request<'_>) -> Result<Outcome, SourceFailure> {
             } else {
                 SemanticAxes::inspect_complete()
             },
+            identities_base.clone(),
         ),
         ir,
     ))
@@ -710,15 +886,16 @@ fn path_conflict(seen: &BTreeMap<String, bool>, path: &str, is_dir: bool) -> Opt
 fn process_member_to_file(
     payload: &[u8],
     member: &ZipMember,
-    policy: &Policy,
+    budget: ResourceBudget,
     remaining_total: u64,
+    member_sync: bool,
     mut file: CapFile,
 ) -> Result<(u64, u32, String), Finding> {
-    let result = process_member(payload, member, policy, remaining_total, &mut file)?;
+    let result = process_member(payload, member, budget, remaining_total, &mut file)?;
     file.flush().map_err(|error| {
         Finding::error(FindingCode::MaterializeIo, format!("flush member: {error}"))
     })?;
-    if policy.atomic {
+    if member_sync {
         file.sync_all().map_err(|error| {
             Finding::error(FindingCode::MaterializeIo, format!("sync member: {error}"))
         })?;
@@ -729,7 +906,7 @@ fn process_member_to_file(
 fn process_member(
     payload: &[u8],
     member: &ZipMember,
-    policy: &Policy,
+    budget: ResourceBudget,
     remaining_total: u64,
     writer: &mut impl Write,
 ) -> Result<(u64, u32, String), Finding> {
@@ -737,14 +914,19 @@ fn process_member(
     let mut crc = Crc::new();
     let mut sha = Sha256::new();
     let mut consume = |chunk: &[u8]| -> Result<(), Finding> {
-        actual = actual.saturating_add(chunk.len() as u64);
+        actual = actual.checked_add(chunk.len() as u64).ok_or_else(|| {
+            Finding::error(
+                FindingCode::QuotaOverflow,
+                "actual member size overflowed u64",
+            )
+        })?;
         if actual > member.uncomp_size {
             return Err(Finding::error(
                 FindingCode::QuotaDeclaredLie,
                 "actual bytes exceeded the declared uncompressed size",
             ));
         }
-        if actual > policy.max_member_bytes {
+        if actual > budget.max_member_bytes {
             return Err(Finding::error(
                 FindingCode::QuotaMember,
                 "actual bytes exceeded the member cap",
@@ -756,15 +938,15 @@ fn process_member(
                 "actual bytes exceeded the remaining archive cap",
             ));
         }
-        if member.comp_size > 0 {
-            if let Some(max_ratio) = policy.max_ratio {
-                let ratio = actual as f64 / member.comp_size as f64;
-                if ratio > max_ratio {
-                    return Err(Finding::error(
-                        FindingCode::QuotaRatio,
-                        format!("actual ratio {ratio:.1} exceeded {max_ratio:.1}"),
-                    ));
-                }
+        if let Some(max_ratio) = budget.max_ratio {
+            if ratio_exceeds(actual, member.comp_size, max_ratio) {
+                return Err(Finding::error(
+                    FindingCode::QuotaRatio,
+                    format!(
+                        "actual {}:{} exceeded {max_ratio}:1",
+                        actual, member.comp_size
+                    ),
+                ));
             }
         }
         writer.write_all(chunk).map_err(|error| {
@@ -848,6 +1030,7 @@ fn detect_magic(bytes: &[u8]) -> &'static str {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn finish(
     (path, source_digest, source_snapshot): (Option<String>, SourceDigest, SnapshotKind),
     magic: &'static str,
@@ -856,6 +1039,7 @@ fn finish(
     members: Vec<MemberView>,
     materialization: MaterializationMeta,
     axes: SemanticAxes,
+    identities: OutcomeIdentities,
 ) -> Outcome {
     let verdict = compat_verdict(&axes);
     let (verdict_s, wrote) = match &verdict {
@@ -875,6 +1059,11 @@ fn finish(
                 sha256: policy.digest_hex(),
             },
         },
+        interpretation: axes.interpretation.clone(),
+        admission: axes.admission.clone(),
+        verification: axes.verification.clone(),
+        effect: axes.effect.clone(),
+        view_completeness: axes.view_completeness.clone(),
         verdict: verdict_s,
         wrote,
         findings: findings.clone(),
@@ -893,6 +1082,7 @@ fn finish(
         source: source_digest,
         source_snapshot,
         policy: view.policy.clone(),
+        identities,
         view_digest: DigestHex {
             sha256: hex_sha256(&view_json),
         },
@@ -923,6 +1113,8 @@ fn finish(
 }
 
 fn with_ir(mut outcome: Outcome, ir: ArchiveIR) -> Outcome {
+    outcome.receipt.identities =
+        OutcomeIdentities::from_ir(outcome.receipt.source.clone(), &ir, &outcome.verification);
     outcome.archive_ir = Some(ir);
     outcome
 }
@@ -962,6 +1154,7 @@ fn reject_only(
     materialization: MaterializationMeta,
     axes: SemanticAxes,
     source_snapshot: SnapshotKind,
+    identities: OutcomeIdentities,
 ) -> Outcome {
     finish(
         (path, digest, source_snapshot),
@@ -971,6 +1164,7 @@ fn reject_only(
         Vec::new(),
         materialization,
         axes,
+        identities,
     )
 }
 
@@ -1000,11 +1194,15 @@ fn parse_failure_axes(finding: &Finding) -> SemanticAxes {
         | FindingCode::ZipEncoding
         | FindingCode::ZipEncrypted
         | FindingCode::MethodUnsupported => InterpretationStatus::Unsupported,
-        FindingCode::QuotaFiles | FindingCode::QuotaMetadata => InterpretationStatus::Interpreted,
+        FindingCode::QuotaFiles | FindingCode::QuotaMetadata | FindingCode::QuotaOverflow => {
+            InterpretationStatus::Interpreted
+        }
         _ => InterpretationStatus::Malformed,
     };
     let admission = match finding.code {
-        FindingCode::QuotaFiles | FindingCode::QuotaMetadata => AdmissionStatus::Denied,
+        FindingCode::QuotaFiles | FindingCode::QuotaMetadata | FindingCode::QuotaOverflow => {
+            AdmissionStatus::Denied
+        }
         _ => AdmissionStatus::NotEvaluated,
     };
     SemanticAxes::structure_stop(interpretation, admission, finding)
@@ -1194,6 +1392,16 @@ mod tests {
         let ir = out.archive_ir.as_ref().expect("admitted inspect has IR");
         assert_eq!(ir.schema, crate::ir::ARCHIVE_IR_SCHEMA);
         assert_eq!(ir.profile, crate::ir::ZIP_STRICT_ASCII_V1);
+        assert_eq!(out.cli_exit_code(), 0);
+        assert_eq!(out.view.admission, AdmissionStatus::Admitted);
+        assert_eq!(out.view.effect, EffectStatus::NotRequested);
+        assert_eq!(ir.covering.local_records.offset, 0);
+        assert_eq!(
+            ir.covering.local_records.len,
+            ir.covering.central_directory.offset
+        );
+        assert_eq!(ir.covering.central_directory.end(), ir.covering.eocd.offset);
+        assert_eq!(ir.covering.eocd.len, 22);
         assert_eq!(ir.members.len(), 1);
         assert_eq!(ir.members[0].canonical_path, "nested/hello.txt");
         assert_eq!(ir.members[0].raw_name_bytes, b"nested/hello.txt");
@@ -1201,6 +1409,17 @@ mod tests {
         assert_eq!(
             ir.members[0].verification,
             crate::ir::MemberVerification::Verified
+        );
+        assert_eq!(ir.profile_digest, crate::ir::zip_strict_ascii_v1_digest());
+        assert_eq!(
+            out.receipt.identities.interpretation.id,
+            crate::ir::ZIP_STRICT_ASCII_V1
+        );
+        assert!(out.receipt.identities.layout.hex().is_some());
+        assert!(out.receipt.identities.content.hex().is_some());
+        assert_ne!(
+            out.receipt.view_digest.sha256,
+            out.receipt.identities.layout.hex().unwrap()
         );
         assert_eq!(out.receipt.policy.id, policy.id);
         assert_eq!(
@@ -1286,10 +1505,17 @@ mod tests {
             data_offset: 0,
             record_end: 1,
             is_dir: false,
+            extra_fields: Vec::new(),
+            source_ranges: crate::ir::MemberSourceRanges {
+                local_header: crate::ir::ByteRange { offset: 0, len: 0 },
+                compressed_payload: crate::ir::ByteRange { offset: 0, len: 1 },
+                data_descriptor: None,
+                central_header: crate::ir::ByteRange { offset: 0, len: 0 },
+            },
         };
         let mut sink = io::sink();
-        let finding = process_member(&[0xff], &member, &Policy::default_v1(), u64::MAX, &mut sink)
-            .unwrap_err();
+        let budget = Policy::default_v1().compile().unwrap().budget;
+        let finding = process_member(&[0xff], &member, budget, u64::MAX, &mut sink).unwrap_err();
 
         assert_eq!(finding.code, FindingCode::CodecDeflateInvalidStream);
     }
@@ -1368,7 +1594,7 @@ mod tests {
                     &member.canonical_path,
                     &member.raw_name_bytes,
                     &member.content_sha256,
-                    member.data_offset,
+                    member.source_ranges.compressed_payload.offset,
                 )
             })
             .collect();
@@ -1380,13 +1606,27 @@ mod tests {
                     &member.canonical_path,
                     &member.raw_name_bytes,
                     &member.content_sha256,
-                    member.data_offset,
+                    member.source_ranges.compressed_payload.offset,
                 )
             })
             .collect();
         assert_eq!(
             inspect_ids, mat_ids,
             "inspect and materialize must share one IR"
+        );
+        assert_eq!(
+            inspect.receipt.identities.layout.hex(),
+            mat.receipt.identities.layout.hex(),
+            "inspect and materialize must share the layout root"
+        );
+        assert_eq!(
+            inspect.receipt.identities.content.hex(),
+            mat.receipt.identities.content.hex(),
+            "inspect and materialize must share the content-tree root"
+        );
+        assert_ne!(
+            inspect.receipt.view_digest.sha256, mat.receipt.view_digest.sha256,
+            "view_digest is invocation evidence and must differ when wrote differs"
         );
         let _ = fs::remove_dir_all(&dir);
     }
@@ -1420,6 +1660,11 @@ mod tests {
             out.archive_ir.is_none(),
             "denied archives must not publish an admitted IR"
         );
+        assert!(
+            out.receipt.identities.layout.hex().is_none(),
+            "denied archives have no layout root"
+        );
+        assert!(out.receipt.identities.content.hex().is_none());
         assert!(!dir.join("outside.txt").exists());
         let parent = dir.parent().unwrap();
         assert!(!parent.join("outside.txt").exists());
@@ -1557,6 +1802,18 @@ mod tests {
         assert!(!parent.exists());
         assert_eq!(out.receipt.materialization.outcome, "setup-failed");
         assert_eq!(out.receipt.materialization.cleanup, "not-created");
+        assert_eq!(out.cli_exit_code(), 3);
+        assert_eq!(out.view.admission, AdmissionStatus::Admitted);
+        assert_eq!(out.view.effect, EffectStatus::Failed);
+        assert!(out.archive_ir.is_some());
+        assert!(
+            out.receipt.identities.layout.hex().is_some(),
+            "an admitted archive keeps its layout root when the destination fails"
+        );
+        assert!(
+            out.receipt.identities.content.hex().is_none(),
+            "content-tree identity requires complete verification"
+        );
     }
 
     #[test]
@@ -1759,7 +2016,7 @@ mod tests {
         assert_eq!(out.receipt.source.sha256(), Some(digest.as_str()));
         assert_eq!(out.interpretation, InterpretationStatus::Indeterminate);
         assert_eq!(out.admission, AdmissionStatus::Denied);
-        assert_eq!(out.receipt.source_snapshot, SnapshotKind::Unavailable);
+        assert_eq!(out.receipt.source_snapshot, SnapshotKind::MemoryBorrowed);
     }
 
     #[test]
@@ -1871,6 +2128,128 @@ mod tests {
     }
 
     #[test]
+    fn records_ignored_extra_fields_in_the_ir() {
+        let mut bytes = make_zip(&[("extra.txt", b"content")]);
+        // Info-ZIP Unix extra field 0x7855 with an empty payload.
+        add_matching_extra_fields(&mut bytes, &[0x55, 0x78, 0x00, 0x00]);
+        let policy = Policy::default_v1();
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("unix-extra.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: None,
+        });
+        assert!(!out.rejected(), "{:?}", out.view.findings);
+        let ir = out.archive_ir.as_ref().expect("admitted IR");
+        assert!(ir.members[0].extra_fields.iter().any(|extra| {
+            extra.id == 0x7855 && extra.disposition == crate::ir::ExtraDisposition::Ignored
+        }));
+        assert!(ir.members[0]
+            .extra_fields
+            .iter()
+            .any(|extra| extra.site == crate::ir::ExtraSite::Local));
+        assert!(ir.members[0]
+            .extra_fields
+            .iter()
+            .any(|extra| extra.site == crate::ir::ExtraSite::Central));
+    }
+
+    #[test]
+    fn ignored_extras_change_layout_identity_not_content_identity() {
+        let base = make_zip(&[("extra.txt", b"content")]);
+        let mut with_extra = base.clone();
+        add_matching_extra_fields(&mut with_extra, &[0x55, 0x78, 0x00, 0x00]);
+        let policy = Policy::default_v1();
+        let inspect = |data: &[u8]| {
+            apply(Request {
+                source: Source::Bytes {
+                    path: Some("extra.zip"),
+                    data,
+                },
+                policy: &policy,
+                dest: None,
+            })
+        };
+        let without = inspect(&base);
+        let with = inspect(&with_extra);
+        assert!(!without.rejected(), "{:?}", without.view.findings);
+        assert!(!with.rejected(), "{:?}", with.view.findings);
+        assert_eq!(
+            without.receipt.identities.content.hex(),
+            with.receipt.identities.content.hex()
+        );
+        assert_ne!(
+            without.receipt.identities.layout.hex(),
+            with.receipt.identities.layout.hex()
+        );
+        assert_ne!(
+            without.receipt.source.sha256(),
+            with.receipt.source.sha256()
+        );
+    }
+
+    #[test]
+    fn unsupported_policy_fails_before_source_ingest() {
+        let mut policy = Policy::default_v1();
+        policy.encrypted = "allow";
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("x.zip"),
+                data: b"not-a-zip",
+            },
+            policy: &policy,
+            dest: None,
+        });
+        assert!(out.rejected());
+        assert_eq!(out.interpretation, InterpretationStatus::Indeterminate);
+        assert_eq!(out.admission, AdmissionStatus::Denied);
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PolicyUnsupported));
+        assert_eq!(out.receipt.source_snapshot, SnapshotKind::Unavailable);
+        assert!(out.receipt.source.sha256().is_none());
+        assert!(out.receipt.identities.layout.hex().is_none());
+        assert_eq!(
+            out.receipt.identities.interpretation.id,
+            crate::ir::ZIP_STRICT_ASCII_V1
+        );
+        assert_eq!(
+            out.receipt.identities.interpretation.digest.sha256.len(),
+            64
+        );
+    }
+
+    #[test]
+    fn directory_members_record_trailing_slash_normalization() {
+        let bytes = make_zip_with_directory();
+        let policy = Policy::default_v1();
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("dir.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: None,
+        });
+        assert!(!out.rejected(), "{:?}", out.view.findings);
+        let ir = out.archive_ir.as_ref().expect("admitted IR");
+        let directory = ir
+            .members
+            .iter()
+            .find(|member| member.kind == MemberKind::Directory)
+            .expect("directory member");
+        assert!(directory
+            .normalization_actions
+            .iter()
+            .any(|action| { matches!(action, NormalizationAction::StripDirectoryTrailingSlash) }));
+        assert!(!directory.canonical_path.ends_with('/'));
+    }
+
+    #[test]
     fn rejects_external_directory_attribute_on_a_file() {
         let mut bytes = make_zip(&[("file.txt", b"content")]);
         let central = signature_offsets(&bytes, [0x50, 0x4b, 0x01, 0x02])[0];
@@ -1879,6 +2258,58 @@ mod tests {
         let out = apply(Request {
             source: Source::Bytes {
                 path: Some("fake-directory.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: None,
+        });
+
+        assert!(out.rejected());
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::ZipDiffA4Dir));
+    }
+
+    #[test]
+    fn rejects_non_stored_directory_entries() {
+        let mut bytes = make_zip_with_directory();
+        let local = signature_offsets(&bytes, [0x50, 0x4b, 0x03, 0x04])[0];
+        let central = signature_offsets(&bytes, [0x50, 0x4b, 0x01, 0x02])[0];
+        put_u16(&mut bytes, local + 8, 8);
+        put_u16(&mut bytes, central + 10, 8);
+
+        let policy = Policy::default_v1();
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("deflated-directory.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: None,
+        });
+
+        assert!(out.rejected());
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::ZipDiffA4Dir));
+    }
+
+    #[test]
+    fn rejects_directory_entries_with_nonzero_crc() {
+        let mut bytes = make_zip_with_directory();
+        let local = signature_offsets(&bytes, [0x50, 0x4b, 0x03, 0x04])[0];
+        let central = signature_offsets(&bytes, [0x50, 0x4b, 0x01, 0x02])[0];
+        put_u32(&mut bytes, local + 14, 1);
+        put_u32(&mut bytes, central + 16, 1);
+
+        let policy = Policy::default_v1();
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("bad-directory-crc.zip"),
                 data: &bytes,
             },
             policy: &policy,
@@ -2032,5 +2463,102 @@ mod tests {
             }
             assert_no_panic(&bytes, &format!("deterministic noise length {len}"));
         }
+    }
+
+    #[test]
+    fn intra_call_directory_component_replacement_never_publishes() {
+        let bytes = make_zip(&[("tree/leaf.txt", b"leaf")]);
+        let policy = Policy::default_v1();
+        let dest = temp_dest("apply-intra-call");
+        let outside = temp_dest("apply-intra-call-outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("sentinel.txt"), b"outside").unwrap();
+        let _guard =
+            crate::materialize::inject_directory_component_replacement("tree", outside.clone());
+
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("intra.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: Some(&dest),
+        });
+
+        assert!(out.rejected(), "{:?}", out.view.findings);
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::MaterializeUnsafeComponent));
+        assert!(!dest.exists());
+        assert!(!outside.join("leaf.txt").exists());
+        assert_eq!(fs::read(outside.join("sentinel.txt")).unwrap(), b"outside");
+        assert_eq!(out.cli_exit_code(), 3);
+        assert_eq!(out.admission, AdmissionStatus::Admitted);
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[test]
+    fn mutated_staged_content_never_publishes() {
+        let bytes = make_zip(&[("hello.txt", b"hello")]);
+        let policy = Policy::default_v1();
+        let dest = temp_dest("apply-stage-mutate");
+        let _guard =
+            crate::materialize::inject_staged_content_overwrite("hello.txt", b"mutated".to_vec());
+
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("mutate.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: Some(&dest),
+        });
+
+        assert!(out.rejected(), "{:?}", out.view.findings);
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::MaterializeAudit));
+        assert!(!dest.exists());
+        assert_eq!(out.receipt.materialization.outcome, "aborted");
+        assert_eq!(out.receipt.materialization.cleanup, "removed");
+        assert_eq!(out.cli_exit_code(), 3);
+        assert_eq!(out.admission, AdmissionStatus::Admitted);
+        assert_eq!(out.verification, VerificationStatus::Complete);
+        assert_eq!(out.effect, EffectStatus::Failed);
+        assert!(
+            out.receipt.identities.content.hex().is_some(),
+            "members were verified; publication failed on the staged-tree audit"
+        );
+    }
+
+    #[test]
+    fn extra_staged_file_never_publishes() {
+        let bytes = make_zip(&[("hello.txt", b"hello")]);
+        let policy = Policy::default_v1();
+        let dest = temp_dest("apply-stage-extra");
+        let _guard = crate::materialize::inject_staged_extra_file("extra.txt", b"nope".to_vec());
+
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("extra.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: Some(&dest),
+        });
+
+        assert!(out.rejected(), "{:?}", out.view.findings);
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::MaterializeAudit));
+        assert!(!dest.exists());
+        assert_eq!(out.cli_exit_code(), 3);
+        assert_eq!(out.effect, EffectStatus::Failed);
     }
 }

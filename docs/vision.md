@@ -1,6 +1,6 @@
 # Vision: one archive, one tree, evidence
 
-> This document describes the product direction. Current alpha.2 behavior and limitations are defined by the [README](../README.md) and [API contract](api.md). The target semantic design is specified in [semantic-model.md](semantic-model.md).
+> This document describes the product direction. Current alpha.3 behavior and limitations are defined by the [README](../README.md) and [API contract](api.md). The target semantic design is specified in [semantic-model.md](semantic-model.md).
 
 Sealr is not a general-purpose unarchiver, archive GUI, malware scanner, agent-execution proxy, model verifier, credential broker, or enterprise control plane.
 
@@ -14,9 +14,9 @@ untrusted archive bytes
 
 Archive bytes are a weak program in a language with disagreeing interpreters. Path traversal, links, resource exhaustion, and filesystem races are critical hazards, but parser disagreement is the deeper problem. A byte digest proves that two consumers received the same bytes. It does not prove they constructed the same tree.
 
-Sealr owns that semantic boundary first. Materialization, projection, caching, language bindings, consumer integrations, and acceleration are consumers of the boundary.
+Sealr owns that semantic boundary first. Materialization, projection, caching, language bindings, consumer integrations, and acceleration are consumers of the boundary. The [usefulness test](usefulness.md) is whether another program calls that boundary and stops opening the ZIP.
 
-## The alpha.2 foundation
+## The alpha.3 foundation
 
 The current Rust library provides one `apply()` path:
 
@@ -27,7 +27,7 @@ UntrustedArchive x Policy
 
 Inspect and materialize share one planned tree. Every outcome includes structured findings, a view, and deterministic unsigned receipt data. Accepted members are content-verified, and requested files are staged and published through capability-relative, native no-replace materialization on the documented Linux, macOS, and Windows filesystem matrix.
 
-This is the foundation, not the finished semantic API. Alpha.2 does not produce `ArchiveIR`, canonical tree roots, semantic locks, signed attestations, read-only projection, content-addressed reuse, wheel admission, or proof certificates.
+This is the foundation, not the finished semantic API. Preview-line work now includes `ArchiveIR` and unsigned `sealrTreeV1` roots. It does not yet produce semantic locks, signed attestations, read-only projection, content-addressed reuse, wheel admission, extra ZIP codecs, or proof certificates.
 
 ## The target contract
 
@@ -53,7 +53,11 @@ Sealr's enduring claim should therefore be:
 
 > Given exact source bytes and a versioned interpretation profile, construct one canonical tree with explicit verification completeness, or produce no admitted tree.
 
-The claim becomes reusable only when consumers receive the admitted representation rather than a receipt beside the original archive.
+The claim becomes reusable only when consumers receive the admitted representation rather than a receipt beside the original archive. The research framing of that claim is [theory.md](theory.md).
+
+## Reliability and trusted computing base
+
+The product bar is high-consequence ingest: fail closed, one interpretation, evidence for every decision, and a dependency graph small enough to review. Common compression is in scope as adapters on that boundary. A large codec framework, a subprocess extractor, or a recovery parser is not. Codec breadth waits until the ZIP trust gate can be reused; it does not wait forever.
 
 ## Product priorities
 
@@ -67,15 +71,15 @@ Combine the hostile ZipDiff gate with a benign ecosystem corpus, source-mutation
 
 ### 3. One canonical consumer
 
-Python wheel admission is the first candidate. It has a documented same-bytes, different-installed-tree problem and meaningful consumer semantics beyond ZIP. A future `python-wheel.v1` must validate wheel metadata, `RECORD`, `.data` relocation, target paths, and installed-tree identity. It is not current functionality.
+Python wheel admission is the first candidate. It has a documented same-bytes, different-installed-tree problem and meaningful consumer semantics beyond ZIP. A future `python-wheel.v1` must validate wheel metadata, `RECORD`, `.data` relocation, target paths, and installed-tree identity. It is not current functionality. It is also the first consumer that would prove the category: if a builder or installer still unzipped the wheel, Sealr would have produced a receipt, not an admission boundary.
 
 ### 4. Reusable admitted trees
 
 Add semantic locks, verified content-addressed blobs, read-only projection, and materialization from verified content. The goal is to avoid reparsing, reinflating, and rewriting the same admitted tree.
 
-### 5. Expansion driven by consumers
+### 5. Common codecs, then consumers
 
-Agent workspaces and hermetic build inputs are promising next profiles. OCI layers, TAR, JAR, APK, and other formats follow only when their consumer semantics and compatibility requirements are explicit.
+After the ZIP trust gate, add Zstd, XZ/LZMA, BZip2, and Deflate64 as ZIP method adapters, then TAR wrappers that call those same adapters. Agent workspaces and hermetic build inputs are promising consumer profiles. OCI, JAR, APK, and other formats follow only when their consumer semantics are explicit. No format is added by bundling another unarchiver.
 
 ## Durable project surface
 
@@ -94,7 +98,7 @@ That surface compounds semantic knowledge, compatibility data, test fixtures, au
 
 ## Evidence discipline
 
-Alpha.2 receipts are deterministic unsigned evidence records. They are not attestations. Future authenticated claims should use standard envelopes and verified identities, keep interpretation, verification, admission, and effect claims distinct, and use SBOM formats only where a consumer profile establishes package or component semantics.
+Alpha.3 receipts are deterministic unsigned evidence records. They are not attestations. Future authenticated claims should use standard envelopes and verified identities, keep interpretation, verification, admission, and effect claims distinct, and use SBOM formats only where a consumer profile establishes package or component semantics.
 
 Do not use a numeric risk score. Current findings provide stable codes, severity, member context, and detail. The target finding schema adds explicit rule versions, phases, deterministic evidence, source spans where applicable, and remediation without turning the human message into the machine contract.
 
@@ -124,7 +128,7 @@ GPU, hardware codecs, alternate runtimes, mmap, and broad parallelism are backen
 | Document | Purpose |
 |---|---|
 | [semantic-model.md](semantic-model.md) | Target outcome axes, `ArchiveIR`, identities, profiles, locks, and sequencing |
-| [api.md](api.md) | Implemented alpha.2 contract and future type-state direction |
+| [api.md](api.md) | Implemented alpha.3 contract and future type-state direction |
 | [architecture.md](architecture.md) | Current trust boundaries and target pipeline |
 | [threat-model.md](threat-model.md) | Adversaries and protected properties |
 | [invariants.md](invariants.md) | Testable safety invariants |

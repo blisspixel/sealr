@@ -50,6 +50,7 @@ impl<'a> SourceSnapshot<'a> {
         }
     }
 
+    #[allow(dead_code)]
     pub fn path(&self) -> Option<&str> {
         self.path.as_deref()
     }
@@ -62,10 +63,12 @@ impl<'a> SourceSnapshot<'a> {
         &self.bytes
     }
 
+    #[allow(dead_code)]
     pub fn len(&self) -> u64 {
         self.bytes.len() as u64
     }
 
+    #[allow(dead_code)]
     pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()
     }
@@ -113,6 +116,8 @@ mod tests {
         let data = b"PK\x03\x04hello";
         let snapshot = SourceSnapshot::borrowed(Some("t.zip".into()), data);
         assert_eq!(snapshot.kind(), SnapshotKind::MemoryBorrowed);
+        assert_eq!(snapshot.path(), Some("t.zip"));
+        assert!(!snapshot.is_empty());
         assert_eq!(snapshot.as_bytes().as_ptr(), data.as_ptr());
         assert_eq!(snapshot.len(), data.len() as u64);
         let digest = hex_sha256(data);

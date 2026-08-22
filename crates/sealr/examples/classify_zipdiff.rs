@@ -3,6 +3,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::thread;
 
 use sealr::{apply, Policy, Request, Source};
 use sha2::{Digest, Sha256};
@@ -48,51 +49,33 @@ fn main() -> ExitCode {
     };
     let total_files = files.len();
     let policy = Policy::default_v1();
+    let classified = match classify_files(&root, &files, &policy) {
+        Ok(classified) => classified,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::from(2);
+        }
+    };
+
     let mut groups: BTreeMap<(String, String), (usize, PathBuf)> = BTreeMap::new();
     let mut allowed = BTreeSet::new();
     let mut corpus_hasher = Sha256::new();
-
-    for path in files {
-        let relative = relative_key(&root, &path);
-        let data = match fs::read(&path) {
-            Ok(data) => data,
-            Err(error) => {
-                eprintln!("{}: {error}", path.display());
-                return ExitCode::from(2);
-            }
-        };
-        hash_fixture(&mut corpus_hasher, &relative, &data);
-        let class = path
-            .parent()
-            .and_then(Path::file_name)
-            .map(|name| name.to_string_lossy().into_owned())
-            .unwrap_or_else(|| "unknown".to_owned());
-        let outcome = apply(Request {
-            source: Source::Bytes {
-                path: Some(&relative),
-                data: &data,
-            },
-            policy: &policy,
-            dest: None,
-        });
-        let result = if outcome.rejected() {
-            outcome
-                .view
-                .findings
-                .iter()
-                .map(|finding| finding.code.as_str())
-                .collect::<Vec<_>>()
-                .join("+")
-        } else {
-            allowed.insert(relative.clone());
+    for item in &classified {
+        hash_fixture(
+            &mut corpus_hasher,
+            &item.relative,
+            item.data_len,
+            &item.digest,
+        );
+        if item.result == "ALLOWED" {
+            allowed.insert(item.relative.clone());
             if list_allowed {
-                eprintln!("ALLOWED\t{relative}");
+                eprintln!("ALLOWED\t{}", item.relative);
             }
-            "ALLOWED".to_owned()
-        };
+        }
         let entry = groups
-            .entry((class, result))
-            .or_insert_with(|| (0, path.clone()));
+            .entry((item.class.clone(), item.result.clone()))
+            .or_insert_with(|| (0, item.path.clone()));
         entry.0 += 1;
     }
 
@@ -258,12 +241,100 @@ fn relative_key(root: &Path, path: &Path) -> String {
         .replace('\\', "/")
 }
 
-fn hash_fixture(hasher: &mut Sha256, relative: &str, data: &[u8]) {
-    let fixture_digest = Sha256::digest(data);
+struct Classified {
+    path: PathBuf,
+    relative: String,
+    class: String,
+    result: String,
+    data_len: u64,
+    digest: [u8; 32],
+}
+
+fn classify_files(
+    root: &Path,
+    files: &[PathBuf],
+    policy: &Policy,
+) -> Result<Vec<Classified>, String> {
+    if files.is_empty() {
+        return Ok(Vec::new());
+    }
+    let workers = worker_count(files.len());
+    let chunk_size = files.len().div_ceil(workers);
+    thread::scope(|scope| {
+        let mut joins = Vec::new();
+        for chunk in files.chunks(chunk_size) {
+            joins.push(scope.spawn(move || {
+                chunk
+                    .iter()
+                    .map(|path| classify_one(root, path, policy))
+                    .collect::<Result<Vec<_>, _>>()
+            }));
+        }
+        let mut classified = Vec::with_capacity(files.len());
+        for join in joins {
+            classified.extend(
+                join.join()
+                    .map_err(|_| "worker thread panicked".to_owned())??,
+            );
+        }
+        Ok(classified)
+    })
+}
+
+fn classify_one(root: &Path, path: &Path, policy: &Policy) -> Result<Classified, String> {
+    let relative = relative_key(root, path);
+    let data = fs::read(path).map_err(|error| format!("{}: {error}", path.display()))?;
+    let class = path
+        .parent()
+        .and_then(Path::file_name)
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "unknown".to_owned());
+    let outcome = apply(Request {
+        source: Source::Bytes {
+            path: Some(&relative),
+            data: &data,
+        },
+        policy,
+        dest: None,
+    });
+    let result = if outcome.rejected() {
+        outcome
+            .view
+            .findings
+            .iter()
+            .map(|finding| finding.code.as_str())
+            .collect::<Vec<_>>()
+            .join("+")
+    } else {
+        "ALLOWED".to_owned()
+    };
+    Ok(Classified {
+        path: path.to_path_buf(),
+        relative,
+        class,
+        result,
+        data_len: data.len() as u64,
+        digest: Sha256::digest(&data).into(),
+    })
+}
+
+fn worker_count(jobs: usize) -> usize {
+    let requested = env::var("SEALR_JOBS")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or_else(|| {
+            thread::available_parallelism()
+                .map(|parallelism| parallelism.get())
+                .unwrap_or(1)
+        });
+    requested.clamp(1, jobs)
+}
+
+fn hash_fixture(hasher: &mut Sha256, relative: &str, data_len: u64, digest: &[u8; 32]) {
     hasher.update((relative.len() as u64).to_le_bytes());
     hasher.update(relative.as_bytes());
-    hasher.update((data.len() as u64).to_le_bytes());
-    hasher.update(fixture_digest);
+    hasher.update(data_len.to_le_bytes());
+    hasher.update(digest);
 }
 
 fn hex(bytes: impl AsRef<[u8]>) -> String {

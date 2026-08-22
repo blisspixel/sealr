@@ -1,12 +1,12 @@
 # Testing, compatibility, and assurance
 
-> This page separates current evidence from the target assurance program. Alpha.2 has a deterministic Rust unit suite, strict cross-platform CI, cargo-deny policy, and a pinned 5,927-file ZipDiff construction gate. Property testing, coverage-guided fuzzing, model checking, benign ecosystem measurement, an independent verifier, and an external audit remain future work.
+> This page separates current evidence from the target assurance program. Alpha.3 has a deterministic Rust unit suite, strict cross-platform CI, cargo-deny policy, and a pinned 5,927-file ZipDiff construction gate. Property testing, coverage-guided fuzzing, model checking, benign ecosystem measurement, an independent verifier, and an external audit remain future work.
 
 Trust is the scarce resource. Format breadth and acceleration follow stable semantics and measured compatibility.
 
 ## Current evidence
 
-| Layer | Current alpha.2 evidence | Remaining work |
+| Layer | Current alpha.3 evidence | Remaining work |
 |---|---|---|
 | Unit | ZIP path grammar, topology, overlap and layout, quotas, inspect/materialize equality, rollback, destination preservation, platform materializer controls, and deterministic truncation, mutation, and noise no-panic coverage | Expand for every new semantic state and backend |
 | Corpus | All 5,927 pinned ZipDiff constructions plus local generated adversarial fixtures | Add codec-boundary, source-race, consumer-profile, and ecosystem fixtures |
@@ -112,7 +112,7 @@ The highest-value generated and machine-checked properties are small:
 | Fail-closed profile and policy compilation | Exhaustive enum and schema tests | Kani over compiled rule states |
 | Monotone policy overlays | Generated overlay tests | Small rule-graph proof harness |
 
-Do not claim a formally verified extractor. A justified future statement would identify the exact pure properties that have machine-checked proofs while stating that parsers and codecs are tested and fuzzed.
+The intended lemmas, and the distinction between combinatorial covering, cryptographic assumptions, and systems obligations, are in [theory.md](theory.md). Do not claim a formally verified extractor. A justified future statement would identify the exact pure properties that have machine-checked proofs while stating that parsers and codecs are tested and fuzzed.
 
 ## Verification-state tests
 

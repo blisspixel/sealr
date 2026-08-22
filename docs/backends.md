@@ -1,6 +1,6 @@
 # Codec and acceleration backends
 
-> Deferred engineering track. Alpha.2 has no runtime backend scheduler, GPU path, QAT path, or alternate codec selection. The current ZIP Deflate implementation uses `flate2` with the pure-Rust `zlib-rs` backend and verifies exact compressed-input consumption.
+> Deferred engineering track for acceleration. Alpha.3 has no runtime backend scheduler, GPU path, QAT path, or alternate codec selection. The current ZIP Deflate implementation uses `flate2` with the pure-Rust `zlib-rs` backend and verifies exact compressed-input consumption. Planned ZIP methods such as Zstd and XZ are codec adapters on the product path, not hardware backends; they still require exact consumption and a justified tiny dependency. See the [roadmap codec destination](../ROADMAP.md#common-compression-one-boundary).
 
 Backends may optimize verification or realization. They may not define interpretation, paths, policy, findings, verification completeness, or tree identity.
 
@@ -34,11 +34,14 @@ An optional backend is eligible only when it:
 The likely order is:
 
 1. reuse an already verified content tree;
-2. parallel verification of independent members within deterministic resource accounting;
-3. optimized CPU copy and DEFLATE implementations that expose exact consumption;
-4. clone or link realization from a trusted content-addressed store;
-5. remote range ingestion backed by an immutable private snapshot;
-6. hardware offload only for a demonstrated large-buffer or device-memory consumer.
+2. parallel verification of independent members after one sequential covering, with deterministic CD-order findings and checked quota combining, using `std::thread` rather than a task runtime;
+3. parallel independent file writes after parent directories exist; never a parallel no-replace publish;
+4. optimized CPU copy and DEFLATE implementations that expose exact consumption;
+5. clone or link realization from a trusted content-addressed store;
+6. remote range ingestion backed by an immutable private snapshot;
+7. hardware offload only for a demonstrated large-buffer or device-memory consumer.
+
+Embarrassingly parallel tools (ZipDiff classification, benign-corpus measurement) may use `std::thread` and `SEALR_JOBS` without touching the library TCB. They must still emit byte-stable aggregates.
 
 GPU, QAT, Mojo, CubeCL, mmap, DirectStorage, and specialized codecs remain research options. None is on the active Phase 0.1 path.
 
