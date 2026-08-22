@@ -100,7 +100,7 @@ Unknown error codes must be treated as rejection by consumers.
 | `zip.diff.c5_zip64` | ZIP64 marker encountered. ZIP64 is not implemented. |
 | `zip.overlap` | Referenced local records overlap each other or the central directory. |
 | `covering.inconsistent` | The IR covering is not a labeled partition of the snapshot, or a claimed LFH/CDH/EOCD offset does not hold the recorded signature. The checker does not search for an EOCD or inflate. |
-| `zip.encrypted` | Encrypted member. |
+| `zip.encrypted` | Traditional, strong-encryption, or masked-header flag is present on a member. |
 | `zip.encoding` | Invalid UTF-8 name or unsupported non-ASCII CP437 decoding. |
 | `zip.extra` | Extra-field sequence is malformed or repeats an identifier. Well-formed extras other than ZIP64 and Unicode Path are recorded on the IR as ignored. |
 | `zip.flags` | Non-encryption CDH and LFH flags disagree. |

@@ -30,6 +30,7 @@ const NORM_STRIP_DIR_SLASH: u8 = 1;
 const NORM_DROP_DOT: u8 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum TreeRoot {
     SealrTreeV1 { hex: String },
     Unavailable,
@@ -72,12 +73,14 @@ impl Serialize for TreeRoot {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub struct InterpretationIdentity {
     pub id: String,
     pub digest: DigestHex,
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[non_exhaustive]
 pub struct OutcomeIdentities {
     pub source: SourceDigest,
     pub interpretation: InterpretationIdentity,

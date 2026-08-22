@@ -13,6 +13,7 @@ use crate::policy::hex_sha256;
 /// immutable byte object whose digest was recorded at ingest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum SnapshotKind {
     MemoryOwned,
     MemoryBorrowed,

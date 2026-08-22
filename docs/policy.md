@@ -51,6 +51,7 @@ Rust struct field order is deterministic, so the current implementation produces
 | `max_path_depth` | Checked after rejecting backslashes and removing dot components. |
 | `max_metadata_bytes` | Bounds the central directory, EOCD comment, and referenced local name and extra bytes during parsing. |
 | `overwrite` | Existing destinations are refused. Replacement is not implemented even if a caller mutates this field. |
+| `encrypted` | Only `"deny"` compiles. Admission rejects traditional encryption bit 0, strong-encryption bit 6, and masked-header bit 13 even when LFH and CDH flags agree. |
 | `atomic` | Materialization always stages before publication. When true, each completed member file is also synced before commit. Directory durability is not yet guaranteed. |
 
 ## Reserved fields
@@ -65,7 +66,7 @@ The following constructor fields exist so the receipt-hashed `Policy` object kee
 - `ambiguity`: known structural ambiguity is always rejected by the interpretation profile.
 - `case_fold_collision`: ASCII case-fold collisions are always rejected by the path grammar.
 - `magic_vs_extension`: the parser uses magic and does not interpret filename extensions.
-- `encrypted`: encrypted ZIP members are always rejected by the interpretation profile.
+- `encrypted`: encrypted ZIP members are always denied. The admission check covers the traditional, strong-encryption, and masked-header indicators defined by the ZIP general-purpose flags.
 
 Callers must not treat mutating a reserved field as enabling the corresponding behavior. Compilation fails closed instead of silently ignoring the mutation.
 

@@ -2,6 +2,7 @@ use serde::Serialize;
 
 /// Agent-switchable codes. Strings are stable; renaming is breaking.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum FindingCode {
     PathAbsolute,
     PathDotDot,
@@ -134,6 +135,7 @@ impl Serialize for FindingCode {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum Severity {
     Error,
     Deny,
@@ -142,6 +144,7 @@ pub enum Severity {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub struct Finding {
     pub code: FindingCode,
     pub severity: Severity,

@@ -93,6 +93,9 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --locked -p sealr --all-features --no-deps
 
+      - name: Verify packaged library
+        run: cargo package --locked -p sealr
+
   platform:
     name: Test on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}

@@ -9,6 +9,7 @@ Trust is the scarce resource. Format breadth and acceleration follow stable sema
 | Layer | Current evidence | Remaining work |
 |---|---|---|
 | Unit | ZIP path grammar, topology, overlap and layout, quotas, inspect/materialize equality, rollback, destination preservation, platform materializer controls, and deterministic truncation, mutation, and noise no-panic coverage | Expand for every new semantic state and backend |
+| Public API and package | External-crate fixture names receipt and view field types and exercises `apply()`; required quality CI verifies the packaged `sealr` crate | Add a separate temporary consumer that depends on the packaged artifact, then add semantic compatibility checks after publication |
 | Corpus | All 5,927 pinned ZipDiff constructions plus local generated adversarial fixtures | Add codec-boundary, source-race, consumer-profile, and ecosystem fixtures |
 | Differential | ZipDiff expectation gate binds strict rejection and a documented valid-control allowlist | Compare major consumers on well-formed profile inputs and track disagreement frontiers |
 | Property | Compression-ratio comparison exhaustively agrees with an independent quotient-and-remainder oracle for `uncomp` 0 through 255 and `comp` and `max_ratio` 0 through 64 | Add independent bounded models for ranges, remaining quotas, strict-profile path topology, and lifecycle transitions |

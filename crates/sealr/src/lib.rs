@@ -15,8 +15,10 @@ mod policy;
 mod snapshot;
 mod zip;
 
-pub use apply::{apply, MemberView, Outcome, Receipt, Request, Source, Verdict, View};
-pub use covering::audit_covering;
+pub use apply::{
+    apply, EnvMeta, MemberView, Outcome, PolicyMeta, Receipt, Request, Source, SourceMeta,
+    ToolMeta, Verdict, View,
+};
 pub use findings::{Finding, FindingCode, Severity};
 pub use identity::{content_root, layout_root, OutcomeIdentities, TreeRoot, TREE_ENCODING_ID};
 pub use ir::{
@@ -31,3 +33,4 @@ pub use outcome::{
     VerificationStatus, ViewCompleteness,
 };
 pub use policy::{hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget};
+pub use snapshot::SnapshotKind;

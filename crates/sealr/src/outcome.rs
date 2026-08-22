@@ -4,6 +4,7 @@ use serde::Serialize;
 use crate::findings::Finding;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub struct DigestHex {
     pub sha256: String,
 }
@@ -14,6 +15,7 @@ pub struct DigestHex {
 /// materialize JSON shape stays byte-compatible. Unavailable sources serialize as
 /// `{ "status": "unavailable" }` and never emit the former all-zero sentinel.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub enum SourceDigest {
     Available { sha256: String },
     Unavailable,
@@ -61,6 +63,7 @@ impl Serialize for SourceDigest {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "status", rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum InterpretationStatus {
     Interpreted,
     Malformed,
@@ -70,6 +73,7 @@ pub enum InterpretationStatus {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "status", rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum AdmissionStatus {
     Admitted,
     Denied,
@@ -78,6 +82,7 @@ pub enum AdmissionStatus {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "status", rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum VerificationStatus {
     StructureOnly,
     Partial {
@@ -89,6 +94,7 @@ pub enum VerificationStatus {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "status", rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum EffectStatus {
     NotRequested,
     Committed,
@@ -97,6 +103,7 @@ pub enum EffectStatus {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum StoppingPhase {
     Source,
     Structure,
@@ -107,6 +114,7 @@ pub enum StoppingPhase {
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "status", rename_all = "kebab-case")]
+#[non_exhaustive]
 pub enum ViewCompleteness {
     Complete,
     Partial { phase: StoppingPhase, cause: String },

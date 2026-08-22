@@ -14,7 +14,7 @@ const EOCD_SIG: [u8; 4] = [0x50, 0x4b, 0x05, 0x06];
 
 /// Check that `ir.covering` is a labeled partition of `snapshot` with the
 /// claimed member header signatures at the recorded offsets.
-pub fn audit_covering(snapshot: &SourceSnapshot<'_>, ir: &ArchiveIR) -> Result<(), Finding> {
+pub(crate) fn audit_covering(snapshot: &SourceSnapshot<'_>, ir: &ArchiveIR) -> Result<(), Finding> {
     let digest = snapshot.digest();
     if ir.source_digest != *digest {
         return Err(inconsistent("source digest does not match the snapshot"));
