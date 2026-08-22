@@ -4,7 +4,7 @@ These are **properties**, not features. They are the *type* of `inspect` / `mate
 
 This document is the target safety contract. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) are authoritative for current implementation status. Alpha.3 intentionally fails closed where canonical Unicode handling is unfinished, and it does not yet satisfy every filesystem-race, fuzzing, proof, isolation, or bounded-input obligation below.
 
-Each MUST have tests, fuzz targets, and a finding code when violated. Machine-checked arguments (Kani/Verus) belong on I1, I2, and fail-closed policy first - not on the format zoo. Full verification of a multi-format extractor is still research.
+Each invariant MUST appear in the assurance claim ledger and receive evidence appropriate to its kind. Pure input properties require deterministic tests and generated properties; byte parsers require finite hostile corpora and coverage-guided fuzzing; bounded arithmetic and finite state machines are model-checking candidates; filesystem and authority properties require native fault and race tests. A finding code is required when an invocation can report the violation. CI infrastructure failures and excluded-adversary assumptions are recorded as evidence or limitations rather than invented archive findings.
 
 Safety is the only default. Permissive behavior is a **named policy document**, loud in logs and on the receipt. There is no `--insecure`.
 

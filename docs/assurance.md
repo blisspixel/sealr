@@ -11,10 +11,28 @@ Trust is the scarce resource. Format breadth and acceleration follow stable sema
 | Unit | ZIP path grammar, topology, overlap and layout, quotas, inspect/materialize equality, rollback, destination preservation, platform materializer controls, and deterministic truncation, mutation, and noise no-panic coverage | Expand for every new semantic state and backend |
 | Corpus | All 5,927 pinned ZipDiff constructions plus local generated adversarial fixtures | Add codec-boundary, source-race, consumer-profile, and ecosystem fixtures |
 | Differential | ZipDiff expectation gate binds strict rejection and a documented valid-control allowlist | Compare major consumers on well-formed profile inputs and track disagreement frontiers |
-| Property | None yet | Generate paths, topology, ranges, counters, and policy overlays |
+| Property | None yet | Add independent bounded models for ranges, quotas, strict-profile path topology, and lifecycle transitions |
 | Fuzz | None yet | `cargo fuzz` targets for interpretation, canonical paths, and inspect-only `apply()` |
-| Formal | None yet | Small Kani or Verus harnesses for pure path, range, and quota properties |
+| Executable specification | None yet | Compare production kernels with simpler independent bounded models |
+| Model checking | None yet | Add Kani harnesses with explicit domains, assumptions, and unwind bounds |
 | Audit | Reporting process and automated dependency checks | Independent review after the semantic core stabilizes |
+
+## Evidence vocabulary
+
+Sealr reports assurance at the granularity actually earned.
+
+| Evidence | What it establishes | What it does not establish |
+|---|---|---|
+| Finite unit or corpus cases | Behavior on the exact named inputs | Behavior outside that finite set |
+| Property testing | Behavior across generated examples from a stated strategy | Exhaustiveness or correctness of the generator or oracle |
+| Executable specification | Agreement with a simpler independent model over tested inputs | Correctness of either implementation outside the modeled relation |
+| Coverage-guided fuzzing | Heuristic exploration guided by observed execution | Exhaustive reachability or absence of defects |
+| Bounded model checking | Exhaustive checking within the harness domain, assumptions, and unwind bounds | Correctness beyond those bounds or of unmodeled dependencies |
+| Mathematical or deductive proof | The stated theorem under its definitions and assumptions | End-to-end correctness unless the theorem and model cover the full system |
+| Native systems testing | Observed behavior under concrete filesystems, kernels, schedules, and fault seams | Universal race freedom or containment against excluded principals |
+| Cryptographic evidence | Integrity or authenticity under named algorithms, identities, and verifier policy | Semantic correctness of the claimed archive interpretation |
+
+No row may be summarized as a formally verified extractor. Reports name the property, implementation revision, tool version, assumptions, bounds, platform, and result.
 
 ## ZipDiff gate
 
@@ -109,8 +127,8 @@ The highest-value generated and machine-checked properties are small:
 | Canonical path containment and collision detection | Unit and property tests | Kani or Verus over the pure path core |
 | Range non-overlap and complete referenced layout | Grammar mutations and property tests | Kani over checked interval arithmetic |
 | Monotone quota accounting with no overflow | Property tests using checked arithmetic | Kani over the pure counter core |
-| Fail-closed profile and policy compilation | Exhaustive enum and schema tests | Kani over compiled rule states |
-| Monotone policy overlays | Generated overlay tests | Small rule-graph proof harness |
+| Fail-closed supported policy compilation | Exhaustive reserved-control tests | Finite-state model checking after controls become typed |
+| Monotone policy overlays | Deferred until an overlay type exists | Generated and machine-checked properties only after semantics are defined |
 
 The intended lemmas, and the distinction between combinatorial covering, cryptographic assumptions, and systems obligations, are in [theory.md](theory.md). Do not claim a formally verified extractor. A justified future statement would identify the exact pure properties that have machine-checked proofs while stating that parsers and codecs are tested and fuzzed.
 
@@ -154,6 +172,16 @@ The future independent verifier needs golden accepted and rejected bundles for:
 - tampered manifests, roots, envelopes, and effect fields.
 
 The verifier does not extract the archive and must not imply that it independently executed codecs.
+
+## Near-term execution increments
+
+1. **Executable assurance kernel.** Unify checked interval and partition logic, quota transitions, strict-profile path and topology planning, and outcome lifecycle transitions into pure functions. Test each against an independent bounded oracle in required CI.
+2. **Bounded model checking.** Check scalar range, ratio, quota, and outcome properties for full integer domains where feasible, plus explicitly bounded adjacent partitions. Run scheduled until cost and stability justify promotion.
+3. **Coverage-guided fuzzing.** Fuzz inspect-only ZIP bytes, raw path and topology processing, and covering plus codec boundaries. Apply explicit input, time, memory, and output bounds. Persist every reproducible failure as a deterministic regression.
+4. **Systems stress.** Exercise native namespace races, worker failures, stage mutation, audit, cleanup, and no-replace publication repeatedly. Compare every receipt with the executable lifecycle model.
+5. **Test-strength and dependency review.** Use targeted mutation testing, coverage reports, and dependency review as review aids. Coverage percentage is not a release claim, and a time-bounded dependency exemption is not an audit.
+
+The detailed budgets and promotion gates are in the [near-term execution plan](near-term.md#assurance-cadence). The existing `CI` workflow remains the only required promotion authority. Scheduled assurance jobs discover evidence. A scheduled gate moves into required CI only after its runtime is bounded, failures reproduce locally, and ten consecutive main runs are stable.
 
 ## Continuous program
 

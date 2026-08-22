@@ -256,9 +256,22 @@ A future small independent verifier should validate canonical evidence serializa
 
 ## Consumer sequence
 
-Build one canonical consumer after semantic identity is stable.
+Research the first consumer while semantic identity stabilizes, then ship it only after its dependencies are executable. The [wheel profile draft](profiles/python-wheel-v1.md) is the current design probe.
 
-1. **Python wheel admission**: first candidate because wheel parser differentials have produced real same-bytes, different-installed-tree advisories. A future `python-wheel.v1` must validate wheel metadata, `.dist-info`, `RECORD`, relocation, path uniqueness, and installed-tree identity rather than merely applying strict ZIP checks.
+For wheels, the proposed semantic pipeline is:
+
+```text
+verified ArchiveIR
+    -> WheelArtifactIR
+    -> scheme-relative WheelInstallPlan
+    -> target-specific realization
+```
+
+These stages have distinct identities. `WheelArtifactIR` binds the exact outer artifact filename because its distribution, version, build, Python, ABI, and platform tags are consumer inputs that are not part of the ZIP tree. `WheelInstallPlan` binds relocation and transformation intent to labeled schemes without querying the host. A realized installed tree is target-specific because installation may rewrite scripts, generate wrappers, update installed `RECORD`, write installer metadata, or compile bytecode.
+
+The archive content root therefore cannot be relabeled as a universal installed-tree root. A consumer profile must state which artifact and plan transformations it authorizes, which target model it uses, and which identity each claim names.
+
+1. **Python wheel admission**: first candidate because wheel parser differentials have produced real same-bytes, different-installed-tree advisories. A future `python-wheel.v1` must bind the artifact filename and validate wheel metadata, `.dist-info`, `RECORD`, relocation, path uniqueness, and scheme-relative plan identity rather than merely applying strict ZIP checks.
 2. **Agent workspace admission**: inspect first, expose a read-only admitted tree, verify content on read, and require explicit promotion. This does not claim to detect malware, malicious source, prompt injection, or unsafe build scripts.
 3. **Hermetic build inputs**: make the canonical tree, not a second extraction, the build input and cache key.
 4. **OCI layers and other rich formats**: later, because whiteouts, ownership, xattrs, links, devices, and ordered application require a dedicated consumer model.

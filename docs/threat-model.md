@@ -1,4 +1,4 @@
-# Threat model (as of 21 August 2026)
+# Threat model (as of 22 August 2026)
 
 Archive extraction is a **security boundary**, same class as HTML sanitizers, memory-safe parsers, and supply-chain attestations. Folklore (“just reject `..`”) is not enough. This file is the living adversary model. Invariants: [invariants.md](invariants.md). Differentials: [differentials.md](differentials.md).
 
@@ -90,8 +90,21 @@ CRC32 is **not** authentication (paper: easy to pad while preserving CRC). We st
 | TAR GNU long-name / PAX metadata bombs | exarch already bounds 4 MiB | Metadata size cap |
 | setuid/setgid | Still default-on in tar extractors | Strip |
 | Polyglot / magic vs extension | Jana/Shmatikov chameleon; Panakkal mixed containers | Magic authority; report conflict |
-| Wheel RECORD vs ZIP | PyPI 2025–2026; uv CVE-2025-54368 | Format-specific extra check for `.whl` |
+| Wheel `RECORD` vs ZIP | PyPI 2025–2026; uv CVE-2025-54368 | Dedicated wheel container and consumer profiles |
 | Parser differential (this file) | USENIX 2025 | Strict single interpretation + findings |
+
+### Wheel consumer threats
+
+Wheel admission adds a second semantic layer above the ZIP container. The proposed controls below are design targets, not Alpha.3 behavior. Their full contract is in [Python wheel consumer profile v1](profiles/python-wheel-v1.md).
+
+| Attack | Ambiguity or effect | Planned control |
+|---|---|---|
+| Missing, duplicate, or phantom `RECORD` rows | ZIP members and the hashed inventory disagree | Require one canonical `RECORD`, one row per admitted member, no unknown rows, and verified hashes and sizes except for specification-defined self and signature-file exemptions |
+| Traversing or colliding `RECORD` paths | The metadata inventory names a different target from the archive member | Parse every row through the same wheel path grammar and reject normalized, case-folded, and Unicode collisions |
+| `.data` relocation collision | Two archive paths become one installed path after scheme relocation | Build and validate the complete install plan before any target effect |
+| Generated entry-point target collision | A launcher or wrapper overwrites an admitted file or another generated target | Treat generated entries as first-class install-plan nodes and run the same collision checks over the combined plan |
+| Reserved interpreter or platform name | A valid-looking member becomes unsafe on a target filesystem | Apply target-aware reserved-name and portability rules before realization |
+| Executable mode or script rewrite disagreement | Installers disagree about shebang rewriting or executable permission | Make transformations explicit, deterministic install-plan operations and bind their rules into the consumer-profile identity |
 
 ---
 
@@ -116,3 +129,5 @@ Default posture: **reject ambiguity**. Future SFX or APK support would require s
 ## What we are not
 
 Sealr is not an antivirus or package inventory system. It does not claim CRC is a signature and does not run 50 parsers during an invocation. Alpha.3 is one strict parser that returns a structured finding at the deterministic refusal point. A rejected view may be partial and must not be treated as a complete inventory.
+
+Property tests, fuzzing, model checking, native race stress, and release provenance support different claims. None alone establishes unique interpretation, complete filesystem race freedom, or a formally verified extractor. Every assurance result is scoped to its input domain, model, platform, tool version, and stated assumptions.

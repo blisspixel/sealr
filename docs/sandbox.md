@@ -4,6 +4,8 @@
 
 Reduced authority follows the semantic-identity work in Roadmap Step 4. The worker protocol and supervisor audit must consume the canonical `ArchiveIR`; they must not create another interpretation or manifest format.
 
+The [near-term plan](near-term.md) adds a prerequisite: the private file-backed `SourceSnapshot` lands before worker IPC. The worker receives a retained read-only source capability and a bounded control frame, never the archive as an in-memory protocol payload. This keeps source immutability, memory limits, and process authority on one design path.
+
 Correctness cannot depend on a kernel sandbox. Path, structure, quota, codec, content, and publication invariants remain mandatory. Process confinement reduces the authority available if that logic is compromised.
 
 ## Target supervisor and worker
@@ -30,11 +32,15 @@ The worker will:
 
 ## Linux first
 
-Linux is the first planned enforced worker platform. The worker will set `no_new_privs`, probe the running Landlock ABI, request only rights supported by that ABI, and grant only the stage operations required by the selected effect. Descriptor authority and path grants are different facts and must be reported separately.
+Linux is the first planned enforced worker platform. The worker will set `no_new_privs`, probe the running Landlock ABI, request only rights supported by that ABI, and grant only the stage operations required by the selected effect. The Phase 0.1 Linux release gate requires a capability floor that includes `REFER` and `TRUNCATE`, currently Landlock ABI 3. A weaker kernel may report isolation unavailable, but it cannot satisfy the enforced-worker gate.
+
+Descriptor authority and path grants are different facts. Landlock does not revoke authority already available through inherited open descriptors, so worker startup must close everything except the bounded control channel, read-only source snapshot, and stage capabilities. The receipt lists those inherited authorities separately from handled pathname rights.
+
+Landlock network controls vary by ABI and do not justify a blanket no-network claim. The worker does not need network access, but network and syscall confinement are recorded separately. Seccomp remains deferred until the real syscall surface is measured.
 
 Landlock setup failure or insufficient handled rights cannot satisfy the reduced-authority release gate. A future explicit degraded mode may still rely on userspace invariants, but its receipt and exit behavior must not look equivalent to enforced isolation.
 
-Seccomp is deferred until native syscall traces cover Store, Deflate, rejection, cleanup, worker crash, and publication handoff. An architecture-sensitive allowlist will not be guessed.
+Native syscall traces must cover Store, Deflate, rejection, cleanup, worker crash, and publication handoff before an architecture-sensitive seccomp allowlist is proposed.
 
 ## macOS and Windows
 

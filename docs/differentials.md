@@ -24,7 +24,7 @@ Anything that would require guessing is a finding and, under default policy, a h
 |---|---|
 | **Pattern detect** (default) | The 14 types as explicit checks. Fast. Incomplete for *unknown* future types. |
 | **ZipDiff corpus CI** | Regenerate the pinned `construction` outputs and classify all 5,927 files through the production API. The aggregate digest, finding counts, and 73-file control allowlist must match. |
-| **Optional multi-parser** | CI/research only: run Info-ZIP / 7-Zip / Python zipfile / Go archive/zip in Docker and compare. Too slow and too many deps for the library hot path. |
+| **Optional multi-parser research** | CI or offline discovery only: compare established parsers on named inputs to locate disagreement frontiers. Agreement is not an oracle, and disagreement shows only that at least one interpretation differs. These tools never enter the library, release binary, or admission path. |
 | **Safe normalize** (Phase 3) | Materialize with *this* engine into a staging tree, then write a canonical ZIP (store or deflate, CD=LFH, no extras that carry names, one EOCD, no ZIP64 unless needed). Downstream tools then see one tree. The paper’s “extract and repack” mitigation - **we** must be the extract, or we have reintroduced a second parser. |
 
 ## Polyglots and magic

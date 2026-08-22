@@ -231,7 +231,7 @@ e_{\sigma(k)} = C.
 
 Independent of ZIP signatures, Deflate, Unicode, Windows, and SHA-256. This is the honest “we actually meant the partition predicate” lemma. Unique Covering uses it as the local-prefix part of the admitted covering. It does not say those ranges are the only ZIP-grammar reading of \(b\).
 
-Kani target: extract the predicate on a bounded array of pairs, unwind bound \(k+1\).
+Kani target: extract the predicate on a bounded array of pairs and state the maximum array length and loop unwind bound explicitly. A successful harness is exhaustive only for that domain. It is machine-checked evidence for the adjacent-covering implementation, not an unbounded proof of ZIP interpretation.
 
 **Runner-up.** If `jail_name(raw, d)` succeeds and `join_under_dest(dest, P, raw)` succeeds, then the result is dest plus the jailed components, and \(P\) contains none of \(\{\varepsilon, \mathtt{..}\}\). Kani on bounded ASCII. Still no Unicode.
 
@@ -285,7 +285,7 @@ Ranked. Trusted code means production TCB, not tests.
 3. **Abolish ignored extras in a later profile.** Every extra ID is semantic (bound into layout) or denied. “Ignored” looks conservative and is how unique parse dies.
 4. **Treat codecs as slice morphisms.** They see a payload interval the covering already named. Exact input consumption is the empty-remainder obligation one level down. They cannot re-enter discovery, jail, or publish.
 5. **Worker as untrusted inhabitant-finder; supervisor as covering auditor.** Two coverings: source bytes and staged tree. Publish iff both check and the content root matches. The supervisor must not reparse ZIP.
-6. **Prove the kernel; test the morphisms.** Kani on jail, covering arithmetic, and quota counters. Hostile corpora on codecs. Do not claim a verified extractor.
+6. **Machine-check bounded kernels; test the morphisms.** Use bit-precise model checking for stated jail, covering-arithmetic, and quota domains. Use property tests and hostile corpora for larger strings, parsers, codecs, and systems behavior. Do not claim a verified extractor.
 
 Refuse even when they sound clever: consensus of N parsers in the hot path; a proof extra inside the ZIP (new A3); recovery-normalize as a second meaning of the old bytes; `--insecure`; libarchive; proving flate2.
 

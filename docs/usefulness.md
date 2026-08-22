@@ -35,10 +35,11 @@ Until then, keep the ZIP32 path strict, fail closed, and do not add TAR, 7z, or 
 ## What would count as passing
 
 1. Preview semantic identity is frozen enough that layout and content roots are the same on every supported release platform for the same source bytes and policy. The walkthrough allowed fixture roots are pinned in `crates/sealr/tests/golden_identity.rs`.
-2. A `python-wheel.v1` consumer validates wheel metadata and `RECORD` against that admitted tree.
-3. One external publisher, registry, build backend, or installer takes Sealr’s admitted representation as authoritative and does not call a second ZIP parser on the original bytes.
-4. A public same-digest, different-tree wheel demonstration uses that path.
+2. A `python-wheel.v1` consumer validates the exact artifact filename, wheel metadata, `RECORD`, and relocation plan against verified members without reopening or reinflating the ZIP.
+3. One external publisher, registry, build backend, or installer takes Sealr's admitted representation as authoritative. In the decisive test, access to the original wheel is removed after admission and the consumer still completes through the admitted capability.
+4. An open-hook or process trace confirms that no ZIP parser opens the source after admission, and mutation of any admitted member is detected before consumption.
+5. A public same-digest, different-tree wheel demonstration uses that path and distinguishes source, archive-tree, wheel-artifact, and installation-plan identities.
 
 Until those hold, Sealr is a strict ZIP32 evaluation boundary with evidence. That is worth building. It is not yet proof of the category.
 
-See [semantic-model.md](semantic-model.md#the-consumption-rule), [theory.md](theory.md), and [ROADMAP.md](../ROADMAP.md#phase-02-one-canonical-consumer).
+See [semantic-model.md](semantic-model.md#the-consumption-rule), the [wheel profile draft](profiles/python-wheel-v1.md), [theory.md](theory.md), and [ROADMAP.md](../ROADMAP.md#phase-02-one-canonical-consumer).

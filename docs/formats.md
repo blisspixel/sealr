@@ -36,17 +36,30 @@ Formats are not added as checkboxes. Each needs:
 6. a concrete consumer whose semantics are understood;
 7. identical canonical evidence on supported Linux, macOS, and Windows targets.
 
+## Wheel profiles are two layers
+
+The planned wheel work does not turn the generic ZIP policy into a package installer.
+
+1. A wheel-oriented ZIP interpretation profile defines the accepted container language. It can require strict UTF-8 member names, reject legacy CP437 and alternate Unicode-name extras, and use an exhaustive flag and extra-field table without waiting for a general legacy-name profile.
+2. The `python-wheel.v1` consumer profile binds the exact artifact filename, validates verified `WHEEL`, `METADATA`, and `RECORD` members, and produces a scheme-relative installation plan.
+
+The first layer constructs one archive tree. The second assigns Python packaging meaning to that tree. Neither may reparse the source. The detailed candidate rules and corpus plan are in the [Python wheel profile draft](profiles/python-wheel-v1.md).
+
 ## Planned order
 
 | Format or profile | Status | Entry condition |
 |---|---|---|
 | Strict ZIP32 Store and Deflate | Current alpha.3 | Existing preview boundary |
-| Canonical ZIP path and tree profile | Phase 0.1 | `ArchiveIR`, outcome axes, profiles, roots, Unicode model, and assurance gates |
+| Exact strict ASCII ZIP profile | Alpha.4 target | Compatibility inventory, exhaustive flags and extra fields, opaque admitted capability, and independent identity vectors |
+| Private file-backed ZIP snapshot | Alpha.5 target | Copy-hash-retain source capability, checked random access, mutation tests, and bounded memory |
+| Supervised Linux ZIP worker | Alpha.6 target | Immutable snapshot capability, bounded protocol, minimum Landlock rights, and supervisor audit |
+| Canonical general ZIP path and tree profile | Phase 0.1 closure | UTF-8 and separately justified legacy CP437 rules, target collision model, and assurance gates |
 | ZIP Zstd, XZ/LZMA, BZip2, Deflate64 adapters | After Phase 0.1 | Same exact-consumption, bounded-window, and dependency rules as Deflate; no second parser |
 | TAR plus PAX and GNU name handling | Phase 1 | ZIP trust gate and codec adapters exist so TAR wrappers reuse them |
 | gzip, bzip2, xz, and zstd wrappers | Phase 1 with TAR | Exact stream, window, metadata, and cancellation semantics via the ZIP codec adapters |
 | ZIP64 | Deferred and consumer-driven | A named consumer demonstrates compatibility need and receives new offset, size, and corpus gates |
-| Python wheel profile | Phase 0.2, first canonical consumer | Phase 0.1 complete; ZIP container plus wheel metadata and installed-tree rules |
+| Wheel-oriented UTF-8 ZIP profile | Phase 0.1 laboratory, not current support | Exact UTF-8 path rules, exhaustive ZIP feature table, hostile fixtures, and benign compatibility report |
+| Python wheel consumer profile | Phase 0.2, first canonical consumer | Verified-member API plus wheel metadata, `RECORD`, artifact identity, and scheme-relative install-plan rules |
 | JAR, APK, OCI, Office, and other ZIP consumers | Later consumer profiles | Signature, relocation, layer, or document semantics specified independently |
 | 7z and other archive families | Deliberately deferred | Concrete consumer, maintained parser strategy, and equivalent assurance evidence |
 | Encrypted or spanned archives | Refused in the current direction | Separate key, volume, and streaming trust models would be required |

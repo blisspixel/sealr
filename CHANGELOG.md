@@ -6,6 +6,10 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+### Changed
+
+- Reorganized the near-term roadmap into release-sized Alpha.4, Alpha.5, and Alpha.6 increments, started the assurance and wheel-consumer research lanes earlier, and added task-oriented planning documents and a documentation index.
+
 ## [0.1.0-alpha.3] - 2026-08-22
 
 ### Added
