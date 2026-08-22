@@ -163,25 +163,11 @@ The semantic walkthrough is enforced by CLI integration tests on the native plat
 
 ## What comes next
 
-The next milestone remains the Phase 0.1 trust gate, not another archive format. Step 3 semantic identity now has a preview-line contract:
+The next milestone remains the Phase 0.1 ZIP trust gate, not another archive format. Alpha.4 closes the measured semantic and adopter-facing contract. Alpha.5 replaces whole-archive ownership with a private immutable random-access snapshot. Alpha.6 passes that capability into a supervised Linux worker and independently audits its staged result.
 
-1. Outcome axes and explicit digest availability have landed in the library and `sealr.receipt.v2`. The inspectable `View` still serializes the compatibility verdict.
-2. `SourceSnapshot` names the current owned and caller-borrowed in-memory bytes. Parse, payload reads, and digest recording use that one object.
-3. A versioned `sealr.archive-ir.v1` is built once from that snapshot after path admission. Inspect and materialize consume the same IR; they do not reparse the archive.
-4. Constructor `Policy` compiles into typed supported controls before source ingestion. Ratio checks use integer arithmetic. Security counters use checked addition. Reserved policy fields fail closed instead of appearing enforced.
-5. Distinct source, interpretation, layout, and content-tree identities are recorded on the receipt. `sealrTreeV1` is a domain-separated binary encoding over the IR. `view_digest` remains invocation evidence.
+Assurance now advances with each increment rather than waiting for a late phase. A non-shipping wheel laboratory also starts now to measure real compatibility and shape the verified-member API, while supported `python-wheel.v1` admission remains gated on its exact UTF-8 ZIP profile, canonical paths, consumer budgets, and identities.
 
-Cross-platform golden ZIP fixtures now pin the preview encodings. The remaining Step 3 work is to replace ignored extra fields with an explicit allowlist under a new profile identifier. The compatibility verdict remains for the preview line; the independent axes and CLI exit `3` are authoritative when a destination effect fails. That identity is what a wheel consumer would reuse.
-
-In parallel, the materializer now refuses intra-call directory-component replacement and staged-content mutation, and audits the staged tree against the admitted IR before publication. Repeated hostile races and the independent supervisor audit remain Step 2/4 work. Those tests strengthen the shipped capability boundary without creating a competing semantic representation.
-
-The supervised Linux worker follows that contract because its bounded protocol and the supervisor's final staged-tree audit need the same canonical tree and manifest. The supervisor will own the destination parent, private stage, publication, and cleanup; the worker will receive only the archive snapshot and stage capabilities and install Landlock before reading the first archive byte. Linux is the first enforced worker platform, while macOS and Windows must remain natively green and report isolation honestly until their worker boundaries are implemented.
-
-Authenticated abandoned-stage recovery follows the worker because recovery must be owned by the final supervisor lifecycle. Landlock limits the worker's ambient authority; it does not contain another process running as the same user. A distinct service identity or equivalent mandatory-access-control boundary would be required to bring that actor into scope.
-
-Canonical CP437 and Unicode collision semantics, snapshot-backed bounded random access, fuzz and property suites, small-core proofs, compatibility measurement, an independent evidence verifier, and performance gates based on avoided parsing, decompression, and writes complete Phase 0.1. After that gate, common ZIP codec adapters (Zstd, XZ/LZMA, BZip2, Deflate64) land on the same boundary with exact input consumption and no extra extractor. Python wheel admission can proceed on Store and Deflate. TAR begins only when it can reuse those adapters. None of this is a claim of current support.
-
-The exact active queue, implementation order, and exit criteria are in [ROADMAP.md](ROADMAP.md#active-execution-queue).
+See the [near-term execution plan](docs/near-term.md) for release-sized work and acceptance gates, the [roadmap](ROADMAP.md) for the full trust gate, and the [wheel profile draft](docs/profiles/python-wheel-v1.md) for the first-consumer design. None of those planned capabilities is current support.
 
 ## Research basis
 
@@ -189,6 +175,7 @@ The exact active queue, implementation order, and exit criteria are in [ROADMAP.
 - [ZipDiff artifact and construction generator](https://github.com/ouuan/ZipDiff)
 - [`uv` ZIP archive confusion advisory](https://github.com/advisories/GHSA-8qf3-x8v5-2pj8)
 - [PyPI response to wheel archive confusion attacks](https://blog.pypi.org/posts/2025-08-07-wheel-archive-confusion-attacks/)
+- [2026 Python wheel parser differential advisory](https://github.com/google/security-research/security/advisories/GHSA-w97x-xxj5-gpjx)
 - [Linux Landlock documentation](https://docs.kernel.org/userspace-api/landlock.html)
 - [cap-std capability-oriented filesystem API](https://github.com/bytecodealliance/cap-std)
 - [Kani Rust Verifier](https://model-checking.github.io/kani/)
@@ -198,26 +185,12 @@ The exact active queue, implementation order, and exit criteria are in [ROADMAP.
 
 | Document | Purpose |
 |---|---|
-| [ROADMAP.md](ROADMAP.md) | Ordered work, gates, and rationale |
-| [docs/vision.md](docs/vision.md) | Product direction and priorities |
-| [docs/usefulness.md](docs/usefulness.md) | Admission-boundary test: one tree, one consumer that does not reparse |
-| [docs/semantic-model.md](docs/semantic-model.md) | Current semantics and target admitted-tree model |
-| [docs/theory.md](docs/theory.md) | Research notes: unique covering, partial interpretation, named conjectures |
-| [docs/api.md](docs/api.md) | Current alpha.3 contract and target API direction |
-| [docs/policy.md](docs/policy.md) | Policy schema and defaults |
-| [docs/findings.md](docs/findings.md) | Stable finding-code registry |
-| [docs/threat-model.md](docs/threat-model.md) | Adversary and ZipDiff classes |
-| [docs/invariants.md](docs/invariants.md) | Non-negotiable safety properties |
-| [docs/differentials.md](docs/differentials.md) | Single-interpretation rules and corpus |
-| [docs/sandbox.md](docs/sandbox.md) | Reduced-authority process design |
-| [docs/attestations.md](docs/attestations.md) | Unsigned evidence and future authenticated claims |
-| [docs/assurance.md](docs/assurance.md) | Hostile and benign corpora, cross-platform determinism, fuzzing, proofs, and audit |
-| [docs/architecture.md](docs/architecture.md) | Current trust boundaries and target semantic pipeline |
-| [docs/usage.md](docs/usage.md) | Intended CLI surface |
-| [CHANGELOG.md](CHANGELOG.md) | Preview release history |
-| [docs/releasing.md](docs/releasing.md) | Reproducible release process and verification |
-| [docs/release-verification.md](docs/release-verification.md) | Runnable checks for the current immutable prerelease |
-| [docs/tooling.md](docs/tooling.md) | Cross-platform repository tooling and runtime dependency discipline |
+| [Documentation index](docs/index.md) | Guided map of current contracts, security material, plans, and operations |
+| [Near-term execution plan](docs/near-term.md) | Alpha.4 through alpha.6 work packages and measurable gates |
+| [Roadmap](ROADMAP.md) | Full capability order, release gate, and non-goals |
+| [Safety specification](docs/safety.md) | Normative safety rules and supported boundary |
+| [API contract](docs/api.md) | Current alpha.3 Rust and JSON surface |
+| [Release verification](docs/release-verification.md) | Checksums, provenance, tag, and immutable release verification |
 
 ## License
 

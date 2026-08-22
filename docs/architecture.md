@@ -77,7 +77,7 @@ The critical rule is that every operation after interpretation consumes the IR a
 
 ### Source ownership
 
-Bounded random access must preserve the security property currently provided by the in-memory source. The target `SourceSnapshot` first names the existing owned and caller-borrowed byte cases, then supports immutable alternatives for the complete interpretation and verification lifetime. A caller path can later be copied, cloned, or reflinked into a private spool or content-addressed object while hashing. Remote metadata such as an ETag or content length does not replace possession of the exact bytes. The bounded random-access implementation is a later memory-scaling milestone, not a prerequisite for defining the semantic abstraction.
+Bounded random access must preserve the security property currently provided by the in-memory source. The target `SourceSnapshot` first names the existing owned and caller-borrowed byte cases, then supports immutable alternatives for the complete interpretation and verification lifetime. A caller path can be copied into a private spool while it is hashed, then retained as a read-only capability. Reflink or content-addressed variants require an equally strong mutation contract. Remote metadata such as an ETag or content length does not replace possession of the exact bytes. The first private file-backed implementation is a prerequisite for worker IPC so the protocol never embeds a whole archive buffer. Broader alternate-backend and sparse-fixture work remains the later memory-scaling milestone.
 
 ### Canonical intermediate representation
 
@@ -89,7 +89,7 @@ Interpretation profile, deterministic resource budget, target filesystem model, 
 
 ### Reduced-authority worker
 
-After semantic types stabilize, a trusted supervisor can own the archive snapshot, destination parent, private stage, lifecycle, staged-tree audit, and publication authority. A worker receives only bounded archive and stage capabilities through a versioned protocol. On Linux, runtime-probed Landlock and `no_new_privs` can restrict that worker before it reads the first archive byte. Equivalent credible packaging boundaries for macOS and Windows require separate work.
+After semantic types stabilize, a trusted supervisor can own the destination parent, lifecycle, staged-tree audit, and publication authority. It creates the private stage and immutable snapshot, then passes the worker only bounded read-only snapshot and stage capabilities through a versioned protocol. On Linux, runtime-probed Landlock and `no_new_privs` can restrict that worker before it reads the first archive byte. Equivalent credible packaging boundaries for macOS and Windows require separate work.
 
 The supervisor treats worker output as untrusted and audits the staged tree against the admitted IR before publication. Process isolation strengthens containment, but does not define archive semantics and must not own a second parser.
 

@@ -61,17 +61,19 @@ The product bar is high-consequence ingest: fail closed, one interpretation, evi
 
 ## Product priorities
 
+The release-sized implementation order is in the [near-term execution plan](near-term.md). Assurance and wheel research begin alongside the primary implementation rather than waiting for every Phase 0.1 capability to finish.
+
 ### 1. Semantic identity
 
-Define the canonical `ArchiveIR`, immutable source snapshot, interpretation profiles, target filesystem models, consumer profiles, layout root, content-tree root, and target outcome axes. Stabilize exact codec-consumption and policy-compilation rules.
+Define the canonical `ArchiveIR`, immutable source snapshot, interpretation profiles, target filesystem models, consumer profiles, layout root, content-tree root, and target outcome axes. Stabilize exact codec-consumption and policy-compilation rules. Make the first private file-backed snapshot capability precede worker IPC.
 
 ### 2. Measured trust
 
-Combine the hostile ZipDiff gate with a benign ecosystem corpus, source-mutation tests, cross-platform semantic goldens, fuzzing, small proof harnesses, reduced-authority execution, and a small independent evidence verifier.
+Combine the hostile ZipDiff gate with a benign ecosystem corpus, source-mutation tests, cross-platform semantic goldens, independent property oracles, bounded model checking, fuzzing, native systems stress, reduced-authority execution, and a small independent evidence verifier. Each evidence type keeps its stated domain and nonclaim.
 
 ### 3. One canonical consumer
 
-Python wheel admission is the first candidate. It has a documented same-bytes, different-installed-tree problem and meaningful consumer semantics beyond ZIP. A future `python-wheel.v1` must validate wheel metadata, `RECORD`, `.data` relocation, target paths, and installed-tree identity. It is not current functionality. It is also the first consumer that would prove the category: if a builder or installer still unzipped the wheel, Sealr would have produced a receipt, not an admission boundary.
+Python wheel admission is the first candidate. It has a documented same-bytes, different-installed-tree problem and meaningful consumer semantics beyond ZIP. The [profile draft](profiles/python-wheel-v1.md) separates archive-tree, wheel-artifact, scheme-relative install-plan, and target realization identities. It is not current functionality. It is also the first consumer that would prove the category: if a builder or installer still unzipped the wheel, Sealr would have produced a receipt, not an admission boundary.
 
 ### 4. Reusable admitted trees
 
@@ -125,8 +127,12 @@ GPU, hardware codecs, alternate runtimes, mmap, and broad parallelism are backen
 
 ## Documentation map
 
+The complete task-oriented map is the [documentation index](index.md).
+
 | Document | Purpose |
 |---|---|
+| [near-term.md](near-term.md) | Alpha.4 through alpha.6 work packages and acceptance gates |
+| [profiles/python-wheel-v1.md](profiles/python-wheel-v1.md) | First-consumer design and corpus plan |
 | [semantic-model.md](semantic-model.md) | Target outcome axes, `ArchiveIR`, identities, profiles, locks, and sequencing |
 | [api.md](api.md) | Implemented alpha.3 contract and future type-state direction |
 | [architecture.md](architecture.md) | Current trust boundaries and target pipeline |

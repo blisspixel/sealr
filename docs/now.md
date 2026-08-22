@@ -12,9 +12,9 @@ That gives sealr a concrete regression gate. The library does not need to run 50
 
 ## Reduced authority is available without a virtual machine
 
-The Linux kernel's [Landlock interface](https://docs.kernel.org/userspace-api/landlock.html) lets an unprivileged process restrict its own ambient filesystem and network rights. It is stackable with existing access control and exposes a runtime ABI so software can report exactly which controls are available.
+The Linux kernel's [Landlock interface](https://docs.kernel.org/userspace-api/landlock.html) lets an unprivileged process restrict its own ambient filesystem rights and, on newer ABIs, selected network rights. It is stackable with existing access control and exposes a runtime ABI so software can report exactly which controls are available.
 
-This makes a small worker process practical as planned work. The proposed design has a trusted supervisor open the archive snapshot and destination parent, create and retain the private stage, then give the worker only bounded archive and stage capabilities. The worker would install its restrictions before reading the first header and would never receive publication authority. Landlock would limit blast radius, while userspace path and quota invariants remain mandatory.
+This makes a small worker process practical as planned work. The proposed design has a trusted supervisor create and retain the immutable archive snapshot, open the destination parent, and create the private stage, then give the worker only bounded read-only snapshot and stage capabilities. The worker would close every unrelated inherited descriptor, install its restrictions before reading the first header, and never receive publication authority. The Phase 0.1 Linux gate requires filesystem rights through `REFER` and `TRUNCATE`, currently Landlock ABI 3. Landlock would limit blast radius, while userspace path and quota invariants remain mandatory. Network and syscall confinement remain separate measured claims.
 
 ## Capability-oriented filesystem APIs are mature enough to use
 

@@ -116,13 +116,15 @@ This is the current third-alpha baseline. It is incomplete and is not a producti
 
 ## Active execution queue
 
-There is one primary implementation stream and one parallel assurance stream:
+The detailed release-sized plan is [docs/near-term.md](docs/near-term.md). It corrects three dependencies in the older numbered sequence below: the private file-backed snapshot lands before worker IPC, assurance foundations land alongside each feature, and a non-shipping wheel laboratory begins before Phase 0.1 completes.
 
-1. **Primary: Step 3, semantic identity.** Outcome axes, `SourceSnapshot`, `ArchiveIR` with a source covering certificate, codec-free covering checker, typed policy compilation, integer ratio and checked counters, extra-field classification, preview `sealrTreeV1` identities, walkthrough golden roots, view axes, and CLI exit `3` for admitted-but-failed effect have landed. Remaining: extra-field allowlist tightening only under a new profile id. The compatibility `verdict` still maps effect failure to `rejected`; axes and exit `3` are the honest record.
-2. **Parallel: finish the Step 2 adversarial matrix.** Destination appearance as a file or link, directory-component substitution after the first member, intra-call create-then-open replacement, and staged-content mutation versus the admitted IR now have deterministic tests. Same-process staged-tree audit runs before publication. Remaining: repeated hostile races, and the independent supervisor audit that arrives with the Step 4 worker. Do not invent a second tree or manifest representation.
-3. **Next after the semantic contract: Step 4, the supervised Linux worker.** The worker protocol and supervisor audit consume the Step 3 tree and manifest. macOS and Windows stay native release gates and report process isolation unavailable until credible platform-specific worker boundaries exist.
+1. **Alpha.4 target: measured semantic contract.** Finish the exact extra-field profile from compatibility evidence, separate serializable evidence from an opaque admitted capability, expose bounded verified-member reads, publish independent identity vectors, and add the first pure property oracles. The compatibility `apply()` facade remains available while the adopter-facing API is reviewed.
+2. **Alpha.5 target: bounded immutable input.** Copy, hash, and retain a private file-backed snapshot, then parse and verify through checked random access without reopening the source path or allocating in proportion to archive size. The worker protocol is specified and fuzzed over capabilities, not archive blobs.
+3. **Alpha.6 target: supervised Linux worker.** The supervisor alone owns the destination parent, publication, cleanup, and recovery authority. The worker receives the immutable snapshot and stage capabilities, installs a measured Landlock boundary before the first archive read, and returns an untrusted bounded result that the supervisor audits without reparsing ZIP.
+4. **Continuous assurance lane.** Pure range, quota, path, and lifecycle models; property tests; bounded model checking; fuzzing; and native race stress begin with the increments they protect. Step 8 completes and operationalizes this program instead of starting it late.
+5. **Parallel wheel laboratory.** Measure a reproducible benign corpus, maintain hostile wheel fixtures, and draft the [Python wheel consumer profile](docs/profiles/python-wheel-v1.md). The lab is not shipped support. It becomes experimental admission only after the exact wheel ZIP profile, canonical UTF-8 paths, verified-member access, consumer budgets, and consumer identities pass their gates.
 
-Steps 5 through 10 then proceed in order: authenticated recovery and durability, canonical Unicode paths, snapshot-backed bounded random access, layered assurance, stable evidence plus avoided-work performance, and the stable CLI experience. After Phase 0.1, common ZIP codec adapters (Zstd, XZ/LZMA, BZip2, Deflate64) land on that same boundary. The Python wheel consumer can proceed on Store and Deflate without waiting for every method. TAR begins only after it can reuse those codec adapters rather than grow a second decompression stack.
+After Alpha.6, authenticated recovery and durability can proceed in parallel with canonical names and the pure wheel evaluator. Stable evidence, avoided-work performance, and CLI closure remain Phase 0.1 gates. Common ZIP codec adapters still follow that trust gate. The wheel consumer can proceed on Store and Deflate without waiting for every method; TAR waits so its wrappers reuse the same codec boundary.
 
 ## Repository tooling and dependency rule
 
@@ -234,6 +236,8 @@ Exit proof:
 
 ### 4. Start parsing and writing in reduced authority
 
+Dependency correction: the minimum private file-backed `SourceSnapshot` slice from Step 7 must land before this step. The worker protocol receives a retained read-only source capability, never a temporary whole-archive buffer. Step 7 then completes alternate backends, large sparse fixtures, and the full memory-scaling gate.
+
 Deliverables:
 
 1. Split a trusted supervisor from a same-binary worker. A library call must not unexpectedly sandbox its caller.
@@ -245,7 +249,7 @@ Deliverables:
 7. Add deterministic barriers and bounded repeated hostile namespace and content-mutation tests. Require zero outside writes, zero destination replacement, and exact manifest equality on success.
 8. Keep macOS and Windows behavior green and report isolation unavailable there until their credible worker packaging boundaries are implemented.
 
-Why fourth: the Windows DACL removes inherited DACL grants to other principals but does not reduce a compromised parser's ambient authority. Windows descendants still receive the creating token's default owner, and a principal matching that SID remains outside this milestone. The worker protocol should carry the canonical IR and staged-tree manifest from Step 3 rather than invent another representation. A supervisor-owned lifecycle also defines the correct owner for recovery. Landlock confines the worker itself; it does not constrain another process running as the same user. Same-principal containment requires a distinct service identity or equivalent mandatory-access-control boundary and remains outside this milestone.
+Why this follows the snapshot slice: the Windows DACL removes inherited DACL grants to other principals but does not reduce a compromised parser's ambient authority. Windows descendants still receive the creating token's default owner, and a principal matching that SID remains outside this milestone. The worker protocol carries the retained snapshot capability, canonical IR, and staged-tree manifest rather than inventing another source or representation. A supervisor-owned lifecycle also defines the correct owner for recovery. Landlock confines the worker itself; it does not constrain another process running as the same user. Same-principal containment requires a distinct service identity or equivalent mandatory-access-control boundary and remains outside this milestone.
 
 Exit proof:
 
@@ -300,6 +304,8 @@ Exit proof:
 
 ### 7. Replace whole-archive buffering with immutable snapshots
 
+Execution note: the first private spool backend, checked random-access interface, and mutation contract move ahead of Step 4 under the [near-term plan](docs/near-term.md#alpha5-bounded-immutable-input). This numbered capability closes the remaining scale, alternate-backend, and sparse-fixture work; it is not permission to build the worker around `Vec<u8>` first.
+
 Deliverables:
 
 1. Extend the `SourceSnapshot` abstraction beyond in-memory bytes with a private spool or content-addressed object, or a filesystem object whose immutability is actually verified.
@@ -318,30 +324,37 @@ Exit proof:
 - a multi-gigabyte sparse valid fixture can be inspected without a multi-gigabyte allocation;
 - truncation and growth produce structured rejection, never panic or stale reads.
 
-### 8. Add layered adversarial and compatibility assurance
+### 8. Complete layered adversarial and compatibility assurance
 
-Current foothold: the deterministic unit suite now drives the public `apply()` boundary over every truncation of a valid ZIP, three mutations at every byte position, and deterministic noise inputs from 0 through 1,024 bytes, asserting that none panic. This is a fast regression gate, not a substitute for coverage-guided fuzzing or semantic property tests.
+Assurance begins before this numbered step. The pure-kernel property tests, bounded model checks, inspect-only fuzz targets, and lifecycle model are prerequisites for the worker, Unicode path, and bounded-snapshot changes that precede this closure milestone. The deterministic unit suite already drives the public `apply()` boundary over every truncation of a valid ZIP, three mutations at every byte position, and deterministic noise inputs from 0 through 1,024 bytes, asserting that none panic.
+
+Evidence types remain distinct. A finite corpus establishes behavior only for named inputs. Generated properties sample a stated semantic class. Coverage-guided fuzzing searches reachable state without claiming completeness. Bounded model checking is exhaustive only for its harness domain, assumptions, and unwind bounds. Native race tests are systems evidence, not a proof of parser uniqueness. Cryptographic provenance authenticates named bytes and builders, not the semantic correctness of the archive interpretation.
 
 Deliverables:
 
-1. Add property tests for canonical path containment, topology conflicts, and monotonic quota counters.
-2. Add `cargo-fuzz` targets for ZIP parsing, canonical names, and inspect-only `apply()`.
-3. Seed fuzz targets with the ZipDiff and local adversarial corpus.
-4. Assert no panic, bounded output, deterministic verdict, and receipt presence.
-5. Add Kani harnesses for the pure path and quota core only.
-6. Run fast deterministic gates on every change. Add longer scheduled fuzzing only after runtime and cost are measured.
-7. Keep unsafe code out of the parser, jail, and quota core. Isolate unavoidable operating-system calls in small platform modules with explicit reviewed invariants.
-8. Maintain a hostile conformance corpus with expected findings, source spans, and tree identities, plus a benign ecosystem corpus that measures acceptance and top rejection causes for each named profile.
+1. Maintain a claim ledger mapping each invariant to its implementation boundary, deterministic tests, generated properties, fuzz target, model-checking harness where applicable, platform evidence, finding codes, and residual assumptions.
+2. Keep property tests for checked ranges, strict-profile paths and topology, quota transitions, outcome axes, and lifecycle transitions in required CI. Production functions and independent bounded oracles must not call one another.
+3. Run documented `cargo-fuzz` targets for inspect-only ZIP bytes, path and topology, and covering plus exact codec consumption. Pin the toolchain and tool version and bound input, time, memory, and output.
+4. Seed fuzzing from locally authored cases and the reproducibly generated pinned ZipDiff corpus. Preserve every reproducible failure as a deterministic regression rather than committing the generated upstream binary corpus.
+5. Model-check scalar range, ratio, quota, and outcome properties. Keep every domain, assumption, unwind limit, and unsupported construct visible in the harness and assurance ledger.
+6. Run bounded repeated filesystem race and worker fault stress on native Linux, macOS, and Windows schedules after measuring cost.
+7. Use targeted mutation testing and coverage reports to find weak assertions and blind branches. Do not use a global coverage percentage as an assurance claim.
+8. Maintain hostile conformance and benign ecosystem corpora with profile-specific acquisition metadata, expected findings, identities, acceptance rates, and investigated rejection classes.
+9. Keep unsafe code outside the interpretation, path, quota, and lifecycle kernels. Give every operating-system FFI exception a local safety contract and native tests.
+10. Commission independent review only after the semantic, worker, canonical-path, snapshot, and evidence surfaces freeze.
 
 Why eighth: unit tests lock known attacks, fuzzing searches byte-level state space, property tests cover semantic classes, compatibility data keeps strict profiles usable, and Kani proves bounded properties. None replaces the others. Kani's own guidance makes small proof harnesses the right unit, while the Rust Fuzz Book makes byte-slice parser targets straightforward.
 
-Exit proof:
+Exit evidence:
 
-- every invariant has at least one deterministic test;
-- the three fuzz targets run locally from a documented seed corpus;
-- Kani proves bounded path and counter properties without verifying codecs;
-- each profile publishes acceptance rates and investigated rejection classes over a reproducible benign corpus;
-- zero unsafe blocks exist in the trusted core, or each exception has a reviewed invariant.
+- every invariant appears in the claim ledger and has evidence appropriate to its kind;
+- production-versus-oracle properties pass in required CI and preserve discovered regressions;
+- each fuzz target has explicit resource bounds, a reproducible seed manifest, and no unresolved reproducible crash;
+- model-check reports identify the exact checked function, domain, assumptions, and bounds;
+- scheduled native stress produces no outside write, destination replacement, or incorrectly successful publication;
+- every surviving targeted mutant is eliminated by a test or covered by an explicit reviewed equivalence waiver;
+- each named profile publishes reproducible hostile and benign compatibility results;
+- zero unsafe blocks exist in the trusted semantic core, and every platform exception has a reviewed invariant.
 
 ### 9. Stabilize evidence and measure avoided work
 
@@ -406,7 +419,7 @@ Phase 0.1 is complete only when every row is green.
 | Reject rollback | No published destination on content, I/O, or policy failure |
 | Inspect equals materialize | Both consume one immutable admitted tree; golden tree and digest comparisons |
 | Reduced authority | Landlock worker test and receipt field |
-| Assurance | Unit, property, fuzz smoke, Kani, Clippy, rustfmt, docs, cargo-deny |
+| Assurance | Claim ledger, deterministic tests, independent property oracles, bounded model-check reports, reproducible fuzzing, native race stress, targeted mutation review, Clippy, rustfmt, docs, cargo-deny, and reviewed dependency evidence |
 | Portability | Current baseline green; every new gate must keep native Linux, macOS, and Windows CI green |
 | Performance | Reproducible baseline with memory and throughput budgets |
 | CLI experience | Stable human and machine output, cross-platform goldens, quiet defaults, screenshot provenance, and reviewed dependency budget |
@@ -433,14 +446,24 @@ The Python wheel consumer does not wait on this list. Wheels today are Store and
 
 ## Phase 0.2: one canonical consumer
 
-Only after Phase 0.1:
+The non-shipping [wheel laboratory](docs/profiles/python-wheel-v1.md) starts during Phase 0.1. Shipping remains gated, but consumer pressure on the semantic API does not wait until every systems item is complete.
 
-- a `python-wheel.v1` consumer profile that validates wheel metadata, `RECORD`, normalized topology, relocation destinations, and actual verified content;
-- `sealr lock` binding source, interpretation, consumer, policy, layout, and content identities;
-- a GitHub Action that gates wheels and emits the same evidence as the Rust API;
-- one public same-digest, different-tree wheel demonstration and a reproducible compatibility report;
+### 0.2.1 Pure wheel admission
+
+- an exact wheel-oriented UTF-8 ZIP profile with exhaustive flag and extra-field dispositions;
+- a `python-wheel.v1` consumer profile that binds the outer artifact filename and validates wheel metadata, `RECORD`, normalized topology, relocation destinations, and actual verified content;
+- separate archive-tree, wheel-artifact, and scheme-relative install-plan identities;
+- bounded verified metadata access from the admitted archive without a second parse or inflation pass;
+- hostile fixtures and a reproducible benign compatibility report;
+- `sealr lock` only after the profile and identity encodings are independently reproducible.
+
+### 0.2.2 Canonical consumer bridge
+
 - one external package publisher, registry, build backend, or installer that consumes Sealr's admitted representation rather than reparsing the ZIP;
-- Sigstore keyless signing of Sealr semantic admission records only after their unsigned claim bytes and independent verifier are stable. Release archives already carry GitHub build-provenance attestations.
+- a test that denies access to the original wheel after admission and still completes through the admitted capability;
+- one public same-digest, different-tree wheel demonstration through that path;
+- a GitHub Action only after it emits the same stable evidence as the Rust API and cannot be confused with the canonical-consumer proof;
+- Sigstore keyless signing only after unsigned claim bytes and an independent verifier are stable. Release archives already carry GitHub build-provenance attestations.
 
 Done when one external consumer treats Sealr's admitted tree and semantic lock as its canonical decision and does not reparse the original ZIP. That is the [usefulness test](docs/usefulness.md). A receipt beside a second unzip does not pass.
 
