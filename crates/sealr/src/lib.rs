@@ -13,6 +13,7 @@ mod jail;
 mod materialize;
 mod outcome;
 mod policy;
+mod quota;
 mod snapshot;
 mod verified;
 mod zip;

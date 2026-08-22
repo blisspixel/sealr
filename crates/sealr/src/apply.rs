@@ -14,6 +14,7 @@ use crate::outcome::{
     VerificationStatus, ViewCompleteness,
 };
 use crate::policy::{hex_sha256, ratio_exceeds, Policy, ResourceBudget};
+use crate::quota::{QuotaError, QuotaState};
 use crate::snapshot::{SnapshotKind, SourceSnapshot};
 use crate::verified::VerifiedArchive;
 use crate::zip::{self, ZipMember};
@@ -428,7 +429,7 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
     let mut planned: Vec<(ZipMember, Vec<String>, Vec<NormalizationAction>)> = Vec::new();
     let mut dest_seen: BTreeMap<String, bool> = BTreeMap::new();
     let mut fold_seen: BTreeMap<String, bool> = BTreeMap::new();
-    let mut declared_total: u64 = 0;
+    let mut declared_total = QuotaState::new(budget.max_total_bytes);
 
     for m in parsed.members {
         if (m.flags & ZIP_ENCRYPTION_FLAGS) != 0 {
@@ -472,22 +473,22 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
                 continue;
             }
         }
-        declared_total = match declared_total.checked_add(m.uncomp_size) {
-            Some(total) => total,
-            None => {
+        match declared_total.consume(m.uncomp_size) {
+            Ok(_) => {}
+            Err(QuotaError::Overflow) => {
                 findings.push(Finding::error(
                     FindingCode::QuotaOverflow,
                     "declared uncompressed total overflowed u64",
                 ));
                 break;
             }
-        };
-        if declared_total > budget.max_total_bytes {
-            findings.push(Finding::error(
-                FindingCode::QuotaTotal,
-                "declared total too large",
-            ));
-            break;
+            Err(QuotaError::Exceeded { .. }) => {
+                findings.push(Finding::error(
+                    FindingCode::QuotaTotal,
+                    "declared total too large",
+                ));
+                break;
+            }
         }
 
         let mut actions = Vec::new();
@@ -592,7 +593,7 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
     }
     let planned_count = ir.members.len() as u64;
     let mut members_view = Vec::new();
-    let mut actual_total: u64 = 0;
+    let mut actual_total = QuotaState::new(budget.max_total_bytes);
     let mut materialization = initial_materialization;
     let mut stage = match req.dest {
         None => None,
@@ -691,36 +692,7 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
                 ));
             }
         };
-        let remaining = match budget.max_total_bytes.checked_sub(actual_total) {
-            Some(remaining) => remaining,
-            None => {
-                let finding =
-                    Finding::error(FindingCode::QuotaOverflow, "remaining total underflowed");
-                ir.members[index].mark_failed(finding.code.as_str());
-                findings.push(finding);
-                materialization = abort_and_report(&mut stage, &mut findings, materialization);
-                let cause = first_error(&findings);
-                let verified = members_view.len() as u64;
-                return Ok(with_ir(
-                    finish(
-                        (snapshot.path_owned(), source_digest, snapshot.kind()),
-                        "zip",
-                        policy,
-                        findings,
-                        members_view,
-                        materialization,
-                        SemanticAxes::admitted_verification_stop(
-                            verified,
-                            planned_count.saturating_sub(verified),
-                            &cause,
-                            write,
-                        ),
-                        identities_base.clone(),
-                    ),
-                    ir,
-                ));
-            }
-        };
+        let remaining = actual_total.remaining();
         let processed = if let Some(stage) = stage.as_ref() {
             stage
                 .create_file(&ir.members[index].components)
@@ -797,39 +769,42 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
                 ir,
             ));
         }
-        actual_total = match actual_total.checked_add(actual) {
-            Some(total) => total,
-            None => {
-                let finding = Finding::error(
+        if let Err(error) = actual_total.consume(actual) {
+            let finding = match error {
+                QuotaError::Overflow => Finding::error(
                     FindingCode::QuotaOverflow,
                     "actual uncompressed total overflowed u64",
-                )
-                .on(&ir.members[index].decoded_name);
-                ir.members[index].mark_failed(finding.code.as_str());
-                findings.push(finding);
-                materialization = abort_and_report(&mut stage, &mut findings, materialization);
-                let cause = first_error(&findings);
-                let verified = members_view.len() as u64;
-                return Ok(with_ir(
-                    finish(
-                        (snapshot.path_owned(), source_digest, snapshot.kind()),
-                        "zip",
-                        policy,
-                        findings,
-                        members_view,
-                        materialization,
-                        SemanticAxes::admitted_verification_stop(
-                            verified,
-                            planned_count.saturating_sub(verified),
-                            &cause,
-                            write,
-                        ),
-                        identities_base.clone(),
-                    ),
-                    ir,
-                ));
+                ),
+                QuotaError::Exceeded { .. } => Finding::error(
+                    FindingCode::QuotaTotal,
+                    "actual uncompressed total exceeded the archive cap",
+                ),
             }
-        };
+            .on(&ir.members[index].decoded_name);
+            ir.members[index].mark_failed(finding.code.as_str());
+            findings.push(finding);
+            materialization = abort_and_report(&mut stage, &mut findings, materialization);
+            let cause = first_error(&findings);
+            let verified = members_view.len() as u64;
+            return Ok(with_ir(
+                finish(
+                    (snapshot.path_owned(), source_digest, snapshot.kind()),
+                    "zip",
+                    policy,
+                    findings,
+                    members_view,
+                    materialization,
+                    SemanticAxes::admitted_verification_stop(
+                        verified,
+                        planned_count.saturating_sub(verified),
+                        &cause,
+                        write,
+                    ),
+                    identities_base.clone(),
+                ),
+                ir,
+            ));
+        }
         ir.members[index].mark_file_verified(actual, crc, sha);
         members_view.push(member_view(&ir.members[index]));
     }
@@ -961,41 +936,46 @@ pub(crate) fn process_member(
     remaining_total: u64,
     writer: &mut impl Write,
 ) -> Result<(u64, u32, String), Finding> {
-    let mut actual = 0_u64;
+    let mut actual = QuotaState::new(u64::MAX);
     let mut crc = Crc::new();
     let mut sha = Sha256::new();
     let mut consume = |chunk: &[u8]| -> Result<(), Finding> {
-        actual = actual.checked_add(chunk.len() as u64).ok_or_else(|| {
-            Finding::error(
-                FindingCode::QuotaOverflow,
-                "actual member size overflowed u64",
-            )
-        })?;
-        if actual > member.uncomp_size {
+        let actual_bytes = actual
+            .consume(chunk.len() as u64)
+            .map_err(|error| match error {
+                QuotaError::Overflow => Finding::error(
+                    FindingCode::QuotaOverflow,
+                    "actual member size overflowed u64",
+                ),
+                QuotaError::Exceeded { .. } => {
+                    unreachable!("u64::MAX quota cannot be exceeded without overflow")
+                }
+            })?;
+        if actual_bytes > member.uncomp_size {
             return Err(Finding::error(
                 FindingCode::QuotaDeclaredLie,
                 "actual bytes exceeded the declared uncompressed size",
             ));
         }
-        if actual > budget.max_member_bytes {
+        if actual_bytes > budget.max_member_bytes {
             return Err(Finding::error(
                 FindingCode::QuotaMember,
                 "actual bytes exceeded the member cap",
             ));
         }
-        if actual > remaining_total {
+        if actual_bytes > remaining_total {
             return Err(Finding::error(
                 FindingCode::QuotaTotal,
                 "actual bytes exceeded the remaining archive cap",
             ));
         }
         if let Some(max_ratio) = budget.max_ratio {
-            if ratio_exceeds(actual, member.comp_size, max_ratio) {
+            if ratio_exceeds(actual_bytes, member.comp_size, max_ratio) {
                 return Err(Finding::error(
                     FindingCode::QuotaRatio,
                     format!(
                         "actual {}:{} exceeded {max_ratio}:1",
-                        actual, member.comp_size
+                        actual_bytes, member.comp_size
                     ),
                 ));
             }
@@ -1039,7 +1019,7 @@ pub(crate) fn process_member(
                     ),
                 ));
             }
-            if decoder.total_out() != actual {
+            if decoder.total_out() != actual.used() {
                 return Err(Finding::error(
                     FindingCode::CodecDeflateInvalidStream,
                     "deflate output accounting disagreed with the verified byte count",
@@ -1053,6 +1033,7 @@ pub(crate) fn process_member(
             ));
         }
     }
+    let actual = actual.used();
     if actual != member.uncomp_size {
         return Err(Finding::error(
             FindingCode::QuotaDeclaredLie,
