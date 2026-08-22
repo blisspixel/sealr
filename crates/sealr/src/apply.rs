@@ -16,7 +16,7 @@ use crate::outcome::{
 use crate::policy::{hex_sha256, ratio_exceeds, Policy, ResourceBudget};
 use crate::quota::{QuotaError, QuotaState};
 use crate::snapshot::{SnapshotKind, SourceSnapshot};
-use crate::verified::VerifiedArchive;
+use crate::verified::{RetentionBuild, RetentionPlan, VerifiedArchive};
 use crate::zip::{self, ZipMember};
 use cap_std::fs::File as CapFile;
 use crc32fast::Hasher as Crc;
@@ -43,6 +43,34 @@ pub struct Request<'a> {
     pub source: Source<'a>,
     pub policy: &'a Policy,
     pub dest: Option<&'a Path>,
+}
+
+/// Optional capabilities requested for one archive operation.
+///
+/// Options do not participate in archive admission or policy identity. A
+/// retention request is independently bounded and reports its result through
+/// the resulting [`VerifiedArchive`].
+#[derive(Clone, Debug, Default)]
+pub struct ApplyOptions {
+    retention: Option<RetentionPlan>,
+}
+
+impl ApplyOptions {
+    /// Create options that request no additional capabilities.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Request the supplied bounded retention plan.
+    pub fn with_retention(mut self, plan: RetentionPlan) -> Self {
+        self.retention = Some(plan);
+        self
+    }
+
+    /// Return the requested retention plan, when present.
+    pub fn retention_plan(&self) -> Option<&RetentionPlan> {
+        self.retention.as_ref()
+    }
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -199,6 +227,13 @@ impl Outcome {
 }
 
 pub fn apply(req: Request<'_>) -> Outcome {
+    apply_with_options(req, &ApplyOptions::default())
+}
+
+/// Apply policy and optionally request independently bounded capabilities.
+///
+/// This has the same archive-admission and evidence semantics as [`apply`].
+pub fn apply_with_options(req: Request<'_>, options: &ApplyOptions) -> Outcome {
     let compiled = match req.policy.compile() {
         Ok(compiled) => compiled,
         Err(finding) => {
@@ -213,7 +248,7 @@ pub fn apply(req: Request<'_>) -> Outcome {
             );
         }
     };
-    match apply_inner(&req, compiled.budget) {
+    match apply_inner(&req, compiled.budget, options) {
         Ok(o) => o,
         Err(failure) => {
             let admission = if failure.finding.code == FindingCode::QuotaArchive {
@@ -321,7 +356,11 @@ fn read_source<'a>(
     }
 }
 
-fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, SourceFailure> {
+fn apply_inner(
+    req: &Request<'_>,
+    budget: ResourceBudget,
+    options: &ApplyOptions,
+) -> Result<Outcome, SourceFailure> {
     let policy = req.policy;
     let initial_materialization =
         MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
@@ -591,6 +630,7 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
             ir,
         ));
     }
+    let mut retention = RetentionBuild::plan(options.retention_plan(), &ir);
     let planned_count = ir.members.len() as u64;
     let mut members_view = Vec::new();
     let mut actual_total = QuotaState::new(budget.max_total_bytes);
@@ -663,6 +703,8 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
             continue;
         }
 
+        let canonical_path = ir.members[index].canonical_path.clone();
+        let mut capture = retention.begin_capture(&canonical_path);
         let zip_member = ir.members[index].as_zip_member();
         let payload = match zip::payload(&snapshot, &zip_member) {
             Ok(payload) => payload,
@@ -703,12 +745,18 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
                         budget,
                         remaining,
                         policy.atomic,
+                        capture.as_mut(),
                         file,
                     )
                 })
         } else {
-            let mut sink = io::sink();
-            process_member(payload, &zip_member, budget, remaining, &mut sink)
+            match capture.as_mut() {
+                Some(bytes) => process_member(payload, &zip_member, budget, remaining, bytes),
+                None => {
+                    let mut sink = io::sink();
+                    process_member(payload, &zip_member, budget, remaining, &mut sink)
+                }
+            }
         };
         let (actual, crc, sha) = match processed {
             Ok(result) => result,
@@ -805,6 +853,7 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
                 ir,
             ));
         }
+        retention.finish_capture(&canonical_path, capture);
         ir.members[index].mark_file_verified(actual, crc, sha);
         members_view.push(member_view(&ir.members[index]));
     }
@@ -816,7 +865,7 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
             materialization = abort_and_report(&mut stage, &mut findings, materialization);
             let cause = first_error(&findings);
             let source_meta = (snapshot.path_owned(), source_digest, snapshot.kind());
-            let archive = VerifiedArchive::new(snapshot, ir, budget);
+            let archive = VerifiedArchive::new(snapshot, ir, budget, retention);
             return Ok(with_verified_archive(
                 finish(
                     source_meta,
@@ -836,7 +885,7 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
             materialization = abort_and_report(&mut stage, &mut findings, materialization);
             let cause = first_error(&findings);
             let source_meta = (snapshot.path_owned(), source_digest, snapshot.kind());
-            let archive = VerifiedArchive::new(snapshot, ir, budget);
+            let archive = VerifiedArchive::new(snapshot, ir, budget, retention);
             return Ok(with_verified_archive(
                 finish(
                     source_meta,
@@ -854,7 +903,7 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
         materialization = materializer.report();
     }
     let source_meta = (snapshot.path_owned(), source_digest, snapshot.kind());
-    let archive = VerifiedArchive::new(snapshot, ir, budget);
+    let archive = VerifiedArchive::new(snapshot, ir, budget, retention);
     Ok(with_verified_archive(
         finish(
             source_meta,
@@ -915,9 +964,16 @@ fn process_member_to_file(
     budget: ResourceBudget,
     remaining_total: u64,
     member_sync: bool,
+    capture: Option<&mut Vec<u8>>,
     mut file: CapFile,
 ) -> Result<(u64, u32, String), Finding> {
-    let result = process_member(payload, member, budget, remaining_total, &mut file)?;
+    let result = {
+        let mut writer = RetainingWriter {
+            primary: &mut file,
+            capture,
+        };
+        process_member(payload, member, budget, remaining_total, &mut writer)?
+    };
     file.flush().map_err(|error| {
         Finding::error(FindingCode::MaterializeIo, format!("flush member: {error}"))
     })?;
@@ -929,6 +985,40 @@ fn process_member_to_file(
     Ok(result)
 }
 
+struct RetainingWriter<'a, W> {
+    primary: &'a mut W,
+    capture: Option<&'a mut Vec<u8>>,
+}
+
+impl<W: Write> Write for RetainingWriter<'_, W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let written = self.primary.write(bytes)?;
+        if let Some(capture) = self.capture.as_deref_mut() {
+            capture.extend_from_slice(&bytes[..written]);
+        }
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.primary.flush()
+    }
+}
+
+#[cfg(test)]
+thread_local! {
+    static PROCESS_MEMBER_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_process_member_calls() {
+    PROCESS_MEMBER_CALLS.with(|calls| calls.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn process_member_calls() -> u64 {
+    PROCESS_MEMBER_CALLS.with(std::cell::Cell::get)
+}
+
 pub(crate) fn process_member(
     payload: &[u8],
     member: &ZipMember,
@@ -936,6 +1026,9 @@ pub(crate) fn process_member(
     remaining_total: u64,
     writer: &mut impl Write,
 ) -> Result<(u64, u32, String), Finding> {
+    #[cfg(test)]
+    PROCESS_MEMBER_CALLS.with(|calls| calls.set(calls.get() + 1));
+
     let mut actual = QuotaState::new(u64::MAX);
     let mut crc = Crc::new();
     let mut sha = Sha256::new();
