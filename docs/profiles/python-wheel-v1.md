@@ -1,6 +1,6 @@
 # Python wheel consumer profile draft
 
-> Status: design and corpus plan only. Alpha.3 does not recognize wheels as a consumer type, parse wheel metadata, validate `RECORD`, or produce an installation plan. No finding or identity name on this page is a shipped contract.
+> Status: design and corpus plan only. Alpha.3 does not recognize wheels as a consumer type, parse wheel metadata, validate `RECORD`, or produce an installation plan. Current main has a generic opaque verified-member capability, but no wheel-specific rule or identity on this page is a shipped contract.
 
 The first consumer should force Sealr to prove its category: another tool receives one admitted representation and does not open the ZIP again. Python wheels are a strong target because wheel installation has archive semantics, package metadata, an internal content manifest, relocations, and target-dependent transformations.
 
@@ -38,6 +38,8 @@ The wheel evaluator consumes an opaque verified archive capability. It reads bou
 - treats a caller-constructed serializable IR as proof of admission.
 
 The verification pass may retain bounded semantic members such as `WHEEL`, `METADATA`, `RECORD`, and `entry_points.txt`, or provide verified reads from the immutable snapshot. The chosen mechanism must preserve one parse and one measured content result.
+
+Current main's `VerifiedArchive` is the first half of this boundary: it retains the snapshot and IR, prevents caller construction, enforces a per-read byte limit, and rechecks size, CRC32, and SHA-256 without another structural parse. It currently re-inflates a selected Deflate member for every read. The wheel profile therefore remains unpromoted until bounded semantic-member retention or equivalent reuse removes repeat inflation for its required metadata set.
 
 ## Container profile
 

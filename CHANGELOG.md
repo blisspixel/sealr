@@ -6,6 +6,12 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+### Added
+
+- Added the opaque `VerifiedArchive` capability for fully verified admitted outcomes. It retains the exact snapshot and verified IR, supports canonical-path lookup, and returns member bytes only after a caller-supplied limit and a second size, CRC32, and SHA-256 check pass.
+- Added a separate Cargo consumer that runs against the extracted packaged crate rather than the workspace source. The required quality job now exercises the intended packaged capability API end to end.
+- Added a finite-domain verified-member limit property over Store and Deflate payloads of 0 through 64 bytes and caller limits of 0 through 64. The test compares the API with the independent relation `limit >= measured_size` and checks every successful byte result.
+
 ### Changed
 
 - Reorganized the near-term roadmap into release-sized Alpha.4, Alpha.5, and Alpha.6 increments, started the assurance and wheel-consumer research lanes earlier, and added task-oriented planning documents and a documentation index.
@@ -13,6 +19,7 @@ The project is in initial development. Compatibility may change between preview 
 - Replaced the golden derived from a publicly constructible synthetic empty IR with the layout root of an actual canonical 22-byte empty ZIP. Added an exhaustive finite-domain compression-ratio check against an independent quotient-and-remainder oracle.
 - Made evolving receipt, view, finding, identity, snapshot-kind, and materialization outputs non-exhaustive. All public receipt field types are now nameable from the crate root, while the snapshot-dependent covering audit remains internal.
 - Added an external-crate public API fixture and a packaged-library verification step to the existing required quality job.
+- Successful borrowed-byte inputs are copied into process-owned storage when the verified capability is created. Path inputs transfer their already owned snapshot without another archive copy. Cloned capabilities share immutable authority.
 
 ### Fixed
 

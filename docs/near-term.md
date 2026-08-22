@@ -36,7 +36,7 @@ Version labels are delivery targets, not permission to cut a release with a red 
 
 Alpha.4 closes the contract before another public surface becomes accidental API.
 
-Current main has removed public `ArchiveIR` construction and mutation, exposed it through a read-only `Outcome` accessor, made evolving evidence outputs non-exhaustive and nameable, added an external-crate API fixture and packaged-library build gate, and added the first independent finite-domain ratio oracle. This is progress toward the adopter-safe boundary and property gates, not completion: the opaque verified capability, bounded member reads, remaining property families, and a downstream fixture that depends on the packaged artifact rather than the workspace source are still open.
+Current main has removed public `ArchiveIR` construction and mutation, exposed it through a read-only `Outcome` accessor, made evolving evidence outputs non-exhaustive and nameable, and added independent finite-domain ratio and verified-member limit oracles. It now also returns an opaque `VerifiedArchive` after complete verification, enforces a caller byte ceiling on canonical-path member reads, revalidates returned content, and runs a separate consumer against the extracted packaged crate. This is substantial progress toward the adopter-safe boundary and property gates, not completion: retained semantic-member caching, at least three more named property families, the new strict profile, identity verifier, and wheel compatibility report are still open.
 
 ### Semantic profile
 
@@ -53,6 +53,8 @@ Current main has removed public `ArchiveIR` construction and mutation, exposed i
 3. Keep `apply()` as the alpha compatibility facade while the capability API is evaluated.
 4. Replace direct construction of evolving configuration with validated constructors or builders. Mark evolving public enums and records non-exhaustive where exhaustive downstream matching is not part of the contract.
 5. Add a downstream compile fixture, packaged-crate build, rustdoc examples, and an explicit MSRV policy. Keep crates unpublished until this API review is complete.
+
+The first capability increment is now implemented on main. `VerifiedArchive` is Sealr-constructed, retains the exact in-memory snapshot and verified IR, and supports canonical-path reads with a caller-supplied maximum. Reads do not reopen a path or parse ZIP structure again; they currently re-inflate the selected member and compare its measured size, CRC32, and SHA-256 with the verified evidence before returning. The packaged consumer and Rust 1.98 MSRV policy are required-CI contracts. Avoiding repeat inflation through bounded retained semantic members remains a wheel-promotion gate, not a current claim.
 
 ### Executable conformance
 

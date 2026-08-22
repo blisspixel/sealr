@@ -40,6 +40,12 @@ The release matrix remains:
 - native 64-bit Windows tests and archive;
 - 32-bit Windows ABI compile check today; native 32-bit execution is a future gate when an explicitly supported runner is available.
 
+## Rust version policy
+
+The current minimum supported Rust version is 1.98. Package metadata declares `rust-version = "1.98"`, `rust-toolchain.toml` pins 1.98.0 for contributors, and required CI installs exactly 1.98.0 rather than relying on a moving stable channel.
+
+During the preview series, raising the MSRV requires an explicit changelog entry, package-metadata update, and green packaged-consumer build on the new minimum. After a stable 1.x release, patch releases do not raise the MSRV. A minor release may raise it only as a documented compatibility decision.
+
 ## Runtime dependency rule
 
 A new dependency in the shipped library or CLI needs:
@@ -53,7 +59,7 @@ A new dependency in the shipped library or CLI needs:
 
 Rust dependencies are locked and covered by repository license and advisory checks, and GitHub Actions are pinned by commit SHA. Runner-provided host tools are part of the documented CI environment but are not shipped runtime dependencies. Convenience alone does not justify adding an async runtime, terminal UI framework, network client, telemetry library, or second serialization stack to the release binary. Codec coverage does not justify libarchive, a vendor unarchiver, or a subprocess. Each new decompression crate is a trusted-computing-base change and is reviewed as such.
 
-The single required `CI` workflow verifies the library package with `cargo package --locked -p sealr` after tests, optimized builds, the README walkthrough, and rustdoc. This catches missing packaged files and package-only compilation failures while the crate remains intentionally unpublished. An external integration test separately compiles against the public crate boundary from outside the library module.
+The single required `CI` workflow verifies the library package with `cargo package --locked -p sealr` after tests, optimized builds, the README walkthrough, and rustdoc. It then runs `tests/packaged-consumer` against Cargo's extracted package directory. This catches missing packaged files, package-only compilation failures, accidental workspace-only APIs, and capability regressions while the crate remains intentionally unpublished. An external integration test also compiles against the public crate boundary from outside the library module.
 
 ## CLI rule
 

@@ -50,9 +50,11 @@ The architecture review produced useful priorities, speculative extensions, and 
 | Numeric risk scoring, permissive recovery, or best-effort interpretation | Rejected | These weaken deterministic, explainable, fail-closed admission. |
 | Malware, prompt-injection, model-identity, or credential governance in the core | Out of scope | Sealr establishes archive structure, resource, namespace, content-integrity, and provenance properties. |
 
-## Current alpha.3 baseline
+## Published alpha.3 and current-main baseline
 
 Alpha.3 has one Rust `apply()` path for inspect and materialize. It uses one bounded in-memory ZIP32 source: path inputs become owned bytes, while byte inputs are borrowed immutably for the call. It applies a strict ASCII path and ZIP interpretation, builds one `ArchiveIR`, verifies accepted Store and Deflate members, emits a view and unsigned receipt, and optionally realizes and audits the same planned members through a capability-relative staged materializer.
+
+Current main adds `VerifiedArchive` without changing that interpretation. A completely verified admitted outcome retains the exact snapshot and IR behind an opaque capability. Canonical member reads enforce a caller limit before allocation and recheck size, CRC32, and SHA-256. They do not reopen the input or run a second parser. The current implementation re-inflates a selected Deflate member for each read, so bounded retained semantic bytes and content-addressed reuse remain later work.
 
 The current public outcome is:
 

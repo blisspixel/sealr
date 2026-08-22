@@ -15,6 +15,7 @@ use crate::outcome::{
 };
 use crate::policy::{hex_sha256, ratio_exceeds, Policy, ResourceBudget};
 use crate::snapshot::{SnapshotKind, SourceSnapshot};
+use crate::verified::VerifiedArchive;
 use crate::zip::{self, ZipMember};
 use cap_std::fs::File as CapFile;
 use crc32fast::Hasher as Crc;
@@ -148,6 +149,9 @@ pub struct Outcome {
     /// Absent when ingest or structure failed before a tree existed.
     #[serde(skip)]
     archive_ir: Option<ArchiveIR>,
+    /// Opaque authority for bounded member reads after complete verification.
+    #[serde(skip)]
+    verified_archive: Option<VerifiedArchive>,
 }
 
 impl Outcome {
@@ -161,11 +165,23 @@ impl Outcome {
 
     /// Read-only interpreted archive evidence, when structure planning completed.
     ///
-    /// This value does not retain member bytes and is not an admitted or verified
-    /// capability. Consumers must not reopen the source ZIP and treat this view as
-    /// authority for those bytes.
+    /// This evidence view is available after planning. Only
+    /// [`Self::verified_archive`] grants authority to read verified member bytes.
     pub fn archive_ir(&self) -> Option<&ArchiveIR> {
-        self.archive_ir.as_ref()
+        self.verified_archive
+            .as_ref()
+            .map(VerifiedArchive::archive_ir)
+            .or(self.archive_ir.as_ref())
+    }
+
+    /// Opaque verified capability, available only after every member passes.
+    pub fn verified_archive(&self) -> Option<&VerifiedArchive> {
+        self.verified_archive.as_ref()
+    }
+
+    /// Consume the outcome and retain only its verified archive capability.
+    pub fn into_verified_archive(self) -> Option<VerifiedArchive> {
+        self.verified_archive
     }
 
     /// Process exit class: 0 admitted without effect failure, 2 not admitted, 3 admitted but effect failed.
@@ -824,9 +840,11 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
             findings.push(finding);
             materialization = abort_and_report(&mut stage, &mut findings, materialization);
             let cause = first_error(&findings);
-            return Ok(with_ir(
+            let source_meta = (snapshot.path_owned(), source_digest, snapshot.kind());
+            let archive = VerifiedArchive::new(snapshot, ir, budget);
+            return Ok(with_verified_archive(
                 finish(
-                    (snapshot.path_owned(), source_digest, snapshot.kind()),
+                    source_meta,
                     "zip",
                     policy,
                     findings,
@@ -835,16 +853,18 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
                     SemanticAxes::admitted_publication_failed(&cause),
                     identities_base.clone(),
                 ),
-                ir,
+                archive,
             ));
         }
         if let Err(finding) = materializer.commit() {
             findings.push(finding);
             materialization = abort_and_report(&mut stage, &mut findings, materialization);
             let cause = first_error(&findings);
-            return Ok(with_ir(
+            let source_meta = (snapshot.path_owned(), source_digest, snapshot.kind());
+            let archive = VerifiedArchive::new(snapshot, ir, budget);
+            return Ok(with_verified_archive(
                 finish(
-                    (snapshot.path_owned(), source_digest, snapshot.kind()),
+                    source_meta,
                     "zip",
                     policy,
                     findings,
@@ -853,14 +873,16 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
                     SemanticAxes::admitted_publication_failed(&cause),
                     identities_base.clone(),
                 ),
-                ir,
+                archive,
             ));
         }
         materialization = materializer.report();
     }
-    Ok(with_ir(
+    let source_meta = (snapshot.path_owned(), source_digest, snapshot.kind());
+    let archive = VerifiedArchive::new(snapshot, ir, budget);
+    Ok(with_verified_archive(
         finish(
-            (snapshot.path_owned(), source_digest, snapshot.kind()),
+            source_meta,
             "zip",
             policy,
             findings,
@@ -873,7 +895,7 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
             },
             identities_base.clone(),
         ),
-        ir,
+        archive,
     ))
 }
 
@@ -932,7 +954,7 @@ fn process_member_to_file(
     Ok(result)
 }
 
-fn process_member(
+pub(crate) fn process_member(
     payload: &[u8],
     member: &ZipMember,
     budget: ResourceBudget,
@@ -1138,6 +1160,7 @@ fn finish(
         receipt,
         view,
         archive_ir: None,
+        verified_archive: None,
     }
 }
 
@@ -1145,6 +1168,16 @@ fn with_ir(mut outcome: Outcome, ir: ArchiveIR) -> Outcome {
     outcome.receipt.identities =
         OutcomeIdentities::from_ir(outcome.receipt.source.clone(), &ir, &outcome.verification);
     outcome.archive_ir = Some(ir);
+    outcome
+}
+
+fn with_verified_archive(mut outcome: Outcome, archive: VerifiedArchive) -> Outcome {
+    outcome.receipt.identities = OutcomeIdentities::from_ir(
+        outcome.receipt.source.clone(),
+        archive.archive_ir(),
+        &outcome.verification,
+    );
+    outcome.verified_archive = Some(archive);
     outcome
 }
 
@@ -1427,7 +1460,8 @@ mod tests {
         assert_eq!(out.effect, EffectStatus::NotRequested);
         assert_eq!(out.receipt.schema, "sealr.receipt.v2");
         assert_eq!(out.receipt.source_snapshot, SnapshotKind::MemoryBorrowed);
-        let ir = out.archive_ir.as_ref().expect("admitted inspect has IR");
+        assert!(out.verified_archive().is_some());
+        let ir = out.archive_ir().expect("admitted inspect has IR");
         assert_eq!(ir.schema, crate::ir::ARCHIVE_IR_SCHEMA);
         assert_eq!(ir.profile, crate::ir::ZIP_STRICT_ASCII_V1);
         assert_eq!(out.cli_exit_code(), 0);
@@ -1619,8 +1653,8 @@ mod tests {
         assert_eq!(mat.verification, VerificationStatus::Complete);
         assert_eq!(mat.effect, EffectStatus::Committed);
         assert!(matches!(mat.verdict, Verdict::Allowed { wrote: true }));
-        let inspect_ir = inspect.archive_ir.as_ref().expect("inspect IR");
-        let mat_ir = mat.archive_ir.as_ref().expect("materialize IR");
+        let inspect_ir = inspect.archive_ir().expect("inspect IR");
+        let mat_ir = mat.archive_ir().expect("materialize IR");
         assert_eq!(inspect_ir.schema, mat_ir.schema);
         assert_eq!(inspect_ir.profile, mat_ir.profile);
         assert_eq!(inspect_ir.source_digest, mat_ir.source_digest);
@@ -1695,8 +1729,12 @@ mod tests {
         assert_eq!(out.admission, AdmissionStatus::Denied);
         assert_eq!(out.effect, EffectStatus::NotRequested);
         assert!(
-            out.archive_ir.is_none(),
+            out.archive_ir().is_none(),
             "denied archives must not publish an admitted IR"
+        );
+        assert!(
+            out.verified_archive().is_none(),
+            "denied archives must not expose verified authority"
         );
         assert!(
             out.receipt.identities.layout.hex().is_none(),
@@ -1874,7 +1912,11 @@ mod tests {
         assert_eq!(out.cli_exit_code(), 3);
         assert_eq!(out.view.admission, AdmissionStatus::Admitted);
         assert_eq!(out.view.effect, EffectStatus::Failed);
-        assert!(out.archive_ir.is_some());
+        assert!(out.archive_ir().is_some());
+        assert!(
+            out.verified_archive().is_none(),
+            "setup failure happens before member verification"
+        );
         assert!(
             out.receipt.identities.layout.hex().is_some(),
             "an admitted archive keeps its layout root when the destination fails"
@@ -1910,6 +1952,10 @@ mod tests {
         assert!(!dir.exists(), "rejected output must not become visible");
         assert_eq!(out.receipt.materialization.outcome, "aborted");
         assert_eq!(out.receipt.materialization.cleanup, "removed");
+        assert!(
+            out.verified_archive().is_none(),
+            "failed content verification must not expose authority"
+        );
     }
 
     #[test]
@@ -2211,7 +2257,7 @@ mod tests {
             dest: None,
         });
         assert!(!out.rejected(), "{:?}", out.view.findings);
-        let ir = out.archive_ir.as_ref().expect("admitted IR");
+        let ir = out.archive_ir().expect("admitted IR");
         assert!(ir.members[0].extra_fields.iter().any(|extra| {
             extra.id == 0x7855 && extra.disposition == crate::ir::ExtraDisposition::Ignored
         }));
@@ -2305,7 +2351,7 @@ mod tests {
             dest: None,
         });
         assert!(!out.rejected(), "{:?}", out.view.findings);
-        let ir = out.archive_ir.as_ref().expect("admitted IR");
+        let ir = out.archive_ir().expect("admitted IR");
         let directory = ir
             .members
             .iter()
@@ -2601,6 +2647,13 @@ mod tests {
         assert!(
             out.receipt.identities.content.hex().is_some(),
             "members were verified; publication failed on the staged-tree audit"
+        );
+        assert_eq!(
+            out.verified_archive()
+                .expect("effect failure preserves verified authority")
+                .read_member("hello.txt", 5)
+                .unwrap(),
+            b"hello"
         );
     }
 

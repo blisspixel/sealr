@@ -1,6 +1,6 @@
 # Testing, compatibility, and assurance
 
-> This page separates current evidence from the target assurance program. The published Alpha.3 has a deterministic Rust unit suite, strict cross-platform CI, cargo-deny policy, and a pinned 5,927-file ZipDiff construction gate. Current main adds the first independent finite-domain compression-ratio oracle. Broader property families, coverage-guided fuzzing, model checking, benign ecosystem measurement, an independent verifier, and an external audit remain future work.
+> This page separates current evidence from the target assurance program. The published Alpha.3 has a deterministic Rust unit suite, strict cross-platform CI, cargo-deny policy, and a pinned 5,927-file ZipDiff construction gate. Current main adds two finite-domain property families, an opaque bounded-read capability, and a consumer that runs against the extracted packaged crate. Broader property families, coverage-guided fuzzing, model checking, benign ecosystem measurement, an independent verifier, and an external audit remain future work.
 
 Trust is the scarce resource. Format breadth and acceleration follow stable semantics and measured compatibility.
 
@@ -9,10 +9,10 @@ Trust is the scarce resource. Format breadth and acceleration follow stable sema
 | Layer | Current evidence | Remaining work |
 |---|---|---|
 | Unit | ZIP path grammar, topology, overlap and layout, quotas, inspect/materialize equality, rollback, destination preservation, platform materializer controls, and deterministic truncation, mutation, and noise no-panic coverage | Expand for every new semantic state and backend |
-| Public API and package | External-crate fixture names receipt and view field types and exercises `apply()`; required quality CI verifies the packaged `sealr` crate | Add a separate temporary consumer that depends on the packaged artifact, then add semantic compatibility checks after publication |
+| Public API and package | External-crate fixture exercises evidence types and `VerifiedArchive`; a separate Cargo consumer runs against the extracted packaged crate in required quality CI | Add semantic compatibility checks after publication and retain bounded wheel metadata without repeat inflation |
 | Corpus | All 5,927 pinned ZipDiff constructions plus local generated adversarial fixtures | Add codec-boundary, source-race, consumer-profile, and ecosystem fixtures |
 | Differential | ZipDiff expectation gate binds strict rejection and a documented valid-control allowlist | Compare major consumers on well-formed profile inputs and track disagreement frontiers |
-| Property | Compression-ratio comparison exhaustively agrees with an independent quotient-and-remainder oracle for `uncomp` 0 through 255 and `comp` and `max_ratio` 0 through 64 | Add independent bounded models for ranges, remaining quotas, strict-profile path topology, and lifecycle transitions |
+| Property | Compression-ratio comparison exhaustively agrees with an independent quotient-and-remainder oracle for `uncomp` 0 through 255 and `comp` and `max_ratio` 0 through 64; verified-member limits agree with `limit >= measured_size` for Store and Deflate sizes and limits 0 through 64 | Add independent bounded models for ranges, remaining quotas, strict-profile path topology, and lifecycle transitions |
 | Fuzz | None yet | `cargo fuzz` targets for interpretation, canonical paths, and inspect-only `apply()` |
 | Executable specification | None yet | Compare production kernels with simpler independent bounded models |
 | Model checking | None yet | Add Kani harnesses with explicit domains, assumptions, and unwind bounds |
