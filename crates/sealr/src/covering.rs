@@ -313,7 +313,7 @@ mod tests {
             dest: None,
         });
         assert!(!out.rejected(), "{:?}", out.view.findings);
-        let ir = out.archive_ir.as_ref().unwrap();
+        let ir = out.archive_ir().unwrap();
         let snapshot = crate::snapshot::SourceSnapshot::borrowed(None, &bytes);
         audit_covering(&snapshot, ir).expect("covering should certify the snapshot");
     }
@@ -340,7 +340,7 @@ mod tests {
             dest: None,
         });
         assert!(!out.rejected(), "{:?}", out.view.findings);
-        out.archive_ir.expect("admitted inspect has IR")
+        out.archive_ir().cloned().expect("admitted inspect has IR")
     }
 
     fn covering_error(bytes: &[u8], ir: &ArchiveIR) -> Finding {

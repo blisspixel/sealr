@@ -120,6 +120,7 @@ pub struct EnvMeta {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[must_use = "archive outcomes contain the admission decision and evidence"]
 pub struct Outcome {
     pub interpretation: InterpretationStatus,
     pub admission: AdmissionStatus,
@@ -132,7 +133,7 @@ pub struct Outcome {
     /// Effect-independent ZIP interpretation when planning produced a member list.
     /// Absent when ingest or structure failed before a tree existed.
     #[serde(skip)]
-    pub archive_ir: Option<ArchiveIR>,
+    archive_ir: Option<ArchiveIR>,
 }
 
 impl Outcome {
@@ -142,6 +143,15 @@ impl Outcome {
 
     pub fn wrote(&self) -> bool {
         matches!(self.verdict, Verdict::Allowed { wrote: true })
+    }
+
+    /// Read-only interpreted archive evidence, when structure planning completed.
+    ///
+    /// This value does not retain member bytes and is not an admitted or verified
+    /// capability. Consumers must not reopen the source ZIP and treat this view as
+    /// authority for those bytes.
+    pub fn archive_ir(&self) -> Option<&ArchiveIR> {
+        self.archive_ir.as_ref()
     }
 
     /// Process exit class: 0 admitted without effect failure, 2 not admitted, 3 admitted but effect failed.

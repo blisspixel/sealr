@@ -18,8 +18,12 @@ const ALLOWED_SOURCE: &str = "580606f3b53229ab60ff1d786bac90c91f75c054269c11142c
 const REJECTED_SOURCE: &str = "5039cccff40a5df0d0b61a2734b5dafeb8224f914603cae870f1638990f58140";
 const PROFILE_DIGEST: &str = "da3a2145d48decf8f8995ea01f1ddd0adb587f7f3544d4642bb8bb07b8f039f5";
 
-/// SHA-256 of `sealr.tree.layout.v1 4\0` plus four zero bytes.
-const EMPTY_LAYOUT: &str = "71a337a4992b91092a55201b7cda79eb3ccc03b22af4d2289ff22d9ba97fa9f1";
+const EMPTY_ZIP: &[u8] = &[
+    0x50, 0x4b, 0x05, 0x06, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+];
+
+/// SHA-256 of the layout preimage for the canonical 22-byte empty ZIP.
+const EMPTY_LAYOUT: &str = "33415b1ed680a15e8c8b9e4794392736c8d998ca30200fe99b207b1cff279091";
 /// SHA-256 of `sealr.tree.content.v1 4\0` plus four zero bytes.
 const EMPTY_CONTENT: &str = "6d2beb70163bbde616d1693f7621d175fe40340e1fc2f38afa6c994c9920e407";
 
@@ -45,11 +49,28 @@ fn apply_bytes(bytes: &[u8], dest: Option<&std::path::Path>) -> sealr::Outcome {
 
 #[test]
 fn empty_tree_preimages_are_pinned() {
-    use sealr::{content_root, layout_root, ArchiveIR, SourceDigest};
-
-    let ir = ArchiveIR::new(SourceDigest::available("abc"), Vec::new());
-    pin("empty layout", layout_root(&ir).hex(), EMPTY_LAYOUT);
-    pin("empty content", content_root(&ir).hex(), EMPTY_CONTENT);
+    let inspect = apply_bytes(EMPTY_ZIP, None);
+    assert!(!inspect.rejected(), "{:?}", inspect.view.findings);
+    assert_eq!(inspect.admission, AdmissionStatus::Admitted);
+    assert_eq!(inspect.verification, VerificationStatus::Complete);
+    let ir = inspect.archive_ir().expect("empty ZIP has an IR");
+    assert_eq!(ir.schema(), "sealr.archive-ir.v1");
+    assert_eq!(ir.profile(), ZIP_STRICT_ASCII_V1);
+    assert_eq!(ir.profile_digest(), PROFILE_DIGEST);
+    assert!(ir.source_digest().is_available());
+    assert!(ir.members().is_empty());
+    assert_eq!(ir.covering().eocd.offset, 0);
+    assert_eq!(ir.covering().eocd.len, 22);
+    pin(
+        "empty layout",
+        inspect.receipt.identities.layout.hex(),
+        EMPTY_LAYOUT,
+    );
+    pin(
+        "empty content",
+        inspect.receipt.identities.content.hex(),
+        EMPTY_CONTENT,
+    );
     assert_ne!(EMPTY_LAYOUT, EMPTY_CONTENT);
 }
 

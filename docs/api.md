@@ -36,6 +36,11 @@ pub struct Outcome {
     pub view: View,                  // always; schema sealr.view.v1
 }
 
+impl Outcome {
+    /// Read-only interpretation evidence when structure planning completed.
+    pub fn archive_ir(&self) -> Option<&ArchiveIR>;
+}
+
 pub enum Verdict {
     /// Policy passed. `wrote` is true only after a requested destination commits.
     Allowed { wrote: bool },
@@ -56,6 +61,8 @@ Invariants:
 - After the complete source bytes are available, `receipt.source` is `{ "sha256": "..." }`. A source open, read, pre-read path-size rejection, or path growth beyond the bounded read uses `{ "status": "unavailable" }` and omits `sha256`. An over-cap `Source::Bytes` input is complete caller-owned data, so it is hashed. The inspectable view keeps the same digest object so `receipt.source` equals `view.source.digest`.
 - `receipt.source_snapshot` is `memory-owned` for accepted path inputs and `memory-borrowed` for caller byte slices, including an over-cap slice rejected before parsing. It is `unavailable` when no complete snapshot was retained. Parse and payload reads use that snapshot; they do not reopen the caller path.
 - The same source bytes, source metadata, and policy produce the same interpreted member tree and findings. Materialization may add an I/O finding, but it must not reinterpret archive bytes. **This is the LibreOffice bug we refuse:** inspect and materialize cannot disagree about the archive tree.
+
+`ArchiveIR` is constructed only by Sealr. Its fields cannot be mutated outside the crate, and evolving IR records and enums are non-exhaustive. `Outcome::archive_ir()` provides a read-only serializable evidence view after planning. It does not retain verified member bytes and is not the planned `AdmittedArchive` capability. A consumer cannot use it as permission to reopen the source through another ZIP parser.
 
 No second function that “recovers” a broken zip.
 
@@ -179,7 +186,7 @@ This target decomposition supports results that the current `Verdict` cannot exp
 - a future read-only projection reports a partial verification frontier;
 - a partial rejected view names the phase and cause at which construction stopped.
 
-These axes now exist as Rust types on `Outcome` and as JSON fields on `sealr.receipt.v2`. The inspectable `View` and CLI exit codes still use the compatibility `Verdict`. `SourceSnapshot` and `ArchiveIR` exist on the library outcome; type-state methods remain design notation.
+These axes now exist as Rust types on `Outcome` and as JSON fields on `sealr.receipt.v2`. The inspectable `View` and CLI exit codes still use the compatibility `Verdict`. `SourceSnapshot` exists internally and `ArchiveIR` is available as a read-only evidence view on the library outcome; type-state methods remain design notation.
 
 ### Type-state flow
 
@@ -195,7 +202,7 @@ verified.materialize(destination)?;
 verified.write_evidence(output)?;
 ```
 
-`SourceSnapshot` and `ArchiveIR` exist in alpha.3 as the ingest object and the inspect/materialize member plan. `AdmittedArchive` and the type-state methods remain design notation. Their required property is that every operation consumes one immutable interpretation and no operation reparses the original archive through another parser.
+`SourceSnapshot` and `ArchiveIR` exist in alpha.3 as the ingest object and the inspect/materialize member plan. The IR is no longer publicly constructible, but it still does not carry bounded access to verified member bytes. `AdmittedArchive` and the type-state methods remain design notation. Their required property is that every operation consumes one immutable interpretation and no operation reparses the original archive through another parser.
 
 ### Semantic identities
 

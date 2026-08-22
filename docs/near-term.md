@@ -36,6 +36,8 @@ Version labels are delivery targets, not permission to cut a release with a red 
 
 Alpha.4 closes the contract before another public surface becomes accidental API.
 
+Current main has removed public `ArchiveIR` construction and mutation, exposed it through a read-only `Outcome` accessor, marked its evolving records and enums non-exhaustive, and added the first independent finite-domain ratio oracle. This is progress toward the adopter-safe boundary and property gates, not completion: the opaque verified capability, bounded member reads, remaining property families, and downstream package fixture are still open.
+
 ### Semantic profile
 
 1. Build a reproducible benign wheel corpus before choosing the next extra-field policy. The acquisition manifest records artifact filename, URL, SHA-256, size, upload time, selection cohort, and provenance URL when available. Raw artifacts are not committed when redistribution is unclear.
