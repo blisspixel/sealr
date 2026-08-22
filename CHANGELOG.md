@@ -13,6 +13,7 @@ The project is in initial development. Compatibility may change between preview 
 - Added a finite-domain verified-member limit property over Store and Deflate payloads of 0 through 64 bytes and caller limits of 0 through 64. The test compares the API with the independent relation `limit >= measured_size` and checks every successful byte result.
 - Added `sealr.identity-conformance.v1` and a separate identity verifier with no dependency on the Sealr crate. Four cases bind exact source and profile bytes, semantic axes, findings, IR evidence, covering ranges, and preview roots. The verifier checks the claimed ZIP32 partition without discovery or inflation and independently reproduces three layout and three content roots.
 - Added exhaustive finite-domain checks for interval arithmetic and exact partitions. Offset-plus-length results are compared with a `u128` oracle over 4,624 boundary pairs, and 1,055,758 bounded interval lists are compared with an independent per-byte bitmap model.
+- Added a fifth finite-domain property family for atomic quota transitions. It compares 159,528 valid states and increments with independent `u128` arithmetic and confirms that overflow and cap failures leave accounting unchanged.
 
 ### Changed
 
@@ -23,6 +24,7 @@ The project is in initial development. Compatibility may change between preview 
 - Added an external-crate public API fixture and a packaged-library verification step to the existing required quality job.
 - Successful borrowed-byte inputs are copied into process-owned storage when the verified capability is created. Path inputs transfer their already owned snapshot without another archive copy. Cloned capabilities share immutable authority.
 - Unified ZIP discovery and codec-free covering audit on one pure checked half-open interval and exact-partition kernel. The audit now rejects offset-plus-length overflow before using an interval in adjacency or containment decisions.
+- Unified declared totals, actual totals, remaining capacity, and per-member byte counts on one pure quota transition. Successful updates are monotone, and failed updates cannot partially mutate the counter.
 
 ### Fixed
 

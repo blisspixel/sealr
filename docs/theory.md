@@ -293,7 +293,7 @@ Refuse even when they sound clever: consensus of N parsers in the hot path; a pr
 
 Do not mix these. A Kani harness on ranges is not a SHA-256 proof. A corpus gate is not Unique Covering.
 
-**Combinatorial, this year.** Adjacent covering lemma; CD exact consumption; exact-suffix EOCD choice as the max of a finite set; ASCII jail dest-prefix; path injectivity; length-delimited tree encodings are uniquely decodable; extra denylist; quota monotonicity.
+**Combinatorial, this year.** Adjacent covering lemma; CD exact consumption; exact-suffix EOCD choice as the max of a finite set; ASCII jail dest-prefix; path injectivity; length-delimited tree encodings are uniquely decodable; extra denylist; quota monotonicity. The current pure quota transition is compared with `u128` over 159,528 finite states and increments and preserves the previous state on overflow or cap failure. That is executable bounded evidence, not a proof over all transition traces.
 
 **Cryptographic assumptions.** SHA-256 collision and second-preimage resistance. Domain-separated labels so layout and content cannot share a preimage even if bodies collided across labels. CRC32 is not a CRHF. Hygiene: never hash unlabelled concatenations of variable-length fields; never mix profile bytes into tree bytes.
 
