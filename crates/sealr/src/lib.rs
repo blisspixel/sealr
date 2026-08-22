@@ -19,8 +19,8 @@ mod verified;
 mod zip;
 
 pub use apply::{
-    apply, EnvMeta, MemberView, Outcome, PolicyMeta, Receipt, Request, Source, SourceMeta,
-    ToolMeta, Verdict, View,
+    apply, apply_with_options, ApplyOptions, EnvMeta, MemberView, Outcome, PolicyMeta, Receipt,
+    Request, Source, SourceMeta, ToolMeta, Verdict, View,
 };
 pub use findings::{Finding, FindingCode, Severity};
 pub use identity::{content_root, layout_root, OutcomeIdentities, TreeRoot, TREE_ENCODING_ID};
@@ -37,4 +37,8 @@ pub use outcome::{
 };
 pub use policy::{hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget};
 pub use snapshot::SnapshotKind;
-pub use verified::{MemberReadError, MemberReadErrorKind, VerifiedArchive};
+pub use verified::{
+    MemberReadError, MemberReadErrorKind, RetentionPlan, RetentionPlanError,
+    RetentionPlanErrorKind, RetentionStatus, VerifiedArchive, MAX_RETENTION_PATHS,
+    MAX_RETENTION_PATH_BYTES, MAX_RETENTION_TOTAL_PATH_BYTES,
+};

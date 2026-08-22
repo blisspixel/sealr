@@ -1,4 +1,7 @@
-use sealr::{apply, MemberReadErrorKind, Policy, Request, Source, VerifiedArchive};
+use sealr::{
+    apply_with_options, ApplyOptions, MemberReadErrorKind, Policy, Request, RetentionPlan,
+    RetentionStatus, Source, VerifiedArchive,
+};
 
 // A canonical ZIP32 archive containing stored `hello.txt` with bytes `hello`.
 const HELLO_ZIP: &[u8] = &[
@@ -44,19 +47,34 @@ const HELLO_ZIP: &[u8] = &[
 
 fn main() {
     let policy = Policy::default_v1();
-    let outcome = apply(Request {
-        source: Source::Bytes {
-            path: Some("hello.zip"),
-            data: HELLO_ZIP,
+    let retention = RetentionPlan::new(5, 5)
+        .with_path("hello.txt")
+        .expect("canonical bounded path");
+    let options = ApplyOptions::new().with_retention(retention);
+    let outcome = apply_with_options(
+        Request {
+            source: Source::Bytes {
+                path: Some("hello.zip"),
+                data: HELLO_ZIP,
+            },
+            policy: &policy,
+            dest: None,
         },
-        policy: &policy,
-        dest: None,
-    });
+        &options,
+    );
 
     assert!(!outcome.rejected(), "{:?}", outcome.view.findings);
     let archive: &VerifiedArchive = outcome
         .verified_archive()
         .expect("admitted archive must expose verified authority");
+    assert_eq!(
+        archive.retention_status("hello.txt"),
+        RetentionStatus::Retained
+    );
+    assert_eq!(
+        archive.retained_member("hello.txt"),
+        Some(b"hello".as_slice())
+    );
     assert_eq!(archive.read_member("hello.txt", 5).unwrap(), b"hello");
     assert_eq!(
         archive.read_member("hello.txt", 4).unwrap_err().kind(),

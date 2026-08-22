@@ -198,8 +198,12 @@ The capability is opaque and cheap to clone. Clones share one immutable snapshot
 
 - `archive_ir()`, `members()`, and `member(path)` inspect Sealr-produced evidence;
 - `source_digest()` binds the capability to the exact ingested bytes;
+- `retention_status(path)` reports the result of an exact-path retention request;
+- `retained_member(path)` borrows bytes captured during the original verification pass without reopening, parsing, inflating, allocating, or hashing;
+- `retained_bytes()` reports the logical aggregate successfully retained content;
 - `read_member(canonical_path, max_bytes)` reads only regular files and checks the caller's limit before reserving memory;
-- every returned read uses the IR's recorded payload range and rechecks actual size, CRC32, and SHA-256 before returning bytes;
+- a non-retained read uses the IR's recorded payload range and rechecks actual size, CRC32, and SHA-256 before returning bytes;
+- a retained read through `read_member` still checks the caller limit, validates the retained length, and returns an owned copy;
 - absent paths, directories, caller-limit failures, platform or allocation limits, and internal integrity disagreement have distinct `MemberReadErrorKind` values.
 
 ```rust
@@ -210,7 +214,50 @@ let archive = outcome
 let metadata = archive.read_member("package.dist-info/METADATA", 256 * 1024)?;
 ```
 
-This path does not reopen the caller path or parse ZIP structure again. The current in-memory implementation re-inflates a selected Deflate member and revalidates it for each call. Bounded retention or content-addressed reuse is required before a wheel consumer may claim that repeated semantic reads avoid reinflation.
+This path does not reopen the caller path or parse ZIP structure again. Without an explicit retention request, the current in-memory implementation re-inflates a selected Deflate member and revalidates it for each call. The next section describes the opt-in path that avoids this repeated work for a small, known member set.
+
+### Bounded one-pass retention
+
+Callers that know the small semantic members they will need can request them before verification:
+
+```rust
+use sealr::{apply_with_options, ApplyOptions, RetentionPlan, RetentionStatus};
+
+let retention = RetentionPlan::new(256 * 1024, 1024 * 1024)
+    .with_path("package.dist-info/WHEEL")?
+    .with_path("package.dist-info/METADATA")?
+    .with_path("package.dist-info/RECORD")?;
+let options = ApplyOptions::new().with_retention(retention);
+let outcome = apply_with_options(request, &options);
+let archive = outcome
+    .verified_archive()
+    .ok_or("archive was not completely verified")?;
+
+if archive.retention_status("package.dist-info/METADATA")
+    != RetentionStatus::Retained
+{
+    return Err("required metadata was not retained".into());
+}
+let metadata = archive
+    .retained_member("package.dist-info/METADATA")
+    .ok_or("required metadata is unavailable")?;
+```
+
+`RetentionPlan` is deliberately not a general cache:
+
+- paths are exact, already-canonical archive paths, with no glob or fallback normalization;
+- the plan accepts at most 64 paths, each path is at most 4,096 bytes, and all path strings together are at most 16,384 bytes;
+- the caller sets both a maximum retained size for one member and a maximum aggregate retained size;
+- aggregate selection is deterministic in canonical-path order, independent of archive record order;
+- a duplicate request is idempotent and does not consume another path slot;
+- only regular files can be retained;
+- content storage is reserved fallibly before inflation and never grows beyond the verified declared size;
+- `NotFound`, `NotFile`, `MemberLimitExceeded`, `TotalLimitExceeded`, `PlatformLimit`, `AllocationFailed`, and defensive `IntegrityMismatch` results are observable without changing the archive verdict;
+- bytes become available only on a `VerifiedArchive`, after every archive member has passed verification.
+
+The retention limits are operation capabilities, not archive-admission policy. They do not change policy identity, receipt bytes, view bytes, tree identities, or the allow or reject result. A consumer that requires a retained member must inspect its `RetentionStatus` and fail its own higher-level evaluation when the status is not `Retained`. `apply(request)` is exactly the no-retention compatibility path.
+
+During inspect-only verification, selected bytes are the verification writer. During materialization, a bounded tee sends the same checked chunks to the staged file and selected buffer. There is no second codec invocation. Unselected or unsuccessfully retained members still support the ordinary caller-bounded `read_member` fallback, which re-inflates and revalidates from the immutable snapshot.
 
 ### Type-state flow
 

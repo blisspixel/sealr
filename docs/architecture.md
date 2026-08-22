@@ -19,10 +19,10 @@ The current input and interpretation boundary is:
 2. Locate and validate ZIP32 EOCD and the central directory.
 3. Compare redundant central and local metadata, validate source ranges, reject overlaps and hidden structural records, and apply the strict path grammar.
 4. If a destination was requested, create and retain its private stage after structural planning and before member processing.
-5. Stream accepted Store and Deflate content through resource bounds, exact DEFLATE input-consumption checks, actual size checks, CRC32, and SHA-256. Write the same verified bytes into the private stage when one exists.
+5. Stream accepted Store and Deflate content through resource bounds, exact DEFLATE input-consumption checks, actual size checks, CRC32, and SHA-256. Write the same verified bytes into the private stage when one exists and, when explicitly requested, into an independently bounded exact-member retention buffer.
 6. Audit the stage against the admitted IR with streaming size and SHA-256 verification plus an exact path-set comparison.
 7. Publish the complete stage without replacement only after every member and the audit pass. Abort and report cleanup on any member, audit, or publication failure.
-8. After complete verification, retain the exact snapshot and IR behind an opaque `VerifiedArchive`; bounded reads use recorded ranges and recheck measured content without reopening or reparsing.
+8. After complete verification, retain the exact snapshot and IR behind an opaque `VerifiedArchive`. Selected exact-path content captured in step 5 can be borrowed directly. Other bounded reads use recorded ranges and recheck measured content without reopening or reparsing.
 9. Emit the versioned view and deterministic unsigned receipt for the actual final outcome.
 
 Current support is seekable ZIP32 with Store and Deflate members plus validated data descriptors. Encryption, ZIP64, spanned archives, recovery parsing, recursive nested extraction, links, devices, and unsupported structures fail closed. The [README](../README.md) is authoritative for the complete support and limitation list.

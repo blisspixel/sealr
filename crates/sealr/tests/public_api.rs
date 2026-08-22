@@ -3,9 +3,9 @@
 use std::io::{Cursor, Write};
 
 use sealr::{
-    apply, EnvMeta, MaterializationMeta, MemberReadErrorKind, Outcome, OutcomeIdentities, Policy,
-    PolicyMeta, Receipt, Request, SnapshotKind, Source, SourceMeta, ToolMeta, VerifiedArchive,
-    View,
+    apply, apply_with_options, ApplyOptions, EnvMeta, MaterializationMeta, MemberReadErrorKind,
+    Outcome, OutcomeIdentities, Policy, PolicyMeta, Receipt, Request, RetentionPlan,
+    RetentionStatus, SnapshotKind, Source, SourceMeta, ToolMeta, VerifiedArchive, View,
 };
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
@@ -76,5 +76,34 @@ fn verified_capability_is_nameable_and_reads_without_reopening_the_source() {
     assert_eq!(
         archive.read_member("METADATA", 13).unwrap_err().kind(),
         MemberReadErrorKind::LimitExceeded
+    );
+}
+
+#[test]
+fn bounded_retention_is_available_to_downstream_consumers() {
+    let bytes = member_zip();
+    let policy = Policy::default_v1();
+    let plan = RetentionPlan::new(14, 14).with_path("METADATA").unwrap();
+    let options = ApplyOptions::new().with_retention(plan);
+    let outcome = apply_with_options(
+        Request {
+            source: Source::Bytes {
+                path: Some("example.whl"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: None,
+        },
+        &options,
+    );
+
+    let archive = outcome.verified_archive().expect("verified capability");
+    assert_eq!(
+        archive.retention_status("METADATA"),
+        RetentionStatus::Retained
+    );
+    assert_eq!(
+        archive.retained_member("METADATA"),
+        Some(b"Name: example\n".as_slice())
     );
 }

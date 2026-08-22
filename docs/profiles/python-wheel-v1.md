@@ -37,9 +37,9 @@ The wheel evaluator consumes an opaque verified archive capability. It reads bou
 - inflates one member again through a second interpretation;
 - treats a caller-constructed serializable IR as proof of admission.
 
-The verification pass may retain bounded semantic members such as `WHEEL`, `METADATA`, `RECORD`, and `entry_points.txt`, or provide verified reads from the immutable snapshot. The chosen mechanism must preserve one parse and one measured content result.
+The verification pass can retain bounded semantic members such as `WHEEL`, `METADATA`, `RECORD`, and `entry_points.txt`, or provide verified reads from the immutable snapshot. The chosen mechanism must preserve one parse and one measured content result.
 
-Current main's `VerifiedArchive` is the first half of this boundary: it retains the snapshot and IR, prevents caller construction, enforces a per-read byte limit, and rechecks size, CRC32, and SHA-256 without another structural parse. It currently re-inflates a selected Deflate member for every read. The wheel profile therefore remains unpromoted until bounded semantic-member retention or equivalent reuse removes repeat inflation for its required metadata set.
+Current main now supplies the generic mechanism for both halves of this boundary. `VerifiedArchive` retains the snapshot and IR, prevents caller construction, and supports caller-bounded revalidated reads. `RetentionPlan` selects an exact canonical path set under independent per-member and aggregate content limits; `apply_with_options` captures successful selections during the original checked stream. The wheel profile remains unpromoted because a wheel-aware selector, metadata parser, `RECORD` bijection, wheel-specific budgets, and consumer identities do not yet exist.
 
 ## Container profile
 
