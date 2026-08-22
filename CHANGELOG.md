@@ -11,12 +11,15 @@ The project is in initial development. Compatibility may change between preview 
 - Reorganized the near-term roadmap into release-sized Alpha.4, Alpha.5, and Alpha.6 increments, started the assurance and wheel-consumer research lanes earlier, and added task-oriented planning documents and a documentation index.
 - Made `ArchiveIR` a read-only, Sealr-constructed evidence view exposed through `Outcome::archive_ir()`. Its evolving records and enums are non-exhaustive, internal state transitions are no longer public, and ignored `Outcome` values now produce a compiler warning.
 - Replaced the golden derived from a publicly constructible synthetic empty IR with the layout root of an actual canonical 22-byte empty ZIP. Added an exhaustive finite-domain compression-ratio check against an independent quotient-and-remainder oracle.
+- Made evolving receipt, view, finding, identity, snapshot-kind, and materialization outputs non-exhaustive. All public receipt field types are now nameable from the crate root, while the snapshot-dependent covering audit remains internal.
+- Added an external-crate public API fixture and a packaged-library verification step to the existing required quality job.
 
 ### Fixed
 
 - ZIP64 entry-count sentinels now report `zip.diff.c5_zip64` before policy quota evaluation instead of being misclassified as `quota.files` under the default cap.
 - File-count enforcement now bounds the number of central headers actually parsed, even when the EOCD understates it, and compares the parsed count to the EOCD without a truncating `usize` to `u16` cast.
 - Local-header bounds use checked offset arithmetic, so a hostile near-`usize::MAX` offset returns `zip.diff.c4_offset` instead of overflowing before the bounds check on narrower targets or debug builds.
+- The default encryption denial now covers traditional encryption bit 0, strong-encryption bit 6, and masked-header bit 13. A matching LFH/CDH flag pair can no longer bypass `encrypted = "deny"` by omitting bit 0.
 
 ## [0.1.0-alpha.3] - 2026-08-22
 

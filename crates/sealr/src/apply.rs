@@ -22,7 +22,12 @@ use flate2::bufread::DeflateDecoder;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+// PKWARE APPNOTE 4.4.4: traditional encryption, strong encryption, and
+// central-directory encryption with masked local-header values.
+const ZIP_ENCRYPTION_FLAGS: u16 = (1 << 0) | (1 << 6) | (1 << 13);
+
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub enum Source<'a> {
     Path(&'a Path),
     Bytes {
@@ -39,12 +44,14 @@ pub struct Request<'a> {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[non_exhaustive]
 pub enum Verdict {
     Allowed { wrote: bool },
     Rejected,
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[non_exhaustive]
 pub struct MemberView {
     pub path: String,
     pub kind: &'static str,
@@ -56,6 +63,7 @@ pub struct MemberView {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[non_exhaustive]
 pub struct View {
     pub schema: &'static str,
     pub source: SourceMeta,
@@ -72,6 +80,7 @@ pub struct View {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[non_exhaustive]
 pub struct SourceMeta {
     pub path: Option<String>,
     pub digest: SourceDigest,
@@ -79,12 +88,14 @@ pub struct SourceMeta {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[non_exhaustive]
 pub struct PolicyMeta {
     pub id: String,
     pub digest: DigestHex,
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[non_exhaustive]
 pub struct Receipt {
     pub schema: &'static str,
     pub verdict: &'static str,
@@ -107,12 +118,14 @@ pub struct Receipt {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[non_exhaustive]
 pub struct ToolMeta {
     pub name: &'static str,
     pub version: &'static str,
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[non_exhaustive]
 pub struct EnvMeta {
     pub os: &'static str,
     pub arch: &'static str,
@@ -121,6 +134,7 @@ pub struct EnvMeta {
 
 #[derive(Clone, Debug, Serialize)]
 #[must_use = "archive outcomes contain the admission decision and evidence"]
+#[non_exhaustive]
 pub struct Outcome {
     pub interpretation: InterpretationStatus,
     pub admission: AdmissionStatus,
@@ -401,9 +415,14 @@ fn apply_inner(req: &Request<'_>, budget: ResourceBudget) -> Result<Outcome, Sou
     let mut declared_total: u64 = 0;
 
     for m in parsed.members {
-        if (m.flags & 1) != 0 {
-            findings
-                .push(Finding::error(FindingCode::ZipEncrypted, "encrypted member").on(&m.name));
+        if (m.flags & ZIP_ENCRYPTION_FLAGS) != 0 {
+            findings.push(
+                Finding::error(
+                    FindingCode::ZipEncrypted,
+                    format!("encryption-related general-purpose flags 0x{:04x}", m.flags),
+                )
+                .on(&m.name),
+            );
             continue;
         }
         if m.method != 0 && m.method != 8 {
@@ -1299,6 +1318,15 @@ mod tests {
         bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
     }
 
+    fn add_matching_flags(bytes: &mut [u8], flags: u16) {
+        let local = signature_offsets(bytes, [0x50, 0x4b, 0x03, 0x04]);
+        let central = signature_offsets(bytes, [0x50, 0x4b, 0x01, 0x02]);
+        assert_eq!(local.len(), 1);
+        assert_eq!(central.len(), 1);
+        put_u16(bytes, local[0] + 6, u16_at(bytes, local[0] + 6) | flags);
+        put_u16(bytes, central[0] + 8, u16_at(bytes, central[0] + 8) | flags);
+    }
+
     fn extend_declared_deflate_payload(bytes: &mut Vec<u8>, suffix: &[u8]) {
         let local_headers = signature_offsets(bytes, [0x50, 0x4b, 0x03, 0x04]);
         let central_headers = signature_offsets(bytes, [0x50, 0x4b, 0x01, 0x02]);
@@ -1699,6 +1727,37 @@ mod tests {
             .findings
             .iter()
             .any(|f| f.code == FindingCode::PathAds));
+    }
+
+    #[test]
+    fn encryption_related_flags_cannot_bypass_the_deny_policy() {
+        for (label, flag) in [
+            ("traditional", 1 << 0),
+            ("strong", 1 << 6),
+            ("masked-header", 1 << 13),
+        ] {
+            let mut bytes = make_zip(&[("secret.txt", b"plaintext")]);
+            add_matching_flags(&mut bytes, flag);
+            let policy = Policy::default_v1();
+            let out = apply(Request {
+                source: Source::Bytes {
+                    path: Some("encrypted-indicator.zip"),
+                    data: &bytes,
+                },
+                policy: &policy,
+                dest: None,
+            });
+
+            assert!(out.rejected(), "{label} flag was admitted");
+            assert!(
+                out.view
+                    .findings
+                    .iter()
+                    .any(|finding| finding.code == FindingCode::ZipEncrypted),
+                "{label} flag findings: {:?}",
+                out.view.findings
+            );
+        }
     }
 
     #[test]

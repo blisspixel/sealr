@@ -54,7 +54,7 @@ IDs are from the paper §5.2. `#` = new or newly extended by You et al.
 | A2 | File size confusion `#` | Compressed/uncompressed size in CDH, LFH, data descriptor, one or more ZIP64 extras | **Never trust declared size.** Measure actual bytes. Deny if any declared size used for allocation disagrees with actual, or if CDH/LFH/descriptor/ZIP64 sizes disagree. Finding `zip.diff.a2_size`. |
 | A3 | Filename confusion `#` | CDH name vs LFH name vs Info-ZIP Unicode Path extra (UP), version/CRC32/flag 11 games | **CD-first.** Raw LFH and CDH names must match. Alternate Unicode Path extras are rejected until one canonical Unicode representation exists. Finding `zip.diff.a3_name`. |
 | A4 | Fake directory `#` | Trailing `/` vs `\`, external attributes (DOS vs Unix), `version made by` | `/` and zero sizes define a directory, and external type attributes must not contradict it. Backslash and non-regular external types are rejected. Finding `zip.diff.a4_dir`. |
-| A5 | Fake encryption `#` | Encrypted flag in CDH vs LFH; “first member encrypted ⇒ skip archive” | Encrypted members **refuse** (policy). CDH/LFH encryption flags MUST agree. Finding `zip.diff.a5_crypt`. |
+| A5 | Fake encryption `#` | Encryption-related flags in CDH vs LFH; “first member encrypted ⇒ skip archive”; strong-encryption or masked-header bits without the traditional bit | CDH/LFH flags MUST agree. Admission refuses traditional bit 0, strong-encryption bit 6, and masked-header bit 13. Findings `zip.diff.a5_crypt` and `zip.encrypted`. |
 
 CRC32 is **not** authentication (paper: easy to pad while preserving CRC). We still verify it. We do not treat it as a signature. SHA-256 is the current cryptographic content digest. BLAKE3 is not implemented.
 

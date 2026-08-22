@@ -36,7 +36,7 @@ Version labels are delivery targets, not permission to cut a release with a red 
 
 Alpha.4 closes the contract before another public surface becomes accidental API.
 
-Current main has removed public `ArchiveIR` construction and mutation, exposed it through a read-only `Outcome` accessor, marked its evolving records and enums non-exhaustive, and added the first independent finite-domain ratio oracle. This is progress toward the adopter-safe boundary and property gates, not completion: the opaque verified capability, bounded member reads, remaining property families, and downstream package fixture are still open.
+Current main has removed public `ArchiveIR` construction and mutation, exposed it through a read-only `Outcome` accessor, made evolving evidence outputs non-exhaustive and nameable, added an external-crate API fixture and packaged-library build gate, and added the first independent finite-domain ratio oracle. This is progress toward the adopter-safe boundary and property gates, not completion: the opaque verified capability, bounded member reads, remaining property families, and a downstream fixture that depends on the packaged artifact rather than the workspace source are still open.
 
 ### Semantic profile
 

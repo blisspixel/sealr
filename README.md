@@ -39,7 +39,7 @@ Every outcome contains:
 The current Rust implementation supports classic ZIP32 archives with stored or Deflate members.
 
 - CD-first parsing with exact EOCD, central-directory, local-header, and data-descriptor agreement.
-- Rejection of hidden stream records, unreferenced layout bytes, overlapping records, spanned archives, ZIP64, encryption, unsupported methods, and mismatched flags or metadata.
+- Rejection of hidden stream records, unreferenced layout bytes, overlapping records, spanned archives, ZIP64, traditional or strong encryption indicators, masked headers, unsupported methods, and mismatched flags or metadata.
 - Pure lexical path jailing for absolute paths, parent traversal, ADS colons, reserved Windows names, trailing dots and spaces, control characters, empty components, depth, duplicates, case-fold collisions, and file/directory topology conflicts.
 - Strict filename handling. Invalid UTF-8 and non-ASCII CP437 names are rejected until the canonical Unicode path design is complete.
 - Bounded source reads, metadata, file count, declared and actual member size, total expanded size, and declared and actual compression ratio.
@@ -47,7 +47,7 @@ The current Rust implementation supports classic ZIP32 archives with stored or D
 - Component-bound, same-volume staging with 128-bit random names. Every member component is opened no-follow from a retained directory handle, files use create-new handles, and the requested destination is published with native no-replace semantics only after every member passes.
 - Deterministic JSON view and versioned unsigned receipt on allow and reject paths. Receipts record the materializer backend, stage mode, stage-creation primitive, component-resolution guarantee, durability, publication primitive, outcome, and cleanup state.
 - A pinned 5,927-file, 14-class ZipDiff construction gate with a deterministically generated aggregate corpus digest, exact finding-count expectations, and an explicit 73-file control allowlist.
-- An adversarial unit suite, strict Clippy, rustfmt, documentation checks, cross-platform tests, and cargo-deny policy in CI.
+- An adversarial unit suite, an external-crate API fixture, packaged-library verification, strict Clippy, rustfmt, documentation checks, cross-platform tests, and cargo-deny policy in CI.
 
 ## Security limitations
 

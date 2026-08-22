@@ -177,6 +177,7 @@ fn apply_injected_stage_mutation(stage: &Path) {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub struct MaterializationMeta {
     pub schema: &'static str,
     pub requested: bool,
@@ -193,6 +194,7 @@ pub struct MaterializationMeta {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
 pub struct WindowsMaterializationEvidence {
     pub storage_policy: &'static str,
     pub filesystem: Option<String>,

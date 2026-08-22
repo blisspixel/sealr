@@ -1,8 +1,8 @@
 # API contract
 
-This page distinguishes the implemented alpha.3 contract from the target semantic API. Current callers must pin to the implemented section. The target is specified further in [semantic-model.md](semantic-model.md).
+This page distinguishes the published alpha.3 contract plus compatible hardening on current main from the target semantic API. Current callers must pin to the implemented section. The target is specified further in [semantic-model.md](semantic-model.md).
 
-## Implemented in alpha.3
+## Implemented surface
 
 ```
 UntrustedArchive x Policy
@@ -63,6 +63,8 @@ Invariants:
 - The same source bytes, source metadata, and policy produce the same interpreted member tree and findings. Materialization may add an I/O finding, but it must not reinterpret archive bytes. **This is the LibreOffice bug we refuse:** inspect and materialize cannot disagree about the archive tree.
 
 `ArchiveIR` is constructed only by Sealr. Its fields cannot be mutated outside the crate, and evolving IR records and enums are non-exhaustive. `Outcome::archive_ir()` provides a read-only serializable evidence view after planning. It does not retain verified member bytes and is not the planned `AdmittedArchive` capability. A consumer cannot use it as permission to reopen the source through another ZIP parser.
+
+Evolving output enums and records are non-exhaustive so the preview API can add evidence without forcing downstream exhaustive matches or permitting caller-constructed receipts. Every public field type in `View` and `Receipt`, including `SourceMeta`, `PolicyMeta`, `ToolMeta`, `EnvMeta`, and `SnapshotKind`, is exported from the crate root and exercised by an external-crate compile fixture. `Request` remains directly constructible for the current compatibility facade.
 
 No second function that “recovers” a broken zip.
 
@@ -161,7 +163,7 @@ On reject, `members` in the view may be partial; `view_digest` still covers exac
 - `interpretation` binds `sealr.profile.zip.strict-ascii.v1` and the SHA-256 of that profile's method, flag, extra-field, and name rules.
 - `layout` is `sealrTreeV1` over canonical paths, kinds, raw names, flags, methods, declared sizes, complete local-header, payload, optional-descriptor, and central-header ranges, extra-field dispositions, and normalization actions. It is present once an `ArchiveIR` exists. It is `{ "status": "unavailable" }` when planning never produced a tree.
 - `content` is `sealrTreeV1` over canonical paths, kinds, actual sizes, and member SHA-256 digests. It is present only when verification is complete. An admitted archive whose destination fails keeps its layout root and does not claim a content root until members are verified.
-- Layout and content encodings are Git-style domain-separated preimages (`sealr.tree.layout.v1` and `sealr.tree.content.v1`) over little-endian length-prefixed covering ranges and member records. They do not use JSON, so they are independent of `view_digest` and of later RFC 8785 work. The interpretation profile is a sibling identity, not mixed into the tree bytes. Empty-tree and walkthrough-fixture roots are pinned in `crates/sealr/tests/golden_identity.rs` so Linux, macOS, and Windows cannot silently diverge. Layout identity includes the source covering (local prefix, central directory, EOCD, comment). Content identity does not. `audit_covering` rechecks that covering against the snapshot without inflating; materialization audits the staged tree against the same IR before publication.
+- Layout and content encodings are Git-style domain-separated preimages (`sealr.tree.layout.v1` and `sealr.tree.content.v1`) over little-endian length-prefixed covering ranges and member records. They do not use JSON, so they are independent of `view_digest` and of later RFC 8785 work. The interpretation profile is a sibling identity, not mixed into the tree bytes. Empty-tree and walkthrough-fixture roots are pinned in `crates/sealr/tests/golden_identity.rs` so Linux, macOS, and Windows cannot silently diverge. Layout identity includes the source covering (local prefix, central directory, EOCD, comment). Content identity does not. An internal codec-free audit rechecks that covering against the snapshot without inflating; materialization audits the staged tree against the same IR before publication.
 
 ## Target semantic API
 

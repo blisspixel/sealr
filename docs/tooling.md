@@ -53,6 +53,8 @@ A new dependency in the shipped library or CLI needs:
 
 Rust dependencies are locked and covered by repository license and advisory checks, and GitHub Actions are pinned by commit SHA. Runner-provided host tools are part of the documented CI environment but are not shipped runtime dependencies. Convenience alone does not justify adding an async runtime, terminal UI framework, network client, telemetry library, or second serialization stack to the release binary. Codec coverage does not justify libarchive, a vendor unarchiver, or a subprocess. Each new decompression crate is a trusted-computing-base change and is reviewed as such.
 
+The single required `CI` workflow verifies the library package with `cargo package --locked -p sealr` after tests, optimized builds, the README walkthrough, and rustdoc. This catches missing packaged files and package-only compilation failures while the crate remains intentionally unpublished. An external integration test separately compiles against the public crate boundary from outside the library module.
+
 ## CLI rule
 
 The CLI is a thin presentation layer over typed library outcomes. Human formatting can improve, but machine JSON, rule identities, and exit classes remain versioned contracts. No UI dependency may become a second policy engine or parser.
