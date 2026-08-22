@@ -188,7 +188,29 @@ This target decomposition supports results that the current `Verdict` cannot exp
 - a future read-only projection reports a partial verification frontier;
 - a partial rejected view names the phase and cause at which construction stopped.
 
-These axes now exist as Rust types on `Outcome` and as JSON fields on `sealr.receipt.v2`. The inspectable `View` and CLI exit codes still use the compatibility `Verdict`. `SourceSnapshot` exists internally and `ArchiveIR` is available as a read-only evidence view on the library outcome; type-state methods remain design notation.
+These axes now exist as Rust types on `Outcome` and as JSON fields on `sealr.receipt.v2`. The inspectable `View` and CLI exit codes still use the compatibility `Verdict`. `SourceSnapshot` exists internally and `ArchiveIR` is available as a read-only evidence view on the library outcome. A completely verified admitted outcome also exposes `VerifiedArchive`; the broader type-state methods remain design notation.
+
+### Verified member capability
+
+`Outcome::verified_archive()` returns `Some(&VerifiedArchive)` only when admission succeeded and every member was verified. Structure-only and partially verified outcomes never receive the capability. `Outcome::into_verified_archive()` lets a consumer discard the larger outcome after it has persisted whatever evidence it needs.
+
+The capability is opaque and cheap to clone. Clones share one immutable snapshot and IR. Its public operations are intentionally narrow:
+
+- `archive_ir()`, `members()`, and `member(path)` inspect Sealr-produced evidence;
+- `source_digest()` binds the capability to the exact ingested bytes;
+- `read_member(canonical_path, max_bytes)` reads only regular files and checks the caller's limit before reserving memory;
+- every returned read uses the IR's recorded payload range and rechecks actual size, CRC32, and SHA-256 before returning bytes;
+- absent paths, directories, caller-limit failures, platform or allocation limits, and internal integrity disagreement have distinct `MemberReadErrorKind` values.
+
+```rust
+let outcome = sealr::apply(request);
+let archive = outcome
+    .verified_archive()
+    .ok_or("archive was not completely verified")?;
+let metadata = archive.read_member("package.dist-info/METADATA", 256 * 1024)?;
+```
+
+This path does not reopen the caller path or parse ZIP structure again. The current in-memory implementation re-inflates a selected Deflate member and revalidates it for each call. Bounded retention or content-addressed reuse is required before a wheel consumer may claim that repeated semantic reads avoid reinflation.
 
 ### Type-state flow
 
@@ -204,7 +226,11 @@ verified.materialize(destination)?;
 verified.write_evidence(output)?;
 ```
 
-`SourceSnapshot` and `ArchiveIR` exist in alpha.3 as the ingest object and the inspect/materialize member plan. The IR is no longer publicly constructible, but it still does not carry bounded access to verified member bytes. `AdmittedArchive` and the type-state methods remain design notation. Their required property is that every operation consumes one immutable interpretation and no operation reparses the original archive through another parser.
+`SourceSnapshot` and `ArchiveIR` landed in alpha.3 as the ingest object and the inspect/materialize member plan. Current main adds `VerifiedArchive` as the first concrete verified type-state result while preserving `apply()` as the compatibility facade. `AdmittedArchive` and the earlier transition methods remain design notation. Their required property is that every operation consumes one immutable interpretation and no operation reparses the original archive through another parser.
+
+### Rust compatibility
+
+The current MSRV is Rust 1.98, declared by the package `rust-version` and exercised as exact Rust 1.98.0 in CI. Preview releases may raise it only with a changelog entry and corresponding metadata update. Once a stable 1.x line exists, patch releases will not raise the MSRV.
 
 ### Semantic identities
 

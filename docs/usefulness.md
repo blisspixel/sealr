@@ -17,6 +17,8 @@ the next tool consumes that admitted tree
 
 If something still reparses the archive, the receipt is just a receipt and the category has not been proven. Wheel admission is the first consumer that would prove it.
 
+Current main now supplies the first generic `VerifiedArchive` capability and proves through a packaged consumer that member bytes remain available after the caller's original slice is changed. That closes the reopen and second-parser gap for this API path. It does not yet pass the usefulness test: no wheel evaluator or external installer consumes it, and current reads re-inflate the selected member instead of retaining bounded semantic bytes.
+
 Until then, keep the ZIP32 path strict, fail closed, and do not add TAR, 7z, or a desktop CLI as a substitute for a dependent.
 
 ## Checklist

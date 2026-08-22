@@ -38,7 +38,7 @@ Pipelines that matter for us:
 | Agent `inspect` → host `materialize` | **Our** dual API; we must not be two parsers |
 | Scanner (libarchive) → sealr | We must not be the second interpretation |
 
-**Invariant for this engine:** current inspect and materialize share one interpretation. Any future projection or mount MUST consume that same interpretation. A recovery or streaming parser MUST NOT provide a second display or effect meaning.
+**Invariant for this engine:** current inspect, materialize, and verified-member reads share one interpretation. `VerifiedArchive` retains the exact snapshot and IR, and its path-input regression deletes the original archive before reading. Any future projection or mount MUST consume that same interpretation. A recovery or streaming parser MUST NOT provide a second display or effect meaning.
 
 ---
 

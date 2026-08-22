@@ -13,6 +13,7 @@ mod materialize;
 mod outcome;
 mod policy;
 mod snapshot;
+mod verified;
 mod zip;
 
 pub use apply::{
@@ -34,3 +35,4 @@ pub use outcome::{
 };
 pub use policy::{hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget};
 pub use snapshot::SnapshotKind;
+pub use verified::{MemberReadError, MemberReadErrorKind, VerifiedArchive};

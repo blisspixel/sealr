@@ -6,4 +6,5 @@
 .DS_Store
 *.profraw
 /fuzz/target
+/tests/packaged-consumer/target
 /.kani

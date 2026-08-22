@@ -69,6 +69,12 @@ Durability is a separate policy choice. When `atomic` is true, completed member 
 
 Linux, macOS, and Windows are the supported materialization platforms; every other platform MUST fail closed. The receipt MUST record the selected stage-creation, member-resolution, durability, publication, outcome, and cleanup evidence, plus Windows storage and ACL observations when applicable. Root, administrators, principals matching the effective token's default-owner SID, same-principal processes, filesystem-override capabilities, and debugging or handle-duplication rights remain outside the in-process containment claim. The planned worker narrows its own ambient authority but does not contain another same-user process. Directory syncing, crash recovery, repeated hostile race testing, and that reduced-authority worker remain Phase 0.1 gates. Do not describe normal rollback as crash durability or an unsigned receipt as authentication.
 
+## I9 - Verified consumption authority
+
+Serializable evidence is not authority. A consumer may receive `VerifiedArchive` only after archive admission and complete member verification. Denied, structure-only, and partially verified outcomes MUST NOT expose it. An effect failure after complete verification may preserve the capability because archive admission and destination publication are separate axes.
+
+Member lookup consumes the canonical paths in the existing `ArchiveIR`. It MUST NOT reopen the caller path, run another structural parser, or trust a caller-constructed IR. Before allocating, each read enforces a caller-supplied byte ceiling against the measured member size. Before returning bytes, it rechecks actual size, CRC32, and SHA-256 against the verified evidence. Directory and absent-member errors remain distinct. Current reads may re-inflate from the retained in-memory snapshot; avoiding repeated inflation is a reuse and wheel-promotion gate, not a current claim.
+
 ---
 
 ## Mapping to findings

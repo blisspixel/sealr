@@ -93,8 +93,10 @@ jobs:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --locked -p sealr --all-features --no-deps
 
-      - name: Verify packaged library
-        run: cargo package --locked -p sealr
+      - name: Verify packaged library and downstream API
+        run: |
+          cargo package --locked -p sealr
+          cargo run --locked --manifest-path tests/packaged-consumer/Cargo.toml
 
   platform:
     name: Test on ${{ matrix.os }}
@@ -188,7 +190,10 @@ jobs:
         run: cargo install cargo-deny --version 0.20.2 --locked
 
       - name: Check advisories, licenses, bans, and sources
-        run: cargo deny check
+        run: |
+          cargo deny check
+          cargo package --locked -p sealr
+          cargo deny --manifest-path tests/packaged-consumer/Cargo.toml check
 
       - name: Install cargo-about
         run: cargo install cargo-about --version 0.9.1 --locked --features cli

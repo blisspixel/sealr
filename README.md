@@ -46,15 +46,16 @@ The current Rust implementation supports classic ZIP32 archives with stored or D
 - Streaming Deflate, exact compressed-input consumption, CRC32, and SHA-256 calculation without buffering an expanded member in memory. The staged-tree audit also hashes through a fixed 64 KiB buffer. Trailing bytes and concatenated raw DEFLATE streams inside one declared member payload are rejected.
 - Component-bound, same-volume staging with 128-bit random names. Every member component is opened no-follow from a retained directory handle, files use create-new handles, and the requested destination is published with native no-replace semantics only after every member passes.
 - Deterministic JSON view and versioned unsigned receipt on allow and reject paths. Receipts record the materializer backend, stage mode, stage-creation primitive, component-resolution guarantee, durability, publication primitive, outcome, and cleanup state.
+- Fully verified admitted outcomes expose an opaque `VerifiedArchive`. It retains the exact source snapshot and existing IR, looks up canonical members without another ZIP parse or path reopen, checks a caller byte ceiling before reserving memory, and revalidates size, CRC32, and SHA-256 before returning bytes.
 - A pinned 5,927-file, 14-class ZipDiff construction gate with a deterministically generated aggregate corpus digest, exact finding-count expectations, and an explicit 73-file control allowlist.
-- An adversarial unit suite, an external-crate API fixture, packaged-library verification, strict Clippy, rustfmt, documentation checks, cross-platform tests, and cargo-deny policy in CI.
+- An adversarial unit suite, an external-crate API fixture, a separate consumer that runs against the extracted packaged crate, strict Clippy, rustfmt, documentation checks, cross-platform tests, and cargo-deny policy in CI.
 
 ## Security limitations
 
 The following work must land before a production-readiness claim:
 
 - The ZipDiff gate covers its pinned known constructions. It does not prove that future or previously unknown parser ambiguities cannot exist.
-- The archive itself is currently buffered in memory, with a default 512 MiB input cap. Expanded members stream.
+- The archive itself is currently buffered in memory, with a default 512 MiB input cap. Expanded members stream. A successful `Source::Bytes` call copies its borrowed input once when constructing the returned verified capability; a path input transfers its already owned snapshot. Each capability read re-inflates the selected member from the retained snapshot and is intended for bounded semantic files, not bulk extraction or zero-copy reuse.
 - Unicode normalization and CP437 decoding are not implemented, so non-ASCII member paths fail closed.
 - Materialization is supported only on Linux, macOS, and Windows; other targets fail closed. On Linux and macOS, sealr accepts only an existing parent owned by the effective user or root that is not externally writable unless sticky semantics protect entries. macOS also requires extended ACLs to be absent. Filesystems that do not enforce these namespace rules are outside this preview's support boundary.
 - Windows materialization is limited to a non-remote, writable NTFS parent that reports persistent ACL support. ReFS, FAT-family filesystems, remote shares, read-only volumes, and ambiguous volume queries fail closed.
@@ -74,6 +75,8 @@ See [SECURITY.md](SECURITY.md), [the threat model](docs/threat-model.md), and [t
 ## Try it
 
 The repository pins Rust 1.98.0 in `rust-toolchain.toml`; rustup selects it automatically.
+
+The crate's current minimum supported Rust version is 1.98, declared through `rust-version`. CI selects exactly 1.98.0. Preview releases may raise this minimum only as a documented compatibility change; patch releases within a stable 1.x line will not.
 
 Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.3` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.3). Runnable checksum and provenance commands are in [release verification](docs/release-verification.md). To build from source:
 
@@ -165,7 +168,7 @@ The semantic walkthrough is enforced by CLI integration tests on the native plat
 
 The next milestone remains the Phase 0.1 ZIP trust gate, not another archive format. Alpha.4 closes the measured semantic and adopter-facing contract. Alpha.5 replaces whole-archive ownership with a private immutable random-access snapshot. Alpha.6 passes that capability into a supervised Linux worker and independently audits its staged result.
 
-Assurance now advances with each increment rather than waiting for a late phase. A non-shipping wheel laboratory also starts now to measure real compatibility and shape the verified-member API, while supported `python-wheel.v1` admission remains gated on its exact UTF-8 ZIP profile, canonical paths, consumer budgets, and identities.
+Assurance now advances with each increment rather than waiting for a late phase. A non-shipping wheel laboratory also starts now to measure real compatibility and pressure-test the generic verified-member API, while supported `python-wheel.v1` admission remains gated on its exact UTF-8 ZIP profile, canonical paths, retained semantic-member budget, consumer budgets, and identities.
 
 See the [near-term execution plan](docs/near-term.md) for release-sized work and acceptance gates, the [roadmap](ROADMAP.md) for the full trust gate, and the [wheel profile draft](docs/profiles/python-wheel-v1.md) for the first-consumer design. None of those planned capabilities is current support.
 

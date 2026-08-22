@@ -85,6 +85,16 @@ impl<'a> SourceSnapshot<'a> {
         }
     }
 
+    /// Convert this invocation snapshot into process-owned bytes without
+    /// copying an already owned path input.
+    pub(crate) fn into_owned(self) -> SourceSnapshot<'static> {
+        SourceSnapshot {
+            path: self.path,
+            bytes: Cow::Owned(self.bytes.into_owned()),
+            digest: self.digest,
+        }
+    }
+
     /// Checked random-access read over the recorded bytes.
     pub fn range(&self, offset: u64, len: u64) -> Result<&[u8], Finding> {
         let start = usize::try_from(offset).map_err(|_| {
@@ -142,6 +152,19 @@ mod tests {
         assert_eq!(finding.code, FindingCode::ZipDiffC4Offset);
         assert_eq!(snapshot.range(1, 2).unwrap(), b"bc");
         assert_eq!(snapshot.range(4, 0).unwrap(), b"");
+    }
+
+    #[test]
+    fn into_owned_preserves_bytes_path_and_digest() {
+        let data = b"borrowed-archive";
+        let snapshot = SourceSnapshot::borrowed(Some("input.zip".into()), data);
+        let digest = snapshot.digest().clone();
+        let owned = snapshot.into_owned();
+
+        assert_eq!(owned.kind(), SnapshotKind::MemoryOwned);
+        assert_eq!(owned.path(), Some("input.zip"));
+        assert_eq!(owned.as_bytes(), data);
+        assert_eq!(owned.digest(), &digest);
     }
 
     #[test]

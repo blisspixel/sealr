@@ -50,7 +50,7 @@ The first layer constructs one archive tree. The second assigns Python packaging
 | Format or profile | Status | Entry condition |
 |---|---|---|
 | Strict ZIP32 Store and Deflate | Current alpha.3 | Existing preview boundary |
-| Exact strict ASCII ZIP profile | Alpha.4 target | Compatibility inventory, exhaustive flags and extra fields, opaque admitted capability, and independent identity vectors |
+| Exact strict ASCII ZIP profile | Alpha.4 target; first capability slice landed | Compatibility inventory, exhaustive flags and extra fields, retained semantic-member reuse, and independent identity vectors |
 | Private file-backed ZIP snapshot | Alpha.5 target | Copy-hash-retain source capability, checked random access, mutation tests, and bounded memory |
 | Supervised Linux ZIP worker | Alpha.6 target | Immutable snapshot capability, bounded protocol, minimum Landlock rights, and supervisor audit |
 | Canonical general ZIP path and tree profile | Phase 0.1 closure | UTF-8 and separately justified legacy CP437 rules, target collision model, and assurance gates |
