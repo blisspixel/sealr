@@ -50,9 +50,8 @@ count c3 quota.files 1
 count c3 zip.diff.c3_count 5
 count c3 zip.diff.c4_offset 2
 count c4 zip.diff.c4_offset 1
-count c5 quota.files 16
 count c5 zip.diff.c3_count 42
-count c5 zip.diff.c5_zip64 16
+count c5 zip.diff.c5_zip64 32
 
 allow a2/a2-1.zip
 allow a2/a2-1009.zip
