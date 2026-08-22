@@ -78,6 +78,11 @@ jobs:
       - name: Run tests
         run: cargo test --locked --workspace --all-features
 
+      - name: Verify independent identity conformance
+        run: >-
+          cargo run --locked -p sealr-identity-verifier --
+          crates/sealr/tests/conformance/identity-v1.json
+
       - name: Build optimized workspace
         run: cargo build --locked --release --workspace --all-features
 

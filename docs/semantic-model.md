@@ -40,7 +40,7 @@ The architecture review produced useful priorities, speculative extensions, and 
 | Hostile and benign compatibility corpora | Scheduled for trust gate | Strictness must be measured within named supported domains on all release platforms. |
 | Python wheel admission | Selected first consumer candidate | It has a concrete parser-differential problem and artifact semantics beyond generic ZIP. It follows the semantic core. |
 | Read-only agent workspace projection and hermetic build inputs | Selected later consumers | They benefit from reusable admitted trees but depend on verification-frontier and snapshot semantics. |
-| Independent evidence verifier and standard authenticated envelopes | Scheduled for trust and consumer gates | Keep the verifier small and use standard signature and identity systems. |
+| Independent evidence verifier and standard authenticated envelopes | Identity-conformance subset landed; authenticated evidence remains scheduled | Keep the verifier small and use standard signature and identity systems. |
 | Content-addressed reuse and performance measured by avoided work | Scheduled after tree identity | Reuse needs stable content identity and verification completeness. |
 | Job-oriented `gate`, `verify`, `lock`, `explain`, and policy tooling | Scheduled after semantic types stabilize | User-facing verbs and remediation should expose the separated outcome axes rather than freeze the current combined verdict. |
 | TAR, OCI, JAR, APK, 7z, broad bindings, and generalized mount support | Deliberately deferred | Add each only for a concrete consumer whose semantics are specified. |
@@ -148,7 +148,7 @@ Sealr should keep these identities distinct:
 4. **Content-tree identity**: a normative root over canonical paths, kinds, content hashes, and security-relevant metadata after required content verification completes.
 5. **Invocation and effect identity**: policy, environment, destination controls, findings, lifecycle, and realization outcome.
 
-`sealrTreeV1` now specifies canonical byte encoding, ordering, domain separation, empty-tree behavior, path representation, metadata coverage, and preview vectors. It remains unstable until the interpretation profile closes its extra-field rules and an independent verifier reproduces the roots. Existing schemes such as in-toto `dirHash1`, Git trees, and OCI `DiffID` are useful interoperability references, but do not commit to every semantic fact Sealr needs.
+`sealrTreeV1` now specifies canonical byte encoding, ordering, domain separation, empty-tree behavior, path representation, metadata coverage, and preview vectors. A separate verifier independently reproduces the committed profile, layout, and content vectors without depending on Sealr. The encoding remains unstable until the interpretation profile closes its extra-field rules and the semantic surface freezes. Existing schemes such as in-toto `dirHash1`, Git trees, and OCI `DiffID` are useful interoperability references, but do not commit to every semantic fact Sealr needs.
 
 ## Immutable source snapshots
 

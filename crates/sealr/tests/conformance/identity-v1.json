@@ -1,0 +1,462 @@
+{
+  "schema": "sealr.identity-conformance.v1",
+  "tree_encoding": "sealrTreeV1",
+  "profiles": [
+    {
+      "id": "sealr.profile.zip.strict-ascii.v1",
+      "digest": {
+        "sha256": "da3a2145d48decf8f8995ea01f1ddd0adb587f7f3544d4642bb8bb07b8f039f5"
+      },
+      "canonical_bytes_hex": "7b22736368656d61223a227365616c722e70726f66696c652e7a69702e7374726963742d61736369692e7631222c22666f726d6174223a227a69703332222c226d6574686f6473223a5b302c385d2c2265787472615f6669656c64735f64656e696564223a5b312c32383738395d2c2265787472615f6669656c64735f6f74686572223a2269676e6f726564222c2267705f656e6372797074696f6e5f626974223a302c2267705f646174615f64657363726970746f725f626974223a332c2267705f757466385f626974223a31312c2267705f6f746865725f62697473223a226163636570746564222c226e616d6573223a2261736369692d6f722d757466382d666c61672d72656a6563742d6e6f6e2d61736369692d6370343337222c226469726563746f72696573223a22747261696c696e672d736c6173682d73746f72652d656d7074792d63726333322d7a65726f222c22726564756e64616e745f6d65746164617461223a2265786163742d6c66682d6364682d64657363726970746f72227d"
+    }
+  ],
+  "cases": [
+    {
+      "id": "empty-zip",
+      "source_bytes_hex": "504b0506000000000000000000000000000000000000",
+      "source": {
+        "sha256": "8739c76e681f900923b900c9df0ef75cf421d39cabb54650c4b9ad19b6a76d85"
+      },
+      "interpretation": {
+        "id": "sealr.profile.zip.strict-ascii.v1",
+        "digest": {
+          "sha256": "da3a2145d48decf8f8995ea01f1ddd0adb587f7f3544d4642bb8bb07b8f039f5"
+        }
+      },
+      "axes": {
+        "interpretation": {
+          "status": "interpreted"
+        },
+        "admission": {
+          "status": "admitted"
+        },
+        "verification": {
+          "status": "complete"
+        },
+        "effect": {
+          "status": "not-requested"
+        },
+        "view_completeness": {
+          "status": "complete"
+        }
+      },
+      "findings": [],
+      "archive_ir": {
+        "schema": "sealr.archive-ir.v1",
+        "profile": "sealr.profile.zip.strict-ascii.v1",
+        "profile_digest": "da3a2145d48decf8f8995ea01f1ddd0adb587f7f3544d4642bb8bb07b8f039f5",
+        "source_digest": {
+          "sha256": "8739c76e681f900923b900c9df0ef75cf421d39cabb54650c4b9ad19b6a76d85"
+        },
+        "covering": {
+          "local_records": {
+            "offset": 0,
+            "len": 0
+          },
+          "central_directory": {
+            "offset": 0,
+            "len": 0
+          },
+          "eocd": {
+            "offset": 0,
+            "len": 22
+          },
+          "comment": {
+            "offset": 22,
+            "len": 0
+          }
+        },
+        "members": []
+      },
+      "layout_root": {
+        "sealrTreeV1": "33415b1ed680a15e8c8b9e4794392736c8d998ca30200fe99b207b1cff279091"
+      },
+      "content_root": {
+        "sealrTreeV1": "6d2beb70163bbde616d1693f7621d175fe40340e1fc2f38afa6c994c9920e407"
+      }
+    },
+    {
+      "id": "walkthrough-allowed",
+      "source_bytes_hex": "504b0304140000000000000021007e7115630e0000000e0000001200000062756e646c652f636f6e6669672e6a736f6e7b2273616665223a747275657d0a504b0304140000000000000021006b83e82111000000110000001000000062756e646c652f68656c6c6f2e74787468656c6c6f2066726f6d207365616c720a504b01021403140000000000000021007e7115630e0000000e000000120000000000000000000000a4810000000062756e646c652f636f6e6669672e6a736f6e504b01021403140000000000000021006b83e8211100000011000000100000000000000000000000a4813e00000062756e646c652f68656c6c6f2e747874504b050600000000020002007e0000007d0000000000",
+      "source": {
+        "sha256": "580606f3b53229ab60ff1d786bac90c91f75c054269c11142cd971f380d3fc25"
+      },
+      "interpretation": {
+        "id": "sealr.profile.zip.strict-ascii.v1",
+        "digest": {
+          "sha256": "da3a2145d48decf8f8995ea01f1ddd0adb587f7f3544d4642bb8bb07b8f039f5"
+        }
+      },
+      "axes": {
+        "interpretation": {
+          "status": "interpreted"
+        },
+        "admission": {
+          "status": "admitted"
+        },
+        "verification": {
+          "status": "complete"
+        },
+        "effect": {
+          "status": "not-requested"
+        },
+        "view_completeness": {
+          "status": "complete"
+        }
+      },
+      "findings": [],
+      "archive_ir": {
+        "schema": "sealr.archive-ir.v1",
+        "profile": "sealr.profile.zip.strict-ascii.v1",
+        "profile_digest": "da3a2145d48decf8f8995ea01f1ddd0adb587f7f3544d4642bb8bb07b8f039f5",
+        "source_digest": {
+          "sha256": "580606f3b53229ab60ff1d786bac90c91f75c054269c11142cd971f380d3fc25"
+        },
+        "covering": {
+          "local_records": {
+            "offset": 0,
+            "len": 125
+          },
+          "central_directory": {
+            "offset": 125,
+            "len": 126
+          },
+          "eocd": {
+            "offset": 251,
+            "len": 22
+          },
+          "comment": {
+            "offset": 273,
+            "len": 0
+          }
+        },
+        "members": [
+          {
+            "raw_name_bytes": [98, 117, 110, 100, 108, 101, 47, 99, 111, 110, 102, 105, 103, 46, 106, 115, 111, 110],
+            "decoded_name": "bundle/config.json",
+            "canonical_path": "bundle/config.json",
+            "components": ["bundle", "config.json"],
+            "kind": "file",
+            "method": 0,
+            "flags": 0,
+            "declared_crc": 1662349694,
+            "declared_comp_size": 14,
+            "declared_uncomp_size": 14,
+            "source_ranges": {
+              "local_header": {
+                "offset": 0,
+                "len": 48
+              },
+              "compressed_payload": {
+                "offset": 48,
+                "len": 14
+              },
+              "data_descriptor": null,
+              "central_header": {
+                "offset": 125,
+                "len": 64
+              }
+            },
+            "extra_fields": [],
+            "actual_uncomp_size": 14,
+            "actual_crc": 1662349694,
+            "content_sha256": "7eeccb134911ebae5c9ab93e29604540babeda8e0f5a634d92fc0a1d3dc45c52",
+            "verification": {
+              "status": "verified"
+            },
+            "normalization_actions": []
+          },
+          {
+            "raw_name_bytes": [98, 117, 110, 100, 108, 101, 47, 104, 101, 108, 108, 111, 46, 116, 120, 116],
+            "decoded_name": "bundle/hello.txt",
+            "canonical_path": "bundle/hello.txt",
+            "components": ["bundle", "hello.txt"],
+            "kind": "file",
+            "method": 0,
+            "flags": 0,
+            "declared_crc": 568886123,
+            "declared_comp_size": 17,
+            "declared_uncomp_size": 17,
+            "source_ranges": {
+              "local_header": {
+                "offset": 62,
+                "len": 46
+              },
+              "compressed_payload": {
+                "offset": 108,
+                "len": 17
+              },
+              "data_descriptor": null,
+              "central_header": {
+                "offset": 189,
+                "len": 62
+              }
+            },
+            "extra_fields": [],
+            "actual_uncomp_size": 17,
+            "actual_crc": 568886123,
+            "content_sha256": "a02804962d3beb2db9929fa6b128329795c7c076d96bb51f63d6afe626bd691e",
+            "verification": {
+              "status": "verified"
+            },
+            "normalization_actions": []
+          }
+        ]
+      },
+      "layout_root": {
+        "sealrTreeV1": "9986381ec4a61fd34452fb759ccaf44b82ee58c8147ee032f077722c1ccac3a3"
+      },
+      "content_root": {
+        "sealrTreeV1": "ccae362a7daa3508aace90d589c4538c27f13ff517a82a049e47005724073f38"
+      }
+    },
+    {
+      "id": "layout-features",
+      "source_bytes_hex": "504b03041400000000000000210000000000000000000000000004000400706b672f55780000504b0304140008000000000021000000000000000000000000000e0004002e2f706b672f646174612e74787455780000616263504b0708c24124350300000003000000504b0102140314000000000000002100000000000000000000000000040004000000000000001000ed4100000000706b672f55780000504b0102140314000800000000002100c241243503000000030000000e0004000000000000000000a481260000002e2f706b672f646174612e74787455780000504b0506000000000200020076000000690000000000",
+      "source": {
+        "sha256": "a62005e498f7a128926af19212867fae18dffaf86b169ecab0657280a07d40a0"
+      },
+      "interpretation": {
+        "id": "sealr.profile.zip.strict-ascii.v1",
+        "digest": {
+          "sha256": "da3a2145d48decf8f8995ea01f1ddd0adb587f7f3544d4642bb8bb07b8f039f5"
+        }
+      },
+      "axes": {
+        "interpretation": {
+          "status": "interpreted"
+        },
+        "admission": {
+          "status": "admitted"
+        },
+        "verification": {
+          "status": "complete"
+        },
+        "effect": {
+          "status": "not-requested"
+        },
+        "view_completeness": {
+          "status": "complete"
+        }
+      },
+      "findings": [],
+      "archive_ir": {
+        "schema": "sealr.archive-ir.v1",
+        "profile": "sealr.profile.zip.strict-ascii.v1",
+        "profile_digest": "da3a2145d48decf8f8995ea01f1ddd0adb587f7f3544d4642bb8bb07b8f039f5",
+        "source_digest": {
+          "sha256": "a62005e498f7a128926af19212867fae18dffaf86b169ecab0657280a07d40a0"
+        },
+        "covering": {
+          "local_records": {
+            "offset": 0,
+            "len": 105
+          },
+          "central_directory": {
+            "offset": 105,
+            "len": 118
+          },
+          "eocd": {
+            "offset": 223,
+            "len": 22
+          },
+          "comment": {
+            "offset": 245,
+            "len": 0
+          }
+        },
+        "members": [
+          {
+            "raw_name_bytes": [112, 107, 103, 47],
+            "decoded_name": "pkg/",
+            "canonical_path": "pkg",
+            "components": ["pkg"],
+            "kind": "directory",
+            "method": 0,
+            "flags": 0,
+            "declared_crc": 0,
+            "declared_comp_size": 0,
+            "declared_uncomp_size": 0,
+            "source_ranges": {
+              "local_header": {
+                "offset": 0,
+                "len": 38
+              },
+              "compressed_payload": {
+                "offset": 38,
+                "len": 0
+              },
+              "data_descriptor": null,
+              "central_header": {
+                "offset": 105,
+                "len": 54
+              }
+            },
+            "extra_fields": [
+              {
+                "site": "central",
+                "id": 30805,
+                "header_range": {
+                  "offset": 155,
+                  "len": 4
+                },
+                "data_range": {
+                  "offset": 159,
+                  "len": 0
+                },
+                "disposition": "ignored"
+              },
+              {
+                "site": "local",
+                "id": 30805,
+                "header_range": {
+                  "offset": 34,
+                  "len": 4
+                },
+                "data_range": {
+                  "offset": 38,
+                  "len": 0
+                },
+                "disposition": "ignored"
+              }
+            ],
+            "actual_uncomp_size": 0,
+            "actual_crc": 0,
+            "content_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "verification": {
+              "status": "verified"
+            },
+            "normalization_actions": [
+              {
+                "action": "strip-directory-trailing-slash"
+              }
+            ]
+          },
+          {
+            "raw_name_bytes": [46, 47, 112, 107, 103, 47, 100, 97, 116, 97, 46, 116, 120, 116],
+            "decoded_name": "./pkg/data.txt",
+            "canonical_path": "pkg/data.txt",
+            "components": ["pkg", "data.txt"],
+            "kind": "file",
+            "method": 0,
+            "flags": 8,
+            "declared_crc": 891568578,
+            "declared_comp_size": 3,
+            "declared_uncomp_size": 3,
+            "source_ranges": {
+              "local_header": {
+                "offset": 38,
+                "len": 48
+              },
+              "compressed_payload": {
+                "offset": 86,
+                "len": 3
+              },
+              "data_descriptor": {
+                "offset": 89,
+                "len": 16
+              },
+              "central_header": {
+                "offset": 159,
+                "len": 64
+              }
+            },
+            "extra_fields": [
+              {
+                "site": "central",
+                "id": 30805,
+                "header_range": {
+                  "offset": 219,
+                  "len": 4
+                },
+                "data_range": {
+                  "offset": 223,
+                  "len": 0
+                },
+                "disposition": "ignored"
+              },
+              {
+                "site": "local",
+                "id": 30805,
+                "header_range": {
+                  "offset": 82,
+                  "len": 4
+                },
+                "data_range": {
+                  "offset": 86,
+                  "len": 0
+                },
+                "disposition": "ignored"
+              }
+            ],
+            "actual_uncomp_size": 3,
+            "actual_crc": 891568578,
+            "content_sha256": "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+            "verification": {
+              "status": "verified"
+            },
+            "normalization_actions": [
+              {
+                "action": "drop-dot-component",
+                "component_index": 0
+              }
+            ]
+          }
+        ]
+      },
+      "layout_root": {
+        "sealrTreeV1": "fa9f991e4a632684b78d093f785e37571133b2f6961c51961947e2c5611fdad6"
+      },
+      "content_root": {
+        "sealrTreeV1": "33203ef267e3d624e59a15fd04368e956b4788e9eb8bef65947b30c1843f9525"
+      }
+    },
+    {
+      "id": "walkthrough-parent-path-denied",
+      "source_bytes_hex": "504b030414000000000000002100ee36f0ce10000000100000000e0000002e2e2f6f7574736964652e7478746d757374206e6f74206573636170650a504b0102140314000000000000002100ee36f0ce10000000100000000e0000000000000000000000a481000000002e2e2f6f7574736964652e747874504b050600000000010001003c0000003c0000000000",
+      "source": {
+        "sha256": "5039cccff40a5df0d0b61a2734b5dafeb8224f914603cae870f1638990f58140"
+      },
+      "interpretation": {
+        "id": "sealr.profile.zip.strict-ascii.v1",
+        "digest": {
+          "sha256": "da3a2145d48decf8f8995ea01f1ddd0adb587f7f3544d4642bb8bb07b8f039f5"
+        }
+      },
+      "axes": {
+        "interpretation": {
+          "status": "interpreted"
+        },
+        "admission": {
+          "status": "denied"
+        },
+        "verification": {
+          "status": "structure-only"
+        },
+        "effect": {
+          "status": "not-requested"
+        },
+        "view_completeness": {
+          "status": "partial",
+          "phase": "admission",
+          "cause": "path.dotdot"
+        }
+      },
+      "findings": [
+        {
+          "code": "path.dotdot",
+          "severity": "error",
+          "member": "../outside.txt",
+          "detail": "parent component"
+        }
+      ],
+      "archive_ir": null,
+      "layout_root": {
+        "status": "unavailable"
+      },
+      "content_root": {
+        "status": "unavailable"
+      }
+    }
+  ]
+}

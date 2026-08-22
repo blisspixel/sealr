@@ -11,6 +11,7 @@ The project is in initial development. Compatibility may change between preview 
 - Added the opaque `VerifiedArchive` capability for fully verified admitted outcomes. It retains the exact snapshot and verified IR, supports canonical-path lookup, and returns member bytes only after a caller-supplied limit and a second size, CRC32, and SHA-256 check pass.
 - Added a separate Cargo consumer that runs against the extracted packaged crate rather than the workspace source. The required quality job now exercises the intended packaged capability API end to end.
 - Added a finite-domain verified-member limit property over Store and Deflate payloads of 0 through 64 bytes and caller limits of 0 through 64. The test compares the API with the independent relation `limit >= measured_size` and checks every successful byte result.
+- Added `sealr.identity-conformance.v1` and a separate identity verifier with no dependency on the Sealr crate. Four cases bind exact source and profile bytes, semantic axes, findings, IR evidence, covering ranges, and preview roots. The verifier checks the claimed ZIP32 partition without discovery or inflation and independently reproduces three layout and three content roots.
 
 ### Changed
 
