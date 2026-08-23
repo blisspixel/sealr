@@ -6,6 +6,8 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+## [0.1.0-alpha.5] - 2026-08-22
+
 ### Added
 
 - Added checked `u64` exact reads, bounded owned reads, and range-limited streaming readers to the internal `SourceSnapshot` boundary. Regression coverage now exercises maximum-distance EOCD discovery, repeated short reads, stream signatures split across 64 KiB boundaries, invalid ranges before allocation, and semantic parity between owned and borrowed memory backends.
@@ -15,7 +17,7 @@ The project is in initial development. Compatibility may change between preview 
 - Added a physically sparse ZIP32 fixture generator, a required 1 MiB versus 128 MiB child-process peak-resident-memory and heap-allocation gate, and a monthly three-platform 3 GiB sparse gate. The local Windows 3 GiB run used 131,072 allocated source bytes and 210,427 tracked heap bytes.
 - Added the non-published, zero-dependency `sealr-worker-protocol` crate. Protocol v1 has a fixed 212-byte start frame, a 4 MiB whole-frame cap, out-of-band source and stage capability slots, operation correlation, bounded canonical manifests and findings, fallible allocation, and typed non-allocating errors.
 - Added deterministic protocol regressions for valid state round trips, every truncation point, header and capability confusion, count inconsistency, malformed strings, invalid result states, canonical ordering, and three mutations at every byte position.
-- Added a separate pinned libFuzzer workspace and weekly AddressSanitizer workflow for both protocol decoders. Required CI authenticates the seed manifest, dictionary, toolchain, tool versions, and explicit input, time, timeout, RSS, job, and reproducer-retention bounds.
+- Added a separate pinned libFuzzer workspace and weekly AddressSanitizer workflow for both protocol decoders. Required CI checks the source-controlled seed and dictionary digests, toolchain, tool versions, and explicit input, time, timeout, RSS, job, and reproducer-retention bounds.
 
 ### Changed
 
@@ -25,6 +27,7 @@ The project is in initial development. Compatibility may change between preview 
 
 ### Fixed
 
+- A closed or failed stdout stream no longer suppresses the independently emitted receipt on stderr. The CLI attempts both machine streams, preserves completed inspect or materialization effects, and returns an operational failure when either stream cannot be written.
 - Snapshot-owned buffer reads now validate the complete offset and length before attempting allocation, so an invalid hostile range cannot trigger a large reservation attempt before it is rejected.
 - Snapshot-access failures during structural interpretation now report an indeterminate interpretation with admission not evaluated instead of being mislabeled as malformed archive structure.
 - Underlying snapshot I/O failures observed through Deflate now retain `source.io` identity instead of being mislabeled as invalid compressed syntax.
@@ -142,7 +145,8 @@ First public development preview of the ZIP boundary.
 
 This preview is not a production-ready security boundary and has not received an external security audit. See the security limitations in the README and the reporting policy in `SECURITY.md` before evaluating it.
 
-[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.4...HEAD
+[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.5...HEAD
+[0.1.0-alpha.5]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.4...v0.1.0-alpha.5
 [0.1.0-alpha.4]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.3...v0.1.0-alpha.4
 [0.1.0-alpha.3]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.2...v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.1...v0.1.0-alpha.2

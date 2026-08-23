@@ -8,14 +8,16 @@ $ErrorActionPreference = 'Stop'
 
 $Repository = 'blisspixel/sealr'
 $DefaultBranch = 'main'
-$Version = '0.1.0-alpha.4'
+$Version = '0.1.0-alpha.5'
 $ReleaseTag = "v$Version"
-$ReleaseTitle = "sealr ${Version}: measured semantic contract preview"
+$ReleaseTitle = "sealr ${Version}: bounded immutable input preview"
 $CiWorkflow = '.github/workflows/ci.yml'
 $ReleaseWorkflow = '.github/workflows/release.yml'
 $GithubActionsAppId = 15368
 $ReleaseNotesRelativePath = "docs/releases/$ReleaseTag.md"
 $ApiVersion = '2026-03-10'
+$FuzzWorkflow = '.github/workflows/fuzz.yml'
+$ExpectedFuzzJob = 'Bounded worker protocol'
 $ExpectedChecks = @(
     'Format, lint, test, and docs'
     'Test on windows-latest'
@@ -229,7 +231,8 @@ function Assert-BranchProtection {
 function Get-WorkflowRuns {
     param(
         [Parameter(Mandatory)][string]$Workflow,
-        [Parameter(Mandatory)][string]$Commit
+        [Parameter(Mandatory)][string]$Commit,
+        [string]$Event = 'push'
     )
 
     $workflowFileName = [System.IO.Path]::GetFileName($Workflow)
@@ -238,10 +241,46 @@ function Get-WorkflowRuns {
         '--method', 'GET',
         "repos/$Repository/actions/workflows/$encodedWorkflow/runs",
         '-f', "head_sha=$Commit",
-        '-f', 'event=push',
+        '-f', "event=$Event",
         '-f', 'per_page=20'
     )
     return @($response.workflow_runs)
+}
+
+function Get-ExactFuzzState {
+    param([Parameter(Mandatory)][string]$Commit)
+
+    $matches = @(
+        Get-WorkflowRuns -Workflow $FuzzWorkflow -Commit $Commit -Event 'workflow_dispatch' |
+            Where-Object {
+                ([string]$_.head_sha).ToLowerInvariant() -eq $Commit -and
+                [string]$_.head_branch -eq $DefaultBranch -and
+                [string]$_.event -eq 'workflow_dispatch' -and
+                (([string]$_.path -split '@')[0]) -eq $FuzzWorkflow
+            } |
+            Sort-Object @{ Expression = { [System.DateTimeOffset]$_.run_started_at } }, @{ Expression = { [int]$_.run_attempt } }, @{ Expression = { [int64]$_.id } }
+    )
+    Assert-True -Condition ($matches.Count -gt 0) -Message 'no exact on-demand fuzz run exists for the release commit'
+    $run = $matches[-1]
+    Assert-Equal -Expected 'completed' -Actual ([string]$run.status) -Label 'on-demand fuzz workflow status'
+    Assert-Equal -Expected 'success' -Actual ([string]$run.conclusion) -Label 'on-demand fuzz workflow conclusion'
+
+    $jobsResponse = Invoke-GhApiJson -ApiArguments @(
+        '--method', 'GET',
+        "repos/$Repository/actions/runs/$($run.id)/attempts/$($run.run_attempt)/jobs",
+        '-f', 'per_page=100'
+    )
+    $jobs = @($jobsResponse.jobs | Where-Object { [string]$_.name -eq $ExpectedFuzzJob })
+    Assert-Equal -Expected 1 -Actual $jobs.Count -Label 'on-demand fuzz job count'
+    Assert-Equal -Expected 'completed' -Actual ([string]$jobs[0].status) -Label 'on-demand fuzz job status'
+    Assert-Equal -Expected 'success' -Actual ([string]$jobs[0].conclusion) -Label 'on-demand fuzz job conclusion'
+    Assert-Equal -Expected $Commit -Actual (([string]$jobs[0].head_sha).ToLowerInvariant()) -Label 'on-demand fuzz job commit'
+
+    [pscustomobject]@{
+        Id = [int64]$run.id
+        Attempt = [int]$run.run_attempt
+        Url = [string]$run.html_url
+    }
 }
 
 function Get-ExactCiState {
@@ -689,6 +728,7 @@ try {
     $protection = Get-BranchProtection
     $requiredChecks = @(Assert-BranchProtection -Protection $protection)
     $ciState = Get-ExactCiState -Commit $source.Commit -RequiredChecks $requiredChecks -Wait
+    $fuzzState = Get-ExactFuzzState -Commit $source.Commit
     $releaseWorkflowState = Get-ExactReleaseWorkflowState -Commit $source.Commit
     $immutableSettings = Assert-ImmutableReleaseSetting
 
@@ -714,6 +754,7 @@ try {
             release_id = [int64]$release.id
             immutable = $true
             ci_run_id = $ciState.Id
+            fuzz_run_id = $fuzzState.Id
             release_workflow_run_id = $releaseWorkflowState.Id
             assets = @($release.assets | Sort-Object name | ForEach-Object { [ordered]@{ name = $_.name; digest = $_.digest } })
         } | ConvertTo-Json -Depth 6
@@ -726,9 +767,15 @@ try {
         return
     }
 
+    $releaseId = [int64]$snapshot.ReleaseId
+    if (-not $PSCmdlet.ShouldProcess("$Repository release $ReleaseTag with ID $releaseId", 'Publish verified draft as an immutable prerelease')) {
+        return
+    }
+
     $finalProtection = Get-BranchProtection
     $finalRequiredChecks = @(Assert-BranchProtection -Protection $finalProtection)
     $finalCiState = Get-ExactCiState -Commit $source.Commit -RequiredChecks $finalRequiredChecks
+    $finalFuzzState = Get-ExactFuzzState -Commit $source.Commit
     $finalReleaseWorkflowState = Get-ExactReleaseWorkflowState -Commit $source.Commit
     Assert-ImmutableReleaseSetting | Out-Null
     $finalMain = Get-RemoteMainCommit
@@ -739,15 +786,13 @@ try {
     $finalDraft = Get-ExactReleaseForTag -ExpectedReleaseId $snapshot.ReleaseId
     Assert-ReleaseContract -Release $finalDraft -ExpectedNotes $source.Notes -State 'draft'
     Assert-ReleaseMatchesSnapshot -Release $finalDraft -Snapshot $snapshot
+    Assert-Equal -Expected $releaseId -Actual ([int64]$finalDraft.id) -Label 'prepublication release ID'
     Assert-Equal -Expected $ciState.Id -Actual $finalCiState.Id -Label 'prepublication CI run ID'
     Assert-Equal -Expected $ciState.Attempt -Actual $finalCiState.Attempt -Label 'prepublication CI run attempt'
+    Assert-Equal -Expected $fuzzState.Id -Actual $finalFuzzState.Id -Label 'prepublication fuzz run ID'
+    Assert-Equal -Expected $fuzzState.Attempt -Actual $finalFuzzState.Attempt -Label 'prepublication fuzz run attempt'
     Assert-Equal -Expected $releaseWorkflowState.Id -Actual $finalReleaseWorkflowState.Id -Label 'prepublication release workflow run ID'
     Assert-Equal -Expected $releaseWorkflowState.Attempt -Actual $finalReleaseWorkflowState.Attempt -Label 'prepublication release workflow run attempt'
-
-    $releaseId = [int64]$finalDraft.id
-    if (-not $PSCmdlet.ShouldProcess("$Repository release $ReleaseTag with ID $releaseId", 'Publish verified draft as an immutable prerelease')) {
-        return
-    }
 
     $publication = Invoke-GhApiJson -ApiArguments @(
         '--method', 'PATCH',
@@ -762,9 +807,7 @@ try {
     Assert-ReleaseAttestation
     Assert-BuildProvenance -ArchiveNames $archiveNames -Directory $TemporaryRoot -Commit $source.Commit
     $publishedTag = Get-RemoteTagCommit
-    $publishedMain = Get-RemoteMainCommit
     Assert-Equal -Expected $source.Commit -Actual $publishedTag -Label 'postpublication tag commit'
-    Assert-Equal -Expected $source.Commit -Actual $publishedMain -Label 'postpublication main commit'
 
     Write-Host "immutable prerelease published and verified: https://github.com/$Repository/releases/tag/$ReleaseTag"
     [pscustomobject]@{
@@ -774,6 +817,7 @@ try {
         release_id = [int64]$published.id
         immutable = [bool]$published.immutable
         ci_run_id = $finalCiState.Id
+        fuzz_run_id = $finalFuzzState.Id
         release_workflow_run_id = $finalReleaseWorkflowState.Id
         assets = @($published.assets | Sort-Object name | ForEach-Object { [ordered]@{ name = $_.name; digest = $_.digest } })
     } | ConvertTo-Json -Depth 6

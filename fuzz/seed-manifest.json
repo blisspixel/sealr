@@ -11,6 +11,11 @@
     "rssLimitMiB": 1024,
     "jobs": 1
   },
+  "failureArtifact": {
+    "directoryName": "sealr-fuzz-artifacts",
+    "uploadOn": "failure",
+    "retentionDays": 7
+  },
   "dictionary": {
     "path": "fuzz/dictionaries/protocol_dictionary",
     "bytes": 71,

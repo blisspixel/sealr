@@ -2,14 +2,14 @@
 set -euo pipefail
 
 selector="scripts/release_candidate.jq"
-tag="v0.1.0-alpha.4"
-title="sealr 0.1.0-alpha.4: measured semantic contract preview"
-notes=$'# sealr 0.1.0-alpha.4\n'
+tag="v0.1.0-alpha.5"
+title="sealr 0.1.0-alpha.5: bounded immutable input preview"
+notes=$'# sealr 0.1.0-alpha.5\n'
 allowed='[
   "SHA256SUMS",
-  "sealr-0.1.0-alpha.4-aarch64-apple-darwin.tar.gz",
-  "sealr-0.1.0-alpha.4-x86_64-pc-windows-msvc.zip",
-  "sealr-0.1.0-alpha.4-x86_64-unknown-linux-gnu.tar.gz"
+  "sealr-0.1.0-alpha.5-aarch64-apple-darwin.tar.gz",
+  "sealr-0.1.0-alpha.5-x86_64-pc-windows-msvc.zip",
+  "sealr-0.1.0-alpha.5-x86_64-unknown-linux-gnu.tar.gz"
 ]'
 
 mapfile -t workspace_versions < <(

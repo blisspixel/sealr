@@ -4,7 +4,7 @@
 
 > **Goal: one archive, one tree, and evidence for the decision.**
 
-sealr is an early attempt to make archive ingestion easier to reason about. The released Alpha.4 boundary implements a deliberately narrow ZIP32 path: it builds one versioned interpretation from an immutable source snapshot, verifies accepted members, and either publishes the requested tree without replacement or publishes no destination. Current main is building Alpha.5: checked random access serves interpretation and verification, path inputs are copied once into a Sealr-owned private file, native source-change and resource gates exercise that boundary, and a bounded capability-oriented worker protocol is now specified and implemented. Sealr does not yet provide a process sandbox or production security claim.
+sealr is an early attempt to make archive ingestion easier to reason about. The released Alpha.5 boundary implements a deliberately narrow ZIP32 path: it builds one versioned interpretation from an immutable source snapshot, verifies accepted members, and either publishes the requested tree without replacement or publishes no destination. Checked random access serves interpretation and verification, path inputs are copied once into a Sealr-owned private file, native source-change and resource gates exercise that boundary, and a bounded capability-oriented worker protocol prepares the next process boundary. Sealr does not yet provide a process sandbox or production security claim.
 
 ```text
 Untrusted archive x policy
@@ -13,9 +13,9 @@ Untrusted archive x policy
 
 The longer-term aim is an archive-to-tree admission boundary whose decision and evidence can be reused by other systems. The current release is a small step toward that aim, not proof that the category or design is finished. Usefulness is not “more unzip.” It is: same bytes and policy produce one tree or no tree on Linux, macOS, and Windows, and the next tool consumes that tree instead of opening the ZIP again. Until a dependent does that, a receipt is just a receipt. The [usefulness test](docs/usefulness.md) is the quality bar.
 
-> Status: `v0.1.0-alpha.4` is the fourth development preview of the ZIP boundary. It is useful for evaluation, development, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. The limitations below are security boundaries, not fine print.
+> Status: `v0.1.0-alpha.5` is the fifth development preview of the ZIP boundary. It is useful for evaluation, development, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. The limitations below are security boundaries, not fine print.
 
-> Release contents: Alpha.4 includes `VerifiedArchive`, opt-in bounded exact-member retention, the extracted-package consumer, six finite-domain property families, two independently checked interpretation-profile vectors, the closed strict ASCII v2 profile, and the reproducible wheel pilot. The [Alpha.4 release notes](docs/releases/v0.1.0-alpha.4.md) define the shipped delta and remaining limitations.
+> Release contents: Alpha.5 adds checked random access, a private file-backed path snapshot, native mutation controls, bounded-memory evidence, a three-platform 3 GiB sparse gate, and the bounded worker-protocol codec with pinned fuzz evidence. The [Alpha.5 release notes](docs/releases/v0.1.0-alpha.5.md) define the shipped delta and remaining limitations.
 
 ## Why this exists
 
@@ -88,7 +88,7 @@ The repository pins Rust 1.98.0 in `rust-toolchain.toml`; rustup selects it auto
 
 The crate's current minimum supported Rust version is 1.98, declared through `rust-version`. CI selects exactly 1.98.0. Preview releases may raise this minimum only as a documented compatibility change; patch releases within a stable 1.x line will not.
 
-Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.4` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.4). Runnable checksum and provenance commands are in [release verification](docs/release-verification.md). To build from source:
+Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.5` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.5). Runnable checksum and provenance commands are in [release verification](docs/release-verification.md). To build from source:
 
 ```text
 git clone https://github.com/blisspixel/sealr.git
@@ -160,7 +160,7 @@ Expected result: exit `0`, verdict `allowed`, `wrote: true`, and exactly the two
   <img alt="Screenshot of sealr materializing two approved members into a new destination after inspection." src="docs/assets/readme-walkthrough/sealr-materialize-allowed-terminal-light.png" width="1000">
 </picture>
 
-The semantic walkthrough is enforced by CLI integration tests on the native platform jobs. The PNGs are rendered terminal-style summaries derived from Alpha.4's separate JSON view and receipt streams; they are not literal captures of raw CLI output or the planned human interface. The visible summary intentionally uses the stable decision, finding, and member subset. CI regenerates the fixtures, native transcript variant, and HTML, checks fixture and platform-specific transcript SHA-256 values against the committed asset manifest, then verifies every PNG's SHA-256, dimensions, format, size, density, and metadata policy. CI does not claim a pixel comparison.
+The semantic walkthrough is enforced by CLI integration tests on the native platform jobs. The PNGs are rendered terminal-style summaries derived from Alpha.5's separate JSON view and receipt streams; they are not literal captures of raw CLI output or the planned human interface. The visible summary intentionally uses the stable decision, finding, and member subset. CI regenerates the fixtures, native transcript variant, and HTML, checks fixture and platform-specific transcript SHA-256 values against the committed asset manifest, then verifies every PNG's SHA-256, dimensions, format, size, density, and metadata policy. CI does not claim a pixel comparison.
 
 ## Design rules
 
@@ -176,7 +176,7 @@ The semantic walkthrough is enforced by CLI integration tests on the native plat
 
 ## What comes next
 
-The next milestone remains the Phase 0.1 ZIP trust gate, not another archive format. Alpha.4 closed the measured semantic and adopter-facing contract. Alpha.5 now has checked random access, the private path-input spool, source-change detection, backend parity, required heap and peak-resident-memory checks, a monthly three-platform 3 GiB sparse gate, and the bounded capability protocol. A clean scheduled fuzz campaign and exact-main release gates remain before Alpha.5 can be published. Alpha.6 passes the snapshot capability into a supervised Linux worker and independently audits its staged result.
+The next milestone remains the Phase 0.1 ZIP trust gate, not another archive format. Alpha.4 closed the measured semantic and adopter-facing contract, and Alpha.5 closes bounded immutable input. Alpha.6 first resolves IR ownership and independent outcome axes beyond the protocol v1 transport foundation, then passes only snapshot and stage capabilities into a supervised Linux worker, restricts that worker before its first archive read, and audits the staged result before supervisor-owned publication.
 
 Assurance now advances with each increment rather than waiting for a late phase. The non-shipping wheel laboratory has published its first small compatibility measurement and now expands toward wheel-aware semantic evaluation, while supported `python-wheel.v1` admission remains gated on its exact UTF-8 ZIP profile, canonical paths, use of the bounded retention capability, consumer budgets, and identities.
 
@@ -199,11 +199,11 @@ See the [near-term execution plan](docs/near-term.md) for release-sized work and
 | Document | Purpose |
 |---|---|
 | [Documentation index](docs/index.md) | Guided map of current contracts, security material, plans, and operations |
-| [Near-term execution plan](docs/near-term.md) | Alpha.4 through alpha.6 work packages and measurable gates |
+| [Near-term execution plan](docs/near-term.md) | Alpha.4 through Alpha.6 work packages and measurable gates |
 | [Identity conformance](docs/identity-conformance.md) | Independent profile, covering, and tree-root vectors with exact nonclaims |
 | [Roadmap](ROADMAP.md) | Full capability order, release gate, and non-goals |
 | [Safety specification](docs/safety.md) | Normative safety rules and supported boundary |
-| [API contract](docs/api.md) | Current Alpha.4 Rust and JSON surface |
+| [API contract](docs/api.md) | Current Alpha.5 Rust and JSON surface |
 | [Release verification](docs/release-verification.md) | Checksums, provenance, tag, and immutable release verification |
 
 ## License

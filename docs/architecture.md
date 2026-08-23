@@ -96,9 +96,9 @@ Interpretation profile, deterministic resource budget, target filesystem model, 
 
 ### Reduced-authority worker
 
-After semantic types stabilize, a trusted supervisor can own the destination parent, lifecycle, staged-tree audit, and publication authority. It creates the private stage and immutable snapshot, then passes the worker only bounded read-only snapshot and stage capabilities through [protocol v1](worker-protocol.md). On Linux, runtime-probed Landlock and `no_new_privs` can restrict that worker before it reads the first archive byte. Equivalent credible packaging boundaries for macOS and Windows require separate work.
+After semantic types stabilize, a trusted supervisor can own the destination parent, lifecycle, staged-tree audit, and publication authority. It creates the private stage and immutable snapshot, then passes the worker only bounded read-only snapshot and stage capabilities. [Protocol v1](worker-protocol.md) proves a bounded transport shape, but Alpha.6 must revise its outcome contract or split the operation into explicit phases before using it as the worker boundary. On Linux, runtime-probed Landlock and `no_new_privs` can restrict that worker before it reads the first archive byte. Equivalent credible packaging boundaries for macOS and Windows require separate work.
 
-The supervisor treats worker output as untrusted and audits the staged tree against the admitted IR before publication. Process isolation strengthens containment, but does not define archive semantics and must not own a second parser.
+The supervisor treats worker output as untrusted and audits the staged tree against the validated returned manifest before publication. This proves equality with the worker's bounded claim, not independent agreement with archive semantics. Unless a later protocol carries a complete independently checkable IR or certificate, the isolated worker remains the semantic trusted computing base. Process isolation strengthens containment and must not introduce a second archive parser.
 
 ## Realization and reuse
 

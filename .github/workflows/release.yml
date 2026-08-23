@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASE_VERSION: 0.1.0-alpha.4
+  RELEASE_VERSION: 0.1.0-alpha.5
   RUST_VERSION: 1.98.0
 
 jobs:
@@ -168,6 +168,76 @@ jobs:
             exit 1
           fi
           echo "exact protected main CI passed: run ${run_id}, attempt ${run_attempt}"
+
+      - name: Require exact protected main fuzz evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_PROMPT_DISABLED: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag_commit="$(git rev-list -n 1 "${GITHUB_REF}")"
+          runs_json="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/fuzz.yml/runs" \
+              -f branch=main \
+              -f event=workflow_dispatch \
+              -f head_sha="${tag_commit}" \
+              -f per_page=20
+          )"
+          run_json="$(
+            jq -c \
+              --arg sha "${tag_commit}" '
+                [.workflow_runs[] |
+                  select(
+                    .head_sha == $sha and
+                    .head_branch == "main" and
+                    .event == "workflow_dispatch" and
+                    (.path | startswith(".github/workflows/fuzz.yml"))
+                  )] |
+                if length == 0 then empty else max_by(.run_number) end
+              ' <<<"${runs_json}"
+          )"
+          if [[ -z "${run_json}" ]]; then
+            echo "::error::no on-demand fuzz run exists for the exact release commit"
+            exit 1
+          fi
+          if [[ "$(jq -r '.status' <<<"${run_json}")" != "completed" ||
+                "$(jq -r '.conclusion // ""' <<<"${run_json}")" != "success" ]]; then
+            echo "::error::exact on-demand fuzz run is not successful"
+            exit 1
+          fi
+
+          run_id="$(jq -r '.id' <<<"${run_json}")"
+          run_attempt="$(jq -r '.run_attempt' <<<"${run_json}")"
+          jobs_json="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/attempts/${run_attempt}/jobs" \
+              -f per_page=100
+          )"
+          count="$(jq '[.jobs[] | select(.name == "Bounded worker protocol")] | length' <<<"${jobs_json}")"
+          if [[ "${count}" -ne 1 ]]; then
+            echo "::error::expected exactly one bounded worker protocol fuzz job, found ${count}"
+            exit 1
+          fi
+          if ! jq -e '
+            .jobs[] |
+            select(.name == "Bounded worker protocol") |
+            .status == "completed" and .conclusion == "success"
+          ' <<<"${jobs_json}" >/dev/null; then
+            echo "::error::bounded worker protocol fuzz job did not complete successfully"
+            exit 1
+          fi
+
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+          if [[ "$(git rev-parse refs/remotes/origin/main)" != "${tag_commit}" ]]; then
+            echo "::error::protected main advanced after exact fuzz evidence"
+            exit 1
+          fi
+          echo "exact protected main fuzz passed: run ${run_id}, attempt ${run_attempt}"
 
   build:
     name: Build and test on ${{ matrix.os }}
@@ -336,14 +406,21 @@ jobs:
               -printf '%f\n' |
               sort
           )
-          if [[ "${#assets[@]}" -ne 3 ]]; then
-            echo "::error::expected three native release archives, found ${#assets[@]}"
+          expected_assets=(
+            "sealr-${RELEASE_VERSION}-aarch64-apple-darwin.tar.gz"
+            "sealr-${RELEASE_VERSION}-x86_64-pc-windows-msvc.zip"
+            "sealr-${RELEASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          )
+          if [[ "${#assets[@]}" -ne "${#expected_assets[@]}" ]]; then
+            echo "::error::expected exactly ${#expected_assets[@]} native release archives, found ${#assets[@]}"
             printf 'asset: %s\n' "${assets[@]:-none}"
             exit 1
           fi
-          for asset in "${assets[@]}"; do
-            if [[ "${asset}" != sealr-${RELEASE_VERSION}-* ]]; then
-              echo "::error::unexpected release asset name: ${asset}"
+          for index in "${!expected_assets[@]}"; do
+            if [[ "${assets[index]}" != "${expected_assets[index]}" ]]; then
+              echo "::error::release asset mismatch at index ${index}"
+              echo "expected: ${expected_assets[index]}"
+              echo "actual:   ${assets[index]}"
               exit 1
             fi
           done
@@ -361,7 +438,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          release_title="sealr ${RELEASE_VERSION}: measured semantic contract preview"
+          release_title="sealr ${RELEASE_VERSION}: bounded immutable input preview"
           notes_file="docs/releases/v${RELEASE_VERSION}.md"
           if [[ ! -f "${notes_file}" ]]; then
             echo "::error::missing release notes: ${notes_file}"

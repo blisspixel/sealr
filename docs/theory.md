@@ -1,6 +1,6 @@
 # Interpretation theory
 
-> Status: research notes. This page names the mathematical object Sealr is aiming at. It is not a proof, not a qualification claim, and not a description of capabilities that Alpha.4 already has. Implemented predicates and the ideal function are distinguished throughout. The current executable contract is the [README](../README.md), [invariants](invariants.md), and [semantic model](semantic-model.md).
+> Status: research notes. This page names the mathematical object Sealr is aiming at. It is not a proof, not a qualification claim, and not a description of capabilities that Alpha.5 already has. Implemented predicates and the ideal function are distinguished throughout. The current executable contract is the [README](../README.md), [invariants](invariants.md), and [semantic model](semantic-model.md).
 
 Sealr is trying to give untrusted archive bytes a denotation: **at most one canonical IR per versioned profile, or no IR.** Git, Nix, and in-toto already know how to hash a tree you have. ZipDiff showed that ZIP, as deployed, does not uniquely produce one. The work is the missing compiler in the middle.
 
@@ -50,7 +50,7 @@ Partial function means: for each \(b\), \(I_\pi(b)\) is undefined or a single IR
 
 ### Source as an interval
 
-A `SourceSnapshot` is an immutable \(b \in \mathbb{B}^n\). Alpha.4 realizes this as owned or borrowed whole-buffer bytes. Current main also realizes path input as a bounded copy into a Sealr-owned private file whose exact length and digest are fixed before interpretation. A caller path, mutable file descriptor, ETag, or content length alone is not a snapshot: another writer can change the bytes under the parse.
+A `SourceSnapshot` is an immutable \(b \in \mathbb{B}^n\). Alpha.4 realizes this as owned or borrowed whole-buffer bytes. Alpha.5 realizes path input as a bounded copy into a Sealr-owned private file whose exact length and digest are fixed before interpretation. A caller path, mutable file descriptor, ETag, or content length alone is not a snapshot: another writer can change the bytes under the parse.
 
 Source identity \(S(b) = \mathsf{H}(b)\), or explicit unavailability if bytes were never held.
 
@@ -86,7 +86,7 @@ Defined only when the covering exists, CDH/LFH/descriptor agreement holds, names
 - `Unsupported`: ZIP64, encryption, methods other than Store/Deflate, spanned, non-ASCII names;
 - `Indeterminate`: bytes never held, I/O, cancellation.
 
-Ideal \(I_\pi\) depends only on \((b,\pi)\). Alpha.4 still folds resource budget into `parse_zip` (`max_files`, `max_metadata_bytes`). That interference is named below.
+Ideal \(I_\pi\) depends only on \((b,\pi)\). Alpha.5 still folds resource budget into `parse_zip` (`max_files`, `max_metadata_bytes`). That interference is named below.
 
 `ArchiveIR` is an effect-independent term: profile id and digest, source digest, members with raw names, canonical paths, kinds, flags, methods, declared sizes, source ranges, extra dispositions, normalization actions, and after verification, actual sizes and content SHA-256. Inspect and materialize walk that object. They do not search for a second EOCD.
 
@@ -118,11 +118,11 @@ E : \mathsf{IR} \times \text{target} \times \text{effect policy}
     \longrightarrow \{\mathsf{NotRequested},\;\mathsf{Committed},\;\mathsf{Failed}\}
 \]
 
-A failed rename is `Interpreted + Admitted + Complete + Failed`, not a different tree. Alpha.4 axes represent this. The compatibility `Verdict` still maps it to `rejected`.
+A failed rename is `Interpreted + Admitted + Complete + Failed`, not a different tree. Alpha.5 axes represent this. The compatibility `Verdict` still maps it to `rejected`.
 
 ## Implemented versus ideal
 
-| Object | Ideal | Alpha.4 |
+| Object | Ideal | Alpha.5 |
 |---|---|---|
 | \(I_\pi\) | Partial function of \((b,\pi)\) only | Parser also sees budget; Unicode absent |
 | Unique covering | At most one admitted partition of \([0,n)\) | Local-prefix partition + CD land + last exact-suffix EOCD |

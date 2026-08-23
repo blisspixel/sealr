@@ -1,6 +1,6 @@
 # Documentation
 
-Start with the [README](../README.md) for the published Alpha.4 boundary and a short walkthrough. This index separates current contracts from plans and research notes.
+Start with the [README](../README.md) for the published Alpha.5 boundary and a short walkthrough. This index separates current contracts from plans and research notes.
 
 ## Start and integrate
 
@@ -8,7 +8,7 @@ Start with the [README](../README.md) for the published Alpha.4 boundary and a s
 |---|---|
 | [Usage](usage.md) | Current CLI behavior and examples |
 | [API contract](api.md) | Current Rust and JSON surface, plus clearly marked target notation |
-| [Current release notes](releases/v0.1.0-alpha.4.md) | Alpha.4 contents and limitations |
+| [Current release notes](releases/v0.1.0-alpha.5.md) | Alpha.5 contents and limitations |
 | [Release verification](release-verification.md) | Verify checksums, provenance, tag, and immutable release state |
 
 ## Trust boundary
@@ -46,7 +46,7 @@ Repository vulnerability reporting and supported-version policy are in [SECURITY
 | Document | Purpose |
 |---|---|
 | [Roadmap](../ROADMAP.md) | Long-range capability order and release gates |
-| [Near-term execution plan](near-term.md) | Alpha.4 through alpha.6 work packages and acceptance gates |
+| [Near-term execution plan](near-term.md) | Alpha.4 through Alpha.6 work packages and acceptance gates |
 | [Python wheel profile draft](profiles/python-wheel-v1.md) | First-consumer semantics and research plan |
 | [Vision](vision.md) | Durable category and priorities |
 | [Usefulness test](usefulness.md) | Proof that a downstream consumer stops reparsing |

@@ -113,6 +113,14 @@ Complete results require both roots and may not contain an error finding. Reject
 
 Version 1 contains no range list. If a later worker needs ranges, that protocol change receives a new version and an independently bounded encoding.
 
+### Deliberate version 1 limits
+
+Version 1 is a non-shipping transport foundation, not the final Alpha.6 semantic contract. Its single status is a worker-operation status. It does not preserve the public interpretation, admission, verification, effect, and lifecycle axes independently, and failed or rejected results intentionally discard the manifest and content root. It therefore cannot represent every admitted-but-effect-failed outcome.
+
+The result carries a reduced staged-member manifest, findings, and preview roots. It does not carry a complete `ArchiveIR`, byte ranges, or an independently checkable proof that the manifest is the unique meaning of the snapshot. A supervisor can validate the frame and prove that the stage equals the returned claim, but protocol v1 alone does not let it independently verify archive semantics.
+
+Alpha.6 begins by choosing and testing either a protocol revision with the necessary independent facts or an explicitly two-phase operation. Conformance vectors must cover admitted plus effect-failed, worker crash, malformed result, stage-audit failure, cleanup failure, and publication failure before the process boundary is frozen.
+
 ## Test and fuzz evidence
 
 The deterministic protocol suite covers valid inspect and materialize round trips, complete and rejected results, every truncation of valid frames, wrong magic, version and kind, trailing input, capability and operation confusion, oversized and impossible counts, root-state confusion, malformed UTF-8, invalid paths, manifest ordering, directory content claims, and three mutations at every byte position. A decoded value must re-encode canonically and decode to the same value.
@@ -131,6 +139,8 @@ The `protocol_decoders` libFuzzer target exercises arbitrary bytes and up to 64 
 | Jobs | 1 |
 
 The [seed manifest](../fuzz/seed-manifest.json) binds every seed and the dictionary by path, byte length, and SHA-256. Required CI verifies that manifest and the workflow bounds. The [scheduled fuzz workflow](../.github/workflows/fuzz.yml) runs the AddressSanitizer campaign weekly and on demand. A crash stops the campaign and preserves the bounded reproducer for seven days. A reproducible failure must become a deterministic regression before the fuzz gate can return to green.
+
+The [first exact-main campaign](https://github.com/blisspixel/sealr/actions/runs/32616069888) executed 18,277,565 units in 601 seconds, averaged 30,411 executions per second, reached 503 MiB peak RSS under the 1,024 MiB limit, and produced no reproducer.
 
 Coverage-guided fuzzing is heuristic evidence. A clean bounded campaign does not prove that every frame or parser state is safe.
 

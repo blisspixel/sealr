@@ -1,5 +1,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
+use std::process::Stdio;
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -56,6 +58,24 @@ fn sealr_text(arguments: &[&str]) -> Output {
         .args(arguments)
         .output()
         .expect("sealr should start")
+}
+
+#[cfg(unix)]
+fn sealr_with_closed_stdout(arguments: &[&Path]) -> Output {
+    let mut command = Command::new("sh");
+    command
+        .arg("-c")
+        .arg("exec 1>&-; exec \"$@\"")
+        .arg("sealr-closed-stdout")
+        .arg(env!("CARGO_BIN_EXE_sealr"));
+    for argument in arguments {
+        command.arg(argument);
+    }
+    command
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .output()
+        .expect("sealr should start with stdout closed")
 }
 
 fn json(bytes: &[u8], stream: &str) -> Value {
@@ -250,6 +270,37 @@ fn materialization_exits_zero_and_matches_the_inspected_members() {
         walkthrough_fixtures::HELLO_BYTES
     );
     assert!(!run.path.join("outside.txt").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn closed_stdout_preserves_inspect_and_materialize_receipts() {
+    let (run, fixtures) = fixture_set("closed-stdout");
+
+    let inspect = sealr_with_closed_stdout(&[&fixtures.allowed]);
+    assert_eq!(inspect.status.code(), Some(1));
+    assert!(inspect.stdout.is_empty());
+    let inspect_receipt = json(&inspect.stderr, "inspect stderr");
+    assert_eq!(inspect_receipt["schema"], "sealr.receipt.v2");
+    assert_eq!(inspect_receipt["verdict"], "allowed");
+    assert_eq!(inspect_receipt["wrote"], false);
+    assert_eq!(inspect_receipt["effect"]["status"], "not-requested");
+
+    let destination = run.path.join("materialized");
+    let materialize =
+        sealr_with_closed_stdout(&[&fixtures.allowed, Path::new("--dest"), &destination]);
+    assert_eq!(materialize.status.code(), Some(1));
+    assert!(materialize.stdout.is_empty());
+    let materialize_receipt = json(&materialize.stderr, "materialize stderr");
+    assert_eq!(materialize_receipt["schema"], "sealr.receipt.v2");
+    assert_eq!(materialize_receipt["verdict"], "allowed");
+    assert_eq!(materialize_receipt["wrote"], true);
+    assert_eq!(materialize_receipt["effect"]["status"], "committed");
+    assert_eq!(
+        fs::read(destination.join(walkthrough_fixtures::HELLO_PATH))
+            .expect("materialization should complete even when stdout is closed"),
+        walkthrough_fixtures::HELLO_BYTES
+    );
 }
 
 #[test]
