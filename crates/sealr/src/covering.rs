@@ -50,21 +50,22 @@ pub(crate) fn audit_covering(snapshot: &SourceSnapshot<'_>, ir: &ArchiveIR) -> R
         ));
     }
 
-    let eocd = snapshot
-        .range(covering.eocd.offset, covering.eocd.len)
+    let mut eocd = [0_u8; 22];
+    snapshot
+        .read_exact_at(covering.eocd.offset, &mut eocd)
         .map_err(|_| inconsistent("claimed EOCD range is outside the snapshot"))?;
     if eocd[0..4] != EOCD_SIG {
         return Err(inconsistent(
             "claimed EOCD offset does not hold an EOCD signature",
         ));
     }
-    let this_disk = le_u16(eocd, 4);
-    let cd_disk = le_u16(eocd, 6);
-    let this_count = le_u16(eocd, 8);
-    let total_count = le_u16(eocd, 10);
-    let cd_size = u64::from(le_u32(eocd, 12));
-    let cd_offset = u64::from(le_u32(eocd, 16));
-    let comment_len = u64::from(le_u16(eocd, 20));
+    let this_disk = le_u16(&eocd, 4);
+    let cd_disk = le_u16(&eocd, 6);
+    let this_count = le_u16(&eocd, 8);
+    let total_count = le_u16(&eocd, 10);
+    let cd_size = u64::from(le_u32(&eocd, 12));
+    let cd_offset = u64::from(le_u32(&eocd, 16));
+    let comment_len = u64::from(le_u16(&eocd, 20));
     if this_disk != 0 || cd_disk != 0 {
         return Err(inconsistent("EOCD names a spanned archive"));
     }
@@ -124,8 +125,9 @@ pub(crate) fn audit_covering(snapshot: &SourceSnapshot<'_>, ir: &ArchiveIR) -> R
                 inconsistent("central header is shorter than 46 bytes").on(&member.decoded_name)
             );
         }
-        let lfh = snapshot
-            .range(member.source_ranges.local_header.offset, 4)
+        let mut lfh = [0_u8; 4];
+        snapshot
+            .read_exact_at(member.source_ranges.local_header.offset, &mut lfh)
             .map_err(|_| {
                 inconsistent("claimed LFH range is outside the snapshot").on(&member.decoded_name)
             })?;
@@ -135,8 +137,9 @@ pub(crate) fn audit_covering(snapshot: &SourceSnapshot<'_>, ir: &ArchiveIR) -> R
                     .on(&member.decoded_name),
             );
         }
-        let cdh = snapshot
-            .range(member.source_ranges.central_header.offset, 4)
+        let mut cdh = [0_u8; 4];
+        snapshot
+            .read_exact_at(member.source_ranges.central_header.offset, &mut cdh)
             .map_err(|_| {
                 inconsistent("claimed CDH range is outside the snapshot").on(&member.decoded_name)
             })?;

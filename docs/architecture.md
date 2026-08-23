@@ -1,8 +1,8 @@
 # Architecture
 
-> This page separates the implemented Alpha.4 architecture from the target semantic architecture. Projection, process isolation, acceleration, stable lock semantics, and an expanded shipping crate graph are not current features. See [semantic-model.md](semantic-model.md) for the normative target.
+> This page separates the architecture implemented on current main from the target semantic architecture. Projection, process isolation, acceleration, stable lock semantics, and an expanded shipping crate graph are not current features. See [semantic-model.md](semantic-model.md) for the normative target.
 
-## Implemented through Alpha.4
+## Implemented on current main
 
 Sealr is a four-package Rust workspace. Two packages ship; two are repository-only assurance tools:
 
@@ -18,10 +18,10 @@ The library exposes one `apply()` path for inspect and materialize. Both modes u
 The current input and interpretation boundary is:
 
 1. Ingest a `SourceSnapshot`. Path inputs become owned bytes; borrowed byte inputs remain borrowed for the call. The digest is SHA-256 of that object.
-2. Locate and validate ZIP32 EOCD and the central directory.
-3. Compare redundant central and local metadata, validate source ranges, reject overlaps and hidden structural records, and apply the strict path grammar.
+2. Locate and validate ZIP32 EOCD through bounded tail access, then copy the central directory only after its declared size passes the metadata cap.
+3. Read fixed headers and bounded metadata through checked `u64` ranges, compare redundant central and local metadata, validate source ranges, reject overlaps and hidden structural records, and apply the strict path grammar.
 4. If a destination was requested, create and retain its private stage after structural planning and before member processing.
-5. Stream accepted Store and Deflate content through resource bounds, exact DEFLATE input-consumption checks, actual size checks, CRC32, and SHA-256. Write the same verified bytes into the private stage when one exists and, when explicitly requested, into an independently bounded exact-member retention buffer.
+5. Stream each exact compressed payload range through a range-limited snapshot reader and fixed 64 KiB buffers, enforcing resource bounds, exact DEFLATE input consumption, actual size, CRC32, and SHA-256. Write the same verified bytes into the private stage when one exists and, when explicitly requested, into an independently bounded exact-member retention buffer.
 6. Audit the stage against the admitted IR with streaming size and SHA-256 verification plus an exact path-set comparison.
 7. Publish the complete stage without replacement only after every member and the audit pass. Abort and report cleanup on any member, audit, or publication failure.
 8. After complete verification, retain the exact snapshot and IR behind an opaque `VerifiedArchive`. Selected exact-path content captured in step 5 can be borrowed directly. Other bounded reads use recorded ranges and recheck measured content without reopening or reparsing.
@@ -50,7 +50,7 @@ The receipt's `materialization` object records the selected backend, stage prote
 
 The format parser, path grammar, quota counters, content verification, and policy decision share one in-process trust boundary. The materializer receives validated relative components rather than archive-controlled ambient paths.
 
-Alpha.4's bounded in-memory source is a named `SourceSnapshot`: path inputs become owned bytes, caller byte inputs remain borrowed, and the recorded digest is SHA-256 of the complete object. ZIP payload reads use checked ranges over the snapshot. Receipt v2 reports `source_snapshot` as `memory-owned`, `memory-borrowed`, or `unavailable`. It does not yet:
+The bounded in-memory source is a named `SourceSnapshot`: path inputs become owned bytes, caller byte inputs remain borrowed, and the recorded digest is SHA-256 of the complete object. Current main routes parsing, codec-free covering checks, initial payload verification, and later verified-member reads through checked exact reads or range-limited readers. Owned and borrowed memory variants have semantic-parity coverage. Receipt v2 reports `source_snapshot` as `memory-owned`, `memory-borrowed`, or `unavailable`. It does not yet:
 
 - freeze preview `sealrTreeV1` roots as a stable lock or authenticated subject; committed cross-platform golden fixtures now pin the preview encoding;
 - replace whole-archive buffering with a private spool or verified filesystem snapshot;

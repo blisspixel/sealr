@@ -2,7 +2,7 @@
 
 These are **properties**, not features. They are the *type* of `inspect` / `materialize` / `mount`. Files on disk are a side effect that is only allowed if this boundary returns yes.
 
-This document is the target safety contract. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) are authoritative for current implementation status. Alpha.4 intentionally fails closed where canonical Unicode handling is unfinished, and it does not yet satisfy every filesystem-race, fuzzing, proof, isolation, or bounded-input obligation below.
+This document is the target safety contract. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) are authoritative for current implementation status. Current main intentionally fails closed where canonical Unicode handling is unfinished, and it does not yet satisfy every filesystem-race, fuzzing, proof, isolation, or bounded-input obligation below.
 
 Each invariant MUST appear in the assurance claim ledger and receive evidence appropriate to its kind. Pure input properties require deterministic tests and generated properties; byte parsers require finite hostile corpora and coverage-guided fuzzing; bounded arithmetic and finite state machines are model-checking candidates; filesystem and authority properties require native fault and race tests. A finding code is required when an invocation can report the violation. CI infrastructure failures and excluded-adversary assumptions are recorded as evidence or limitations rather than invented archive findings.
 
@@ -57,7 +57,7 @@ The inspect API and the materialize API MUST NOT diverge (LibreOffice recovery-m
 
 ## I7 - Streaming + bounded allocation
 
-Target state: no whole-archive load. Header-driven allocations go through `try_reserve` and I2. Expanded bytes stream in bounded chunks. A future whole-buffer codec is allowed only under a RAM gate. Alpha.4 still reads the archive into one input buffer capped at 512 MiB; removing that buffer is the Alpha.5 gate.
+Target state: no whole-archive load. Header-driven allocations go through `try_reserve` and I2. Expanded bytes stream in bounded chunks. A future whole-buffer codec is allowed only under a RAM gate. Current main routes ZIP structure and payload access through checked random-access operations, but still reads the archive into one input buffer capped at 512 MiB. Replacing that backing with a private spool and proving memory independence are Alpha.5 gates.
 
 ## I8 - Staged publication and optional durability
 

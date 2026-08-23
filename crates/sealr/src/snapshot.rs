@@ -1,4 +1,5 @@
 use std::borrow::Cow;
+use std::io::{self, Read};
 
 use serde::Serialize;
 
@@ -8,9 +9,10 @@ use crate::policy::hex_sha256;
 
 /// How this invocation holds the exact archive bytes.
 ///
-/// Bounded random-access and content-addressed snapshots come later. They must
-/// preserve the same property: parse, verify, and materialize observe one
-/// immutable byte object whose digest was recorded at ingest.
+/// Current memory backends expose checked random access. File-backed and
+/// content-addressed backends come later and must preserve the same property:
+/// parse, verify, and materialize observe one immutable byte object whose
+/// digest was recorded at ingest.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
@@ -51,7 +53,7 @@ impl<'a> SourceSnapshot<'a> {
         }
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn path(&self) -> Option<&str> {
         self.path.as_deref()
     }
@@ -60,16 +62,16 @@ impl<'a> SourceSnapshot<'a> {
         self.path.clone()
     }
 
+    #[cfg(test)]
     pub fn as_bytes(&self) -> &[u8] {
         &self.bytes
     }
 
-    #[allow(dead_code)]
     pub fn len(&self) -> u64 {
         self.bytes.len() as u64
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn is_empty(&self) -> bool {
         self.bytes.is_empty()
     }
@@ -97,6 +99,60 @@ impl<'a> SourceSnapshot<'a> {
 
     /// Checked random-access read over the recorded bytes.
     pub fn range(&self, offset: u64, len: u64) -> Result<&[u8], Finding> {
+        let (start, end) = self.checked_range(offset, len)?;
+        self.bytes.get(start..end).ok_or_else(|| {
+            Finding::error(FindingCode::ZipDiffC4Offset, "range extends past snapshot")
+        })
+    }
+
+    /// Copy one exact checked range into a caller-owned buffer.
+    pub(crate) fn read_exact_at(&self, offset: u64, output: &mut [u8]) -> Result<(), Finding> {
+        let len = u64::try_from(output.len()).map_err(|_| {
+            Finding::error(
+                FindingCode::ZipDiffC4Offset,
+                "read buffer length does not fit u64",
+            )
+        })?;
+        output.copy_from_slice(self.range(offset, len)?);
+        Ok(())
+    }
+
+    /// Copy one exact checked range into a bounded owned buffer.
+    pub(crate) fn read_vec(&self, offset: u64, len: u64) -> Result<Vec<u8>, Finding> {
+        self.checked_range(offset, len)?;
+        let length = usize::try_from(len).map_err(|_| {
+            Finding::error(
+                FindingCode::ZipDiffC4Offset,
+                "range length does not fit this platform",
+            )
+        })?;
+        let mut output = Vec::new();
+        output.try_reserve_exact(length).map_err(|error| {
+            Finding::error(
+                FindingCode::SourceIo,
+                format!("could not reserve {len} snapshot bytes: {error}"),
+            )
+        })?;
+        output.resize(length, 0);
+        self.read_exact_at(offset, &mut output)?;
+        Ok(output)
+    }
+
+    /// Open a checked reader limited to one exact snapshot range.
+    pub(crate) fn reader(
+        &self,
+        offset: u64,
+        len: u64,
+    ) -> Result<SnapshotRangeReader<'_, 'a>, Finding> {
+        self.checked_range(offset, len)?;
+        Ok(SnapshotRangeReader {
+            snapshot: self,
+            offset,
+            remaining: len,
+        })
+    }
+
+    fn checked_range(&self, offset: u64, len: u64) -> Result<(usize, usize), Finding> {
         let start = usize::try_from(offset).map_err(|_| {
             Finding::error(
                 FindingCode::ZipDiffC4Offset,
@@ -112,9 +168,43 @@ impl<'a> SourceSnapshot<'a> {
         let end = start
             .checked_add(length)
             .ok_or_else(|| Finding::error(FindingCode::ZipDiffC4Offset, "range end overflows"))?;
-        self.bytes.get(start..end).ok_or_else(|| {
-            Finding::error(FindingCode::ZipDiffC4Offset, "range extends past snapshot")
-        })
+        if end > self.bytes.len() {
+            return Err(Finding::error(
+                FindingCode::ZipDiffC4Offset,
+                "range extends past snapshot",
+            ));
+        }
+        Ok((start, end))
+    }
+}
+
+/// Read-only cursor over one checked half-open snapshot range.
+#[derive(Debug)]
+pub(crate) struct SnapshotRangeReader<'s, 'a> {
+    snapshot: &'s SourceSnapshot<'a>,
+    offset: u64,
+    remaining: u64,
+}
+
+impl Read for SnapshotRangeReader<'_, '_> {
+    fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+        if output.is_empty() || self.remaining == 0 {
+            return Ok(0);
+        }
+        let output_len = u64::try_from(output.len()).unwrap_or(u64::MAX);
+        let count = self.remaining.min(output_len);
+        let count = usize::try_from(count).expect("read count is bounded by the output buffer");
+        let count_u64 =
+            u64::try_from(count).expect("read count already originated from a u64 value");
+        self.snapshot
+            .read_exact_at(self.offset, &mut output[..count])
+            .map_err(|finding| io::Error::new(io::ErrorKind::UnexpectedEof, finding.detail))?;
+        self.offset = self
+            .offset
+            .checked_add(count_u64)
+            .expect("validated snapshot range cannot overflow");
+        self.remaining -= count_u64;
+        Ok(count)
     }
 }
 
@@ -152,6 +242,33 @@ mod tests {
         assert_eq!(finding.code, FindingCode::ZipDiffC4Offset);
         assert_eq!(snapshot.range(1, 2).unwrap(), b"bc");
         assert_eq!(snapshot.range(4, 0).unwrap(), b"");
+    }
+
+    #[test]
+    fn exact_reads_and_range_reader_share_checked_u64_bounds() {
+        let snapshot = SourceSnapshot::borrowed(None, b"abcdefgh");
+        let mut exact = [0_u8; 3];
+        snapshot.read_exact_at(2, &mut exact).unwrap();
+        assert_eq!(&exact, b"cde");
+        assert_eq!(snapshot.read_vec(4, 4).unwrap(), b"efgh");
+
+        let mut reader = snapshot.reader(1, 5).unwrap();
+        let mut streamed = Vec::new();
+        reader.read_to_end(&mut streamed).unwrap();
+        assert_eq!(streamed, b"bcdef");
+
+        assert_eq!(
+            snapshot.reader(7, 2).unwrap_err().code,
+            FindingCode::ZipDiffC4Offset
+        );
+        assert_eq!(
+            snapshot.read_vec(u64::MAX, 1).unwrap_err().code,
+            FindingCode::ZipDiffC4Offset
+        );
+        assert_eq!(
+            snapshot.read_vec(0, u64::MAX).unwrap_err().code,
+            FindingCode::ZipDiffC4Offset
+        );
     }
 
     #[test]

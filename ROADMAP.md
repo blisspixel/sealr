@@ -101,6 +101,7 @@ The repository now has:
 - exact local-record layout with hidden bytes, gaps, prefixes, and overlap rejected;
 - exact consumption of one declared raw DEFLATE stream, with trailing bytes and concatenated streams rejected;
 - bounded archive reads and streaming expanded-byte enforcement;
+- checked `u64` snapshot reads and range-limited readers across ZIP discovery, metadata parsing, covering audit, original payload verification, and later verified-member reads, with central metadata copied only after its cap passes;
 - staged materialization that publishes only after all members pass;
 - component-bound no-follow member writes, random same-volume staging, create-new files, and native no-replace publication on Linux, macOS, and Windows;
 - versioned materialization receipts that report the backend, stage mode, stage-creation primitive, component resolution, durability, platform publication primitive, outcome, and cleanup state;
@@ -115,14 +116,14 @@ The repository now has:
 - protected `main` requiring pull requests, linear history, resolved conversations, and all five current required CI checks;
 - the `v0.1.0-alpha.4` measured-semantic-contract preview line, built from protected `main` through all five required main CI checks and the release workflow, with immutable releases enabled.
 
-This is the current Alpha.4 baseline. It is incomplete and is not a production security boundary.
+This is the current main baseline: the released Alpha.4 contract plus the first unreleased Alpha.5 access-layer increment. It is incomplete and is not a production security boundary. The snapshot backing still retains the complete archive in memory.
 
 ## Active execution queue
 
 The detailed release-sized plan is [docs/near-term.md](docs/near-term.md). It corrects three dependencies in the older numbered sequence below: the private file-backed snapshot lands before worker IPC, assurance foundations land alongside each feature, and a non-shipping wheel laboratory begins before Phase 0.1 completes.
 
 1. **Alpha.4 measured semantic contract: complete on current main.** The opaque verified capability, caller-bounded member reads, bounded one-pass exact-member retention, packaged consumer, six finite-domain property families, independent identity-conformance verifier, shared checked interval and partition kernel, pure quota transition, first wheel compatibility pilot, and [closed strict ASCII v2 profile](docs/profiles/zip-strict-ascii-v2.md) have landed. The compatibility `apply()` facade preserves v1 while callers can select v2 explicitly.
-2. **Alpha.5 target: bounded immutable input.** Copy, hash, and retain a private file-backed snapshot, then parse and verify through checked random access without reopening the source path or allocating in proportion to archive size. The worker protocol is specified and fuzzed over capabilities, not archive blobs.
+2. **Alpha.5 in progress: bounded immutable input.** Checked random access now serves the parser, covering audit, and verifier over the current memory backends, with owned and borrowed semantic-parity tests. Next, copy, hash, and retain a private file-backed snapshot without reopening the source path or allocating in proportion to archive size. The worker protocol is specified and fuzzed over capabilities, not archive blobs.
 3. **Alpha.6 target: supervised Linux worker.** The supervisor alone owns the destination parent, publication, cleanup, and recovery authority. The worker receives the immutable snapshot and stage capabilities, installs a measured Landlock boundary before the first archive read, and returns an untrusted bounded result that the supervisor audits without reparsing ZIP.
 4. **Continuous assurance lane.** Pure range, quota, path, and lifecycle models; property tests; bounded model checking; fuzzing; and native race stress begin with the increments they protect. Step 8 completes and operationalizes this program instead of starting it late.
 5. **Parallel wheel laboratory.** The first reproducible benign [compatibility pilot](docs/wheel-compatibility-pilot.md) is published. Expand it around observed decision boundaries, maintain hostile wheel fixtures, and advance the [Python wheel consumer profile](docs/profiles/python-wheel-v1.md). The lab is not shipped support. It becomes experimental admission only after the exact wheel ZIP profile, canonical UTF-8 paths, verified-member access, consumer budgets, and consumer identities pass their gates.
@@ -308,6 +309,8 @@ Exit proof:
 ### 7. Replace whole-archive buffering with immutable snapshots
 
 Execution note: the first private spool backend, checked random-access interface, and mutation contract move ahead of Step 4 under the [near-term plan](docs/near-term.md#alpha5-bounded-immutable-input). This numbered capability closes the remaining scale, alternate-backend, and sparse-fixture work; it is not permission to build the worker around `Vec<u8>` first.
+
+Current status: the checked access interface and production parser/verifier routing have landed for owned and borrowed memory backends. Exact reads reject invalid ranges before allocation; EOCD discovery uses a bounded tail; central-directory allocation follows the metadata gate; local records, descriptors, covering signatures, and compressed payloads use exact ranges or bounded readers. The private spool, copy interruption and mutation cases, sparse fixture, and memory-independence evidence remain open.
 
 Deliverables:
 

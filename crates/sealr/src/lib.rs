@@ -1,7 +1,7 @@
 //! `UntrustedArchive × Policy → (Materialization | Rejection) × Receipt × InspectableView`
 //!
-//! Ingest produces an immutable `SourceSnapshot`. Parse and payload reads use that
-//! snapshot; they do not reopen the caller path.
+//! Ingest produces an immutable `SourceSnapshot`. Parsing and payload verification
+//! use checked ranges over that snapshot; they do not reopen the caller path.
 
 mod apply;
 mod covering;

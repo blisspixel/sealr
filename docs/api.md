@@ -202,7 +202,7 @@ The capability is opaque and cheap to clone. Clones share one immutable snapshot
 - `retained_member(path)` borrows bytes captured during the original verification pass without reopening, parsing, inflating, allocating, or hashing;
 - `retained_bytes()` reports the logical aggregate successfully retained content;
 - `read_member(canonical_path, max_bytes)` reads only regular files and checks the caller's limit before reserving memory;
-- a non-retained read uses the IR's recorded payload range and rechecks actual size, CRC32, and SHA-256 before returning bytes;
+- a non-retained read streams only the IR's recorded compressed payload range and rechecks actual size, CRC32, and SHA-256 before returning bytes;
 - a retained read through `read_member` still checks the caller limit, validates the retained length, and returns an owned copy;
 - absent paths, directories, caller-limit failures, platform or allocation limits, and internal integrity disagreement have distinct `MemberReadErrorKind` values.
 
@@ -214,7 +214,7 @@ let archive = outcome
 let metadata = archive.read_member("package.dist-info/METADATA", 256 * 1024)?;
 ```
 
-This path does not reopen the caller path or parse ZIP structure again. Without an explicit retention request, the current in-memory implementation re-inflates a selected Deflate member and revalidates it for each call. The next section describes the opt-in path that avoids this repeated work for a small, known member set.
+This path does not reopen the caller path or parse ZIP structure again. Without an explicit retention request, the current in-memory implementation opens a range-limited reader over the recorded payload, re-inflates a selected Deflate member, and revalidates it for each call. The backing snapshot still holds the complete archive in memory. The next section describes the opt-in path that avoids this repeated work for a small, known member set.
 
 ### Bounded one-pass retention
 

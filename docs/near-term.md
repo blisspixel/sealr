@@ -80,11 +80,13 @@ The first two capability increments are now implemented on main. `VerifiedArchiv
 
 Alpha.5 makes the source capability real before it crosses a process boundary.
 
+**Current main status:** the backend-neutral access substrate has landed. Magic detection, ZIP discovery, central and local metadata reads, descriptor checks, covering audit, original member verification, and later verified-member reads use checked `u64` ranges or range-limited readers. Central-directory buffering occurs only after the metadata cap passes, and compressed payloads stream in fixed buffers. Owned and borrowed memory snapshots produce byte-identical semantic evidence in regression tests. The backing object is still the bounded whole-archive memory snapshot, so the private spool, mutation suite, large sparse fixture, and memory-independence gate remain open.
+
 ### Snapshot backend
 
 1. Make the first file-backed source a Sealr-owned private spool: copy once while hashing and enforcing the source cap, retain the resulting object, and stop relying on the original path.
-2. Give interpretation and verification read-only random access to that retained object. No later phase reopens the input path.
-3. Keep offsets and lengths as checked `u64`, with explicit bounded conversion at each I/O boundary.
+2. Give interpretation and verification read-only random access to that retained object. No later phase reopens the input path. **Access layer landed; private spool integration remains.**
+3. Keep offsets and lengths as checked `u64`, with explicit bounded conversion at each I/O boundary. **Landed for the memory backends and parser/verifier call paths.**
 4. Bind the snapshot to its exact length and source digest. A partial copy never receives the digest of a bounded prefix as though it were the whole source.
 5. Prefer the simple copy, hash, retain design over direct mmap or unproven filesystem immutability. Content-addressed reuse and zero-copy backends can follow measured need.
 
