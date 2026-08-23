@@ -1,12 +1,12 @@
 # Private semantic-record experiment
 
-Status: implemented as dormant crate-private Alpha.6 code. No library, CLI, worker, receipt, or release path invokes it.
+Status: implemented as dormant crate-private Alpha.6 code. No `apply`, CLI, worker, receipt, default-feature, supported API, or release path invokes it. Only the unsupported hidden driver enabled explicitly by the fuzz workspace reaches it.
 
 This experiment makes the split-phase handoff in the [semantic-ownership decision](decisions/0001-alpha6-semantic-ownership.md) executable without defining operation protocol v2 or changing public behavior. It establishes a bounded representation and hostile decoder for semantic proposals. It does not establish process isolation or a public verified capability.
 
 ## Record boundary
 
-The experimental format has independent `SEALRSEM` magic, version `1`, planning and completion kinds, a zero reserved byte, little-endian fixed integers, an exact body length, and a 64 MiB hard record limit. Counts are checked against semantic maxima and the minimum bytes remaining before fallible vector reservation. Strings are length-bounded and validated as UTF-8 before typed conversion. Unknown tags, nonzero reserved state, truncation, trailing bytes, range overflow, and cross-phase decoding fail closed with a typed static-detail error.
+The experimental format has independent `SEALRSEM` magic, version `1`, planning and completion kinds, a zero reserved byte, little-endian fixed integers, an exact body length, and a 64 MiB encoded-length limit. The encoder checks each required length before requesting buffer growth or copying field bytes, uses bounded fallible reserve requests, and stops appending after the first error. An allocator may retain capacity beyond the logical encoded length, so the limit is not an allocator-capacity claim. The decoder checks counts against semantic maxima and the minimum bytes remaining before fallible vector reservation. After exact equality with the supervisor-supplied expected binding succeeds, it also applies the bound `max_path_depth` before allocating owned component strings and bounds normalization reservation by actions representable by the encoded member name. Strings are length-bounded and validated as UTF-8 before typed conversion. Unknown tags, nonzero reserved state, truncation, trailing bytes, range overflow, and cross-phase decoding fail closed with a typed static-detail error.
 
 Successful decode must re-encode to the exact same bytes. The format is private and experimental, so these bytes are pinned as repository evidence rather than promised as a public compatibility surface.
 
@@ -51,12 +51,12 @@ Before reconstructing crate-private IR, the adapter checks:
 
 - exact invocation, source, profile, policy, budget, target, consumer, effect-request, and retention binding;
 - checked half-open ranges without using saturating range helpers on hostile values;
-- an exact structural partition for every IR, followed during hostile ready-plan decode by source length, digest, EOCD, header signature, LFH and CDH variable-length geometry, encoded name, extra-field header, range, and count reproduction against the supervisor-owned `SourceSnapshot`;
-- local-header, payload, optional data-descriptor, and central-header containment and adjacency;
+- an exact structural partition for every IR, followed during hostile ready-plan decode by source length and digest agreement; EOCD zero-disk enforcement plus member-count, central-directory, and comment-geometry agreement; header signatures; LFH and CDH fixed-field and variable-length agreement; encoded names; extra-field headers, ranges, and counts; local-offset reproduction; zero disk-start enforcement; and member-kind agreement with source external attributes;
+- local-header, payload, optional data-descriptor, and central-header containment and adjacency, including descriptor signature, length, CRC32, and sizes;
 - extra-field site order, per-site ID uniqueness, header/data adjacency, ZIP16 lengths, owner containment, profile disposition, and exact source-backed coverage of the encoded local and central extra-field regions;
 - raw-name and decoded-name equality for the current strict ASCII profiles;
 - canonical path, components, normalization actions, case-fold uniqueness, and file/directory topology;
-- Store or Deflate only, encryption-bit denial, strict-v2 flag closure, directory empty-content rules, and all declared resource budgets, including a parser-equivalent metadata aggregate derived from comment, central-directory, and source-checked local-header geometry rather than worker-reported extra-field records;
+- Store or Deflate only, encryption-bit denial, strict-v2 flag closure, directory empty-content rules, structural-signature exclusion in comments and stored data-descriptor payloads, and all declared resource budgets, including a parser-equivalent metadata aggregate derived from comment, central-directory, and source-checked local-header geometry rather than worker-reported extra-field records;
 - pending-only planning state, exact completion-vector length, verified-prefix ordering, one failed frontier, absent measurements for failed or pending members, exact declared size and CRC32 for verified members, and aggregate actual-size bounds;
 - rejection of completion findings that claim supervisor-owned audit, cleanup, commit, publication, or unsupported-stage outcomes.
 
@@ -77,21 +77,30 @@ Focused deterministic tests cover:
 - stale request or plan correlation, impossible completion frontiers, member reorder, and hostile range overflow;
 - exact metadata-budget acceptance and one-byte-under rejection through both trusted encode and hostile decode, checked against the shipped parser on a nonempty ignored-extra fixture, with omitted records, correlated geometry shrinkage, and source extra-ID relabeling rejected;
 - source-byte mutation that rejects a ready plan and admits IR-bearing `covering.inconsistent` evidence only when the supervisor reproduces the exact finding;
+- fixed EOCD, LFH, and CDH field forgery, descriptor drift, central-comment signatures, and nonzero per-member disk-start rejection;
+- per-member ZIP64 sentinels and the ambiguous 12-byte descriptor whose first word is the optional signature;
+- planning and completion phase-finding allowlists, including wrong-phase archive and execution findings;
+- materialization-only setup merging with setup-owned error causes;
+- parity with the public parser for 257 path components and 257 normalization actions, plus rejection of the same deep plan before component allocation when its authenticated depth is reduced;
+- rejection at a deliberately small encoder limit before the attempted field can grow the output;
 - distinct absent and present-empty retention bindings;
 - pinned plan and completion vector digests.
 
-These tests establish record and semantic-evidence parity for the covered states. They do not establish full `VerifiedArchive` equivalence.
+A separate `semantic_records` libFuzzer target uses a hidden, nondefault fuzz-only feature to reach this private boundary. It decodes arbitrary planning and completion bytes, applies up to 128 input-directed mutations per canonical Ready, terminal-admission, Complete, and Stopped frame, requires stable success or error class and error offset on repeated decode, checks exact Ready-plan IR equality with the production pending IR, rejects stale completion correlation, and exercises every valid record kind. A committed dictionary and four seed cases have their paths, lengths, and SHA-256 digests checked by required CI. The verifier binds the complete Cargo manifest, parsed exact bin, hidden driver source, lock checksum, and registry-rooted crates.io libFuzzer package while refusing Cargo configuration, then compares the complete scheduled workflow with a manifest-derived contract covering its weekly trigger, permissions, concurrency, setup, shell programs, resource bounds, dictionaries, and failure artifacts. Executable negative fixtures reject inert TOML remapping, local, patched, or vendored fuzz-engine substitution, manual-only drift, direct weakening, inactive or appended commands, inert artifact evidence, and raw or quoted duplicate last-wins arguments. The target compiles under the pinned fuzz workspace. Its first scheduled Linux AddressSanitizer campaign remains pending, so no clean campaign claim is made here.
+
+These tests establish parity for the named deterministic record, source-binding, and codec cases. They do not establish broader shadow parity or full `VerifiedArchive` equivalence.
 
 ## Remaining gates
 
 Before any runtime or public activation, Alpha.6 still requires:
 
-1. shadow parity against a broader current `apply()` corpus, including data descriptors, v1 ignored extras, malformed structure, quota stops, codec stops, audit failure, and publication failure;
-2. a dedicated plan/completion fuzz target and committed seed vectors;
+1. broader semantic shadow parity against the current `apply()` corpus, including malformed structure, quota stops, and codec stops; data descriptors and v1 ignored extras now have focused source-binding coverage;
+2. execution that consumes the validated plan without structurally reparsing the source;
 3. immutable retained-content transfer and original-pass retention semantics;
 4. isolated, caller-bounded non-retained reads with clone, cancellation, crash, and last-owner behavior;
 5. sealed immutable blob transport with exact seals, length, digest, clean exit, and reap;
 6. no-descendant and stage-permission-mutation controls, writer quiescence, stage audit, and supervisor-owned publication;
-7. a helper packaging and discovery model that works for both library and CLI consumers.
+7. a helper packaging and discovery model that works for both library and CLI consumers;
+8. the first clean bounded Linux AddressSanitizer campaign for the dedicated target, with every reproducible failure promoted to a deterministic regression.
 
 Invalid records, bad transport state, worker crash, and timeout are infrastructure failures. They must never be translated into archive denial, malformed interpretation, failed effect, or another worker-authored semantic claim.

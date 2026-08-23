@@ -22,6 +22,14 @@ mod semantic_record;
 mod verified;
 mod zip;
 
+/// Exercises the dormant semantic-record decoders from the separate fuzz
+/// workspace without exposing their types or making them reachable by default.
+#[cfg(feature = "__internal-fuzzing")]
+#[doc(hidden)]
+pub fn __fuzz_semantic_records(input: &[u8]) {
+    semantic_record::exercise_fuzz_input(input);
+}
+
 pub use apply::{
     apply, apply_with_options, ApplyOptions, EnvMeta, MemberView, Outcome, PolicyMeta, Receipt,
     Request, Source, SourceMeta, ToolMeta, Verdict, View,

@@ -2939,6 +2939,46 @@ mod tests {
     }
 
     #[test]
+    fn rejects_nonzero_central_member_disk_start() {
+        let mut bytes = make_zip(&[("file.txt", b"content")]);
+        let central = signature_offsets(&bytes, [0x50, 0x4b, 0x01, 0x02]);
+        assert_eq!(central.len(), 1);
+        put_u16(&mut bytes, central[0] + 34, 1);
+        let policy = Policy::default_v1();
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("spanned-member.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: None,
+        });
+
+        assert!(out.rejected());
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::ZipDiffC3Count));
+
+        put_u16(&mut bytes, central[0] + 34, u16::MAX);
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("zip64-member-disk.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: None,
+        });
+        assert!(out.rejected());
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::ZipDiffC5Zip64));
+    }
+
+    #[test]
     fn rejects_stored_descriptor_signature_split_across_reader_buffers() {
         let mut payload = vec![0_u8; 65_538];
         payload[65_534..65_538].copy_from_slice(&[0x50, 0x4b, 0x03, 0x04]);

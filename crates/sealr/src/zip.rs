@@ -187,12 +187,25 @@ pub fn parse_zip_with_profile(
             u16::from_le_bytes(central_directory[pos + 30..pos + 32].try_into().unwrap()) as usize;
         let comment_len =
             u16::from_le_bytes(central_directory[pos + 32..pos + 34].try_into().unwrap()) as usize;
+        let disk_start =
+            u16::from_le_bytes(central_directory[pos + 34..pos + 36].try_into().unwrap());
         let lfh_offset =
             u32::from_le_bytes(central_directory[pos + 42..pos + 46].try_into().unwrap());
         let external_attributes =
             u32::from_le_bytes(central_directory[pos + 38..pos + 42].try_into().unwrap());
-        if comp == 0xFFFF_FFFF || uncomp == 0xFFFF_FFFF || lfh_offset == 0xFFFF_FFFF {
+        if comp == 0xFFFF_FFFF
+            || uncomp == 0xFFFF_FFFF
+            || lfh_offset == 0xFFFF_FFFF
+            || disk_start == 0xFFFF
+        {
             return Err(Finding::error(FindingCode::ZipDiffC5Zip64, "ZIP64 member").on(""));
+        }
+        if disk_start != 0 {
+            return Err(Finding::error(
+                FindingCode::ZipDiffC3Count,
+                "central-directory member starts on another disk",
+            )
+            .on(""));
         }
         let name_off = pos + 46;
         if name_off + name_len + extra_len + comment_len > cd_end {
