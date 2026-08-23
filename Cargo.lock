@@ -450,6 +450,7 @@ dependencies = [
  "crc32fast",
  "flate2",
  "getrandom",
+ "libc",
  "rustix",
  "serde",
  "serde_json",

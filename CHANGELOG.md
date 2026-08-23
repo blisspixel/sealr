@@ -10,12 +10,15 @@ The project is in initial development. Compatibility may change between preview 
 
 - Added checked `u64` exact reads, bounded owned reads, and range-limited streaming readers to the internal `SourceSnapshot` boundary. Regression coverage now exercises maximum-distance EOCD discovery, repeated short reads, stream signatures split across 64 KiB boundaries, invalid ranges before allocation, and semantic parity between owned and borrowed memory backends.
 - Added the first private file-backed snapshot for path inputs. Sealr opens the caller path once, copies and hashes through a fixed 64 KiB buffer under the archive cap, verifies the opened source length and modification state, reopens only the Sealr-owned file read-only, removes its filename, and retains the unnamed capability for parsing, verification, materialization, and later `VerifiedArchive` reads.
-- Added path-replacement, truncation, growth, short-read, interrupted-read, private-directory cleanup, file-versus-memory parity, and post-source-deletion verified-read regressions. A required large-input probe compares valid 1 MiB and 32 MiB stored ZIPs and fails if tracked heap allocation exceeds 8 MiB or grows by more than 1 MiB with the archive.
+- Added path-replacement, truncation, growth, short-read, interrupted-read, private-directory cleanup, file-versus-memory parity, and post-source-deletion verified-read regressions.
+- Added deterministic same-length mutation coverage. Windows source opens now deny concurrent write sharing for the duration of the copy; Unix source admission compares device, inode, mode, length, modification time, and change time before and after the copy.
+- Added a physically sparse ZIP32 fixture generator, a required 1 MiB versus 128 MiB child-process peak-resident-memory and heap-allocation gate, and a monthly three-platform 3 GiB sparse gate. The local Windows 3 GiB run used 131,072 allocated source bytes and 210,427 tracked heap bytes.
 
 ### Changed
 
 - Routed magic detection, EOCD discovery, central-directory and local-header parsing, data-descriptor checks, the codec-free covering audit, initial content verification, and later `VerifiedArchive` member reads through the snapshot random-access interface. The central directory is copied only after the metadata cap passes, and compressed payloads are no longer exposed to production code as whole slices.
 - Path-input receipts now report `source_snapshot: private-file`; caller byte inputs remain `memory-borrowed`, and a borrowed snapshot becomes `memory-owned` only when a returned verified capability must outlive the call.
+- The path-input source fingerprint now covers stronger native change evidence than length and best-effort modification time alone. Existing Windows writers cause source admission to fail closed instead of racing the copy.
 
 ### Fixed
 

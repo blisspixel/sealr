@@ -57,7 +57,7 @@ The inspect API and the materialize API MUST NOT diverge (LibreOffice recovery-m
 
 ## I7 - Streaming + bounded allocation
 
-Target state: no whole-archive load for path inputs. Header-driven allocations go through `try_reserve` and I2. Expanded bytes stream in bounded chunks. A future whole-buffer codec is allowed only under a RAM gate. Current main routes ZIP structure and payload access through checked random-access operations and copies path inputs into a Sealr-owned private file through a fixed 64 KiB buffer. A required 1 MiB versus 32 MiB valid-archive test caps tracked heap allocation and its size-related delta. Caller-provided byte slices remain memory-backed by definition. Multi-gigabyte sparse and peak-resident-memory evidence remain Alpha.5 gates.
+Target state: no whole-archive load for path inputs. Header-driven allocations go through `try_reserve` and I2. Expanded bytes stream in bounded chunks. A future whole-buffer codec is allowed only under a RAM gate. Current main routes ZIP structure and payload access through checked random-access operations and copies path inputs into a Sealr-owned private file through a fixed 64 KiB buffer. A required physically sparse 1 MiB versus 128 MiB test caps tracked heap allocation, peak resident memory, and both size-related deltas. A monthly Linux, macOS, and Windows gate applies a 3 GiB sparse valid ZIP32 fixture. Caller-provided byte slices remain memory-backed by definition. Measurements are regression bounds for named runners, not a universal proof for every allocator or operating system.
 
 ## I8 - Staged publication and optional durability
 
