@@ -80,7 +80,7 @@ The first two capability increments are now implemented on main. `VerifiedArchiv
 
 Alpha.5 makes the source capability real before it crosses a process boundary.
 
-**Current main status:** the backend-neutral access substrate and first private spool have landed. Magic detection, ZIP discovery, central and local metadata reads, descriptor checks, covering audit, original member verification, and later verified-member reads use checked `u64` ranges or range-limited readers. Central-directory buffering occurs only after the metadata cap passes, and compressed payloads stream in fixed buffers. A path is opened once and copied under the source cap into a random native-private directory through a fixed 64 KiB buffer while SHA-256 is computed. Sealr verifies the opened source and copied lengths, reopens only its own file read-only, removes its filename, and retains that unnamed capability. Private-file and borrowed-memory runs produce byte-identical semantic evidence. Same-length hostile mutation during construction, multi-gigabyte sparse, peak-resident-memory, and protocol gates remain open.
+**Current main status:** the backend-neutral access substrate and first private spool have landed. Magic detection, ZIP discovery, central and local metadata reads, descriptor checks, covering audit, original member verification, and later verified-member reads use checked `u64` ranges or range-limited readers. Central-directory buffering occurs only after the metadata cap passes, and compressed payloads stream in fixed buffers. A path is opened once and copied under the source cap into a random native-private directory through a fixed 64 KiB buffer while SHA-256 is computed. Sealr validates the opened source length and native change fingerprint, reopens only its own file read-only, removes its filename, and retains that unnamed capability. Windows denies write sharing during the copy. Private-file and borrowed-memory runs produce byte-identical semantic evidence. Same-length mutation, physically sparse 128 MiB, isolated peak-memory, and locally executed 3 GiB gates have landed. The bounded protocol and fuzz gates remain open.
 
 ### Snapshot backend
 
@@ -92,9 +92,9 @@ Alpha.5 makes the source capability real before it crosses a process boundary.
 
 ### Resource and mutation evidence
 
-1. Test truncation, growth, in-place source mutation, path replacement, stale handles, short reads, and copy interruption. **Landed except for a deterministic same-length in-place hostile-writer test:** the suite covers length mismatch, cap growth, replacement after the source handle opens, repeated short reads, interruption retry, private-directory cleanup, original-path deletion, and retained reads.
-2. Verify that memory stays within a declared budget independently of archive size. **Initial heap gate landed:** a required integration test generates valid 1 MiB and 32 MiB stored ZIPs, caps tracked allocation at 8 MiB, and permits at most a 1 MiB size-related delta. Both allocated 144,065 tracked heap bytes on the current Windows run. Peak resident memory and larger native measurements remain open.
-3. Inspect a large sparse valid fixture without a proportionally large allocation. **Partially landed:** the 32 MiB generated valid fixture proves the regression would catch whole-archive heap buffering. The multi-gigabyte sparse gate remains open.
+1. Test truncation, growth, in-place source mutation, path replacement, stale handles, short reads, and copy interruption. **Landed:** the suite covers length mismatch, cap growth, deterministic same-length mutation, Windows writer exclusion, replacement after the source handle opens, repeated short reads, interruption retry, private-directory cleanup, original-path deletion, and retained reads.
+2. Verify that memory stays within a declared budget independently of archive size. **Landed as a required regression gate:** isolated child processes apply physically sparse valid 1 MiB and 128 MiB ZIPs. Tracked heap allocation is capped at 8 MiB with a 1 MiB size-related delta; peak resident memory is capped at 256 MiB with a 64 MiB delta. The latest Windows run measured 210,367 tracked heap bytes for both and about 7.3 MiB peak resident memory for each.
+3. Inspect a large sparse valid fixture without a proportionally large allocation. **Landed as scheduled evidence:** a locally executed 3 GiB sparse ZIP32 case used 131,072 allocated source bytes and 210,427 tracked heap bytes. The exact ignored regression runs monthly on Linux, macOS, and Windows so the expensive native measurement does not burden every pull request.
 4. Require the memory-backed and file-backed snapshots to produce byte-identical IR, findings, and roots for the same bytes. **Landed for the current borrowed-memory and private-file backends.**
 
 ### Protocol preparation
@@ -106,7 +106,7 @@ Alpha.5 makes the source capability real before it crosses a process boundary.
 
 ### Alpha.5 exit gate
 
-**Status: open.** The private-file capability and bounded-heap regression are complete, but the same-file mutation, multi-gigabyte sparse, peak-resident-memory, protocol, and fuzz gates below are not.
+**Status: open.** The snapshot, mutation, backend-parity, required resource, and scheduled multi-gigabyte gates are complete. The bounded protocol and fuzz gates below remain release blockers.
 
 - Resident memory is bounded independently of accepted archive size.
 - Interpretation and payload verification cannot observe different source versions.

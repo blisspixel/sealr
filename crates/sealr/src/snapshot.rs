@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::error::Error;
 use std::fmt;
-use std::fs::File;
+use std::fs::{File, Metadata, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::Path;
 
@@ -17,6 +17,38 @@ use crate::policy::hex_sha256;
 
 const COPY_BUFFER_BYTES: usize = 64 * 1024;
 const SPOOL_FILE_NAME: &str = "archive.snapshot";
+
+#[derive(Debug, PartialEq, Eq)]
+struct OpenedSourceState {
+    len: u64,
+    platform: PlatformSourceState,
+}
+
+#[cfg(unix)]
+#[derive(Debug, PartialEq, Eq)]
+struct PlatformSourceState {
+    device: u64,
+    inode: u64,
+    mode: u32,
+    modified_seconds: i64,
+    modified_nanoseconds: i64,
+    changed_seconds: i64,
+    changed_nanoseconds: i64,
+}
+
+#[cfg(windows)]
+#[derive(Debug, PartialEq, Eq)]
+struct PlatformSourceState {
+    attributes: u32,
+    creation_time: u64,
+    last_write_time: u64,
+}
+
+#[cfg(not(any(unix, windows)))]
+#[derive(Debug, PartialEq, Eq)]
+struct PlatformSourceState {
+    modified: Option<std::time::SystemTime>,
+}
 
 /// How this invocation holds the exact archive bytes.
 ///
@@ -115,9 +147,18 @@ impl<'a> SourceSnapshot<'a> {
         path: Option<String>,
         max_archive_bytes: u64,
     ) -> Result<Self, Finding> {
-        let mut source = File::open(source_path).map_err(|error| {
+        let source = open_source_for_snapshot(source_path).map_err(|error| {
             Finding::error(FindingCode::SourceIo, format!("open source: {error}"))
         })?;
+        Self::private_file_from_opened(source, path, max_archive_bytes, || {})
+    }
+
+    fn private_file_from_opened(
+        mut source: File,
+        path: Option<String>,
+        max_archive_bytes: u64,
+        after_copy: impl FnOnce(),
+    ) -> Result<Self, Finding> {
         let before = source.metadata().map_err(|error| {
             Finding::error(
                 FindingCode::SourceIo,
@@ -130,27 +171,25 @@ impl<'a> SourceSnapshot<'a> {
                 "opened source is not a regular file",
             ));
         }
-        let expected_len = before.len();
+        let before = opened_source_state(&before);
+        let expected_len = before.len;
         if expected_len > max_archive_bytes {
             return Err(Finding::error(
                 FindingCode::QuotaArchive,
                 format!("archive is {expected_len} bytes; cap is {max_archive_bytes}"),
             ));
         }
-        let before_modified = before.modified().ok();
 
         let snapshot =
             Self::private_file_from_reader(path, &mut source, expected_len, max_archive_bytes)?;
+        after_copy();
         let after = source.metadata().map_err(|error| {
             Finding::error(
                 FindingCode::SourceIo,
                 format!("recheck opened-source metadata: {error}"),
             )
         })?;
-        let modified_changed = before_modified
-            .zip(after.modified().ok())
-            .is_some_and(|(before, after)| before != after);
-        if !after.is_file() || after.len() != expected_len || modified_changed {
+        if !after.is_file() || opened_source_state(&after) != before {
             return Err(Finding::error(
                 FindingCode::SourceIo,
                 "opened source changed while the private snapshot was being copied",
@@ -426,6 +465,67 @@ impl<'a> SourceSnapshot<'a> {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(windows)]
+fn open_source_for_snapshot(path: &Path) -> io::Result<File> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use windows_sys::Win32::Storage::FileSystem::{FILE_SHARE_DELETE, FILE_SHARE_READ};
+
+    OpenOptions::new()
+        .read(true)
+        // A writer that is already open causes this open to fail, and a new
+        // writer cannot open until this handle closes. Delete sharing is safe:
+        // later reads use this exact handle, never the caller's path.
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_DELETE)
+        .open(path)
+}
+
+#[cfg(not(windows))]
+fn open_source_for_snapshot(path: &Path) -> io::Result<File> {
+    OpenOptions::new().read(true).open(path)
+}
+
+#[cfg(unix)]
+fn opened_source_state(metadata: &Metadata) -> OpenedSourceState {
+    use std::os::unix::fs::MetadataExt;
+
+    OpenedSourceState {
+        len: metadata.len(),
+        platform: PlatformSourceState {
+            device: metadata.dev(),
+            inode: metadata.ino(),
+            mode: metadata.mode(),
+            modified_seconds: metadata.mtime(),
+            modified_nanoseconds: metadata.mtime_nsec(),
+            changed_seconds: metadata.ctime(),
+            changed_nanoseconds: metadata.ctime_nsec(),
+        },
+    }
+}
+
+#[cfg(windows)]
+fn opened_source_state(metadata: &Metadata) -> OpenedSourceState {
+    use std::os::windows::fs::MetadataExt;
+
+    OpenedSourceState {
+        len: metadata.len(),
+        platform: PlatformSourceState {
+            attributes: metadata.file_attributes(),
+            creation_time: metadata.creation_time(),
+            last_write_time: metadata.last_write_time(),
+        },
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn opened_source_state(metadata: &Metadata) -> OpenedSourceState {
+    OpenedSourceState {
+        len: metadata.len(),
+        platform: PlatformSourceState {
+            modified: metadata.modified().ok(),
+        },
     }
 }
 
@@ -794,6 +894,73 @@ mod tests {
 
         assert_eq!(snapshot.read_vec(0, snapshot.len()).unwrap(), original);
         drop(snapshot);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn private_path_copy_rejects_same_length_in_place_mutation() {
+        use std::io::{Seek, SeekFrom};
+
+        let mut random = [0_u8; 12];
+        getrandom::fill(&mut random).unwrap();
+        let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let directory = std::env::temp_dir().join(format!("sealr-source-mutate-{suffix}"));
+        std::fs::create_dir(&directory).unwrap();
+        let source_path = directory.join("input.zip");
+        let original = vec![0x11; COPY_BUFFER_BYTES * 2];
+        std::fs::write(&source_path, &original).unwrap();
+        let source = open_source_for_snapshot(&source_path).unwrap();
+
+        let error = SourceSnapshot::private_file_from_opened(
+            source,
+            Some(source_path.display().to_string()),
+            original.len() as u64,
+            || {
+                let mut writer = OpenOptions::new().write(true).open(&source_path).unwrap();
+                writer
+                    .seek(SeekFrom::Start(COPY_BUFFER_BYTES as u64))
+                    .unwrap();
+                writer.write_all(&vec![0x22; COPY_BUFFER_BYTES]).unwrap();
+                writer.flush().unwrap();
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code, FindingCode::SourceIo);
+        assert_eq!(
+            error.detail,
+            "opened source changed while the private snapshot was being copied"
+        );
+        assert_eq!(
+            std::fs::metadata(&source_path).unwrap().len(),
+            original.len() as u64
+        );
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn private_path_copy_rejects_an_existing_writer() {
+        let mut random = [0_u8; 12];
+        getrandom::fill(&mut random).unwrap();
+        let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let directory = std::env::temp_dir().join(format!("sealr-source-writer-{suffix}"));
+        std::fs::create_dir(&directory).unwrap();
+        let source_path = directory.join("input.zip");
+        std::fs::write(&source_path, b"stable bytes").unwrap();
+        let writer = OpenOptions::new().write(true).open(&source_path).unwrap();
+
+        let error = SourceSnapshot::private_file_from_path(
+            &source_path,
+            Some(source_path.display().to_string()),
+            1024,
+        )
+        .unwrap_err();
+
+        assert_eq!(error.code, FindingCode::SourceIo);
+        assert!(error.detail.starts_with("open source:"));
+        drop(writer);
         std::fs::remove_dir_all(directory).unwrap();
     }
 
