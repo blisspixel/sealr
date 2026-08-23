@@ -63,6 +63,8 @@ The single required `CI` workflow verifies the library package with `cargo packa
 
 `sealr-identity-verifier` is a separate non-published workspace tool, not the future general `xtask`. It intentionally has no dependency on `sealr`, uses only the existing Serde, serde_json, and SHA-256 dependency families, and independently checks the committed [identity-conformance bundle](identity-conformance.md). Required CI names that check explicitly in addition to running its tamper tests through the workspace suite. It is not included in native release archives.
 
+`sealr-wheel-lab` is also a non-published workspace tool. It uses the public Sealr API to analyze an explicitly bounded, digest-pinned corpus without another ZIP parser. Raw wheels remain outside Git. Required CI performs an offline verification of the committed [pilot report](wheel-compatibility-pilot.md): analyzer revision, manifest, interpretation-profile and default-policy bindings, artifact metadata, rollups, canonical JSON, and rendered Markdown must agree. Re-executing the measurement is a deliberate research operation because it requires the ignored local artifact cache.
+
 ## CLI rule
 
 The CLI is a thin presentation layer over typed library outcomes. Human formatting can improve, but machine JSON, rule identities, and exit classes remain versioned contracts. No UI dependency may become a second policy engine or parser.

@@ -94,7 +94,7 @@ The [usefulness test](docs/usefulness.md) is the product gate: same bytes and po
 
 The repository now has:
 
-- a Rust workspace with `sealr` and `sealr-cli`;
+- a Rust workspace with the shipped `sealr` library and `sealr-cli`, plus non-published identity-conformance and wheel-laboratory tools;
 - one `apply()` operation returning verdict, view, and receipt;
 - classic ZIP32 Store and Deflate support;
 - CD-first structure agreement across EOCD, CDH, LFH, and data descriptors;
@@ -110,6 +110,7 @@ The repository now has:
 - pinned Rust 1.98.0 plus strict format, Clippy, debug test, optimized build, cross-platform release test, Rustdoc build, documentation, and supply-chain CI gates;
 - an opaque `VerifiedArchive` on completely verified admitted outcomes, with canonical member lookup, caller-bounded reads, and opt-in exact-path retention under independent member and total byte ceilings during the original verification pass;
 - a separate locked Cargo consumer that runs against the extracted packaged crate rather than the workspace source;
+- a reproducible, byte-addressed 20-wheel compatibility pilot that uses only the public Sealr outcome and read-only IR, binds its manifest and interpretation-profile digests, and records 19 admissions plus one investigated three-member expansion-ratio denial without advertising wheel support;
 - dependency update automation and an explicit permissive-license policy;
 - protected `main` requiring pull requests, linear history, resolved conversations, and all five current required CI checks;
 - the `v0.1.0-alpha.3` semantic-identity preview line, built from protected `main` through all five required main CI checks and the release workflow, with immutable releases enabled.
@@ -120,11 +121,11 @@ This is the current third-alpha baseline. It is incomplete and is not a producti
 
 The detailed release-sized plan is [docs/near-term.md](docs/near-term.md). It corrects three dependencies in the older numbered sequence below: the private file-backed snapshot lands before worker IPC, assurance foundations land alongside each feature, and a non-shipping wheel laboratory begins before Phase 0.1 completes.
 
-1. **Alpha.4 target: measured semantic contract.** The first opaque verified capability, caller-bounded member reads, bounded one-pass exact-member retention, packaged consumer, six finite-domain property families, independent identity-conformance verifier, shared checked interval and partition kernel, and pure quota transition have landed. Finish the exact extra-field profile from compatibility evidence and the first wheel compatibility report. The compatibility `apply()` facade remains available while the adopter-facing API is reviewed.
+1. **Alpha.4 target: measured semantic contract.** The first opaque verified capability, caller-bounded member reads, bounded one-pass exact-member retention, packaged consumer, six finite-domain property families, independent identity-conformance verifier, shared checked interval and partition kernel, pure quota transition, and first wheel compatibility pilot have landed. Expand the compatibility evidence where it changes a rule, then finish the exact flag and extra-field profile. The compatibility `apply()` facade remains available while the adopter-facing API is reviewed.
 2. **Alpha.5 target: bounded immutable input.** Copy, hash, and retain a private file-backed snapshot, then parse and verify through checked random access without reopening the source path or allocating in proportion to archive size. The worker protocol is specified and fuzzed over capabilities, not archive blobs.
 3. **Alpha.6 target: supervised Linux worker.** The supervisor alone owns the destination parent, publication, cleanup, and recovery authority. The worker receives the immutable snapshot and stage capabilities, installs a measured Landlock boundary before the first archive read, and returns an untrusted bounded result that the supervisor audits without reparsing ZIP.
 4. **Continuous assurance lane.** Pure range, quota, path, and lifecycle models; property tests; bounded model checking; fuzzing; and native race stress begin with the increments they protect. Step 8 completes and operationalizes this program instead of starting it late.
-5. **Parallel wheel laboratory.** Measure a reproducible benign corpus, maintain hostile wheel fixtures, and draft the [Python wheel consumer profile](docs/profiles/python-wheel-v1.md). The lab is not shipped support. It becomes experimental admission only after the exact wheel ZIP profile, canonical UTF-8 paths, verified-member access, consumer budgets, and consumer identities pass their gates.
+5. **Parallel wheel laboratory.** The first reproducible benign [compatibility pilot](docs/wheel-compatibility-pilot.md) is published. Expand it around observed decision boundaries, maintain hostile wheel fixtures, and advance the [Python wheel consumer profile](docs/profiles/python-wheel-v1.md). The lab is not shipped support. It becomes experimental admission only after the exact wheel ZIP profile, canonical UTF-8 paths, verified-member access, consumer budgets, and consumer identities pass their gates.
 
 After Alpha.6, authenticated recovery and durability can proceed in parallel with canonical names and the pure wheel evaluator. Stable evidence, avoided-work performance, and CLI closure remain Phase 0.1 gates. Common ZIP codec adapters still follow that trust gate. The wheel consumer can proceed on Store and Deflate without waiting for every method; TAR waits so its wrappers reuse the same codec boundary.
 

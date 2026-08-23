@@ -16,6 +16,8 @@ The project is in initial development. Compatibility may change between preview 
 - Added a fifth finite-domain property family for atomic quota transitions. It compares 159,528 valid states and increments with independent `u128` arithmetic and confirms that overflow and cap failures leave accounting unchanged.
 - Added `apply_with_options`, validated `RetentionPlan` construction, and per-path `RetentionStatus` reporting. Up to 64 exact canonical paths can be selected under bounded path metadata plus caller-selected member and aggregate content ceilings. Successful selections are captured during the original verification stream and borrowed through `VerifiedArchive::retained_member` without another parse, inflation, allocation, or hash.
 - Added a sixth finite-domain property family that compares deterministic retention selection with an independent small-domain oracle over 8,125 member-size and limit combinations.
+- Added a reproducible, non-shipping compatibility pilot over 20 exact PyPI wheels and 90,417,280 source bytes. Its bounded manifest pins acquisition metadata and digests; analysis uses only Sealr's public outcome and read-only IR. The profile admits 19 artifacts and denies one SciPy artifact for three investigated per-member expansion-ratio findings. Structural inventory also distinguishes top-level wheel metadata from nested vendored `.dist-info` trees.
+- Added an offline committed-report verifier to required CI. It binds the wheel report to the analyzer revision plus exact manifest, current interpretation-profile, and default-policy digests; recomputes rollups; and requires canonical JSON and Markdown without downloading or reparsing the corpus.
 
 ### Changed
 

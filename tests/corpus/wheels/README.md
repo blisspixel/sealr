@@ -1,0 +1,45 @@
+# Wheel compatibility pilot corpus
+
+This directory defines a small, non-shipping compatibility pilot for the future `python-wheel.v1` profile. It does not advertise wheel support and is not a representative sample of PyPI.
+
+## Scope
+
+The manifest pins 20 non-yanked artifacts returned by PyPI's official JSON API on 2026-08-22:
+
+- eight universal wheels from packaging tools and pure Python libraries;
+- four Linux x86_64 native wheels;
+- four Windows x86_64 native wheels;
+- three macOS arm64 native wheels and one macOS universal2 wheel.
+
+The named projects are a judgmental pilot chosen to exercise packaging tools, pure libraries, native extensions, and larger scientific artifacts. Each platform-specific selection targets CPython 3.12 when the release publishes that tag. `cryptography` and `psutil` use compatible `abi3` artifacts. The manifest, rather than the mutable project endpoint, is the reproducibility authority.
+
+Raw wheels are not committed. Each entry records project, release, cohort, exact filename and URL, SHA-256, size, upload time, and a PyPI provenance page. The acquisition script accepts only direct HTTPS URLs on `files.pythonhosted.org`, disables redirects, applies 512 MiB per-artifact and 2 GiB aggregate limits while streaming through a fixed buffer, and verifies size and digest before promoting a partial download into the ignored `.research/wheels` cache.
+
+The analyzer separately caps the manifest at 1 MiB, each cached-artifact read at its declared size, the corpus inventory at 65,536 interpreted members and 65,536 finding occurrences, and each generated or verified report file at 32 MiB. These laboratory limits are not product policy and do not widen the default Sealr budget.
+
+## Reproduce
+
+From the repository root:
+
+```powershell
+cargo run --locked -p sealr-wheel-lab -- validate-manifest tests/corpus/wheels/manifest.json
+pwsh -NoLogo -NoProfile -File scripts/acquire_wheel_corpus.ps1
+cargo run --locked -p sealr-wheel-lab -- analyze `
+  tests/corpus/wheels/manifest.json `
+  .research/wheels `
+  tests/corpus/wheels/report.json `
+  docs/wheel-compatibility-pilot.md
+cargo run --locked -p sealr-wheel-lab -- check `
+  tests/corpus/wheels/manifest.json `
+  .research/wheels `
+  tests/corpus/wheels/report.json `
+  docs/wheel-compatibility-pilot.md
+cargo run --locked -p sealr-wheel-lab -- verify-report `
+  tests/corpus/wheels/manifest.json `
+  tests/corpus/wheels/report.json `
+  docs/wheel-compatibility-pilot.md
+```
+
+The analyzer uses only Sealr's public `apply` outcome and read-only `ArchiveIR`. It does not call Python `zipfile`, an external extractor, or another ZIP parser. Rejected artifacts are not reopened through a fallback parser, so feature counts are available only when current interpretation produced an IR.
+
+The committed report binds the analyzer revision plus exact manifest, interpretation-profile, and default-policy digests. It records current admission results, affected-artifact and finding-occurrence counts, structured denial details, methods, general-purpose flags, extra fields by site and disposition, normalization actions, `.dist-info` path candidates, candidate metadata basenames, and per-artifact structural totals. The offline `verify-report` command checks those bindings, internal rollups, canonical JSON, and Markdown rendering without raw wheels. It does not re-execute corpus analysis or validate wheel metadata, `RECORD`, relocation, target compatibility, or installation semantics.
