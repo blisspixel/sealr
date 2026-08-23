@@ -4,7 +4,7 @@
 
 > **Goal: one archive, one tree, and evidence for the decision.**
 
-sealr is an early attempt to make archive ingestion easier to reason about. The released Alpha.4 boundary implements a deliberately narrow ZIP32 path: it builds one versioned interpretation from an immutable source snapshot, verifies accepted members, and either publishes the requested tree without replacement or publishes no destination. Current main is building Alpha.5: checked random access now serves interpretation and verification, path inputs are copied once into a Sealr-owned private file instead of a whole-archive memory buffer, and native source-change and resource gates exercise that boundary. Sealr does not yet provide a process sandbox or production security claim.
+sealr is an early attempt to make archive ingestion easier to reason about. The released Alpha.4 boundary implements a deliberately narrow ZIP32 path: it builds one versioned interpretation from an immutable source snapshot, verifies accepted members, and either publishes the requested tree without replacement or publishes no destination. Current main is building Alpha.5: checked random access serves interpretation and verification, path inputs are copied once into a Sealr-owned private file, native source-change and resource gates exercise that boundary, and a bounded capability-oriented worker protocol is now specified and implemented. Sealr does not yet provide a process sandbox or production security claim.
 
 ```text
 Untrusted archive x policy
@@ -55,6 +55,7 @@ The current Rust implementation supports classic ZIP32 archives with stored or D
 - An adversarial unit suite, an external-crate API fixture, a separate consumer that runs against the extracted packaged crate, strict Clippy, rustfmt, documentation checks, cross-platform tests, and cargo-deny policy in CI.
 - A versioned four-case identity-conformance bundle with two exact profile vectors, checked by both the production API and a standalone workspace verifier that has no dependency on the Sealr crate. It hashes exact source and profile bytes, checks the claimed covering without searching or inflating, and independently reproduces three layout and three content roots.
 - A non-shipping, byte-addressed [20-wheel compatibility pilot](docs/wheel-compatibility-pilot.md) analyzed only through Sealr's public API under strict ASCII v2. The profile admits 19 artifacts; one SciPy wheel is denied by three per-member `quota.ratio` findings. The sample is judgmental evidence, not a PyPI-wide compatibility claim or supported wheel admission.
+- A non-published, zero-dependency [bounded worker protocol v1](docs/worker-protocol.md). Its 4 MiB control-frame limit, fixed start frame, out-of-band capability slots, correlated result state, canonical manifest, fallible decoder, adversarial regressions, and pinned libFuzzer target prepare the Alpha.6 process boundary without embedding archive bytes in IPC.
 
 ## Security limitations
 
@@ -71,6 +72,7 @@ The following work must land before a production-readiness claim:
 - Normal rejection attempts stage cleanup and retries once after failure, then records `removed` or `failed` in the receipt. Setup failure after stage creation uses the retained stage handle first and a parent-relative retry. A killed process or two cleanup failures can leave a hidden staging directory.
 - The default durability mode is `flush-only`. Setting the Rust policy field `atomic: true` syncs completed member files, but directory syncing, crash recovery, and power-loss durability are not implemented.
 - Landlock, seccomp, AppContainer, and other process sandboxes are not implemented. Receipts report `kernel_jail: unavailable`.
+- Worker protocol v1 is a codec and authority contract, not a worker. The current parser still runs in process. The scheduled AddressSanitizer fuzz campaign is bounded heuristic evidence and does not prove decoder safety or process containment.
 - When the complete source bytes are held, the receipt records their SHA-256. A failure before a complete snapshot is available records `{ "status": "unavailable" }` instead of a digest. Receipts also carry separate interpretation, admission, verification, effect, and view-completeness axes; the alpha.2 `Allowed`/`Rejected` shape remains a compatibility adapter and still maps an admitted archive with a failed destination to `Rejected`.
 - Receipts are unsigned, and their JSON digest is deterministic for the current Rust structs but is not yet RFC 8785 JCS.
 - The inspectable `View` remains invocation evidence. Its digest covers verdict, write state, findings, and members. Receipts now also carry separate `sealrTreeV1` layout and content-tree identities derived from `ArchiveIR`. Those roots are unsigned, preview-line encodings; they are not yet a lock, an authenticated subject, or a claim that every extra-field payload is semantic. Materialization failures still map into the end-to-end `Rejected` verdict.
@@ -174,7 +176,7 @@ The semantic walkthrough is enforced by CLI integration tests on the native plat
 
 ## What comes next
 
-The next milestone remains the Phase 0.1 ZIP trust gate, not another archive format. Alpha.4 closed the measured semantic and adopter-facing contract. Alpha.5 is in progress: checked random access, the private path-input spool, source-change detection, backend parity, required heap and peak-resident-memory checks, and a monthly three-platform 3 GiB sparse gate have landed. The remaining Alpha.5 release blocker is a bounded, fuzzed capability protocol. Alpha.6 passes the snapshot capability into a supervised Linux worker and independently audits its staged result.
+The next milestone remains the Phase 0.1 ZIP trust gate, not another archive format. Alpha.4 closed the measured semantic and adopter-facing contract. Alpha.5 now has checked random access, the private path-input spool, source-change detection, backend parity, required heap and peak-resident-memory checks, a monthly three-platform 3 GiB sparse gate, and the bounded capability protocol. A clean scheduled fuzz campaign and exact-main release gates remain before Alpha.5 can be published. Alpha.6 passes the snapshot capability into a supervised Linux worker and independently audits its staged result.
 
 Assurance now advances with each increment rather than waiting for a late phase. The non-shipping wheel laboratory has published its first small compatibility measurement and now expands toward wheel-aware semantic evaluation, while supported `python-wheel.v1` admission remains gated on its exact UTF-8 ZIP profile, canonical paths, use of the bounded retention capability, consumer budgets, and identities.
 

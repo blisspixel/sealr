@@ -1,6 +1,6 @@
 # Testing, compatibility, and assurance
 
-> This page separates current evidence from the target assurance program. The Alpha.4 baseline has a deterministic Rust suite, strict cross-platform CI, cargo-deny policy, a pinned 5,927-file ZipDiff construction gate, six finite-domain property families, an opaque bounded-read capability with one-pass exact-member retention, a consumer that runs against the extracted packaged crate, an independent verifier for two profile vectors and four identity-conformance cases, and a 20-wheel compatibility measurement. Current main also has the first private file-backed source, native mutation controls, a required heap and peak-resident-memory comparison, and a scheduled multi-gigabyte sparse gate. Broader ecosystem sampling, coverage-guided fuzzing, model checking, the general authenticated-evidence verifier, and an external audit remain future work.
+> This page separates current evidence from the target assurance program. The Alpha.4 baseline has a deterministic Rust suite, strict cross-platform CI, cargo-deny policy, a pinned 5,927-file ZipDiff construction gate, six finite-domain property families, an opaque bounded-read capability with one-pass exact-member retention, a consumer that runs against the extracted packaged crate, an independent verifier for two profile vectors and four identity-conformance cases, and a 20-wheel compatibility measurement. Current main also has the first private file-backed source, native mutation controls, required heap and peak-resident-memory comparison, scheduled multi-gigabyte sparse gate, and a pinned bounded-protocol fuzz target. Broader ecosystem sampling, ZIP and topology fuzz targets, model checking, the general authenticated-evidence verifier, and an external audit remain future work.
 
 Trust is the scarce resource. Format breadth and acceleration follow stable semantics and measured compatibility.
 
@@ -14,7 +14,7 @@ Trust is the scarce resource. Format breadth and acceleration follow stable sema
 | Corpus | All 5,927 pinned ZipDiff constructions, local generated adversarial fixtures, and a byte-addressed non-shipping pilot of 20 exact PyPI wheels with an investigated denial cluster | Expand producer and feature diversity; add codec-boundary, source-race, and wheel-semantic fixtures |
 | Differential | ZipDiff expectation gate binds strict rejection and a documented valid-control allowlist | Compare major consumers on well-formed profile inputs and track disagreement frontiers |
 | Property | Six finite-domain families: compression ratio against quotient and remainder; verified-member limits against `limit >= measured_size`; retention selection over 8,125 size and limit combinations; checked `offset + len` against `u128` over 4,624 boundary pairs; exact partitions against a per-byte bitmap over 1,055,758 lists of zero through three intervals; atomic quota transitions against `u128` over 159,528 valid states and increments | Add independent bounded models for strict-profile path topology and lifecycle transitions |
-| Fuzz | None yet | `cargo fuzz` targets for interpretation, canonical paths, and inspect-only `apply()` |
+| Fuzz | `protocol_decoders` exercises arbitrary start and result frames plus input-directed mutations of valid frames under pinned tool, seed, input, time, timeout, RSS, job, and output bounds | Add targets for interpretation, canonical paths, covering, codecs, and inspect-only `apply()`; accumulate scheduled history |
 | Executable specification | A no-Sealr-dependency verifier agrees with production evidence on four exact identity cases and independently checks their covering, profile digest, and roots | Add independent bounded models for ranges, quotas, paths, and lifecycle transitions; extend identity cases with each published profile and encoding branch |
 | Model checking | None yet | Add Kani harnesses with explicit domains, assumptions, and unwind bounds |
 | Audit | Reporting process and automated dependency checks | Independent review after the semantic core stabilizes |
@@ -97,9 +97,9 @@ Golden semantic fixtures should run across x86_64 and aarch64 where release infr
 
 The bounded random-access implementation must preserve the guarantee that interpretation and verification use the same byte object. The first private spool copies the opened source once before interpretation and serves every later range from the retained Sealr-owned read-only file.
 
-Current deterministic coverage includes opened-handle path replacement, source-length mismatch, growth beyond the cap, repeated short reads, interrupted reads, private-directory cleanup, original-path deletion before verified reads, and file-versus-memory semantic parity. Remaining tests include:
+Current deterministic coverage includes opened-handle path replacement, source-length mismatch, growth beyond the cap, deterministic same-length in-place mutation, Windows existing-writer exclusion, repeated short reads, interrupted reads, private-directory cleanup, original-path deletion before verified reads, and file-versus-memory semantic parity. Remaining work includes:
 
-- in-place payload mutation through another handle;
+- repeated hostile native mutation stress across supported filesystems;
 - remote object mutation or inconsistent range responses;
 - cache lookup under mismatched source or profile identity.
 
@@ -189,9 +189,9 @@ The detailed budgets and promotion gates are in the [near-term execution plan](n
 ## Continuous program
 
 - Run fast deterministic tests, formatting, strict lints, documentation checks, dependency policy, release-fixture checks, and native platform jobs on every change.
-- Add property tests and fuzz smoke tests once targets are stable.
-- Seed coverage-guided fuzzing with ZipDiff and local adversarial fixtures.
-- Add longer scheduled fuzzing only after runtime and cost are measured.
+- Keep the bounded protocol target, seed manifest, and scheduled campaign reproducible.
+- Add inspect-only ZIP, topology, covering, and codec targets after each interface is stable.
+- Seed later parser targets with locally authored cases and the reproducibly generated ZipDiff corpus where redistribution permits.
 - Publish compatibility changes and profile semantics with each release.
 - Add public continuous fuzzing after the crate and fuzz interfaces stabilize.
 - Commission an external review after the target semantic surface freezes.

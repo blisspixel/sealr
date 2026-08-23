@@ -30,6 +30,8 @@ On Windows, the retained parent must report non-remote, writable NTFS with persi
 
 Member operations must not follow a substituted link or reparse point. Root, an administrator, a principal matching the effective token's default-owner SID, a process running as the same security principal, a process with take-ownership, restore, or filesystem-override capabilities, or a process with debugging or handle-duplication rights is outside the containment promise of an in-process library. The planned worker contains its own parser authority but does not constrain another same-user process; bringing that actor into scope requires a distinct service identity or equivalent mandatory-access-control boundary. Receipts expose the selected storage, stage ACL, member-resolution, publication, outcome, and cleanup controls, but remain unsigned and therefore are evidence rather than authenticated attestations.
 
+The future worker response is hostile input to the supervisor. [Worker protocol v1](worker-protocol.md) bounds frames, counts, strings, canonical paths, state combinations, capability slots, and operation correlation before effect. The supervisor must still distrust a syntactically valid manifest, compare it with its own `ArchiveIR`, audit the stage through retained capabilities, and retain publication authority. The codec does not prove that a transport attached the intended handles or that their operating-system rights are minimal.
+
 Pipelines that matter for us:
 
 | Pipeline | Why it exists |

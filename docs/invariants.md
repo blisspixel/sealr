@@ -2,7 +2,7 @@
 
 These are **properties**, not features. They are the *type* of `inspect` / `materialize` / `mount`. Files on disk are a side effect that is only allowed if this boundary returns yes.
 
-This document is the target safety contract. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) are authoritative for current implementation status. Current main intentionally fails closed where canonical Unicode handling is unfinished, and it does not yet satisfy every filesystem-race, fuzzing, proof, isolation, or bounded-input obligation below.
+This document is the target safety contract. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) are authoritative for current implementation status. Current main intentionally fails closed where canonical Unicode handling is unfinished. It has bounded protocol fuzzing but does not yet satisfy every ZIP-parser fuzzing, filesystem-race, proof, isolation, or alternate-input obligation below.
 
 Each invariant MUST appear in the assurance claim ledger and receive evidence appropriate to its kind. Pure input properties require deterministic tests and generated properties; byte parsers require finite hostile corpora and coverage-guided fuzzing; bounded arithmetic and finite state machines are model-checking candidates; filesystem and authority properties require native fault and race tests. A finding code is required when an invocation can report the violation. CI infrastructure failures and excluded-adversary assumptions are recorded as evidence or limitations rather than invented archive findings.
 
@@ -74,6 +74,12 @@ Linux, macOS, and Windows are the supported materialization platforms; every oth
 Serializable evidence is not authority. A consumer may receive `VerifiedArchive` only after archive admission and complete member verification. Denied, structure-only, and partially verified outcomes MUST NOT expose it. An effect failure after complete verification may preserve the capability because archive admission and destination publication are separate axes.
 
 Member lookup consumes the canonical paths in the existing `ArchiveIR`. It MUST NOT reopen the caller path, run another structural parser, or trust a caller-constructed IR. Before allocating, each read enforces a caller-supplied byte ceiling against the measured member size. A non-retained read rechecks actual size, CRC32, and SHA-256 against the verified evidence. An explicitly retained member is captured from that original checked stream and becomes visible only on the fully verified capability. The retention plan MUST use exact canonical paths, independent per-member and aggregate byte ceilings, bounded path metadata, deterministic selection, and fallible allocation. Retention failure MUST NOT admit an archive that would otherwise reject or expose partially verified bytes. Directory, absent-member, and retention statuses remain distinct.
+
+## I10 - Worker protocol authority
+
+A worker control frame MUST name capabilities rather than contain archive bytes. Frame length, counts, strings, manifests, and findings are bounded before allocation or effect. The received capability count MUST equal the declared count; inspect receives only a source, materialize receives distinct source and stage slots, and results receive none. A result MUST match the supervisor's nonzero operation ID, use a coherent status and root state, and provide a strictly ordered canonical manifest. Reserved fields, unknown variants, trailing bytes, and absent fields with nonzero storage fail closed.
+
+The [protocol v1 codec](worker-protocol.md) implements these byte-level rules. It does not establish that a future transport passed the right handles or that their rights are restricted. Handle-right validation, inherited-descriptor closure, worker confinement, supervisor audit, and lifecycle control remain Alpha.6 obligations.
 
 ---
 

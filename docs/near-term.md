@@ -80,7 +80,7 @@ The first two capability increments are now implemented on main. `VerifiedArchiv
 
 Alpha.5 makes the source capability real before it crosses a process boundary.
 
-**Current main status:** the backend-neutral access substrate and first private spool have landed. Magic detection, ZIP discovery, central and local metadata reads, descriptor checks, covering audit, original member verification, and later verified-member reads use checked `u64` ranges or range-limited readers. Central-directory buffering occurs only after the metadata cap passes, and compressed payloads stream in fixed buffers. A path is opened once and copied under the source cap into a random native-private directory through a fixed 64 KiB buffer while SHA-256 is computed. Sealr validates the opened source length and native change fingerprint, reopens only its own file read-only, removes its filename, and retains that unnamed capability. Windows denies write sharing during the copy. Private-file and borrowed-memory runs produce byte-identical semantic evidence. Same-length mutation, physically sparse 128 MiB, isolated peak-memory, and locally executed 3 GiB gates have landed. The bounded protocol and fuzz gates remain open.
+**Current main status:** the backend-neutral access substrate and first private spool have landed. Magic detection, ZIP discovery, central and local metadata reads, descriptor checks, covering audit, original member verification, and later verified-member reads use checked `u64` ranges or range-limited readers. Central-directory buffering occurs only after the metadata cap passes, and compressed payloads stream in fixed buffers. A path is opened once and copied under the source cap into a random native-private directory through a fixed 64 KiB buffer while SHA-256 is computed. Sealr validates the opened source length and native change fingerprint, reopens only its own file read-only, removes its filename, and retains that unnamed capability. Windows denies write sharing during the copy. Private-file and borrowed-memory runs produce byte-identical semantic evidence. Same-length mutation, physically sparse 128 MiB, isolated peak-memory, and 3 GiB native matrix gates have landed. The bounded protocol codec, malformed-frame suite, seed manifest, and pinned fuzz workflow have landed. A clean scheduled fuzz campaign remains before Alpha.5 release.
 
 ### Snapshot backend
 
@@ -99,14 +99,14 @@ Alpha.5 makes the source capability real before it crosses a process boundary.
 
 ### Protocol preparation
 
-1. Specify a bounded, versioned supervisor-worker control frame over snapshot and stage capabilities. The frame does not contain the archive blob.
-2. Bound every message, member count, string, range list, and response before allocating.
-3. Fuzz the frame and response decoders alongside inspect-only ZIP bytes, path topology, and covering plus codec boundaries.
-4. Pin fuzz tool versions and toolchains, record resource limits and seed-manifest digests, and promote every reproducible crash into a deterministic regression.
+1. Specify a bounded, versioned supervisor-worker control frame over snapshot and stage capabilities. The frame does not contain the archive blob. **Landed:** [worker protocol v1](worker-protocol.md) uses fixed versioned framing and out-of-band capability slots.
+2. Bound every message, member count, string, range list, and response before allocating. **Landed for protocol v1:** the whole frame, counts, fixed minimum encoding, strings, manifest, and findings have explicit limits and fallible allocation. Version 1 carries no range list.
+3. Fuzz the frame and response decoders alongside inspect-only ZIP bytes, path topology, and covering plus codec boundaries. **Protocol slice landed:** the first target covers arbitrary start and result frames plus input-directed mutations of valid frames. ZIP, topology, covering, and codec targets remain later assurance increments.
+4. Pin fuzz tool versions and toolchains, record resource limits and seed-manifest digests, and promote every reproducible crash into a deterministic regression. **Landed for the protocol target:** required CI verifies exact tool, seed, dictionary, time, input, timeout, memory, job, and artifact-retention configuration. The bounded AddressSanitizer campaign runs weekly and on demand.
 
 ### Alpha.5 exit gate
 
-**Status: open.** The snapshot, mutation, backend-parity, required resource, and scheduled multi-gigabyte gates are complete. The bounded protocol and fuzz gates below remain release blockers.
+**Status: awaiting scheduled evidence.** The snapshot, mutation, backend-parity, required resource, scheduled multi-gigabyte, bounded protocol, and deterministic malformed-frame gates are complete. The first clean scheduled AddressSanitizer protocol campaign and exact-main release gates remain release blockers.
 
 - Resident memory is bounded independently of accepted archive size.
 - Interpretation and payload verification cannot observe different source versions.

@@ -1,0 +1,22 @@
+[package]
+name = "sealr-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+sealr-worker-protocol = { path = "../crates/sealr-protocol", version = "=0.1.0-alpha.4" }
+
+[[bin]]
+name = "protocol_decoders"
+path = "fuzz_targets/protocol_decoders.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]
