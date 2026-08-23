@@ -8,6 +8,7 @@ use crate::ir::{
 };
 use crate::snapshot::SourceSnapshot;
 use std::collections::BTreeSet;
+use std::io::Read;
 
 const EOCD_SIG: u32 = 0x0605_4b50;
 const CDH_SIG: u32 = 0x0201_4b50;
@@ -17,7 +18,7 @@ const ZIP64_EOCD_SIG: u32 = 0x0606_4b50;
 const ZIP64_LOCATOR_SIG: u32 = 0x0706_4b50;
 const EOCD_MIN: usize = 22;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ZipMember {
     pub raw_name: Vec<u8>,
     pub name: String,
@@ -34,21 +35,20 @@ pub struct ZipMember {
     pub source_ranges: MemberSourceRanges,
 }
 
-struct LocalHeader<'a> {
-    data_offset: usize,
-    extra_offset: usize,
-    name: &'a [u8],
+struct LocalHeader {
+    data_offset: u64,
+    extra_offset: u64,
+    name: Vec<u8>,
     method: u16,
     flags: u16,
     comp_size: u32,
     uncomp_size: u32,
     crc: u32,
-    extra: &'a [u8],
+    extra: Vec<u8>,
 }
 
-#[allow(dead_code)]
-pub struct ZipArchive<'a> {
-    pub bytes: &'a [u8],
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ZipArchive {
     pub members: Vec<ZipMember>,
     pub cd_offset: u64,
     pub cd_size: u64,
@@ -57,7 +57,7 @@ pub struct ZipArchive<'a> {
     pub metadata_bytes: u64,
 }
 
-impl ZipArchive<'_> {
+impl ZipArchive {
     pub fn covering(&self) -> crate::ir::ArchiveCovering {
         crate::ir::ArchiveCovering::from_zip32(
             self.cd_offset,
@@ -73,9 +73,10 @@ pub fn parse_zip(
     bytes: &[u8],
     max_files: u64,
     max_metadata_bytes: u64,
-) -> Result<ZipArchive<'_>, Finding> {
+) -> Result<ZipArchive, Finding> {
+    let snapshot = SourceSnapshot::borrowed(None, bytes);
     parse_zip_with_profile(
-        bytes,
+        &snapshot,
         max_files,
         max_metadata_bytes,
         ZipInterpretationProfile::StrictAsciiV1,
@@ -83,26 +84,28 @@ pub fn parse_zip(
 }
 
 pub fn parse_zip_with_profile(
-    bytes: &[u8],
+    snapshot: &SourceSnapshot<'_>,
     max_files: u64,
     max_metadata_bytes: u64,
     profile: ZipInterpretationProfile,
-) -> Result<ZipArchive<'_>, Finding> {
-    if bytes.len() < EOCD_MIN {
+) -> Result<ZipArchive, Finding> {
+    if snapshot.len() < EOCD_MIN as u64 {
         return Err(Finding::error(
             FindingCode::FormatUnsupported,
             "too small to be ZIP",
         ));
     }
-    let (eocd_off, comment_len) = find_eocd(bytes)?;
-    let comment = &bytes[eocd_off + 22..eocd_off + 22 + comment_len as usize];
-    reject_structural_metadata(comment, "EOCD comment")?;
-    let this_disk = u16::from_le_bytes(bytes[eocd_off + 4..eocd_off + 6].try_into().unwrap());
-    let cd_disk = u16::from_le_bytes(bytes[eocd_off + 6..eocd_off + 8].try_into().unwrap());
-    let this_count = u16::from_le_bytes(bytes[eocd_off + 8..eocd_off + 10].try_into().unwrap());
-    let total_count = u16::from_le_bytes(bytes[eocd_off + 10..eocd_off + 12].try_into().unwrap());
-    let cd_size = u32::from_le_bytes(bytes[eocd_off + 12..eocd_off + 16].try_into().unwrap());
-    let cd_offset = u32::from_le_bytes(bytes[eocd_off + 16..eocd_off + 20].try_into().unwrap());
+    let (eocd_off, comment_len) = find_eocd(snapshot)?;
+    let mut eocd = [0_u8; EOCD_MIN];
+    snapshot.read_exact_at(eocd_off, &mut eocd)?;
+    let comment = snapshot.read_vec(eocd_off + EOCD_MIN as u64, u64::from(comment_len))?;
+    reject_structural_metadata(&comment, "EOCD comment")?;
+    let this_disk = u16::from_le_bytes(eocd[4..6].try_into().unwrap());
+    let cd_disk = u16::from_le_bytes(eocd[6..8].try_into().unwrap());
+    let this_count = u16::from_le_bytes(eocd[8..10].try_into().unwrap());
+    let total_count = u16::from_le_bytes(eocd[10..12].try_into().unwrap());
+    let cd_size = u32::from_le_bytes(eocd[12..16].try_into().unwrap());
+    let cd_offset = u32::from_le_bytes(eocd[16..20].try_into().unwrap());
     if this_disk != 0 || cd_disk != 0 {
         return Err(Finding::error(FindingCode::ZipDiffC3Count, "spanned ZIP"));
     }
@@ -124,9 +127,9 @@ pub fn parse_zip_with_profile(
             format!("{total_count} entries; cap is {max_files}"),
         ));
     }
-    let cd_offset = cd_offset as u64;
-    let cd_size = cd_size as u64;
-    let mut metadata_bytes = (comment_len as u64).checked_add(cd_size).ok_or_else(|| {
+    let cd_offset = u64::from(cd_offset);
+    let cd_size = u64::from(cd_size);
+    let mut metadata_bytes = u64::from(comment_len).checked_add(cd_size).ok_or_else(|| {
         Finding::error(FindingCode::QuotaOverflow, "ZIP metadata counter overflow")
     })?;
     if metadata_bytes > max_metadata_bytes {
@@ -135,23 +138,19 @@ pub fn parse_zip_with_profile(
             format!("ZIP metadata exceeds {max_metadata_bytes} bytes"),
         ));
     }
-    if cd_offset + cd_size != eocd_off as u64 {
+    if cd_offset.checked_add(cd_size) != Some(eocd_off) {
         return Err(Finding::error(
             FindingCode::ZipDiffC4Offset,
             "CD size+offset does not land on EOCD",
         ));
     }
-    let cd_end = (cd_offset as usize).saturating_add(cd_size as usize);
-    if cd_end > bytes.len() {
-        return Err(Finding::error(
-            FindingCode::ZipDiffC4Offset,
-            "CD extends past file",
-        ));
-    }
+    let central_directory = snapshot
+        .read_vec(cd_offset, cd_size)
+        .map_err(|_| Finding::error(FindingCode::ZipDiffC4Offset, "CD extends past file"))?;
 
     let mut members = Vec::new();
-    let mut pos = cd_offset as usize;
-    let cd_end = cd_offset as usize + cd_size as usize;
+    let mut pos = 0_usize;
+    let cd_end = central_directory.len();
     while pos < cd_end {
         let parsed_count = u64::try_from(members.len()).map_err(|_| {
             Finding::error(
@@ -168,25 +167,30 @@ pub fn parse_zip_with_profile(
         if pos + 46 > cd_end {
             return Err(Finding::error(FindingCode::ZipDiffC3Count, "truncated CDH"));
         }
-        let sig = u32::from_le_bytes(bytes[pos..pos + 4].try_into().unwrap());
+        let sig = u32::from_le_bytes(central_directory[pos..pos + 4].try_into().unwrap());
         if sig != CDH_SIG {
             return Err(Finding::error(
                 FindingCode::ZipDiffC3Count,
                 "bad CDH signature",
             ));
         }
-        let flags = u16::from_le_bytes(bytes[pos + 8..pos + 10].try_into().unwrap());
-        let method = u16::from_le_bytes(bytes[pos + 10..pos + 12].try_into().unwrap());
-        let version_made_by = u16::from_le_bytes(bytes[pos + 4..pos + 6].try_into().unwrap());
-        let crc = u32::from_le_bytes(bytes[pos + 16..pos + 20].try_into().unwrap());
-        let comp = u32::from_le_bytes(bytes[pos + 20..pos + 24].try_into().unwrap());
-        let uncomp = u32::from_le_bytes(bytes[pos + 24..pos + 28].try_into().unwrap());
-        let name_len = u16::from_le_bytes(bytes[pos + 28..pos + 30].try_into().unwrap()) as usize;
-        let extra_len = u16::from_le_bytes(bytes[pos + 30..pos + 32].try_into().unwrap()) as usize;
+        let flags = u16::from_le_bytes(central_directory[pos + 8..pos + 10].try_into().unwrap());
+        let method = u16::from_le_bytes(central_directory[pos + 10..pos + 12].try_into().unwrap());
+        let version_made_by =
+            u16::from_le_bytes(central_directory[pos + 4..pos + 6].try_into().unwrap());
+        let crc = u32::from_le_bytes(central_directory[pos + 16..pos + 20].try_into().unwrap());
+        let comp = u32::from_le_bytes(central_directory[pos + 20..pos + 24].try_into().unwrap());
+        let uncomp = u32::from_le_bytes(central_directory[pos + 24..pos + 28].try_into().unwrap());
+        let name_len =
+            u16::from_le_bytes(central_directory[pos + 28..pos + 30].try_into().unwrap()) as usize;
+        let extra_len =
+            u16::from_le_bytes(central_directory[pos + 30..pos + 32].try_into().unwrap()) as usize;
         let comment_len =
-            u16::from_le_bytes(bytes[pos + 32..pos + 34].try_into().unwrap()) as usize;
-        let lfh_offset = u32::from_le_bytes(bytes[pos + 42..pos + 46].try_into().unwrap());
-        let external_attributes = u32::from_le_bytes(bytes[pos + 38..pos + 42].try_into().unwrap());
+            u16::from_le_bytes(central_directory[pos + 32..pos + 34].try_into().unwrap()) as usize;
+        let lfh_offset =
+            u32::from_le_bytes(central_directory[pos + 42..pos + 46].try_into().unwrap());
+        let external_attributes =
+            u32::from_le_bytes(central_directory[pos + 38..pos + 42].try_into().unwrap());
         if comp == 0xFFFF_FFFF || uncomp == 0xFFFF_FFFF || lfh_offset == 0xFFFF_FFFF {
             return Err(Finding::error(FindingCode::ZipDiffC5Zip64, "ZIP64 member").on(""));
         }
@@ -197,25 +201,34 @@ pub fn parse_zip_with_profile(
                 "CDH name overflows CD",
             ));
         }
-        let name_bytes = &bytes[name_off..name_off + name_len];
+        let name_bytes = &central_directory[name_off..name_off + name_len];
         let central_extra_off = name_off + name_len;
-        let central_extra = &bytes[central_extra_off..central_extra_off + extra_len];
-        let central_comment =
-            &bytes[central_extra_off + extra_len..central_extra_off + extra_len + comment_len];
+        let central_extra = &central_directory[central_extra_off..central_extra_off + extra_len];
+        let central_comment = &central_directory
+            [central_extra_off + extra_len..central_extra_off + extra_len + comment_len];
+        let central_extra_absolute =
+            cd_offset
+                .checked_add(central_extra_off as u64)
+                .ok_or_else(|| {
+                    Finding::error(
+                        FindingCode::ZipDiffC4Offset,
+                        "central extra-field offset overflow",
+                    )
+                })?;
         let mut extra_fields = classify_extra_fields(
             central_extra,
-            central_extra_off as u64,
+            central_extra_absolute,
             ExtraSite::Central,
             "central directory",
             name_bytes,
             profile,
         )?;
         reject_structural_metadata(central_comment, "central-directory comment")?;
-        let lfh = lfh_offset as usize;
-        let local = parse_lfh(bytes, lfh)?;
+        let lfh_offset = u64::from(lfh_offset);
+        let local = parse_lfh(snapshot, lfh_offset)?;
         extra_fields.extend(classify_extra_fields(
-            local.extra,
-            local.extra_offset as u64,
+            &local.extra,
+            local.extra_offset,
             ExtraSite::Local,
             "local header",
             name_bytes,
@@ -279,52 +292,44 @@ pub fn parse_zip_with_profile(
             uncomp,
         )?;
         let is_dir = name.ends_with('/');
-        let payload_end = (local.data_offset as u64).saturating_add(comp as u64);
-        if gp3 && method == 0 {
-            let payload_end = usize::try_from(payload_end).map_err(|_| {
-                Finding::error(
-                    FindingCode::ZipDiffC4Offset,
-                    "stored payload end does not fit this platform",
-                )
+        let payload_end = local
+            .data_offset
+            .checked_add(u64::from(comp))
+            .ok_or_else(|| {
+                Finding::error(FindingCode::ZipDiffC4Offset, "payload end overflows").on(&name)
             })?;
-            let stored_payload = bytes.get(local.data_offset..payload_end).ok_or_else(|| {
-                Finding::error(
-                    FindingCode::ZipDiffC4Offset,
-                    "stored payload extends past EOF",
-                )
-                .on(&name)
-            })?;
-            if contains_stream_signature(stored_payload) {
-                return Err(Finding::error(
-                    FindingCode::ZipDiffC1Stream,
-                    "stored data-descriptor payload contains an alternate record signature",
-                )
-                .on(&name));
-            }
+        if gp3
+            && method == 0
+            && contains_stream_signature_in_range(snapshot, local.data_offset, u64::from(comp))
+                .map_err(|finding| finding.on(&name))?
+        {
+            return Err(Finding::error(
+                FindingCode::ZipDiffC1Stream,
+                "stored data-descriptor payload contains an alternate record signature",
+            )
+            .on(&name));
         }
         let record_end = if gp3 {
-            let descriptor_offset = usize::try_from(payload_end).map_err(|_| {
-                Finding::error(
-                    FindingCode::ZipDiffC4Offset,
-                    "data descriptor offset does not fit this platform",
-                )
-            })?;
-            parse_data_descriptor(bytes, descriptor_offset, crc, comp, uncomp)? as u64
+            parse_data_descriptor(snapshot, payload_end, crc, comp, uncomp)?
         } else {
             payload_end
         };
-        let local_header_len = (local.data_offset as u64)
-            .checked_sub(lfh_offset as u64)
-            .ok_or_else(|| {
+        let local_header_len = local.data_offset.checked_sub(lfh_offset).ok_or_else(|| {
+            Finding::error(
+                FindingCode::ZipDiffC4Offset,
+                "local header length underflow",
+            )
+            .on(&name)
+        })?;
+        let payload_len = comp as u64;
+        let descriptor_range = if gp3 {
+            let start = local.data_offset.checked_add(payload_len).ok_or_else(|| {
                 Finding::error(
                     FindingCode::ZipDiffC4Offset,
-                    "local header length underflow",
+                    "data descriptor offset overflow",
                 )
                 .on(&name)
             })?;
-        let payload_len = comp as u64;
-        let descriptor_range = if gp3 {
-            let start = local.data_offset as u64 + payload_len;
             Some(ByteRange {
                 offset: start,
                 len: record_end.checked_sub(start).ok_or_else(|| {
@@ -347,23 +352,23 @@ pub fn parse_zip_with_profile(
             crc,
             comp_size: payload_len,
             uncomp_size: uncomp as u64,
-            lfh_offset: lfh_offset as u64,
-            data_offset: local.data_offset as u64,
+            lfh_offset,
+            data_offset: local.data_offset,
             record_end,
             is_dir,
             extra_fields,
             source_ranges: MemberSourceRanges {
                 local_header: ByteRange {
-                    offset: lfh_offset as u64,
+                    offset: lfh_offset,
                     len: local_header_len,
                 },
                 compressed_payload: ByteRange {
-                    offset: local.data_offset as u64,
+                    offset: local.data_offset,
                     len: payload_len,
                 },
                 data_descriptor: descriptor_range,
                 central_header: ByteRange {
-                    offset: pos as u64,
+                    offset: cd_offset + pos as u64,
                     len: cdh_len,
                 },
             },
@@ -396,12 +401,11 @@ pub fn parse_zip_with_profile(
     }
     check_layout(&members, cd_offset)?;
     Ok(ZipArchive {
-        bytes,
         members,
         cd_offset,
         cd_size,
-        eocd_offset: eocd_off as u64,
-        comment_len: comment_len as u64,
+        eocd_offset: eocd_off,
+        comment_len: u64::from(comment_len),
         metadata_bytes,
     })
 }
@@ -542,6 +546,40 @@ fn contains_stream_signature(data: &[u8]) -> bool {
         .any(|signature| contains_signature(data, signature))
 }
 
+fn contains_stream_signature_in_range(
+    snapshot: &SourceSnapshot<'_>,
+    offset: u64,
+    len: u64,
+) -> Result<bool, Finding> {
+    let mut reader = snapshot.reader(offset, len).map_err(|_| {
+        Finding::error(
+            FindingCode::ZipDiffC4Offset,
+            "stored payload extends past EOF",
+        )
+    })?;
+    let mut buffer = [0_u8; 64 * 1024];
+    let mut rolling = 0_u32;
+    let mut seen = 0_u8;
+    loop {
+        let read = reader.read(&mut buffer).map_err(|error| {
+            Finding::error(
+                FindingCode::SourceIo,
+                format!("read stored payload while checking signatures: {error}"),
+            )
+        })?;
+        if read == 0 {
+            return Ok(false);
+        }
+        for byte in &buffer[..read] {
+            rolling = (rolling >> 8) | (u32::from(*byte) << 24);
+            seen = seen.saturating_add(1);
+            if seen >= 4 && matches!(rolling, LFH_SIG | CDH_SIG | DATA_DESCRIPTOR_SIG) {
+                return Ok(true);
+            }
+        }
+    }
+}
+
 fn contains_signature(data: &[u8], signature: u32) -> bool {
     let signature = signature.to_le_bytes();
     data.windows(signature.len())
@@ -634,23 +672,24 @@ fn decode_name_for_profile(
     ))
 }
 
-fn find_eocd(bytes: &[u8]) -> Result<(usize, u16), Finding> {
-    let max_back = bytes.len().saturating_sub(EOCD_MIN);
-    let scan = max_back.min(65535 + EOCD_MIN);
-    let start = bytes.len() - EOCD_MIN;
-    for i in 0..=scan {
+fn find_eocd(snapshot: &SourceSnapshot<'_>) -> Result<(u64, u16), Finding> {
+    let tail_len = snapshot.len().min(65_535 + EOCD_MIN as u64);
+    let tail_offset = snapshot.len() - tail_len;
+    let tail = snapshot.read_vec(tail_offset, tail_len)?;
+    let max_back = tail.len().saturating_sub(EOCD_MIN);
+    let start = tail.len() - EOCD_MIN;
+    for i in 0..=max_back {
         let off = start.saturating_sub(i);
-        if off + 22 > bytes.len() {
+        if off + EOCD_MIN > tail.len() {
             continue;
         }
-        let sig = u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
+        let sig = u32::from_le_bytes(tail[off..off + 4].try_into().unwrap());
         if sig != EOCD_SIG {
             continue;
         }
-        let comment_len =
-            u16::from_le_bytes(bytes[off + 20..off + 22].try_into().unwrap()) as usize;
-        if off + 22 + comment_len == bytes.len() {
-            return Ok((off, comment_len as u16));
+        let comment_len = u16::from_le_bytes(tail[off + 20..off + 22].try_into().unwrap()) as usize;
+        if off + EOCD_MIN + comment_len == tail.len() {
+            return Ok((tail_offset + off as u64, comment_len as u16));
         }
     }
     Err(Finding::error(
@@ -659,34 +698,37 @@ fn find_eocd(bytes: &[u8]) -> Result<(usize, u16), Finding> {
     ))
 }
 
-fn parse_lfh(bytes: &[u8], off: usize) -> Result<LocalHeader<'_>, Finding> {
-    let fixed_end = off
-        .checked_add(30)
-        .filter(|end| *end <= bytes.len())
-        .ok_or_else(|| Finding::error(FindingCode::ZipDiffC4Offset, "LFH past EOF"))?;
-    let sig = u32::from_le_bytes(bytes[off..off + 4].try_into().unwrap());
+fn parse_lfh(snapshot: &SourceSnapshot<'_>, off: u64) -> Result<LocalHeader, Finding> {
+    let mut fixed = [0_u8; 30];
+    snapshot
+        .read_exact_at(off, &mut fixed)
+        .map_err(|_| Finding::error(FindingCode::ZipDiffC4Offset, "LFH past EOF"))?;
+    let sig = u32::from_le_bytes(fixed[0..4].try_into().unwrap());
     if sig != LFH_SIG {
         return Err(Finding::error(
             FindingCode::ZipDiffC1Stream,
             "LFH signature missing",
         ));
     }
-    let flags = u16::from_le_bytes(bytes[off + 6..off + 8].try_into().unwrap());
-    let method = u16::from_le_bytes(bytes[off + 8..off + 10].try_into().unwrap());
-    let crc = u32::from_le_bytes(bytes[off + 14..off + 18].try_into().unwrap());
-    let comp = u32::from_le_bytes(bytes[off + 18..off + 22].try_into().unwrap());
-    let uncomp = u32::from_le_bytes(bytes[off + 22..off + 26].try_into().unwrap());
-    let name_len = u16::from_le_bytes(bytes[off + 26..off + 28].try_into().unwrap()) as usize;
-    let extra_len = u16::from_le_bytes(bytes[off + 28..off + 30].try_into().unwrap()) as usize;
-    let name_off = fixed_end;
+    let flags = u16::from_le_bytes(fixed[6..8].try_into().unwrap());
+    let method = u16::from_le_bytes(fixed[8..10].try_into().unwrap());
+    let crc = u32::from_le_bytes(fixed[14..18].try_into().unwrap());
+    let comp = u32::from_le_bytes(fixed[18..22].try_into().unwrap());
+    let uncomp = u32::from_le_bytes(fixed[22..26].try_into().unwrap());
+    let name_len = u16::from_le_bytes(fixed[26..28].try_into().unwrap());
+    let extra_len = u16::from_le_bytes(fixed[28..30].try_into().unwrap());
+    let name_off = off
+        .checked_add(30)
+        .ok_or_else(|| Finding::error(FindingCode::ZipDiffC4Offset, "LFH offset overflow"))?;
     let extra_offset = name_off
-        .checked_add(name_len)
+        .checked_add(u64::from(name_len))
         .ok_or_else(|| Finding::error(FindingCode::ZipDiffC4Offset, "LFH name past EOF"))?;
     let data_offset = extra_offset
-        .checked_add(extra_len)
-        .filter(|end| *end <= bytes.len())
+        .checked_add(u64::from(extra_len))
+        .filter(|end| *end <= snapshot.len())
         .ok_or_else(|| Finding::error(FindingCode::ZipDiffC4Offset, "LFH name past EOF"))?;
-    let name = &bytes[name_off..extra_offset];
+    let name = snapshot.read_vec(name_off, u64::from(name_len))?;
+    let extra = snapshot.read_vec(extra_offset, u64::from(extra_len))?;
     Ok(LocalHeader {
         data_offset,
         extra_offset,
@@ -696,43 +738,58 @@ fn parse_lfh(bytes: &[u8], off: usize) -> Result<LocalHeader<'_>, Finding> {
         comp_size: comp,
         uncomp_size: uncomp,
         crc,
-        extra: &bytes[extra_offset..data_offset],
+        extra,
     })
 }
 
 fn parse_data_descriptor(
-    bytes: &[u8],
-    offset: usize,
+    snapshot: &SourceSnapshot<'_>,
+    offset: u64,
     expected_crc: u32,
     expected_comp: u32,
     expected_uncomp: u32,
-) -> Result<usize, Finding> {
-    if offset.saturating_add(12) > bytes.len() {
-        return Err(Finding::error(
-            FindingCode::ZipDiffC4Offset,
-            "data descriptor extends past EOF",
-        ));
-    }
-    let first = u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap());
-    let (values_offset, end) = if first == DATA_DESCRIPTOR_SIG {
-        (offset + 4, offset.saturating_add(16))
+) -> Result<u64, Finding> {
+    let mut descriptor = [0_u8; 16];
+    snapshot
+        .read_exact_at(offset, &mut descriptor[..12])
+        .map_err(|_| {
+            Finding::error(
+                FindingCode::ZipDiffC4Offset,
+                "data descriptor extends past EOF",
+            )
+        })?;
+    let first = u32::from_le_bytes(descriptor[0..4].try_into().unwrap());
+    let (values_offset, descriptor_len) = if first == DATA_DESCRIPTOR_SIG {
+        let suffix_offset = offset.checked_add(12).ok_or_else(|| {
+            Finding::error(
+                FindingCode::ZipDiffC4Offset,
+                "signed data descriptor offset overflow",
+            )
+        })?;
+        snapshot
+            .read_exact_at(suffix_offset, &mut descriptor[12..16])
+            .map_err(|_| {
+                Finding::error(
+                    FindingCode::ZipDiffC4Offset,
+                    "signed data descriptor extends past EOF",
+                )
+            })?;
+        (4_usize, 16_u64)
     } else {
-        (offset, offset.saturating_add(12))
+        (0_usize, 12_u64)
     };
-    if end > bytes.len() {
-        return Err(Finding::error(
-            FindingCode::ZipDiffC4Offset,
-            "signed data descriptor extends past EOF",
-        ));
-    }
-    let crc = u32::from_le_bytes(bytes[values_offset..values_offset + 4].try_into().unwrap());
+    let crc = u32::from_le_bytes(
+        descriptor[values_offset..values_offset + 4]
+            .try_into()
+            .unwrap(),
+    );
     let comp = u32::from_le_bytes(
-        bytes[values_offset + 4..values_offset + 8]
+        descriptor[values_offset + 4..values_offset + 8]
             .try_into()
             .unwrap(),
     );
     let uncomp = u32::from_le_bytes(
-        bytes[values_offset + 8..values_offset + 12]
+        descriptor[values_offset + 8..values_offset + 12]
             .try_into()
             .unwrap(),
     );
@@ -742,7 +799,9 @@ fn parse_data_descriptor(
             "data descriptor disagrees with the CDH",
         ));
     }
-    Ok(end)
+    offset
+        .checked_add(descriptor_len)
+        .ok_or_else(|| Finding::error(FindingCode::ZipDiffC4Offset, "data descriptor end overflow"))
 }
 
 fn check_layout(members: &[ZipMember], cd_off: u64) -> Result<(), Finding> {
@@ -815,9 +874,12 @@ fn check_layout(members: &[ZipMember], cd_off: u64) -> Result<(), Finding> {
     })
 }
 
-pub fn payload<'s>(snapshot: &'s SourceSnapshot<'_>, m: &ZipMember) -> Result<&'s [u8], Finding> {
+pub(crate) fn payload_reader<'s, 'a>(
+    snapshot: &'s SourceSnapshot<'a>,
+    m: &ZipMember,
+) -> Result<crate::snapshot::SnapshotRangeReader<'s, 'a>, Finding> {
     snapshot
-        .range(m.data_offset, m.comp_size)
+        .reader(m.data_offset, m.comp_size)
         .map_err(|finding| finding.on(&m.name))
 }
 
@@ -892,8 +954,45 @@ mod tests {
     }
 
     #[test]
+    fn owned_and_borrowed_snapshots_produce_the_same_archive() {
+        let bytes = zip_with_files(&["one.txt", "nested/two.txt"]);
+        let borrowed = SourceSnapshot::borrowed(Some("same.zip".into()), &bytes);
+        let owned = SourceSnapshot::owned(Some("same.zip".into()), bytes.clone());
+
+        let from_borrowed = parse_zip_with_profile(
+            &borrowed,
+            10,
+            4 * 1024 * 1024,
+            ZipInterpretationProfile::StrictAsciiV1,
+        )
+        .unwrap();
+        let from_owned = parse_zip_with_profile(
+            &owned,
+            10,
+            4 * 1024 * 1024,
+            ZipInterpretationProfile::StrictAsciiV1,
+        )
+        .unwrap();
+
+        assert_eq!(from_owned, from_borrowed);
+    }
+
+    #[test]
+    fn eocd_at_the_maximum_comment_distance_is_found() {
+        let mut bytes = zip_with_files(&[]);
+        let eocd = eocd_offset(&bytes);
+        bytes[eocd + 20..eocd + 22].copy_from_slice(&u16::MAX.to_le_bytes());
+        bytes.resize(bytes.len() + usize::from(u16::MAX), 0);
+
+        let parsed = parse_zip(&bytes, 0, 128 * 1024).unwrap();
+        assert_eq!(parsed.eocd_offset, eocd as u64);
+        assert_eq!(parsed.comment_len, u64::from(u16::MAX));
+    }
+
+    #[test]
     fn local_header_offset_overflow_is_a_structured_error() {
-        let finding = match parse_lfh(&[], usize::MAX - 1) {
+        let snapshot = SourceSnapshot::borrowed(None, &[]);
+        let finding = match parse_lfh(&snapshot, u64::MAX - 1) {
             Ok(_) => panic!("overflowing LFH offset unexpectedly parsed"),
             Err(finding) => finding,
         };

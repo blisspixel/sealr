@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
+use std::io::BufReader;
 use std::sync::Arc;
 
 use crate::apply::process_member;
@@ -553,8 +554,9 @@ impl VerifiedArchive {
         })?;
 
         let zip_member = member.as_zip_member();
-        let payload = zip::payload(&self.inner.snapshot, &zip_member)
+        let payload = zip::payload_reader(&self.inner.snapshot, &zip_member)
             .map_err(|finding| integrity_error(canonical_path, &finding))?;
+        let payload = BufReader::with_capacity(64 * 1024, payload);
         let (actual, crc, sha256) = process_member(
             payload,
             &zip_member,

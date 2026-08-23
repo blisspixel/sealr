@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
 
 use crate::covering::audit_covering;
@@ -389,7 +389,20 @@ fn apply_inner(
         OutcomeIdentities::unavailable_for(snapshot.digest().clone(), interpretation_profile);
     let source_digest = snapshot.digest().clone();
     let source_meta = (snapshot.path_owned(), source_digest.clone(), policy.clone());
-    let magic = detect_magic(snapshot.as_bytes());
+    let magic = match detect_magic(&snapshot) {
+        Ok(magic) => magic,
+        Err(finding) => {
+            return Ok(reject_only(
+                source_meta,
+                vec![finding.clone()],
+                Some("unknown"),
+                initial_materialization,
+                parse_failure_axes(&finding),
+                snapshot.kind(),
+                identities_base.clone(),
+            ));
+        }
+    };
     if magic != "zip" {
         let f = Finding::error(FindingCode::FormatUnsupported, format!("magic {magic}"));
         return Ok(reject_only(
@@ -424,7 +437,7 @@ fn apply_inner(
     }
 
     let parsed = match zip::parse_zip_with_profile(
-        snapshot.as_bytes(),
+        &snapshot,
         budget.max_files,
         budget.max_metadata_bytes,
         interpretation_profile,
@@ -729,7 +742,7 @@ fn apply_inner(
         let canonical_path = ir.members[index].canonical_path.clone();
         let mut capture = retention.begin_capture(&canonical_path);
         let zip_member = ir.members[index].as_zip_member();
-        let payload = match zip::payload(&snapshot, &zip_member) {
+        let payload = match zip::payload_reader(&snapshot, &zip_member) {
             Ok(payload) => payload,
             Err(finding) => {
                 ir.members[index].mark_failed(finding.code.as_str());
@@ -757,6 +770,7 @@ fn apply_inner(
                 ));
             }
         };
+        let payload = BufReader::with_capacity(64 * 1024, payload);
         let remaining = actual_total.remaining();
         let processed = if let Some(stage) = stage.as_ref() {
             stage
@@ -982,7 +996,7 @@ fn path_conflict(seen: &BTreeMap<String, bool>, path: &str, is_dir: bool) -> Opt
 }
 
 fn process_member_to_file(
-    payload: &[u8],
+    payload: impl BufRead,
     member: &ZipMember,
     budget: ResourceBudget,
     remaining_total: u64,
@@ -1043,7 +1057,7 @@ pub(crate) fn process_member_calls() -> u64 {
 }
 
 pub(crate) fn process_member(
-    payload: &[u8],
+    mut payload: impl BufRead,
     member: &ZipMember,
     budget: ResourceBudget,
     remaining_total: u64,
@@ -1106,8 +1120,18 @@ pub(crate) fn process_member(
 
     match member.method {
         0 => {
-            for chunk in payload.chunks(64 * 1024) {
-                consume(chunk)?;
+            let mut buffer = [0_u8; 64 * 1024];
+            loop {
+                let read = payload.read(&mut buffer).map_err(|error| {
+                    Finding::error(
+                        FindingCode::SourceIo,
+                        format!("read stored member payload: {error}"),
+                    )
+                })?;
+                if read == 0 {
+                    break;
+                }
+                consume(&buffer[..read])?;
             }
         }
         8 => {
@@ -1126,12 +1150,12 @@ pub(crate) fn process_member(
                 consume(&buffer[..read])?;
             }
             let consumed = decoder.total_in();
-            if consumed != payload.len() as u64 {
+            if consumed != member.comp_size {
                 return Err(Finding::error(
                     FindingCode::CodecDeflateTrailingInput,
                     format!(
                         "deflate consumed {consumed} of {} declared compressed bytes",
-                        payload.len()
+                        member.comp_size
                     ),
                 ));
             }
@@ -1164,17 +1188,22 @@ pub(crate) fn process_member(
     Ok((actual, crc.finalize(), sha256))
 }
 
-fn detect_magic(bytes: &[u8]) -> &'static str {
+fn detect_magic(snapshot: &SourceSnapshot<'_>) -> Result<&'static str, Finding> {
+    let prefix_len =
+        usize::try_from(snapshot.len().min(4)).expect("a four-byte prefix always fits usize");
+    let mut prefix = [0_u8; 4];
+    snapshot.read_exact_at(0, &mut prefix[..prefix_len])?;
+    let bytes = &prefix[..prefix_len];
     if bytes.len() >= 4
         && bytes[0] == 0x50
         && bytes[1] == 0x4b
         && (bytes[2] == 0x03 || bytes[2] == 0x05)
     {
-        "zip"
+        Ok("zip")
     } else if bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b {
-        "gz"
+        Ok("gz")
     } else {
-        "unknown"
+        Ok("unknown")
     }
 }
 
@@ -1347,6 +1376,7 @@ fn first_error(findings: &[Finding]) -> Finding {
 
 fn parse_failure_axes(finding: &Finding) -> SemanticAxes {
     let interpretation = match finding.code {
+        FindingCode::SourceIo => InterpretationStatus::Indeterminate,
         FindingCode::FormatUnsupported
         | FindingCode::FormatMagic
         | FindingCode::ZipDiffC5Zip64
@@ -1374,6 +1404,18 @@ mod tests {
     use ::zip::{CompressionMethod, ZipWriter};
     use std::io::{Cursor, Write};
     use std::path::PathBuf;
+
+    struct ChunkedReader<R> {
+        inner: R,
+        max_read: usize,
+    }
+
+    impl<R: Read> Read for ChunkedReader<R> {
+        fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+            let limit = output.len().min(self.max_read);
+            self.inner.read(&mut output[..limit])
+        }
+    }
 
     fn make_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
         let mut cursor = Cursor::new(Vec::new());
@@ -1640,6 +1682,62 @@ mod tests {
     }
 
     #[test]
+    fn owned_and_borrowed_snapshot_backends_have_semantic_parity() {
+        let bytes = make_zip(&[("nested/hello.txt", b"hello"), ("other.bin", b"bytes")]);
+        let dir = temp_dest("snapshot-parity");
+        fs::create_dir_all(&dir).unwrap();
+        let archive = dir.join("same.zip");
+        fs::write(&archive, &bytes).unwrap();
+        let displayed_path = archive.to_string_lossy();
+        let policy = Policy::default_v1();
+
+        let borrowed = apply(Request {
+            source: Source::Bytes {
+                path: Some(&displayed_path),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: None,
+        });
+        let owned = apply(Request {
+            source: Source::Path(&archive),
+            policy: &policy,
+            dest: None,
+        });
+
+        assert_eq!(
+            serde_json::to_value(&owned.view).unwrap(),
+            serde_json::to_value(&borrowed.view).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(&owned.receipt.identities).unwrap(),
+            serde_json::to_value(&borrowed.receipt.identities).unwrap()
+        );
+        assert_eq!(
+            serde_json::to_value(owned.archive_ir().unwrap()).unwrap(),
+            serde_json::to_value(borrowed.archive_ir().unwrap()).unwrap()
+        );
+        assert_eq!(
+            owned
+                .verified_archive()
+                .unwrap()
+                .read_member("nested/hello.txt", 5)
+                .unwrap(),
+            borrowed
+                .verified_archive()
+                .unwrap()
+                .read_member("nested/hello.txt", 5)
+                .unwrap()
+        );
+        assert_eq!(owned.receipt.source_snapshot, SnapshotKind::MemoryOwned);
+        assert_eq!(
+            borrowed.receipt.source_snapshot,
+            SnapshotKind::MemoryBorrowed
+        );
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn rejects_bytes_after_the_single_deflate_stream() {
         let policy = Policy::default_v1();
         let control = make_zip(&[("payload.txt", b"payload")]);
@@ -1701,9 +1799,104 @@ mod tests {
         };
         let mut sink = io::sink();
         let budget = Policy::default_v1().compile().unwrap().budget;
-        let finding = process_member(&[0xff], &member, budget, u64::MAX, &mut sink).unwrap_err();
+        let finding =
+            process_member(&[0xff][..], &member, budget, u64::MAX, &mut sink).unwrap_err();
 
         assert_eq!(finding.code, FindingCode::CodecDeflateInvalidStream);
+    }
+
+    #[test]
+    fn stored_member_verification_handles_repeated_short_reads() {
+        let payload: Vec<u8> = (0_u8..=255).cycle().take(200_000).collect();
+        let member = ZipMember {
+            raw_name: b"stream.bin".to_vec(),
+            name: "stream.bin".to_owned(),
+            method: 0,
+            flags: 0,
+            crc: 0,
+            comp_size: payload.len() as u64,
+            uncomp_size: payload.len() as u64,
+            lfh_offset: 0,
+            data_offset: 0,
+            record_end: payload.len() as u64,
+            is_dir: false,
+            extra_fields: Vec::new(),
+            source_ranges: crate::ir::MemberSourceRanges {
+                local_header: crate::ir::ByteRange { offset: 0, len: 0 },
+                compressed_payload: crate::ir::ByteRange {
+                    offset: 0,
+                    len: payload.len() as u64,
+                },
+                data_descriptor: None,
+                central_header: crate::ir::ByteRange { offset: 0, len: 0 },
+            },
+        };
+        let chunked = ChunkedReader {
+            inner: Cursor::new(&payload),
+            max_read: 7,
+        };
+        let reader = BufReader::with_capacity(11, chunked);
+        let budget = Policy::default_v1().compile().unwrap().budget;
+        let mut output = Vec::new();
+
+        let (actual, _, _) =
+            process_member(reader, &member, budget, u64::MAX, &mut output).unwrap();
+
+        assert_eq!(actual, payload.len() as u64);
+        assert_eq!(output, payload);
+    }
+
+    #[test]
+    fn deflate_member_verification_handles_repeated_short_reads() {
+        let mut state = 0x6d2b_79f5_u32;
+        let payload: Vec<u8> = std::iter::repeat_with(|| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state as u8
+        })
+        .take(200_000)
+        .collect();
+        let mut encoder =
+            flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&payload).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let member = ZipMember {
+            raw_name: b"stream.deflate".to_vec(),
+            name: "stream.deflate".to_owned(),
+            method: 8,
+            flags: 0,
+            crc: 0,
+            comp_size: compressed.len() as u64,
+            uncomp_size: payload.len() as u64,
+            lfh_offset: 0,
+            data_offset: 0,
+            record_end: compressed.len() as u64,
+            is_dir: false,
+            extra_fields: Vec::new(),
+            source_ranges: crate::ir::MemberSourceRanges {
+                local_header: crate::ir::ByteRange { offset: 0, len: 0 },
+                compressed_payload: crate::ir::ByteRange {
+                    offset: 0,
+                    len: compressed.len() as u64,
+                },
+                data_descriptor: None,
+                central_header: crate::ir::ByteRange { offset: 0, len: 0 },
+            },
+        };
+        let chunked = ChunkedReader {
+            inner: Cursor::new(&compressed),
+            max_read: 3,
+        };
+        let reader = BufReader::with_capacity(5, chunked);
+        let budget = Policy::default_v1().compile().unwrap().budget;
+        let mut output = Vec::new();
+
+        let (actual, _, _) =
+            process_member(reader, &member, budget, u64::MAX, &mut output).unwrap();
+
+        assert_eq!(actual, payload.len() as u64);
+        assert_eq!(output, payload);
     }
 
     #[test]
@@ -1960,6 +2153,16 @@ mod tests {
         assert_eq!(out.interpretation, InterpretationStatus::Unsupported);
         assert_eq!(out.admission, AdmissionStatus::NotEvaluated);
         assert_eq!(out.view.verdict, "rejected");
+    }
+
+    #[test]
+    fn snapshot_read_failure_is_indeterminate_not_malformed() {
+        let finding = Finding::error(FindingCode::SourceIo, "snapshot read failed");
+        let axes = parse_failure_axes(&finding);
+
+        assert_eq!(axes.interpretation, InterpretationStatus::Indeterminate);
+        assert_eq!(axes.admission, AdmissionStatus::NotEvaluated);
+        assert_eq!(axes.verification, VerificationStatus::StructureOnly);
     }
 
     #[test]
@@ -2682,14 +2885,16 @@ mod tests {
     }
 
     #[test]
-    fn rejects_stored_descriptor_payload_with_hidden_records() {
+    fn rejects_stored_descriptor_signature_split_across_reader_buffers() {
+        let mut payload = vec![0_u8; 65_538];
+        payload[65_534..65_538].copy_from_slice(&[0x50, 0x4b, 0x03, 0x04]);
         let mut cursor = Cursor::new(Vec::new());
         {
             let mut writer = ZipWriter::new(&mut cursor);
             let options =
                 SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
             writer.start_file("records.bin", options).unwrap();
-            writer.write_all(&[0x50, 0x4b, 0x03, 0x04]).unwrap();
+            writer.write_all(&payload).unwrap();
             writer.finish().unwrap();
         }
         let mut bytes = cursor.into_inner();

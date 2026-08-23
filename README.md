@@ -4,7 +4,7 @@
 
 > **Goal: one archive, one tree, and evidence for the decision.**
 
-sealr is an early attempt to make archive ingestion easier to reason about. Alpha.4 implements a deliberately narrow ZIP32 path: it builds one versioned interpretation from an immutable source snapshot, verifies accepted members, and either publishes the requested tree without replacement or publishes no destination. Receipts record separate outcome axes and unsigned layout and content identities. It does not yet provide a process sandbox or production security claim.
+sealr is an early attempt to make archive ingestion easier to reason about. The released Alpha.4 boundary implements a deliberately narrow ZIP32 path: it builds one versioned interpretation from an immutable source snapshot, verifies accepted members, and either publishes the requested tree without replacement or publishes no destination. Current main has begun Alpha.5 by routing interpretation, covering checks, and payload verification through checked random access and bounded range readers. The backing object is still memory-only. Sealr does not yet provide a process sandbox or production security claim.
 
 ```text
 Untrusted archive x policy
@@ -46,6 +46,7 @@ The current Rust implementation supports classic ZIP32 archives with stored or D
 - Strict filename handling. Invalid UTF-8 and non-ASCII CP437 names are rejected until the canonical Unicode path design is complete.
 - An opt-in [strict ASCII ZIP32 v2 profile](docs/profiles/zip-strict-ascii-v2.md) with an exhaustive 16-bit flag table and an all-extra-fields-denied rule. `apply()` preserves v1 compatibility; `apply_with_options` records the selected profile in IR and receipt identity.
 - Bounded source reads, metadata, file count, declared and actual member size, total expanded size, and declared and actual compression ratio.
+- Checked `u64` snapshot access for magic detection, ZIP discovery, local and central metadata, covering audit, and payload verification. Structural scratch reads are fixed-size or metadata-capped, and compressed member ranges stream through fixed 64 KiB buffers. The private file-backed backend remains Alpha.5 work.
 - Streaming Deflate, exact compressed-input consumption, CRC32, and SHA-256 calculation without buffering an expanded member in memory. The staged-tree audit also hashes through a fixed 64 KiB buffer. Trailing bytes and concatenated raw DEFLATE streams inside one declared member payload are rejected.
 - Component-bound, same-volume staging with 128-bit random names. Every member component is opened no-follow from a retained directory handle, files use create-new handles, and the requested destination is published with native no-replace semantics only after every member passes.
 - Deterministic JSON view and versioned unsigned receipt on allow and reject paths. Receipts record the materializer backend, stage mode, stage-creation primitive, component-resolution guarantee, durability, publication primitive, outcome, and cleanup state.
@@ -60,7 +61,7 @@ The current Rust implementation supports classic ZIP32 archives with stored or D
 The following work must land before a production-readiness claim:
 
 - The ZipDiff gate covers its pinned known constructions. It does not prove that future or previously unknown parser ambiguities cannot exist.
-- The archive itself is currently buffered in memory, with a default 512 MiB input cap. Expanded members stream. A successful `Source::Bytes` call copies its borrowed input once when constructing the returned verified capability; a path input transfers its already owned snapshot. Opt-in retention stores only explicitly selected exact paths under independent member and total byte ceilings. Reads of other members re-inflate from the retained snapshot. This is intended for small semantic files, not bulk extraction, general caching, or zero-copy reuse.
+- The archive itself is currently buffered in memory, with a default 512 MiB input cap. Parser and verifier access is now range-based, but this does not yet reduce whole-archive resident memory. A successful `Source::Bytes` call copies its borrowed input once when constructing the returned verified capability; a path input transfers its already owned snapshot. Opt-in retention stores only explicitly selected exact paths under independent member and total byte ceilings. Reads of other members re-inflate from the retained snapshot. This is intended for small semantic files, not bulk extraction, general caching, or zero-copy reuse.
 - Unicode normalization and CP437 decoding are not implemented, so non-ASCII member paths fail closed.
 - Materialization is supported only on Linux, macOS, and Windows; other targets fail closed. On Linux and macOS, sealr accepts only an existing parent owned by the effective user or root that is not externally writable unless sticky semantics protect entries. macOS also requires extended ACLs to be absent. Filesystems that do not enforce these namespace rules are outside this preview's support boundary.
 - Windows materialization is limited to a non-remote, writable NTFS parent that reports persistent ACL support. ReFS, FAT-family filesystems, remote shares, read-only volumes, and ambiguous volume queries fail closed.
@@ -172,7 +173,7 @@ The semantic walkthrough is enforced by CLI integration tests on the native plat
 
 ## What comes next
 
-The next milestone remains the Phase 0.1 ZIP trust gate, not another archive format. Alpha.4 has closed the measured semantic and adopter-facing contract on current main. Alpha.5 replaces whole-archive ownership with a private immutable random-access snapshot. Alpha.6 passes that capability into a supervised Linux worker and independently audits its staged result.
+The next milestone remains the Phase 0.1 ZIP trust gate, not another archive format. Alpha.4 closed the measured semantic and adopter-facing contract. Alpha.5 is in progress: the checked random-access substrate now serves ZIP parsing, covering, and verification, while the next increment replaces the memory-only backing with a Sealr-owned private spool and proves mutation resistance and bounded memory. Alpha.6 passes that capability into a supervised Linux worker and independently audits its staged result.
 
 Assurance now advances with each increment rather than waiting for a late phase. The non-shipping wheel laboratory has published its first small compatibility measurement and now expands toward wheel-aware semantic evaluation, while supported `python-wheel.v1` admission remains gated on its exact UTF-8 ZIP profile, canonical paths, use of the bounded retention capability, consumer budgets, and identities.
 

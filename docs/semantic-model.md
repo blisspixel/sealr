@@ -34,7 +34,7 @@ The architecture review produced useful priorities, speculative extensions, and 
 | Unsigned evidence terminology | Adopted now | Current JSON is an EvidenceRecord or receipt, not an authenticated attestation. |
 | Separate interpretation, admission, verification, effect, and completeness axes | Landed in receipt v2 and the view | The `Allowed` or `Rejected` compatibility verdict remains, but the axes and CLI exit classes expose the independent facts. |
 | Versioned `ArchiveIR` and separate source, interpretation, layout, content, and effect identities | ArchiveIR landed; preview tree identities landed | `sealr.archive-ir.v1` is the inspect/materialize member plan and now records ranges, extra-field dispositions, and normalization actions. Receipts carry `sealrTreeV1` layout and content roots. Golden ZIP fixtures and lock semantics remain. |
-| Immutable `SourceSnapshot` abstraction | Landed for in-memory sources | Path inputs become owned whole-buffer bytes and byte inputs are borrowed immutably for the call. Bounded random access can follow later. |
+| Immutable `SourceSnapshot` abstraction | Checked access landed for in-memory sources | Path inputs become owned whole-buffer bytes and byte inputs are borrowed immutably for the call. Interpretation and verification now use checked `u64` exact reads and range-limited readers; the private file-backed object remains open. |
 | Typed interpretation, budget, target, consumer, and effect profiles | Preview compilation landed | `Policy::compile()` produces typed supported controls before ingest. The long-term external five-layer document is still unspecified. |
 | Semantic lock | Scheduled after canonical encoding and roots | A lock is useful only when profile and tree identities are normative and stable. |
 | Hostile and benign compatibility corpora | Scheduled for trust gate | Strictness must be measured within named supported domains on all release platforms. |
@@ -164,7 +164,9 @@ SourceSnapshot
   | VerifiedImmutableFilesystemObject
 ```
 
-The current owned and borrowed byte variants now implement this abstraction as `SourceSnapshot`. Parsing, payload reads, and digest recording use that one object. A later bounded random-access implementation can use a private spool or content-addressed object, but holding a file descriptor, ETag, length, or path alone is not enough if another writer can mutate the underlying bytes. Source truncation, growth, replacement, and same-file mutation need deterministic adversarial tests on Linux, macOS, and Windows.
+The current owned and borrowed byte variants now implement this abstraction as `SourceSnapshot`. Parsing, payload reads, and digest recording use that one object. A later file-backed implementation can use a private spool or content-addressed object behind the same bounded access interface, but holding a file descriptor, ETag, length, or path alone is not enough if another writer can mutate the underlying bytes. Source truncation, growth, replacement, and same-file mutation need deterministic adversarial tests on Linux, macOS, and Windows.
+
+Current main has separated access from backing: parser discovery, metadata reads, covering checks, and content verification use checked `u64` exact reads or range-limited readers. The central directory is buffered only after its size passes the metadata budget, while compressed payloads are streamed. This is an implementation seam, not the Alpha.5 memory claim. Both current variants still retain the complete archive in memory until the private spool backend and its mutation and memory evidence land.
 
 ## Profiles and compiled policy
 

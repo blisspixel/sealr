@@ -6,6 +6,19 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+### Added
+
+- Added checked `u64` exact reads, bounded owned reads, and range-limited streaming readers to the internal `SourceSnapshot` boundary. Regression coverage now exercises maximum-distance EOCD discovery, repeated short reads, stream signatures split across 64 KiB boundaries, invalid ranges before allocation, and semantic parity between owned and borrowed memory backends.
+
+### Changed
+
+- Routed magic detection, EOCD discovery, central-directory and local-header parsing, data-descriptor checks, the codec-free covering audit, initial content verification, and later `VerifiedArchive` member reads through the snapshot random-access interface. The central directory is copied only after the metadata cap passes, and compressed payloads are no longer exposed to production code as whole slices.
+
+### Fixed
+
+- Snapshot-owned buffer reads now validate the complete offset and length before attempting allocation, so an invalid hostile range cannot trigger a large reservation attempt before it is rejected.
+- Snapshot-access failures during structural interpretation now report an indeterminate interpretation with admission not evaluated instead of being mislabeled as malformed archive structure.
+
 ## [0.1.0-alpha.4] - 2026-08-22
 
 ### Added
