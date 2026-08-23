@@ -1,5 +1,8 @@
 use std::path::{Path, PathBuf};
 
+#[cfg(test)]
+use std::cell::Cell;
+
 use crate::findings::{Finding, FindingCode};
 use crate::ir::NormalizationAction;
 
@@ -8,6 +11,26 @@ use crate::ir::NormalizationAction;
 pub struct JailedName {
     pub components: Vec<String>,
     pub actions: Vec<NormalizationAction>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum JailNameError {
+    Invalid {
+        code: FindingCode,
+        detail: &'static str,
+    },
+    AllocationFailed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ComponentDisposition {
+    DropDot,
+    Keep,
+}
+
+#[cfg(test)]
+thread_local! {
+    static CONTAINER_RESERVATION_ATTEMPTS: Cell<usize> = const { Cell::new(0) };
 }
 
 const RESERVED: &[&str] = &[
@@ -22,69 +45,163 @@ pub fn jail_relative(raw: &str, max_depth: u32) -> Result<Vec<String>, Finding> 
 
 /// Jail a member name and record silent normalizations for the IR.
 pub fn jail_name(raw: &str, max_depth: u32) -> Result<JailedName, Finding> {
-    if raw.contains('\0') {
-        return Err(Finding::error(FindingCode::PathNul, "NUL in member name").on(raw));
+    match jail_name_fallible(raw, max_depth) {
+        Ok(jailed) => Ok(jailed),
+        Err(JailNameError::Invalid { code, detail }) => Err(Finding::error(code, detail).on(raw)),
+        Err(JailNameError::AllocationFailed) => {
+            panic!("bounded path normalization allocation failed")
+        }
     }
-    if !raw.is_ascii() {
-        return Err(Finding::error(
-            FindingCode::PathUnicode,
-            "Unicode path normalization is not implemented",
-        )
-        .on(raw));
-    }
-    if raw.contains('\\') {
-        return Err(Finding::error(
-            FindingCode::PathInvalidChar,
-            "backslash is not a portable ZIP path separator",
-        )
-        .on(raw));
-    }
-    if raw.starts_with('/') || raw.starts_with("//") || looks_like_drive(raw) {
-        return Err(Finding::error(FindingCode::PathAbsolute, "absolute or drive path").on(raw));
-    }
+}
+
+pub(crate) fn jail_name_fallible(raw: &str, max_depth: u32) -> Result<JailedName, JailNameError> {
+    let (component_count, action_count) = validate_name(raw, max_depth)?;
 
     let mut out = Vec::new();
+    reserve_exact(&mut out, component_count)?;
     let mut actions = Vec::new();
+    reserve_exact(&mut actions, action_count)?;
     for (component_index, part) in raw.split('/').enumerate() {
-        if part.is_empty() {
-            return Err(Finding::error(FindingCode::PathEmpty, "empty path component").on(raw));
+        match validate_component(part).expect("first path-validation pass accepted the component") {
+            ComponentDisposition::DropDot => {
+                actions.push(NormalizationAction::DropDotComponent {
+                    component_index: u32::try_from(component_index)
+                        .expect("first path-validation pass bounded the component index"),
+                });
+            }
+            ComponentDisposition::Keep => {
+                let mut component = String::new();
+                component
+                    .try_reserve_exact(part.len())
+                    .map_err(|_| JailNameError::AllocationFailed)?;
+                component.push_str(part);
+                out.push(component);
+            }
         }
-        if part == "." {
-            actions.push(NormalizationAction::DropDotComponent {
-                component_index: component_index as u32,
-            });
-            continue;
-        }
-        if part == ".." {
-            return Err(Finding::error(FindingCode::PathDotDot, "parent component").on(raw));
-        }
-        if part.contains(':') {
-            return Err(Finding::error(FindingCode::PathAds, "colon in component").on(raw));
-        }
-        if part
-            .chars()
-            .any(|c| c.is_ascii_control() || "<>\"|?*".contains(c))
-        {
-            return Err(Finding::error(FindingCode::PathInvalidChar, "illegal character").on(raw));
-        }
-        if part.ends_with('.') || part.ends_with(' ') {
-            return Err(Finding::error(FindingCode::PathTrailing, "trailing dot or space").on(raw));
-        }
-        if is_reserved(part) {
-            return Err(Finding::error(FindingCode::PathReserved, "Windows reserved name").on(raw));
-        }
-        out.push(part.to_string());
-    }
-    if out.is_empty() {
-        return Err(Finding::error(FindingCode::PathEmpty, "name empty after normalize").on(raw));
-    }
-    if out.len() as u32 > max_depth {
-        return Err(Finding::error(FindingCode::PathDepth, "path too deep").on(raw));
     }
     Ok(JailedName {
         components: out,
         actions,
     })
+}
+
+fn validate_name(raw: &str, max_depth: u32) -> Result<(usize, usize), JailNameError> {
+    if raw.contains('\0') {
+        return Err(JailNameError::Invalid {
+            code: FindingCode::PathNul,
+            detail: "NUL in member name",
+        });
+    }
+    if !raw.is_ascii() {
+        return Err(JailNameError::Invalid {
+            code: FindingCode::PathUnicode,
+            detail: "Unicode path normalization is not implemented",
+        });
+    }
+    if raw.contains('\\') {
+        return Err(JailNameError::Invalid {
+            code: FindingCode::PathInvalidChar,
+            detail: "backslash is not a portable ZIP path separator",
+        });
+    }
+    if raw.starts_with('/') || raw.starts_with("//") || looks_like_drive(raw) {
+        return Err(JailNameError::Invalid {
+            code: FindingCode::PathAbsolute,
+            detail: "absolute or drive path",
+        });
+    }
+
+    let mut component_count = 0_usize;
+    let mut action_count = 0_usize;
+    for (component_index, part) in raw.split('/').enumerate() {
+        match validate_component(part)? {
+            ComponentDisposition::DropDot => {
+                u32::try_from(component_index).map_err(|_| JailNameError::Invalid {
+                    code: FindingCode::PathDepth,
+                    detail: "path too deep",
+                })?;
+                action_count += 1;
+            }
+            ComponentDisposition::Keep => component_count += 1,
+        }
+    }
+    if component_count == 0 {
+        return Err(JailNameError::Invalid {
+            code: FindingCode::PathEmpty,
+            detail: "name empty after normalize",
+        });
+    }
+    if u32::try_from(component_count).map_or(true, |count| count > max_depth) {
+        return Err(JailNameError::Invalid {
+            code: FindingCode::PathDepth,
+            detail: "path too deep",
+        });
+    }
+    Ok((component_count, action_count))
+}
+
+fn validate_component(part: &str) -> Result<ComponentDisposition, JailNameError> {
+    if part.is_empty() {
+        return Err(JailNameError::Invalid {
+            code: FindingCode::PathEmpty,
+            detail: "empty path component",
+        });
+    }
+    if part == "." {
+        return Ok(ComponentDisposition::DropDot);
+    }
+    if part == ".." {
+        return Err(JailNameError::Invalid {
+            code: FindingCode::PathDotDot,
+            detail: "parent component",
+        });
+    }
+    if part.contains(':') {
+        return Err(JailNameError::Invalid {
+            code: FindingCode::PathAds,
+            detail: "colon in component",
+        });
+    }
+    if part
+        .chars()
+        .any(|c| c.is_ascii_control() || "<>\"|?*".contains(c))
+    {
+        return Err(JailNameError::Invalid {
+            code: FindingCode::PathInvalidChar,
+            detail: "illegal character",
+        });
+    }
+    if part.ends_with('.') || part.ends_with(' ') {
+        return Err(JailNameError::Invalid {
+            code: FindingCode::PathTrailing,
+            detail: "trailing dot or space",
+        });
+    }
+    if is_reserved(part) {
+        return Err(JailNameError::Invalid {
+            code: FindingCode::PathReserved,
+            detail: "Windows reserved name",
+        });
+    }
+    Ok(ComponentDisposition::Keep)
+}
+
+fn reserve_exact<T>(items: &mut Vec<T>, count: usize) -> Result<(), JailNameError> {
+    #[cfg(test)]
+    CONTAINER_RESERVATION_ATTEMPTS.with(|attempts| attempts.set(attempts.get() + 1));
+    items
+        .try_reserve_exact(count)
+        .map_err(|_| JailNameError::AllocationFailed)
+}
+
+#[cfg(test)]
+fn reset_container_reservation_attempts() {
+    CONTAINER_RESERVATION_ATTEMPTS.with(|attempts| attempts.set(0));
+}
+
+#[cfg(test)]
+fn container_reservation_attempts() -> usize {
+    CONTAINER_RESERVATION_ATTEMPTS.with(Cell::get)
 }
 
 /// Join jailed components under dest. Dest must already be absolute.
@@ -188,5 +305,33 @@ mod tests {
             jailed.actions,
             [NormalizationAction::DropDotComponent { component_index: 1 }]
         );
+    }
+
+    #[test]
+    fn rejects_before_reserving_for_untrusted_component_counts() {
+        let slash_dense = format!("../{}", "a/".repeat(32_768));
+        reset_container_reservation_attempts();
+        assert_eq!(
+            jail_name_fallible(&slash_dense, u32::MAX),
+            Err(JailNameError::Invalid {
+                code: FindingCode::PathDotDot,
+                detail: "parent component",
+            })
+        );
+        assert_eq!(container_reservation_attempts(), 0);
+
+        reset_container_reservation_attempts();
+        assert_eq!(
+            jail_name_fallible("a/b/c", 2),
+            Err(JailNameError::Invalid {
+                code: FindingCode::PathDepth,
+                detail: "path too deep",
+            })
+        );
+        assert_eq!(container_reservation_attempts(), 0);
+
+        reset_container_reservation_attempts();
+        jail_name_fallible("a/./b", 2).expect("valid name should materialize after validation");
+        assert_eq!(container_reservation_attempts(), 2);
     }
 }

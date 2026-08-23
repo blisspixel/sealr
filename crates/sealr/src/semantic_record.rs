@@ -3,19 +3,21 @@
 //! This is a crate-private, behavior-neutral record codec. It is deliberately
 //! independent from worker protocol v1 and is not invoked by a shipped path.
 
-use std::collections::BTreeMap;
+use std::cmp::Ordering;
 use std::fmt;
 
 use sha2::{Digest, Sha256};
 
+#[cfg(test)]
 use crate::covering::audit_covering;
+use crate::covering::{audit_covering_fallible, CoveringAuditError};
 use crate::findings::{Finding, FindingCode, Severity};
 use crate::ir::{
     ArchiveCovering, ArchiveIR, ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite, IrMember,
     MemberKind, MemberSourceRanges, MemberVerification, NormalizationAction,
     ZipInterpretationProfile,
 };
-use crate::jail::jail_name;
+use crate::jail::{jail_name_fallible, JailNameError, JailedName};
 use crate::outcome::{
     AdmissionStatus, InterpretationStatus, SemanticAxes, SourceDigest, StoppingPhase,
     VerificationStatus, ViewCompleteness,
@@ -204,6 +206,21 @@ struct ValidatedCompletionRecord {
     view_completeness: ViewCompleteness,
     ir: ArchiveIR,
     findings: Vec<Finding>,
+}
+
+struct CompletionValidation<'plan> {
+    interpretation: InterpretationStatus,
+    admission: AdmissionStatus,
+    verification: VerificationStatus,
+    view_cause: Option<FindingCode>,
+    ir: &'plan ArchiveIR,
+}
+
+#[cfg(test)]
+thread_local! {
+    static COMPLETION_IR_MATERIALIZATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+    static COMPLETION_ALLOCATION_FAIL_AFTER: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    static COMPLETION_ALLOCATION_BUDGET: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -616,6 +633,13 @@ fn request_id(binding: &InvocationBinding) -> Result<[u8; 32], RecordError> {
 
 fn encode_binding(encoder: &mut Encoder, binding: &InvocationBinding) -> Result<(), RecordError> {
     validate_binding(binding)?;
+    encode_binding_validated(encoder, binding)
+}
+
+fn encode_binding_validated(
+    encoder: &mut Encoder,
+    binding: &InvocationBinding,
+) -> Result<(), RecordError> {
     encoder.fixed(&binding.operation_id);
     encoder.u64(binding.source_len);
     encoder.fixed(&binding.source_sha256);
@@ -934,14 +958,8 @@ fn validate_binding(binding: &InvocationBinding) -> Result<(), RecordError> {
                     "retention paths are not strictly byte-sorted",
                 ));
             }
-            let jailed = jail_name(path, u32::MAX).map_err(|_| {
-                RecordError::new(
-                    RecordErrorKind::InvalidString,
-                    0,
-                    "retention path is not canonical",
-                )
-            })?;
-            if !jailed.actions.is_empty() || jailed.components.join("/") != *path {
+            let jailed = validate_jailed_name(path, u32::MAX, "retention path is not canonical")?;
+            if !jailed.actions.is_empty() || !components_equal_path(&jailed.components, path) {
                 return Err(RecordError::new(
                     RecordErrorKind::InvalidString,
                     0,
@@ -952,6 +970,27 @@ fn validate_binding(binding: &InvocationBinding) -> Result<(), RecordError> {
         }
     }
     Ok(())
+}
+
+fn validate_jailed_name(
+    raw: &str,
+    max_depth: u32,
+    invalid_detail: &'static str,
+) -> Result<JailedName, RecordError> {
+    jail_name_fallible(raw, max_depth).map_err(|error| match error {
+        JailNameError::Invalid { .. } => {
+            RecordError::new(RecordErrorKind::InvalidString, 0, invalid_detail)
+        }
+        JailNameError::AllocationFailed => RecordError::new(
+            RecordErrorKind::AllocationFailed,
+            0,
+            "bounded path-validation allocation failed",
+        ),
+    })
+}
+
+fn components_equal_path(components: &[String], path: &str) -> bool {
+    components.iter().map(String::as_str).eq(path.split('/'))
 }
 
 fn decode_bool(value: u8, offset: usize) -> Result<bool, RecordError> {
@@ -993,6 +1032,22 @@ fn hex_32(value: &[u8; 32]) -> String {
         result.push(HEX[(byte & 0x0f) as usize] as char);
     }
     result
+}
+
+fn digest_matches_hex(value: Option<&str>, expected: &[u8; 32]) -> bool {
+    let Some(value) = value else {
+        return false;
+    };
+    value.len() == 64
+        && value
+            .as_bytes()
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .zip(expected)
+            .all(|(pair, byte)| {
+                hex_nibble(pair[0]) == Some(byte >> 4) && hex_nibble(pair[1]) == Some(byte & 0x0f)
+            })
 }
 
 fn encode_finding(encoder: &mut Encoder, finding: &Finding) -> Result<(), RecordError> {
@@ -1489,7 +1544,11 @@ fn decode_ir(
     }
     Ok(ArchiveIR::with_covering(
         binding.profile,
-        SourceDigest::available(hex_32(&binding.source_sha256)),
+        SourceDigest::available(try_record_hex_32(
+            &binding.source_sha256,
+            cursor.offset(),
+            "bounded source-digest allocation failed",
+        )?),
         covering,
         members,
     ))
@@ -1535,7 +1594,7 @@ fn validate_pending_ir(ir: &ArchiveIR, binding: &InvocationBinding) -> Result<()
     if ir.schema() != crate::ir::ARCHIVE_IR_SCHEMA
         || ir.profile() != binding.profile.id()
         || ir.profile_digest() != binding.profile.digest()
-        || ir.source_digest().sha256() != Some(hex_32(&binding.source_sha256).as_str())
+        || !digest_matches_hex(ir.source_digest().sha256(), &binding.source_sha256)
     {
         return Err(RecordError::new(
             RecordErrorKind::BindingMismatch,
@@ -1565,8 +1624,14 @@ fn validate_pending_ir(ir: &ArchiveIR, binding: &InvocationBinding) -> Result<()
         ));
     }
 
-    let mut destination_seen: BTreeMap<String, bool> = BTreeMap::new();
-    let mut folded_seen: BTreeMap<String, bool> = BTreeMap::new();
+    let mut paths = Vec::new();
+    paths.try_reserve_exact(ir.members.len()).map_err(|_| {
+        RecordError::new(
+            RecordErrorKind::AllocationFailed,
+            0,
+            "bounded path-topology allocation failed",
+        )
+    })?;
     let mut declared_total = 0_u64;
     let mut local_intervals = Vec::new();
     local_intervals
@@ -1583,32 +1648,7 @@ fn validate_pending_ir(ir: &ArchiveIR, binding: &InvocationBinding) -> Result<()
     for member in &ir.members {
         validate_pending_member(member, binding)?;
         let is_dir = matches!(member.kind, MemberKind::Directory);
-        if destination_seen.contains_key(&member.canonical_path) {
-            return Err(RecordError::new(
-                RecordErrorKind::InvalidSemanticState,
-                0,
-                "IR contains a duplicate canonical path",
-            ));
-        }
-        let folded = member.canonical_path.to_ascii_lowercase();
-        if folded_seen.contains_key(&folded) {
-            return Err(RecordError::new(
-                RecordErrorKind::InvalidSemanticState,
-                0,
-                "IR contains a case-fold collision",
-            ));
-        }
-        if path_conflict(&destination_seen, &member.canonical_path, is_dir).is_some()
-            || path_conflict(&folded_seen, &folded, is_dir).is_some()
-        {
-            return Err(RecordError::new(
-                RecordErrorKind::InvalidSemanticState,
-                0,
-                "IR contains a file-directory topology conflict",
-            ));
-        }
-        destination_seen.insert(member.canonical_path.clone(), is_dir);
-        folded_seen.insert(folded, is_dir);
+        paths.push((member.canonical_path.as_str(), is_dir));
 
         if member.declared_uncomp_size > binding.budget.max_member_bytes {
             return Err(RecordError::new(
@@ -1658,6 +1698,9 @@ fn validate_pending_ir(ir: &ArchiveIR, binding: &InvocationBinding) -> Result<()
         }
         expected_central = checked_end(member.source_ranges.central_header)?;
     }
+
+    validate_path_topology(&mut paths, false)?;
+    validate_path_topology(&mut paths, true)?;
 
     if expected_central != checked_end(ir.covering.central_directory)? {
         return Err(RecordError::new(
@@ -1776,16 +1819,14 @@ fn validate_pending_member(
         }
         member.decoded_name.as_str()
     };
-    let jailed = jail_name(jailed_input, binding.budget.max_path_depth).map_err(|_| {
-        RecordError::new(
-            RecordErrorKind::InvalidString,
-            0,
-            "member name does not satisfy the bound path grammar",
-        )
-    })?;
+    let jailed = validate_jailed_name(
+        jailed_input,
+        binding.budget.max_path_depth,
+        "member name does not satisfy the bound path grammar",
+    )?;
     if jailed.components.len() > MAX_COMPONENTS
         || jailed.components != member.components
-        || jailed.components.join("/") != member.canonical_path
+        || !components_equal_path(&jailed.components, &member.canonical_path)
     {
         return Err(RecordError::new(
             RecordErrorKind::InvalidString,
@@ -1793,14 +1834,15 @@ fn validate_pending_member(
             "member components do not match canonical path derivation",
         ));
     }
-    let mut expected_actions = Vec::new();
-    if is_dir {
-        expected_actions.push(NormalizationAction::StripDirectoryTrailingSlash);
-    }
-    expected_actions.extend(jailed.actions);
-    if expected_actions != member.normalization_actions
-        || expected_actions.len() > MAX_NORMALIZATIONS_PER_MEMBER
-    {
+    let action_offset = usize::from(is_dir);
+    let actions_match = member.normalization_actions.len() == jailed.actions.len() + action_offset
+        && (!is_dir
+            || matches!(
+                member.normalization_actions.first(),
+                Some(NormalizationAction::StripDirectoryTrailingSlash)
+            ))
+        && member.normalization_actions[action_offset..] == jailed.actions;
+    if !actions_match || member.normalization_actions.len() > MAX_NORMALIZATIONS_PER_MEMBER {
         return Err(RecordError::new(
             RecordErrorKind::InvalidSemanticState,
             0,
@@ -1928,8 +1970,7 @@ fn validate_extra_fields(
             "strict v2 IR contains a denied extra field",
         ));
     }
-    let mut central_ids = BTreeMap::new();
-    let mut local_ids = BTreeMap::new();
+    let mut ids = [0_u64; 1024];
     let mut site = ExtraSite::Central;
     let mut previous_end = None;
     let mut last_local_end = None;
@@ -1946,18 +1987,18 @@ fn validate_extra_fields(
         if extra.site == ExtraSite::Local && site == ExtraSite::Central {
             site = ExtraSite::Local;
             previous_end = None;
+            ids.fill(0);
         }
-        let ids = match extra.site {
-            ExtraSite::Central => &mut central_ids,
-            ExtraSite::Local => &mut local_ids,
-        };
-        if ids.insert(extra.id, ()).is_some() {
+        let word = usize::from(extra.id) / u64::BITS as usize;
+        let mask = 1_u64 << (u32::from(extra.id) % u64::BITS);
+        if ids[word] & mask != 0 {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidSemanticState,
                 0,
                 "member repeats an extra-field ID within one header",
             ));
         }
+        ids[word] |= mask;
         if extra.header_range.len != 4
             || extra.data_range.len > u64::from(u16::MAX)
             || checked_end(extra.header_range)? != extra.data_range.offset
@@ -2111,28 +2152,73 @@ fn member_record_end(ranges: &MemberSourceRanges) -> Result<u64, RecordError> {
     }
 }
 
-fn path_conflict(seen: &BTreeMap<String, bool>, path: &str, is_dir: bool) -> Option<String> {
-    for (index, _) in path.match_indices('/') {
-        let ancestor = &path[..index];
-        if matches!(seen.get(ancestor), Some(false)) {
-            return Some(ancestor.to_owned());
+fn validate_path_topology(
+    paths: &mut [(&str, bool)],
+    ascii_folded: bool,
+) -> Result<(), RecordError> {
+    paths.sort_unstable_by(|left, right| path_compare(left.0, right.0, ascii_folded));
+    for pair in paths.windows(2) {
+        let path = pair[0].0;
+        let candidate = pair[1].0;
+        if path_equal(path, candidate, ascii_folded) {
+            let detail = if ascii_folded {
+                "IR contains a case-fold collision"
+            } else {
+                "IR contains a duplicate canonical path"
+            };
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                detail,
+            ));
         }
     }
-    if !is_dir {
-        let prefix = format!("{path}/");
-        if let Some((candidate, _)) = seen.range(prefix.clone()..).next() {
-            if candidate.starts_with(&prefix) {
-                return Some(candidate.clone());
+    for &(candidate, _) in paths.iter() {
+        for (separator, _) in candidate.match_indices('/') {
+            let ancestor = &candidate[..separator];
+            let Ok(ancestor_index) =
+                paths.binary_search_by(|entry| path_compare(entry.0, ancestor, ascii_folded))
+            else {
+                continue;
+            };
+            if !paths[ancestor_index].1 {
+                return Err(RecordError::new(
+                    RecordErrorKind::InvalidSemanticState,
+                    0,
+                    "IR contains a file-directory topology conflict",
+                ));
             }
         }
     }
-    None
+    Ok(())
+}
+
+fn path_compare(left: &str, right: &str, ascii_folded: bool) -> Ordering {
+    if ascii_folded {
+        left.bytes()
+            .map(|byte| byte.to_ascii_lowercase())
+            .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
+    } else {
+        left.cmp(right)
+    }
+}
+
+fn path_equal(left: &str, right: &str, ascii_folded: bool) -> bool {
+    if ascii_folded {
+        left.eq_ignore_ascii_case(right)
+    } else {
+        left == right
+    }
 }
 
 fn encode_planning(record: &PlanningRecord) -> Result<Vec<u8>, RecordError> {
     validate_planning(record)?;
+    encode_planning_validated(record)
+}
+
+fn encode_planning_validated(record: &PlanningRecord) -> Result<Vec<u8>, RecordError> {
     let mut encoder = Encoder::new(KIND_PLANNING);
-    encode_binding(&mut encoder, &record.binding)?;
+    encode_binding_validated(&mut encoder, &record.binding)?;
     encode_findings(&mut encoder, &record.findings)?;
     match &record.disposition {
         PlanningDisposition::ReadyForVerification => encoder.u8(0),
@@ -2209,7 +2295,11 @@ fn decode_planning(
                 verification: VerificationStatus::StructureOnly,
                 view_completeness: ViewCompleteness::Partial {
                     phase,
-                    cause: findings[cause_index].code.as_str().to_owned(),
+                    cause: try_record_string(
+                        findings[cause_index].code.as_str(),
+                        cursor.offset(),
+                        "bounded planning cause allocation failed",
+                    )?,
                 },
             })
         }
@@ -2241,7 +2331,7 @@ fn decode_planning(
     };
     validate_planning(&record)?;
     validate_planning_against_snapshot(&record, snapshot)?;
-    let canonical = encode_planning(&record)?;
+    let canonical = encode_planning_validated(&record)?;
     if canonical != input {
         return Err(RecordError::new(
             RecordErrorKind::InvalidSemanticState,
@@ -2261,7 +2351,7 @@ fn validate_snapshot_binding(
     binding: &InvocationBinding,
 ) -> Result<(), RecordError> {
     if snapshot.len() != binding.source_len
-        || snapshot.digest().sha256() != Some(hex_32(&binding.source_sha256).as_str())
+        || !digest_matches_hex(snapshot.digest().sha256(), &binding.source_sha256)
     {
         return Err(RecordError::new(
             RecordErrorKind::BindingMismatch,
@@ -2278,17 +2368,22 @@ fn validate_planning_against_snapshot(
 ) -> Result<(), RecordError> {
     match (&record.disposition, &record.ir) {
         (PlanningDisposition::ReadyForVerification, Some(ir)) => {
-            audit_covering(snapshot, ir).map_err(|_| {
-                RecordError::new(
+            audit_covering_fallible(snapshot, ir).map_err(|error| match error {
+                CoveringAuditError::AllocationFailed => RecordError::new(
+                    RecordErrorKind::AllocationFailed,
+                    0,
+                    "bounded covering-audit allocation failed",
+                ),
+                CoveringAuditError::Inconsistent { .. } => RecordError::new(
                     RecordErrorKind::InvalidSemanticState,
                     0,
                     "ready planning IR does not reproduce the supervisor snapshot covering",
-                )
+                ),
             })?;
             validate_ready_ir_source_fields(snapshot, ir)?;
         }
         (PlanningDisposition::Terminal(_), Some(ir)) => {
-            let reproduced = match audit_covering(snapshot, ir) {
+            let reproduced = match audit_covering_fallible(snapshot, ir) {
                 Ok(()) => {
                     return Err(RecordError::new(
                         RecordErrorKind::InvalidSemanticState,
@@ -2296,10 +2391,21 @@ fn validate_planning_against_snapshot(
                         "covering terminal does not reproduce a supervisor-observed failure",
                     ));
                 }
-                Err(finding) => finding,
+                Err(CoveringAuditError::AllocationFailed) => {
+                    return Err(RecordError::new(
+                        RecordErrorKind::AllocationFailed,
+                        0,
+                        "bounded covering-audit allocation failed",
+                    ));
+                }
+                Err(CoveringAuditError::Inconsistent { detail, member }) => (detail, member),
             };
             let cause = &record.findings[first_error_index(&record.findings)?];
-            if &reproduced != cause {
+            if cause.code != FindingCode::CoveringInconsistent
+                || cause.severity != Severity::Error
+                || cause.detail != reproduced.0
+                || cause.member.as_deref() != reproduced.1
+            {
                 return Err(RecordError::new(
                     RecordErrorKind::InvalidSemanticState,
                     0,
@@ -3072,6 +3178,10 @@ fn encode_completion(
     planning: &ValidatedPlanningRecord,
 ) -> Result<Vec<u8>, RecordError> {
     validate_completion(record, planning)?;
+    encode_completion_validated(record)
+}
+
+fn encode_completion_validated(record: &CompletionRecord) -> Result<Vec<u8>, RecordError> {
     let mut encoder = Encoder::new(KIND_COMPLETION);
     encoder.fixed(&record.operation_id);
     encoder.fixed(&record.request_id);
@@ -3211,8 +3321,8 @@ fn decode_completion(
         members,
         findings,
     };
-    let validated = validate_completion(&record, planning)?;
-    let canonical = encode_completion(&record, planning)?;
+    let validation = validate_completion(&record, planning)?;
+    let canonical = encode_completion_validated(&record)?;
     if canonical != input {
         return Err(RecordError::new(
             RecordErrorKind::InvalidSemanticState,
@@ -3220,13 +3330,14 @@ fn decode_completion(
             "decoded completion record did not re-encode identically",
         ));
     }
-    Ok(validated)
+    drop(canonical);
+    materialize_completion(record, validation)
 }
 
-fn validate_completion(
+fn validate_completion<'plan>(
     record: &CompletionRecord,
-    planning: &ValidatedPlanningRecord,
-) -> Result<ValidatedCompletionRecord, RecordError> {
+    planning: &'plan ValidatedPlanningRecord,
+) -> Result<CompletionValidation<'plan>, RecordError> {
     if !matches!(
         planning.record.disposition,
         PlanningDisposition::ReadyForVerification
@@ -3312,7 +3423,7 @@ fn validate_completion(
             "completion finding cannot occur during member execution",
         ));
     }
-    let mut ir = planning.record.ir.clone().ok_or_else(|| {
+    let ir = planning.record.ir.as_ref().ok_or_else(|| {
         RecordError::new(
             RecordErrorKind::PhaseMismatch,
             0,
@@ -3382,11 +3493,6 @@ fn validate_completion(
                         "completion exceeds the aggregate actual-size budget",
                     ));
                 }
-                ir.members[index].mark_file_verified(
-                    *actual_uncomp_size,
-                    *actual_crc,
-                    hex_32(content_sha256),
-                );
                 verified_prefix += 1;
             }
             MemberCompletion::Failed { cause } => {
@@ -3398,13 +3504,12 @@ fn validate_completion(
                     ));
                 }
                 failed_index = Some((index, *cause));
-                ir.members[index].mark_failed(cause.as_str());
             }
             MemberCompletion::Pending => pending_started = true,
         }
     }
 
-    let (interpretation, admission, verification, view_completeness) = match record.disposition {
+    let (interpretation, admission, verification, view_cause) = match record.disposition {
         CompletionDisposition::Complete => {
             if verified_prefix != ir.members.len()
                 || failed_index.is_some()
@@ -3423,7 +3528,7 @@ fn validate_completion(
                 InterpretationStatus::Interpreted,
                 AdmissionStatus::Admitted,
                 VerificationStatus::Complete,
-                ViewCompleteness::Complete,
+                None,
             )
         }
         CompletionDisposition::Stopped {
@@ -3454,28 +3559,322 @@ fn validate_completion(
                     "partial verification counts disagree with the frontier",
                 ));
             }
-            let axes = SemanticAxes::admitted_verification_stop(
-                verified_members,
-                pending_members,
-                first_error,
-                false,
-            );
+            let (interpretation, admission) = completion_stop_axes(first_error.code);
             (
-                axes.interpretation,
-                axes.admission,
-                axes.verification,
-                axes.view_completeness,
+                interpretation,
+                admission,
+                VerificationStatus::Partial {
+                    verified_members,
+                    pending_members,
+                },
+                Some(first_error.code),
             )
         }
     };
-    Ok(ValidatedCompletionRecord {
+    Ok(CompletionValidation {
         interpretation,
         admission,
         verification,
+        view_cause,
+        ir,
+    })
+}
+
+fn completion_stop_axes(cause: FindingCode) -> (InterpretationStatus, AdmissionStatus) {
+    match cause {
+        FindingCode::SourceIo => (
+            InterpretationStatus::Indeterminate,
+            AdmissionStatus::Admitted,
+        ),
+        FindingCode::CodecDeflateInvalidStream
+        | FindingCode::CodecDeflateTrailingInput
+        | FindingCode::ZipDiffC4Offset => (
+            InterpretationStatus::Malformed,
+            AdmissionStatus::NotEvaluated,
+        ),
+        FindingCode::MaterializeIo
+        | FindingCode::MaterializeUnsafeComponent
+        | FindingCode::MaterializeCommit
+        | FindingCode::MaterializeExists => {
+            (InterpretationStatus::Interpreted, AdmissionStatus::Admitted)
+        }
+        _ => (InterpretationStatus::Interpreted, AdmissionStatus::Denied),
+    }
+}
+
+fn materialize_completion(
+    record: CompletionRecord,
+    validation: CompletionValidation<'_>,
+) -> Result<ValidatedCompletionRecord, RecordError> {
+    #[cfg(test)]
+    COMPLETION_IR_MATERIALIZATIONS.with(|count| count.set(count.get() + 1));
+
+    let mut ir = try_clone_archive_ir(validation.ir)?;
+    for (member, state) in ir.members.iter_mut().zip(&record.members) {
+        match state {
+            MemberCompletion::Pending => {}
+            MemberCompletion::Verified {
+                actual_uncomp_size,
+                actual_crc,
+                content_sha256,
+            } => member.mark_file_verified(
+                *actual_uncomp_size,
+                *actual_crc,
+                try_hex_32(content_sha256)?,
+            ),
+            MemberCompletion::Failed { cause } => {
+                member.verification = MemberVerification::Failed {
+                    cause: try_clone_string(
+                        cause.as_str(),
+                        "bounded completion failure-cause allocation failed",
+                    )?,
+                };
+            }
+        }
+    }
+    let view_completeness = match validation.view_cause {
+        None => ViewCompleteness::Complete,
+        Some(cause) => ViewCompleteness::Partial {
+            phase: StoppingPhase::Verification,
+            cause: try_clone_string(
+                cause.as_str(),
+                "bounded completion view-cause allocation failed",
+            )?,
+        },
+    };
+    Ok(ValidatedCompletionRecord {
+        interpretation: validation.interpretation,
+        admission: validation.admission,
+        verification: validation.verification,
         view_completeness,
         ir,
-        findings: record.findings.clone(),
+        findings: record.findings,
     })
+}
+
+fn try_clone_archive_ir(ir: &ArchiveIR) -> Result<ArchiveIR, RecordError> {
+    let profile_digest = try_clone_string(
+        &ir.profile_digest,
+        "bounded completion profile-digest allocation failed",
+    )?;
+    let source_digest = match &ir.source_digest {
+        SourceDigest::Available { sha256 } => SourceDigest::Available {
+            sha256: try_clone_string(sha256, "bounded completion source-digest allocation failed")?,
+        },
+        SourceDigest::Unavailable => SourceDigest::Unavailable,
+    };
+    let mut members = Vec::new();
+    completion_allocation_gate(
+        "bounded completion member reconstruction allocation failed",
+        allocation_bytes::<IrMember>(ir.members.len())?,
+    )?;
+    members.try_reserve_exact(ir.members.len()).map_err(|_| {
+        RecordError::new(
+            RecordErrorKind::AllocationFailed,
+            0,
+            "bounded completion member reconstruction allocation failed",
+        )
+    })?;
+    for member in &ir.members {
+        members.push(try_clone_pending_member(member)?);
+    }
+    Ok(ArchiveIR {
+        schema: ir.schema,
+        profile: ir.profile,
+        profile_digest,
+        source_digest,
+        covering: ir.covering.clone(),
+        members,
+    })
+}
+
+fn try_clone_pending_member(member: &IrMember) -> Result<IrMember, RecordError> {
+    let mut raw_name_bytes = Vec::new();
+    completion_allocation_gate(
+        "bounded completion raw-name allocation failed",
+        member.raw_name_bytes.len(),
+    )?;
+    raw_name_bytes
+        .try_reserve_exact(member.raw_name_bytes.len())
+        .map_err(|_| {
+            RecordError::new(
+                RecordErrorKind::AllocationFailed,
+                0,
+                "bounded completion raw-name allocation failed",
+            )
+        })?;
+    raw_name_bytes.extend_from_slice(&member.raw_name_bytes);
+
+    let mut components = Vec::new();
+    completion_allocation_gate(
+        "bounded completion path-component allocation failed",
+        allocation_bytes::<String>(member.components.len())?,
+    )?;
+    components
+        .try_reserve_exact(member.components.len())
+        .map_err(|_| {
+            RecordError::new(
+                RecordErrorKind::AllocationFailed,
+                0,
+                "bounded completion path-component allocation failed",
+            )
+        })?;
+    for component in &member.components {
+        components.push(try_clone_string(
+            component,
+            "bounded completion path-component string allocation failed",
+        )?);
+    }
+
+    let mut extra_fields = Vec::new();
+    completion_allocation_gate(
+        "bounded completion extra-field allocation failed",
+        allocation_bytes::<ExtraFieldRecord>(member.extra_fields.len())?,
+    )?;
+    extra_fields
+        .try_reserve_exact(member.extra_fields.len())
+        .map_err(|_| {
+            RecordError::new(
+                RecordErrorKind::AllocationFailed,
+                0,
+                "bounded completion extra-field allocation failed",
+            )
+        })?;
+    extra_fields.extend_from_slice(&member.extra_fields);
+
+    let mut normalization_actions = Vec::new();
+    completion_allocation_gate(
+        "bounded completion normalization allocation failed",
+        allocation_bytes::<NormalizationAction>(member.normalization_actions.len())?,
+    )?;
+    normalization_actions
+        .try_reserve_exact(member.normalization_actions.len())
+        .map_err(|_| {
+            RecordError::new(
+                RecordErrorKind::AllocationFailed,
+                0,
+                "bounded completion normalization allocation failed",
+            )
+        })?;
+    normalization_actions.extend_from_slice(&member.normalization_actions);
+
+    Ok(IrMember {
+        raw_name_bytes,
+        decoded_name: try_clone_string(
+            &member.decoded_name,
+            "bounded completion decoded-name allocation failed",
+        )?,
+        canonical_path: try_clone_string(
+            &member.canonical_path,
+            "bounded completion canonical-path allocation failed",
+        )?,
+        components,
+        kind: member.kind,
+        method: member.method,
+        flags: member.flags,
+        declared_crc: member.declared_crc,
+        declared_comp_size: member.declared_comp_size,
+        declared_uncomp_size: member.declared_uncomp_size,
+        source_ranges: member.source_ranges.clone(),
+        extra_fields,
+        actual_uncomp_size: None,
+        actual_crc: None,
+        content_sha256: None,
+        verification: MemberVerification::Pending,
+        normalization_actions,
+    })
+}
+
+fn try_clone_string(value: &str, detail: &'static str) -> Result<String, RecordError> {
+    completion_allocation_gate(detail, value.len())?;
+    try_record_string(value, 0, detail)
+}
+
+fn try_record_string(
+    value: &str,
+    offset: usize,
+    detail: &'static str,
+) -> Result<String, RecordError> {
+    let mut result = String::new();
+    result
+        .try_reserve_exact(value.len())
+        .map_err(|_| RecordError::new(RecordErrorKind::AllocationFailed, offset, detail))?;
+    result.push_str(value);
+    Ok(result)
+}
+
+fn try_hex_32(value: &[u8; 32]) -> Result<String, RecordError> {
+    completion_allocation_gate("bounded completion digest allocation failed", 64)?;
+    try_record_hex_32(value, 0, "bounded completion digest allocation failed")
+}
+
+fn try_record_hex_32(
+    value: &[u8; 32],
+    offset: usize,
+    detail: &'static str,
+) -> Result<String, RecordError> {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut result = String::new();
+    result
+        .try_reserve_exact(64)
+        .map_err(|_| RecordError::new(RecordErrorKind::AllocationFailed, offset, detail))?;
+    for byte in value {
+        result.push(HEX[(byte >> 4) as usize] as char);
+        result.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    Ok(result)
+}
+
+fn allocation_bytes<T>(count: usize) -> Result<usize, RecordError> {
+    count.checked_mul(std::mem::size_of::<T>()).ok_or_else(|| {
+        RecordError::new(
+            RecordErrorKind::IntegerOverflow,
+            0,
+            "completion reconstruction size calculation overflowed",
+        )
+    })
+}
+
+fn completion_allocation_gate(
+    detail: &'static str,
+    requested_bytes: usize,
+) -> Result<(), RecordError> {
+    #[cfg(test)]
+    {
+        let should_fail =
+            COMPLETION_ALLOCATION_FAIL_AFTER.with(|remaining| match remaining.get() {
+                None => false,
+                Some(0) => true,
+                Some(value) => {
+                    remaining.set(Some(value - 1));
+                    false
+                }
+            });
+        if should_fail {
+            return Err(RecordError::new(
+                RecordErrorKind::AllocationFailed,
+                0,
+                detail,
+            ));
+        }
+        let within_budget = COMPLETION_ALLOCATION_BUDGET.with(|budget| match budget.get() {
+            None => true,
+            Some(remaining) if requested_bytes <= remaining => {
+                budget.set(Some(remaining - requested_bytes));
+                true
+            }
+            Some(_) => false,
+        });
+        if !within_budget {
+            return Err(RecordError::new(
+                RecordErrorKind::AllocationFailed,
+                0,
+                detail,
+            ));
+        }
+    }
+    let _ = (detail, requested_bytes);
+    Ok(())
 }
 
 fn completion_finding(code: FindingCode, requested_effect: RequestedEffect) -> bool {
@@ -3999,6 +4398,26 @@ mod tests {
     use crate::apply::{apply_with_options, ApplyOptions, Request, Source};
     use crate::policy::Policy;
 
+    fn reset_completion_materializations() {
+        COMPLETION_IR_MATERIALIZATIONS.with(|count| count.set(0));
+    }
+
+    fn completion_materializations() -> usize {
+        COMPLETION_IR_MATERIALIZATIONS.with(std::cell::Cell::get)
+    }
+
+    fn fail_completion_allocation_after(successes: Option<usize>) {
+        COMPLETION_ALLOCATION_FAIL_AFTER.with(|remaining| remaining.set(successes));
+    }
+
+    fn set_completion_allocation_budget(bytes: Option<usize>) {
+        COMPLETION_ALLOCATION_BUDGET.with(|budget| budget.set(bytes));
+    }
+
+    fn completion_allocation_budget() -> Option<usize> {
+        COMPLETION_ALLOCATION_BUDGET.with(std::cell::Cell::get)
+    }
+
     fn make_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
         let mut writer = ZipWriter::new(IoCursor::new(Vec::new()));
         let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
@@ -4250,6 +4669,25 @@ mod tests {
     }
 
     #[test]
+    fn path_topology_rejects_interleaved_file_ancestors() {
+        let mut exact = [("a", false), ("a-foo", false), ("a/child", false)];
+        assert_eq!(
+            validate_path_topology(&mut exact, false).unwrap_err().kind,
+            RecordErrorKind::InvalidSemanticState
+        );
+
+        let mut folded = [("A", false), ("a-foo", false), ("a/child", false)];
+        assert_eq!(
+            validate_path_topology(&mut folded, true).unwrap_err().kind,
+            RecordErrorKind::InvalidSemanticState
+        );
+
+        let mut directory = [("a", true), ("a-foo", false), ("a/child", false)];
+        validate_path_topology(&mut directory, false)
+            .expect("a directory may precede descendants despite an interleaving sibling");
+    }
+
+    #[test]
     fn ready_plan_round_trips_complete_pending_ir_in_source_order() {
         let bytes = make_zip(&[("z.txt", b"z"), ("a.txt", b"a")]);
         let (binding, pending, _) = reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
@@ -4308,13 +4746,119 @@ mod tests {
             members: complete_states(&completed),
             findings: Vec::new(),
         };
+        reset_completion_materializations();
         let encoded = encode_completion(&completion, &plan).unwrap();
+        assert_eq!(completion_materializations(), 0);
         let decoded = decode_completion(&encoded, &plan).unwrap();
+        assert_eq!(completion_materializations(), 1);
         assert_eq!(decoded.interpretation, InterpretationStatus::Interpreted);
         assert_eq!(decoded.admission, AdmissionStatus::Admitted);
         assert_eq!(decoded.verification, VerificationStatus::Complete);
         assert_eq!(decoded.view_completeness, ViewCompleteness::Complete);
         assert_ir_eq(&decoded.ir, &completed);
+    }
+
+    #[test]
+    fn every_completion_reconstruction_allocation_fails_typed_and_without_plan_mutation() {
+        let bytes = make_zip(&[
+            ("dir/", b""),
+            ("dir/one.txt", b"one"),
+            ("dir/deep/two.txt", b"two"),
+        ]);
+        let (binding, pending, completed) =
+            reference(&bytes, ZipInterpretationProfile::StrictAsciiV2);
+        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending)).unwrap();
+        let plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+        let completion = CompletionRecord {
+            operation_id: binding.operation_id,
+            request_id: plan.request_id,
+            plan_id: plan.plan_id,
+            disposition: CompletionDisposition::Complete,
+            members: complete_states(&completed),
+            findings: Vec::new(),
+        };
+        let encoded = encode_completion(&completion, &plan).unwrap();
+
+        let mut successful_allocations = 0;
+        loop {
+            assert!(successful_allocations < 128);
+            fail_completion_allocation_after(Some(successful_allocations));
+            reset_completion_materializations();
+            match decode_completion(&encoded, &plan) {
+                Err(error) => {
+                    assert_eq!(error.kind, RecordErrorKind::AllocationFailed);
+                    assert_eq!(completion_materializations(), 1);
+                    assert!(plan
+                        .record
+                        .ir
+                        .as_ref()
+                        .unwrap()
+                        .members
+                        .iter()
+                        .all(|member| matches!(member.verification, MemberVerification::Pending)));
+                    successful_allocations += 1;
+                }
+                Ok(decoded) => {
+                    assert!(successful_allocations >= 20);
+                    assert_eq!(completion_materializations(), 1);
+                    assert_ir_eq(&decoded.ir, &completed);
+                    break;
+                }
+            }
+        }
+        fail_completion_allocation_after(None);
+    }
+
+    #[test]
+    fn scaled_record_keeps_completion_reconstruction_to_one_ir_materialization() {
+        let names: Vec<String> = (0..512)
+            .map(|index| format!("deep/tree/member-{index:04}.txt"))
+            .collect();
+        let entries: Vec<(&str, &[u8])> = names
+            .iter()
+            .map(|name| (name.as_str(), b"x".as_slice()))
+            .collect();
+        let bytes = make_zip(&entries);
+        let (binding, pending, completed) =
+            reference(&bytes, ZipInterpretationProfile::StrictAsciiV2);
+        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending)).unwrap();
+        assert!(plan_bytes.len() > 64 * 1024);
+        let plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+        let completion = CompletionRecord {
+            operation_id: binding.operation_id,
+            request_id: plan.request_id,
+            plan_id: plan.plan_id,
+            disposition: CompletionDisposition::Complete,
+            members: complete_states(&completed),
+            findings: Vec::new(),
+        };
+
+        reset_completion_materializations();
+        let encoded = encode_completion(&completion, &plan).unwrap();
+        assert_eq!(completion_materializations(), 0);
+
+        set_completion_allocation_budget(Some(usize::MAX));
+        let decoded = decode_completion(&encoded, &plan).unwrap();
+        assert_eq!(completion_materializations(), 1);
+        assert_ir_eq(&decoded.ir, &completed);
+        let required = usize::MAX - completion_allocation_budget().unwrap();
+        assert!(required > plan_bytes.len());
+
+        set_completion_allocation_budget(Some(required - 1));
+        reset_completion_materializations();
+        assert_eq!(
+            decode_completion(&encoded, &plan).unwrap_err().kind,
+            RecordErrorKind::AllocationFailed
+        );
+        assert_eq!(completion_materializations(), 1);
+
+        set_completion_allocation_budget(Some(required));
+        reset_completion_materializations();
+        let decoded = decode_completion(&encoded, &plan).unwrap();
+        assert_eq!(completion_allocation_budget(), Some(0));
+        assert_eq!(completion_materializations(), 1);
+        assert_ir_eq(&decoded.ir, &completed);
+        set_completion_allocation_budget(None);
     }
 
     #[test]
@@ -4354,8 +4898,11 @@ mod tests {
                 Finding::error(FindingCode::CrcMismatch, "mismatch").on("safe.txt:hidden"),
             ],
         };
+        reset_completion_materializations();
         let encoded = encode_completion(&completion, &plan).unwrap();
+        assert_eq!(completion_materializations(), 0);
         let decoded = decode_completion(&encoded, &plan).unwrap();
+        assert_eq!(completion_materializations(), 1);
         assert_eq!(
             decoded.verification,
             VerificationStatus::Partial {
@@ -4700,12 +5247,15 @@ mod tests {
             members: complete_states(&completed),
             findings: Vec::new(),
         };
+        reset_completion_materializations();
         let mut stale_bytes = encode_completion(&valid, &plan).unwrap();
+        assert_eq!(completion_materializations(), 0);
         stale_bytes[HEADER_BYTES + 16 + 32] ^= 1;
         assert_eq!(
             decode_completion(&stale_bytes, &plan).unwrap_err().kind,
             RecordErrorKind::BindingMismatch
         );
+        assert_eq!(completion_materializations(), 0);
 
         let impossible = CompletionRecord {
             operation_id: binding.operation_id,
@@ -4727,6 +5277,15 @@ mod tests {
             encode_completion(&impossible, &plan).unwrap_err().kind,
             RecordErrorKind::InvalidSemanticState
         );
+        assert_eq!(completion_materializations(), 0);
+        let impossible_bytes = encode_completion_validated(&impossible).unwrap();
+        assert_eq!(
+            decode_completion(&impossible_bytes, &plan)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::InvalidSemanticState
+        );
+        assert_eq!(completion_materializations(), 0);
 
         let supervisor_owned = CompletionRecord {
             operation_id: binding.operation_id,

@@ -144,7 +144,7 @@ The `protocol_decoders` libFuzzer target exercises arbitrary bytes and up to 64 
 
 The [protocol seed manifest](../fuzz/seed-manifest.json) binds every protocol seed and its dictionary by path, byte length, and SHA-256. Required CI verifies that manifest and the workflow bounds. The [scheduled fuzz workflow](../.github/workflows/fuzz.yml) runs this AddressSanitizer campaign weekly and on demand. A crash stops the campaign and preserves the bounded reproducer for seven days. A reproducible failure must become a deterministic regression before the fuzz gate can return to green.
 
-The same workflow now contains a separate `semantic_records` job with its own manifest, corpus, dictionary, and artifact boundary. That Alpha.6 target reaches a hidden private codec entry only when its nondefault fuzz feature is enabled. It does not revise protocol v1, and its first Linux AddressSanitizer campaign remains pending.
+The same workflow contains a separate `semantic_records` job with its own manifest, corpus, dictionary, and artifact boundary. That Alpha.6 target reaches a hidden private codec entry only when its nondefault fuzz feature is enabled. It does not revise protocol v1. Clean exact-main on-demand evidence is recorded in the [assurance report](assurance.md#current-evidence); the first scheduled-event run and accumulated scheduled history remain pending.
 
 The [first exact-main campaign](https://github.com/blisspixel/sealr/actions/runs/32616069888) executed 18,277,565 units in 601 seconds, averaged 30,411 executions per second, reached 503 MiB peak RSS under the 1,024 MiB limit, and produced no reproducer.
 
