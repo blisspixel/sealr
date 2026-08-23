@@ -10,10 +10,12 @@ The project is in initial development. Compatibility may change between preview 
 
 - Added protocol v1 result validation against the accepted start request. The validator binds the operation and returned interpretation profile, then enforces the requested member-count, per-member-byte, total-byte, and canonical-path-depth limits with checked aggregate arithmetic.
 - Added deterministic request-drift, aggregate-overflow, and manifest-topology regressions, and routed the request-bound decoder through the pinned fuzz target.
+- Added a repository-only Linux authority-bootstrap conformance tool. Its same-binary child removes inherited authority before and after exec with `close_range`, receives optional stage authority over `SCM_RIGHTS`, hard-requires a fixed Landlock ABI 3 filesystem policy with `no_new_privs`, and receives the read-only source descriptor only after restriction readiness. Native cases cover enforced inspect and stage probes, descriptor and identity rejection, protocol correlation, outside-path denial, exact parent-observed descriptor roles, bounded pidfd termination and reap, and checked post-reap fixture cleanup.
 
 ### Changed
 
 - Split Alpha.6 planning into a nonsemantic Linux authority bootstrap, a consumer-preserving semantic-ownership decision, and supervised execution. The plan now requires writer quiescence before stage audit and keeps protocol v1 byte-compatible and non-runtime.
+- Kept the bootstrap lab outside the library, CLI, operation protocol, receipt schemas, and release archives. It establishes repository conformance evidence, not a claim that archive parsing is confined.
 
 ### Fixed
 

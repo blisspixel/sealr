@@ -121,12 +121,16 @@ Alpha.6 gives a compromised parser materially less ambient authority while prese
 
 ### 1. Linux authority bootstrap
 
-1. Add a separately versioned, bounded bootstrap exchange for a same-binary Linux child. Keep operation protocol v1 byte-compatible and non-runtime.
-2. Transfer only the control channel, read-only private snapshot, and optional stage directory as out-of-band descriptors. Validate exact count, role, object type, access mode, source length, non-aliasing, truncation, and ancillary-message state.
-3. Close and report every unrelated inherited descriptor. Pre-opened descriptors are authority and must be audited separately from pathname rules.
-4. Install `no_new_privs` and a measured Landlock ruleset before any source read. Report available ABI, requested and handled rights, granted paths, and setup status separately.
-5. Return one correlated restriction-ready record, then exit and reap. This slice interprets no archive, changes no public API or CLI execution path, and makes no reduced-authority product claim.
-6. Exercise success, insufficient ABI, wrong or extra descriptors, role swaps, writable source, malformed control, crash, timeout, bounded termination, reap, and cleanup through deterministic native tests.
+**Current status: first repository conformance slice landed.** It is a non-published tool, not a runtime path in `sealr` or `sealr-cli`.
+
+1. A separately versioned 96-byte bootstrap exchange drives a same-binary Linux child over `SOCK_SEQPACKET`. Operation protocol v1 remains byte-compatible and non-runtime.
+2. A pre-exec `close_range(CLOSE_RANGE_CLOEXEC | CLOSE_RANGE_UNSHARE)` prevents unrelated inherited descriptors from crossing exec without interfering with the spawn error channel. At child entry, the process retains the control socket plus inert `/dev/null` output streams and repeats closure for descriptors 3 and above. It then receives an optional private stage through one bounded `SCM_RIGHTS` packet. Transport validates exact counts and close-on-exec state; stage validation binds directory type, device, inode, effective owner, private mode, and read-only descriptor access, while source validation binds regular-file type, read-only access, length, device, and inode.
+3. The child sets and verifies `no_new_privs`, hard-requires the complete fixed Landlock ABI 3 filesystem-rights set, and grants a synthetic stage only `WRITE_FILE`, `MAKE_DIR`, and `MAKE_REG`. It sends correlated readiness before it owns any source descriptor.
+4. The supervisor observes one thread, `NoNewPrivs: 1`, inert output streams, and the exact control-plus-optional-stage descriptor set through `/proc/<pid>`. A deliberately inheritable sentinel object must be absent. After source acceptance, a second paused observation binds exact source and stage object identities and access modes to the supervisor-retained descriptors.
+5. Only after readiness does the supervisor transfer a read-only, unlinked synthetic source with exact length, device, and inode binding. The child proves the existing source capability remains readable, an unrelated or sibling path is denied, and a stage-local create succeeds when staged authority was granted.
+6. The supervisor sends an explicit exit acknowledgement, waits against a bounded deadline, kills through a pidfd on timeout, reaps before fixture cleanup, and treats every response as untrusted. Native conformance covers inspect and stage success; writable, nonregular, missing, injected, and identity-drifted descriptors; operation drift; extra source authority; and bounded timeout termination.
+
+Remaining bootstrap closure includes deterministic insufficient-ABI and setup-failure injection, ancillary data and control truncation at the process boundary, crash barriers at every lifecycle phase, and broader repeated fault stress. These remain Alpha.6 work, along with no-descendant and stage-permission-mutation controls required before semantic parsing.
 
 ### 2. Consumer-preserving semantic ownership
 

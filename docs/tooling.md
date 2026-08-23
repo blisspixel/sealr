@@ -65,6 +65,8 @@ The single required `CI` workflow verifies the library package with `cargo packa
 
 `sealr-wheel-lab` is also a non-published workspace tool. It uses the public Sealr API and explicitly selects [strict ASCII v2](profiles/zip-strict-ascii-v2.md) to analyze a bounded, digest-pinned corpus without another ZIP parser. Raw wheels remain outside Git. Required CI performs an offline verification of the committed [pilot report](wheel-compatibility-pilot.md): analyzer revision, manifest, interpretation-profile and default-policy bindings, artifact metadata, rollups, canonical JSON, and rendered Markdown must agree. Re-executing the measurement is a deliberate research operation because it requires the ignored local artifact cache.
 
+`sealr-worker-bootstrap-lab` is a Linux-only executable conformance tool with a trivial non-Linux build path and cross-platform fixed-frame unit tests. It has no dependency on `sealr`, `sealr-cli`, or `sealr-worker-protocol`, and it is not a release asset. Linux-only `rustix` and `landlock` dependencies exercise sequenced-packet descriptor transfer, authority closure, fixed Landlock ABI 3 enforcement, parent observation, pidfd termination, reap, and cleanup ordering. The tool proves only those mechanics with synthetic source and stage objects. Promoting them into product execution waits for the complete-IR versus worker-session decision and a packaging design that works for both CLI and library consumers.
+
 ## CLI rule
 
 The CLI is a thin presentation layer over typed library outcomes. Human formatting can improve, but machine JSON, rule identities, and exit classes remain versioned contracts. No UI dependency may become a second policy engine or parser.
