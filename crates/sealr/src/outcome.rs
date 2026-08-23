@@ -201,6 +201,10 @@ impl SemanticAxes {
         dest_requested: bool,
     ) -> Self {
         let (interpretation, admission) = match finding.code {
+            crate::findings::FindingCode::SourceIo => (
+                InterpretationStatus::Indeterminate,
+                AdmissionStatus::Admitted,
+            ),
             crate::findings::FindingCode::CodecDeflateInvalidStream
             | crate::findings::FindingCode::CodecDeflateTrailingInput
             | crate::findings::FindingCode::ZipDiffC4Offset => (
@@ -285,6 +289,34 @@ mod tests {
         assert_eq!(axes.interpretation, InterpretationStatus::Indeterminate);
         assert_eq!(axes.admission, AdmissionStatus::NotEvaluated);
         assert_eq!(axes.effect, EffectStatus::NotRequested);
+    }
+
+    #[test]
+    fn verification_source_failure_preserves_admission_and_is_indeterminate() {
+        let finding = Finding::error(FindingCode::SourceIo, "read");
+        for (dest_requested, expected_effect) in [
+            (false, EffectStatus::NotRequested),
+            (true, EffectStatus::Failed),
+        ] {
+            let axes = SemanticAxes::admitted_verification_stop(2, 3, &finding, dest_requested);
+            assert_eq!(axes.interpretation, InterpretationStatus::Indeterminate);
+            assert_eq!(axes.admission, AdmissionStatus::Admitted);
+            assert_eq!(
+                axes.verification,
+                VerificationStatus::Partial {
+                    verified_members: 2,
+                    pending_members: 3,
+                }
+            );
+            assert_eq!(axes.effect, expected_effect);
+            assert_eq!(
+                axes.view_completeness,
+                ViewCompleteness::Partial {
+                    phase: StoppingPhase::Verification,
+                    cause: "source.io".into(),
+                }
+            );
+        }
     }
 
     #[test]

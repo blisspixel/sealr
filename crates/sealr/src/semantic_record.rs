@@ -4386,6 +4386,51 @@ mod tests {
     }
 
     #[test]
+    fn stopped_source_io_is_indeterminate_but_admitted() {
+        let bytes = make_zip(&[("a.txt", b"a")]);
+        let (binding, pending, _) = reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending)).unwrap();
+        let plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+        let completion = CompletionRecord {
+            operation_id: binding.operation_id,
+            request_id: plan.request_id,
+            plan_id: plan.plan_id,
+            disposition: CompletionDisposition::Stopped {
+                verified_members: 0,
+                pending_members: 1,
+            },
+            members: vec![MemberCompletion::Failed {
+                cause: FindingCode::SourceIo,
+            }],
+            findings: vec![
+                Finding::error(FindingCode::SourceIo, "snapshot read failed").on("a.txt"),
+            ],
+        };
+        let encoded = encode_completion(&completion, &plan).unwrap();
+        let decoded = decode_completion(&encoded, &plan).unwrap();
+        assert_eq!(decoded.interpretation, InterpretationStatus::Indeterminate);
+        assert_eq!(decoded.admission, AdmissionStatus::Admitted);
+        assert_eq!(
+            decoded.verification,
+            VerificationStatus::Partial {
+                verified_members: 0,
+                pending_members: 1,
+            }
+        );
+        assert_eq!(
+            decoded.view_completeness,
+            ViewCompleteness::Partial {
+                phase: StoppingPhase::Verification,
+                cause: FindingCode::SourceIo.as_str().into(),
+            }
+        );
+        assert!(matches!(
+            decoded.ir.members[0].verification,
+            MemberVerification::Failed { .. }
+        ));
+    }
+
+    #[test]
     fn supervisor_setup_failure_merge_matches_current_axes() {
         let bytes = make_zip(&[("a.txt", b"a")]);
         let (inspect_binding, pending, _) =

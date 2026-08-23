@@ -26,6 +26,7 @@ The project is in initial development. Compatibility may change between preview 
 
 ### Fixed
 
+- Verification-time source I/O failures now preserve `Admitted + Partial` while reporting interpretation as `Indeterminate`, instead of misclassifying an operational read failure as policy denial. Inspect remains `NotRequested`; a requested materialization reports a failed effect. The compatibility verdict and CLI still fail closed whenever verification is incomplete.
 - Protocol manifests now reject a file that is an ancestor of another claimed object, including cases where another lexicographic entry separates the ancestor and descendant.
 - Removed unbounded child waits from pidfd-bind and descriptor-restore failure handling in the authority-bootstrap lab.
 - Semantic planning validation now derives the parser-equivalent metadata aggregate from complete local-header geometry and enforces it against the bound budget. Ready-plan decode binds LFH and CDH variable-length geometry, encoded names, and every represented extra-field header to the supervisor snapshot, so omitted records or fabricated range boundaries cannot understate the parser's resource charge.

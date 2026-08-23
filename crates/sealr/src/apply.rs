@@ -232,16 +232,10 @@ impl Outcome {
         self.verified_archive
     }
 
-    /// Process exit class: 0 admitted without effect failure, 2 not admitted, 3 admitted but effect failed.
+    /// Process exit class: 0 admitted and completely verified without effect failure,
+    /// 2 not admitted or not completely verified, 3 admitted but effect failed.
     pub fn cli_exit_code(&self) -> u8 {
-        if self.admission == AdmissionStatus::Admitted {
-            match self.effect {
-                EffectStatus::Failed => 3,
-                EffectStatus::Committed | EffectStatus::NotRequested => 0,
-            }
-        } else {
-            2
-        }
+        compat_exit_code(&self.admission, &self.verification, &self.effect)
     }
 }
 
@@ -1322,12 +1316,30 @@ fn reject_only(
 }
 
 fn compat_verdict(axes: &SemanticAxes) -> Verdict {
-    match (&axes.admission, &axes.effect) {
-        (AdmissionStatus::Admitted, EffectStatus::Committed) => Verdict::Allowed { wrote: true },
-        (AdmissionStatus::Admitted, EffectStatus::NotRequested) => {
+    match (&axes.admission, &axes.verification, &axes.effect) {
+        (AdmissionStatus::Admitted, VerificationStatus::Complete, EffectStatus::Committed) => {
+            Verdict::Allowed { wrote: true }
+        }
+        (AdmissionStatus::Admitted, VerificationStatus::Complete, EffectStatus::NotRequested) => {
             Verdict::Allowed { wrote: false }
         }
         _ => Verdict::Rejected,
+    }
+}
+
+fn compat_exit_code(
+    admission: &AdmissionStatus,
+    verification: &VerificationStatus,
+    effect: &EffectStatus,
+) -> u8 {
+    match (admission, verification, effect) {
+        (AdmissionStatus::Admitted, _, EffectStatus::Failed) => 3,
+        (
+            AdmissionStatus::Admitted,
+            VerificationStatus::Complete,
+            EffectStatus::Committed | EffectStatus::NotRequested,
+        ) => 0,
+        _ => 2,
     }
 }
 
@@ -2217,6 +2229,19 @@ mod tests {
         assert_eq!(axes.interpretation, InterpretationStatus::Indeterminate);
         assert_eq!(axes.admission, AdmissionStatus::NotEvaluated);
         assert_eq!(axes.verification, VerificationStatus::StructureOnly);
+    }
+
+    #[test]
+    fn partial_verification_never_projects_as_compatibility_success() {
+        let finding = Finding::error(FindingCode::SourceIo, "snapshot read failed");
+        for (dest_requested, expected_exit) in [(false, 2), (true, 3)] {
+            let axes = SemanticAxes::admitted_verification_stop(0, 1, &finding, dest_requested);
+            assert!(matches!(compat_verdict(&axes), Verdict::Rejected));
+            assert_eq!(
+                compat_exit_code(&axes.admission, &axes.verification, &axes.effect),
+                expected_exit
+            );
+        }
     }
 
     #[test]
