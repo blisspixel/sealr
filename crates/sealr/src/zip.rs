@@ -3,7 +3,7 @@
 use crate::findings::{Finding, FindingCode};
 use crate::interval::{exact_partition, CheckedInterval, IntervalError, PartitionError};
 use crate::ir::{
-    is_denied_extra_id, ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite,
+    is_denied_extra_id, ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite, IrMember,
     MemberSourceRanges, ZipInterpretationProfile,
 };
 use crate::snapshot::SourceSnapshot;
@@ -17,6 +17,21 @@ const DATA_DESCRIPTOR_SIG: u32 = 0x0807_4b50;
 const ZIP64_EOCD_SIG: u32 = 0x0606_4b50;
 const ZIP64_LOCATOR_SIG: u32 = 0x0706_4b50;
 const EOCD_MIN: usize = 22;
+
+#[cfg(test)]
+thread_local! {
+    static PARSE_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+}
+
+#[cfg(test)]
+pub(crate) fn reset_parse_calls() {
+    PARSE_CALLS.with(|calls| calls.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn parse_calls() -> u64 {
+    PARSE_CALLS.with(std::cell::Cell::get)
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ZipMember {
@@ -89,6 +104,9 @@ pub fn parse_zip_with_profile(
     max_metadata_bytes: u64,
     profile: ZipInterpretationProfile,
 ) -> Result<ZipArchive, Finding> {
+    #[cfg(test)]
+    PARSE_CALLS.with(|calls| calls.set(calls.get() + 1));
+
     if snapshot.len() < EOCD_MIN as u64 {
         return Err(Finding::error(
             FindingCode::FormatUnsupported,
@@ -887,13 +905,14 @@ fn check_layout(members: &[ZipMember], cd_off: u64) -> Result<(), Finding> {
     })
 }
 
-pub(crate) fn payload_reader<'s, 'a>(
+pub(crate) fn planned_payload_reader<'s, 'a>(
     snapshot: &'s SourceSnapshot<'a>,
-    m: &ZipMember,
+    member: &IrMember,
 ) -> Result<crate::snapshot::SnapshotRangeReader<'s, 'a>, Finding> {
+    let range = member.source_ranges.compressed_payload;
     snapshot
-        .reader(m.data_offset, m.comp_size)
-        .map_err(|finding| finding.on(&m.name))
+        .reader(range.offset, range.len)
+        .map_err(|finding| finding.on(&member.decoded_name))
 }
 
 #[cfg(test)]

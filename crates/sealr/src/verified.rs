@@ -3,13 +3,13 @@ use std::fmt;
 use std::io::BufReader;
 use std::sync::Arc;
 
-use crate::apply::process_member;
 use crate::ir::{ArchiveIR, IrMember, MemberKind, MemberVerification};
 use crate::jail::jail_name;
 use crate::outcome::SourceDigest;
 use crate::policy::ResourceBudget;
 use crate::quota::QuotaState;
 use crate::snapshot::SourceSnapshot;
+use crate::verification::{digest_hex, verify_payload, PayloadSpec};
 use crate::zip;
 
 /// Maximum number of distinct exact paths accepted by one retention plan.
@@ -554,13 +554,13 @@ impl VerifiedArchive {
             )
         })?;
 
-        let zip_member = member.as_zip_member();
-        let payload = zip::payload_reader(&self.inner.snapshot, &zip_member)
+        let payload_spec = PayloadSpec::from_ir(member);
+        let payload = zip::planned_payload_reader(&self.inner.snapshot, member)
             .map_err(|finding| member_read_error(canonical_path, &finding))?;
         let payload = BufReader::with_capacity(64 * 1024, payload);
-        let (actual, crc, sha256) = process_member(
+        let (actual, crc, sha256) = verify_payload(
             payload,
-            &zip_member,
+            payload_spec,
             self.inner.budget,
             expected_size,
             &mut bytes,
@@ -569,7 +569,7 @@ impl VerifiedArchive {
 
         if actual != expected_size
             || Some(crc) != member.actual_crc
-            || member.content_sha256.as_deref() != Some(sha256.as_str())
+            || member.content_sha256.as_deref() != Some(digest_hex(&sha256).as_str())
         {
             return Err(MemberReadError::new(
                 MemberReadErrorKind::IntegrityMismatch,
@@ -615,7 +615,7 @@ mod tests {
     use ::zip::{CompressionMethod, ZipWriter};
 
     use super::*;
-    use crate::apply::{process_member_calls, reset_process_member_calls};
+    use crate::verification::{reset_verify_payload_calls, verify_payload_calls};
     use crate::{
         apply, apply_with_options, ApplyOptions, Finding, FindingCode, Policy, Request, Source,
     };
@@ -887,23 +887,23 @@ mod tests {
     fn retained_reads_do_not_repeat_member_processing() {
         let bytes = make_two_file_zip();
         let plan = RetentionPlan::new(5, 5).with_path("a.txt").unwrap();
-        reset_process_member_calls();
+        reset_verify_payload_calls();
         let outcome = admitted_with_retention(&bytes, plan);
-        assert_eq!(process_member_calls(), 2);
+        assert_eq!(verify_payload_calls(), 2);
         let archive = outcome.verified_archive().unwrap();
 
         assert_eq!(archive.retained_member("a.txt"), Some(b"alpha".as_slice()));
         assert_eq!(archive.read_member("a.txt", 5).unwrap(), b"alpha");
         assert_eq!(archive.read_member("a.txt", 5).unwrap(), b"alpha");
-        assert_eq!(process_member_calls(), 2);
+        assert_eq!(verify_payload_calls(), 2);
 
         assert_eq!(archive.read_member("z.txt", 5).unwrap(), b"zulu!");
-        assert_eq!(process_member_calls(), 3);
+        assert_eq!(verify_payload_calls(), 3);
         assert_eq!(
             archive.read_member("a.txt", 4).unwrap_err().kind(),
             MemberReadErrorKind::LimitExceeded
         );
-        assert_eq!(process_member_calls(), 3);
+        assert_eq!(verify_payload_calls(), 3);
     }
 
     #[test]
@@ -937,7 +937,7 @@ mod tests {
             .with_path("metadata.txt")
             .unwrap();
         let options = ApplyOptions::new().with_retention(plan);
-        reset_process_member_calls();
+        reset_verify_payload_calls();
         let outcome = apply_with_options(
             Request {
                 source: Source::Bytes {
@@ -952,7 +952,7 @@ mod tests {
 
         assert!(!outcome.rejected(), "{:?}", outcome.view.findings);
         assert!(outcome.wrote());
-        assert_eq!(process_member_calls(), 1);
+        assert_eq!(verify_payload_calls(), 1);
         assert_eq!(
             fs::read(dest.join("metadata.txt")).unwrap(),
             b"verified metadata"

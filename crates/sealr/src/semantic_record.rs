@@ -47,6 +47,8 @@ const MIN_FINDING_BYTES: usize = 8;
 const REQUEST_DOMAIN: &[u8] = b"sealr.semantic-request.experimental.v1\0";
 const PLAN_DOMAIN: &[u8] = b"sealr.semantic-plan.experimental.v1\0";
 
+mod executor;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RequestedEffect {
     Inspect,
@@ -116,7 +118,7 @@ struct PlanningRecord {
     findings: Vec<Finding>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 struct ValidatedPlanningRecord {
     record: PlanningRecord,
     request_id: [u8; 32],
@@ -221,6 +223,25 @@ thread_local! {
     static COMPLETION_IR_MATERIALIZATIONS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
     static COMPLETION_ALLOCATION_FAIL_AFTER: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
     static COMPLETION_ALLOCATION_BUDGET: std::cell::Cell<Option<usize>> = const { std::cell::Cell::new(None) };
+    static ENCODER_RESERVATION_FAILURE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+struct EncoderReservationFailureGuard {
+    previous: bool,
+}
+
+#[cfg(test)]
+impl Drop for EncoderReservationFailureGuard {
+    fn drop(&mut self) {
+        ENCODER_RESERVATION_FAILURE.with(|enabled| enabled.set(self.previous));
+    }
+}
+
+#[cfg(test)]
+fn fail_encoder_reservation() -> EncoderReservationFailureGuard {
+    let previous = ENCODER_RESERVATION_FAILURE.with(|enabled| enabled.replace(true));
+    EncoderReservationFailureGuard { previous }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -401,6 +422,15 @@ impl Encoder {
             return false;
         }
         if required > self.bytes.capacity() {
+            #[cfg(test)]
+            if ENCODER_RESERVATION_FAILURE.with(std::cell::Cell::get) {
+                self.error = Some(RecordError::new(
+                    RecordErrorKind::AllocationFailed,
+                    self.bytes.len(),
+                    "bounded record allocation failed",
+                ));
+                return false;
+            }
             let doubled = self.bytes.capacity().saturating_mul(2);
             let target = doubled.max(required).min(self.limit);
             if self
@@ -3535,7 +3565,7 @@ fn validate_completion<'plan>(
             verified_members,
             pending_members,
         } => {
-            let (_, failed_cause) = failed_index.ok_or_else(|| {
+            let (failed_member_index, failed_cause) = failed_index.ok_or_else(|| {
                 RecordError::new(
                     RecordErrorKind::InvalidSemanticState,
                     0,
@@ -3548,6 +3578,17 @@ fn validate_completion<'plan>(
                     RecordErrorKind::InvalidSemanticState,
                     0,
                     "failed member cause differs from the first error finding",
+                ));
+            }
+            if !completion_cause_reachable(
+                planning.record.binding.requested_effect,
+                &ir.members[failed_member_index],
+                first_error.code,
+            ) {
+                return Err(RecordError::new(
+                    RecordErrorKind::InvalidSemanticState,
+                    0,
+                    "completion failure cause is unreachable for the planned member",
                 ));
             }
             let expected_verified = verified_prefix as u64;
@@ -3617,11 +3658,17 @@ fn materialize_completion(
                 actual_uncomp_size,
                 actual_crc,
                 content_sha256,
-            } => member.mark_file_verified(
-                *actual_uncomp_size,
-                *actual_crc,
-                try_hex_32(content_sha256)?,
-            ),
+            } => {
+                if matches!(member.kind, MemberKind::Directory) {
+                    member.mark_directory_verified();
+                } else {
+                    member.mark_file_verified(
+                        *actual_uncomp_size,
+                        *actual_crc,
+                        try_hex_32(content_sha256)?,
+                    );
+                }
+            }
             MemberCompletion::Failed { cause } => {
                 member.verification = MemberVerification::Failed {
                     cause: try_clone_string(
@@ -3881,10 +3928,6 @@ fn completion_finding(code: FindingCode, requested_effect: RequestedEffect) -> b
     matches!(
         code,
         FindingCode::SourceIo
-            | FindingCode::QuotaMember
-            | FindingCode::QuotaTotal
-            | FindingCode::QuotaRatio
-            | FindingCode::QuotaOverflow
             | FindingCode::QuotaDeclaredLie
             | FindingCode::CodecDeflateInvalidStream
             | FindingCode::CodecDeflateTrailingInput
@@ -3894,6 +3937,19 @@ fn completion_finding(code: FindingCode, requested_effect: RequestedEffect) -> b
             code,
             FindingCode::MaterializeIo | FindingCode::MaterializeUnsafeComponent
         ))
+}
+
+fn completion_cause_reachable(
+    requested_effect: RequestedEffect,
+    member: &IrMember,
+    code: FindingCode,
+) -> bool {
+    executor::inspect_failure_reachable(member, code)
+        || (requested_effect == RequestedEffect::Materialize
+            && matches!(
+                code,
+                FindingCode::MaterializeIo | FindingCode::MaterializeUnsafeComponent
+            ))
 }
 
 fn encode_findings(encoder: &mut Encoder, findings: &[Finding]) -> Result<(), RecordError> {
@@ -4271,8 +4327,22 @@ mod fuzzing {
                 .collect(),
             findings: Vec::new(),
         };
-        let completion_bytes =
+        let synthesized_completion_bytes =
             encode_completion(&completion, &planning).expect("reference completion encodes");
+        let completion_bytes = if materialize {
+            synthesized_completion_bytes
+        } else {
+            let execution_snapshot = SourceSnapshot::borrowed(None, &source);
+            let execution_plan = decode_planning(&planning_bytes, &binding, &execution_snapshot)
+                .expect("inspect execution plan decodes");
+            let executed = execution_plan
+                .bind_inspect_execution(execution_snapshot)
+                .expect("inspect execution plan binds")
+                .execute()
+                .expect("inspect execution completes");
+            assert_eq!(executed.completion(), synthesized_completion_bytes);
+            executed.completion().to_vec()
+        };
         let first = completed.members.first().expect("fixture has members");
         let stopped = CompletionRecord {
             operation_id: binding.operation_id,
@@ -4402,7 +4472,10 @@ mod tests {
     };
     use crate::outcome::EffectStatus;
     use crate::policy::Policy;
-    use crate::snapshot::inject_read_failure;
+    use crate::snapshot::{
+        inject_read_failure, reset_test_read_ranges, test_read_failure_is_armed, test_read_ranges,
+    };
+    use crate::verification::{reset_verify_payload_calls, verify_payload_calls};
 
     fn reset_completion_materializations() {
         COMPLETION_IR_MATERIALIZATIONS.with(|count| count.set(0));
@@ -4590,7 +4663,7 @@ mod tests {
         replace_declared_deflate_payload(bytes, &replacement);
     }
 
-    fn understate_declared_uncompressed_size(bytes: &mut [u8], size: u32) {
+    fn set_declared_uncompressed_size(bytes: &mut [u8], size: u32) {
         let local = signature_offset(bytes, [0x50, 0x4b, 0x03, 0x04]);
         let central = signature_offset(bytes, [0x50, 0x4b, 0x01, 0x02]);
         put_u32(bytes, local + 22, size);
@@ -4605,14 +4678,14 @@ mod tests {
         (payload as u64, u64::from(u32_at(bytes, local + 18)))
     }
 
-    fn corrupt_second_member_crc(bytes: &mut [u8]) {
+    fn corrupt_member_crc(bytes: &mut [u8], index: usize) {
         let locals = signature_offsets(bytes, [0x50, 0x4b, 0x03, 0x04]);
         let centrals = signature_offsets(bytes, [0x50, 0x4b, 0x01, 0x02]);
-        assert_eq!(locals.len(), 2);
-        assert_eq!(centrals.len(), 2);
-        let wrong_crc = u32_at(bytes, centrals[1] + 16) ^ 1;
-        put_u32(bytes, locals[1] + 14, wrong_crc);
-        put_u32(bytes, centrals[1] + 16, wrong_crc);
+        assert_eq!(locals.len(), centrals.len());
+        assert!(index < locals.len());
+        let wrong_crc = u32_at(bytes, centrals[index] + 16) ^ 1;
+        put_u32(bytes, locals[index] + 14, wrong_crc);
+        put_u32(bytes, centrals[index] + 16, wrong_crc);
     }
 
     fn rebind_source(binding: &mut InvocationBinding, ir: &mut ArchiveIR, source: &[u8]) {
@@ -4968,29 +5041,6 @@ mod tests {
         }
     }
 
-    fn member_completions(
-        ir: &ArchiveIR,
-        finding_code: Option<FindingCode>,
-    ) -> Vec<MemberCompletion> {
-        ir.members
-            .iter()
-            .map(|member| match &member.verification {
-                MemberVerification::Pending => MemberCompletion::Pending,
-                MemberVerification::Verified => MemberCompletion::Verified {
-                    actual_uncomp_size: member.actual_uncomp_size.unwrap(),
-                    actual_crc: member.actual_crc.unwrap(),
-                    content_sha256: parse_hex_32(member.content_sha256.as_deref().unwrap())
-                        .unwrap(),
-                },
-                MemberVerification::Failed { cause } => {
-                    let code = finding_code.expect("failed frontier has a pinned cause");
-                    assert_eq!(cause, code.as_str());
-                    MemberCompletion::Failed { cause: code }
-                }
-            })
-            .collect()
-    }
-
     #[allow(clippy::too_many_arguments)]
     fn run_completion_shadow(
         name: &str,
@@ -5030,6 +5080,7 @@ mod tests {
         );
         let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending.clone())).unwrap();
         let plan = decode_plan(&plan_bytes, &binding, bytes).unwrap();
+        let correlation_plan = decode_plan(&plan_bytes, &binding, bytes).unwrap();
         assert_eq!(encode_planning(&plan.record).unwrap(), plan_bytes, "{name}");
         assert_eq!(plan.record.binding, binding, "{name}");
         assert!(plan.record.findings.is_empty(), "{name}");
@@ -5038,27 +5089,15 @@ mod tests {
         assert_eq!(plan.plan_id, plan_id(&plan_bytes), "{name}");
 
         let final_ir = outcome.archive_ir().expect("completion outcome retains IR");
-        let disposition = match expected_verification {
-            VerificationStatus::Complete => CompletionDisposition::Complete,
-            VerificationStatus::Partial {
-                verified_members,
-                pending_members,
-            } => CompletionDisposition::Stopped {
-                verified_members,
-                pending_members,
-            },
-            VerificationStatus::StructureOnly => panic!("completion case stopped before execution"),
-        };
-        let completion = CompletionRecord {
-            operation_id: binding.operation_id,
-            request_id: plan.request_id,
-            plan_id: plan.plan_id,
-            disposition,
-            members: member_completions(final_ir, finding_code),
-            findings: outcome.view.findings.clone(),
-        };
-        let completion_bytes = encode_completion(&completion, &plan).unwrap();
-        let decoded = decode_completion(&completion_bytes, &plan).unwrap();
+        let execution_snapshot = SourceSnapshot::borrowed(None, bytes);
+        crate::zip::reset_parse_calls();
+        let executed = plan
+            .bind_inspect_execution(execution_snapshot)
+            .unwrap()
+            .execute()
+            .unwrap();
+        assert_eq!(crate::zip::parse_calls(), 0, "{name}");
+        let decoded = decode_completion(executed.completion(), executed.planning()).unwrap();
         assert_eq!(decoded.interpretation, outcome.interpretation, "{name}");
         assert_eq!(decoded.admission, outcome.admission, "{name}");
         assert_eq!(decoded.verification, outcome.verification, "{name}");
@@ -5069,20 +5108,22 @@ mod tests {
         assert_eq!(decoded.findings, outcome.view.findings, "{name}");
         assert_ir_eq(&decoded.ir, final_ir);
         assert_eq!(frontier(&decoded.ir), frontier(final_ir), "{name}");
+        let shadow = evidence(
+            name,
+            bytes,
+            &outcome,
+            finding_code,
+            executed.planning(),
+            Some(&pending),
+            &plan_bytes,
+            Some(executed.completion()),
+            true,
+        );
+        let completion_bytes = executed.completion().to_vec();
         (
-            evidence(
-                name,
-                bytes,
-                &outcome,
-                finding_code,
-                &plan,
-                Some(&pending),
-                &plan_bytes,
-                Some(&completion_bytes),
-                true,
-            ),
+            shadow,
             CompletionArtifact {
-                plan,
+                plan: correlation_plan,
                 bytes: completion_bytes,
             },
         )
@@ -5355,7 +5396,7 @@ mod tests {
         ));
 
         let mut crc_mismatch = make_zip(&[("first.txt", b"first"), ("second.txt", b"second")]);
-        corrupt_second_member_crc(&mut crc_mismatch);
+        corrupt_member_crc(&mut crc_mismatch, 1);
         let (crc_evidence, _) = run_completion_shadow(
             "crc-mismatch-stopped",
             &crc_mismatch,
@@ -5379,7 +5420,7 @@ mod tests {
             &[("declared-lie.txt", b"more than one byte")],
             CompressionMethod::Deflated,
         );
-        understate_declared_uncompressed_size(&mut declared_lie, 1);
+        set_declared_uncompressed_size(&mut declared_lie, 1);
         let (declared_lie_evidence, _) = run_completion_shadow(
             "declared-lie-stopped",
             &declared_lie,
@@ -5509,6 +5550,491 @@ mod tests {
             vec![hex_bytes(&[0x41; 16]), hex_bytes(&[0x52; 16])]
         );
         assert_eq!(manifest.cases, cases);
+    }
+
+    #[test]
+    fn inspect_executor_owns_snapshot_and_reads_only_planned_payload_ranges() {
+        let mut ignored_extra = make_zip(&[("extra.txt", b"content")]);
+        add_matching_extra_fields(&mut ignored_extra, &[0x55, 0x78, 0x00, 0x00]);
+        let cases = [
+            (ZipInterpretationProfile::StrictAsciiV1, make_zip(&[]), 0),
+            (ZipInterpretationProfile::StrictAsciiV1, ignored_extra, 1),
+            (
+                ZipInterpretationProfile::StrictAsciiV2,
+                make_zip(&[("dir/", b""), ("dir/file.txt", b"payload")]),
+                1,
+            ),
+        ];
+
+        for (profile, bytes, expected_payloads) in cases {
+            crate::zip::reset_parse_calls();
+            let (binding, pending, completed) = reference(&bytes, profile);
+            assert_eq!(crate::zip::parse_calls(), 1);
+            let plan_bytes =
+                encode_planning(&ready_plan(binding.clone(), pending.clone())).unwrap();
+            let plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+            let structural = pending.covering.eocd;
+            let structural_failure = inject_read_failure(structural.offset, structural.len);
+            reset_verify_payload_calls();
+            let bound = plan
+                .bind_inspect_execution(SourceSnapshot::borrowed(None, &bytes))
+                .unwrap();
+            reset_test_read_ranges();
+
+            let executed = bound.execute().unwrap();
+
+            assert_eq!(crate::zip::parse_calls(), 1);
+            assert_eq!(verify_payload_calls(), expected_payloads);
+            let payload_ranges: Vec<_> = pending
+                .members
+                .iter()
+                .filter(|member| !matches!(member.kind, MemberKind::Directory))
+                .map(|member| member.source_ranges.compressed_payload)
+                .collect();
+            for (offset, len) in test_read_ranges() {
+                let end = offset.checked_add(len).unwrap();
+                assert!(payload_ranges.iter().any(|range| {
+                    let range_end = range.offset.checked_add(range.len).unwrap();
+                    offset >= range.offset && end <= range_end
+                }));
+            }
+            assert_eq!(
+                test_read_ranges().is_empty(),
+                payload_ranges.iter().all(|range| range.len == 0)
+            );
+            assert!(test_read_failure_is_armed());
+            let decoded = decode_completion(executed.completion(), executed.planning()).unwrap();
+            assert_ir_eq(&decoded.ir, &completed);
+            assert_eq!(decoded.verification, VerificationStatus::Complete);
+            drop(structural_failure);
+        }
+    }
+
+    #[test]
+    fn inspect_executor_private_snapshot_matches_memory_after_source_removal() {
+        let bytes = make_zip_with_method(
+            &[("first.txt", b"first"), ("second.txt", b"second")],
+            CompressionMethod::Deflated,
+        );
+        let (binding, pending, _) = reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending)).unwrap();
+        let memory_plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+        let private_plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+
+        let source_path = temp_shadow_dest("executor-private-source.zip");
+        fs::write(&source_path, &bytes).unwrap();
+        let private_snapshot = SourceSnapshot::private_file_from_path(
+            &source_path,
+            None,
+            binding.budget.max_archive_bytes,
+        )
+        .unwrap();
+        fs::remove_file(&source_path).unwrap();
+
+        crate::zip::reset_parse_calls();
+        let memory = memory_plan
+            .bind_inspect_execution(SourceSnapshot::borrowed(None, &bytes))
+            .unwrap()
+            .execute()
+            .unwrap();
+        let private = private_plan
+            .bind_inspect_execution(private_snapshot)
+            .unwrap()
+            .execute()
+            .unwrap();
+
+        assert_eq!(crate::zip::parse_calls(), 0);
+        assert_eq!(memory.completion(), private.completion());
+        let decoded = decode_completion(private.completion(), private.planning()).unwrap();
+        assert_eq!(decoded.verification, VerificationStatus::Complete);
+    }
+
+    #[test]
+    fn inspect_executor_rejects_ineligible_or_unbound_work_without_payload_reads() {
+        let bytes = make_zip(&[("file.txt", b"payload")]);
+        let (binding, pending, _) = reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+
+        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending.clone())).unwrap();
+        let wrong_snapshot_plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+        let wrong_snapshot = SourceSnapshot::borrowed(None, b"different snapshot");
+        assert_eq!(
+            wrong_snapshot_plan
+                .bind_inspect_execution(wrong_snapshot)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::BindingMismatch
+        );
+
+        let digest_mismatch_plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+        let mut same_length_snapshot = bytes.clone();
+        let last = same_length_snapshot.last_mut().unwrap();
+        *last ^= 1;
+        assert_eq!(
+            digest_mismatch_plan
+                .bind_inspect_execution(SourceSnapshot::borrowed(None, &same_length_snapshot))
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::BindingMismatch
+        );
+
+        let mut materialize_binding = binding_for(
+            &bytes,
+            ZipInterpretationProfile::StrictAsciiV1,
+            &Policy::default_v1(),
+            RequestedEffect::Materialize,
+        );
+        materialize_binding.operation_id = [0x52; 16];
+        let materialize_bytes =
+            encode_planning(&ready_plan(materialize_binding.clone(), pending.clone())).unwrap();
+        let materialize_plan =
+            decode_plan(&materialize_bytes, &materialize_binding, &bytes).unwrap();
+        assert_eq!(
+            materialize_plan
+                .bind_inspect_execution(SourceSnapshot::borrowed(None, &bytes))
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::PhaseMismatch
+        );
+
+        let mut retention_binding = binding.clone();
+        retention_binding.retention = RetentionBinding::Plan {
+            paths: Vec::new(),
+            max_member_bytes: 0,
+            max_total_bytes: 0,
+        };
+        let retention_bytes =
+            encode_planning(&ready_plan(retention_binding.clone(), pending.clone())).unwrap();
+        let retention_plan = decode_plan(&retention_bytes, &retention_binding, &bytes).unwrap();
+        assert_eq!(
+            retention_plan
+                .bind_inspect_execution(SourceSnapshot::borrowed(None, &bytes))
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::PhaseMismatch
+        );
+
+        let terminal_record = PlanningRecord {
+            binding: binding.clone(),
+            disposition: PlanningDisposition::Terminal(TerminalPlanningAxes {
+                interpretation: InterpretationStatus::Interpreted,
+                admission: AdmissionStatus::Denied,
+                verification: VerificationStatus::StructureOnly,
+                view_completeness: ViewCompleteness::Partial {
+                    phase: StoppingPhase::Admission,
+                    cause: FindingCode::QuotaMember.as_str().into(),
+                },
+            }),
+            ir: None,
+            findings: vec![Finding::error(
+                FindingCode::QuotaMember,
+                "declared member size exceeded the member cap",
+            )],
+        };
+        let terminal_bytes = encode_planning(&terminal_record).unwrap();
+        let terminal_plan = decode_plan(&terminal_bytes, &binding, &bytes).unwrap();
+        crate::zip::reset_parse_calls();
+        reset_verify_payload_calls();
+        assert_eq!(
+            terminal_plan
+                .bind_inspect_execution(SourceSnapshot::borrowed(None, &bytes))
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::PhaseMismatch
+        );
+        assert_eq!(crate::zip::parse_calls(), 0);
+        assert_eq!(verify_payload_calls(), 0);
+
+        let allocation_plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+        let allocation_failure = executor::fail_state_reservation();
+        crate::zip::reset_parse_calls();
+        reset_verify_payload_calls();
+        assert_eq!(
+            allocation_plan
+                .bind_inspect_execution(SourceSnapshot::borrowed(None, &bytes))
+                .unwrap()
+                .execute()
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::AllocationFailed
+        );
+        assert_eq!(crate::zip::parse_calls(), 0);
+        assert_eq!(verify_payload_calls(), 0);
+        drop(allocation_failure);
+
+        let encoder_plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+        let bound = encoder_plan
+            .bind_inspect_execution(SourceSnapshot::borrowed(None, &bytes))
+            .unwrap();
+        let encoder_failure = fail_encoder_reservation();
+        crate::zip::reset_parse_calls();
+        reset_verify_payload_calls();
+        assert_eq!(
+            bound.execute().unwrap_err().kind,
+            RecordErrorKind::AllocationFailed
+        );
+        assert_eq!(crate::zip::parse_calls(), 0);
+        assert_eq!(verify_payload_calls(), 1);
+        drop(encoder_failure);
+    }
+
+    #[test]
+    fn inspect_executor_matches_end_of_stream_lie_and_source_io_after_prefix() {
+        let policy = Policy::default_v1();
+
+        let mut overstated = make_zip_with_method(
+            &[("overstated.txt", b"short payload")],
+            CompressionMethod::Deflated,
+        );
+        set_declared_uncompressed_size(&mut overstated, 64);
+        run_completion_shadow(
+            "declared-size-overstated",
+            &overstated,
+            &policy,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Denied,
+            VerificationStatus::Partial {
+                verified_members: 0,
+                pending_members: 1,
+            },
+            EffectStatus::NotRequested,
+            ViewCompleteness::Partial {
+                phase: StoppingPhase::Verification,
+                cause: FindingCode::QuotaDeclaredLie.as_str().to_owned(),
+            },
+            Some(FindingCode::QuotaDeclaredLie),
+        );
+
+        let source_io = make_zip(&[("first.txt", b"first"), ("second.txt", b"second")]);
+        let (_, pending, _) = reference(&source_io, ZipInterpretationProfile::StrictAsciiV1);
+        let second_payload = pending.members[1].source_ranges.compressed_payload;
+        let source_io_failure = inject_read_failure(second_payload.offset, second_payload.len);
+        run_completion_shadow(
+            "source-io-after-prefix",
+            &source_io,
+            &policy,
+            InterpretationStatus::Indeterminate,
+            AdmissionStatus::Admitted,
+            VerificationStatus::Partial {
+                verified_members: 1,
+                pending_members: 1,
+            },
+            EffectStatus::NotRequested,
+            ViewCompleteness::Partial {
+                phase: StoppingPhase::Verification,
+                cause: FindingCode::SourceIo.as_str().to_owned(),
+            },
+            Some(FindingCode::SourceIo),
+        );
+        drop(source_io_failure);
+    }
+
+    #[test]
+    fn inspect_executor_stops_at_middle_failure_and_leaves_later_payload_unread() {
+        let mut bytes = make_zip(&[
+            ("first.txt", b"first"),
+            ("second.txt", b"second"),
+            ("third.txt", b"third"),
+        ]);
+        let (_, pending, _) = reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+        let third_payload = pending.members[2].source_ranges.compressed_payload;
+        corrupt_member_crc(&mut bytes, 1);
+        let later_payload_failure = inject_read_failure(third_payload.offset, third_payload.len);
+        reset_verify_payload_calls();
+
+        let (_, artifact) = run_completion_shadow(
+            "crc-middle-frontier",
+            &bytes,
+            &Policy::default_v1(),
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Denied,
+            VerificationStatus::Partial {
+                verified_members: 1,
+                pending_members: 2,
+            },
+            EffectStatus::NotRequested,
+            ViewCompleteness::Partial {
+                phase: StoppingPhase::Verification,
+                cause: FindingCode::CrcMismatch.as_str().to_owned(),
+            },
+            Some(FindingCode::CrcMismatch),
+        );
+
+        assert_eq!(verify_payload_calls(), 4);
+        assert!(test_read_failure_is_armed());
+        let decoded = decode_completion(&artifact.bytes, &artifact.plan).unwrap();
+        assert!(matches!(
+            &decoded.ir.members[0].verification,
+            MemberVerification::Verified
+        ));
+        assert!(matches!(
+            &decoded.ir.members[1].verification,
+            MemberVerification::Failed { .. }
+        ));
+        assert!(matches!(
+            &decoded.ir.members[2].verification,
+            MemberVerification::Pending
+        ));
+        drop(later_payload_failure);
+    }
+
+    #[test]
+    fn inspect_executor_runs_at_exact_resource_boundaries_and_denies_one_under() {
+        let execute_exact = |bytes: &[u8], policy: &Policy, expected_payloads: u64| {
+            let (binding, pending, completed) =
+                reference_with_policy(bytes, ZipInterpretationProfile::StrictAsciiV1, policy);
+            let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending)).unwrap();
+            let plan = decode_plan(&plan_bytes, &binding, bytes).unwrap();
+            reset_verify_payload_calls();
+            let executed = plan
+                .bind_inspect_execution(SourceSnapshot::borrowed(None, bytes))
+                .unwrap()
+                .execute()
+                .unwrap();
+            assert_eq!(verify_payload_calls(), expected_payloads);
+            let decoded = decode_completion(executed.completion(), executed.planning()).unwrap();
+            assert_eq!(decoded.verification, VerificationStatus::Complete);
+            assert_ir_eq(&decoded.ir, &completed);
+        };
+        let deny_one_under = |bytes: &[u8], policy: &Policy, expected: FindingCode| {
+            let capture = capture_next_planning_boundary();
+            reset_verify_payload_calls();
+            let outcome = apply_with_options(
+                Request {
+                    source: Source::Bytes {
+                        path: Some("semantic-budget-boundary.zip"),
+                        data: bytes,
+                    },
+                    policy,
+                    dest: None,
+                },
+                &ApplyOptions::new()
+                    .with_interpretation_profile(ZipInterpretationProfile::StrictAsciiV1),
+            );
+            assert_eq!(outcome.admission, AdmissionStatus::Denied);
+            assert_eq!(outcome.verification, VerificationStatus::StructureOnly);
+            assert_eq!(
+                outcome
+                    .view
+                    .findings
+                    .iter()
+                    .find(|finding| finding.severity == Severity::Error)
+                    .unwrap()
+                    .code,
+                expected
+            );
+            assert!(capture.take().is_none());
+            assert_eq!(verify_payload_calls(), 0);
+        };
+
+        let aggregate = make_zip(&[("five.bin", b"12345"), ("six.bin", b"123456")]);
+        let mut member_exact = Policy::default_v1();
+        member_exact.max_member_bytes = 6;
+        member_exact.max_ratio = None;
+        execute_exact(&aggregate, &member_exact, 2);
+        let mut member_under = member_exact.clone();
+        member_under.max_member_bytes = 5;
+        deny_one_under(&aggregate, &member_under, FindingCode::QuotaMember);
+
+        let mut total_exact = Policy::default_v1();
+        total_exact.max_total_bytes = 11;
+        total_exact.max_ratio = None;
+        execute_exact(&aggregate, &total_exact, 2);
+        let mut total_under = total_exact.clone();
+        total_under.max_total_bytes = 10;
+        deny_one_under(&aggregate, &total_under, FindingCode::QuotaTotal);
+
+        let ratio_payload = vec![b'x'; 4096];
+        let ratio = make_zip_with_method(
+            &[("ratio.bin", ratio_payload.as_slice())],
+            CompressionMethod::Deflated,
+        );
+        let mut ratio_unlimited = Policy::default_v1();
+        ratio_unlimited.max_ratio = None;
+        let (_, ratio_pending, _) = reference_with_policy(
+            &ratio,
+            ZipInterpretationProfile::StrictAsciiV1,
+            &ratio_unlimited,
+        );
+        let ratio_member = &ratio_pending.members[0];
+        let exact_ratio = ratio_member
+            .declared_uncomp_size
+            .div_ceil(ratio_member.declared_comp_size);
+        assert!(exact_ratio > 0);
+        let mut ratio_exact = Policy::default_v1();
+        ratio_exact.max_ratio = Some(exact_ratio);
+        execute_exact(&ratio, &ratio_exact, 1);
+        let mut ratio_under = ratio_exact.clone();
+        ratio_under.max_ratio = Some(exact_ratio - 1);
+        deny_one_under(&ratio, &ratio_under, FindingCode::QuotaRatio);
+    }
+
+    #[test]
+    fn completion_rejects_unreachable_quota_and_member_specific_failures() {
+        let store = make_zip(&[("stored.txt", b"stored")]);
+        let (binding, pending, _) = reference(&store, ZipInterpretationProfile::StrictAsciiV1);
+        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending)).unwrap();
+        let plan = decode_plan(&plan_bytes, &binding, &store).unwrap();
+
+        for code in [
+            FindingCode::QuotaMember,
+            FindingCode::QuotaTotal,
+            FindingCode::QuotaRatio,
+            FindingCode::QuotaOverflow,
+            FindingCode::CodecDeflateInvalidStream,
+            FindingCode::CodecDeflateTrailingInput,
+        ] {
+            let forged = CompletionRecord {
+                operation_id: plan.record.binding.operation_id,
+                request_id: plan.request_id,
+                plan_id: plan.plan_id,
+                disposition: CompletionDisposition::Stopped {
+                    verified_members: 0,
+                    pending_members: 1,
+                },
+                members: vec![MemberCompletion::Failed { cause: code }],
+                findings: vec![Finding::error(code, "unreachable executor cause").on("stored.txt")],
+            };
+            assert_eq!(
+                encode_completion(&forged, &plan).unwrap_err().kind,
+                RecordErrorKind::InvalidSemanticState,
+                "{code:?}"
+            );
+            let hostile = encode_completion_validated(&forged).unwrap();
+            assert_eq!(
+                decode_completion(&hostile, &plan).unwrap_err().kind,
+                RecordErrorKind::InvalidSemanticState,
+                "{code:?}"
+            );
+        }
+
+        let directory = make_zip(&[("directory/", b"")]);
+        let (directory_binding, directory_pending, _) =
+            reference(&directory, ZipInterpretationProfile::StrictAsciiV1);
+        let directory_plan_bytes =
+            encode_planning(&ready_plan(directory_binding.clone(), directory_pending)).unwrap();
+        let directory_plan =
+            decode_plan(&directory_plan_bytes, &directory_binding, &directory).unwrap();
+        let forged_directory = CompletionRecord {
+            operation_id: directory_plan.record.binding.operation_id,
+            request_id: directory_plan.request_id,
+            plan_id: directory_plan.plan_id,
+            disposition: CompletionDisposition::Stopped {
+                verified_members: 0,
+                pending_members: 1,
+            },
+            members: vec![MemberCompletion::Failed {
+                cause: FindingCode::CrcMismatch,
+            }],
+            findings: vec![
+                Finding::error(FindingCode::CrcMismatch, "directory CRC").on("directory/")
+            ],
+        };
+        assert_eq!(
+            encode_completion(&forged_directory, &directory_plan)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::InvalidSemanticState
+        );
     }
 
     #[test]
