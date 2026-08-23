@@ -59,3 +59,50 @@ jobs:
           path: ${{ runner.temp }}/sealr-fuzz-artifacts/
           if-no-files-found: ignore
           retention-days: 7
+
+  semantic:
+    name: Bounded semantic records
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned nightly
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Verify seed and configuration manifest
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Fuzz bounded semantic records
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/sealr-semantic-fuzz-artifacts/"
+          mkdir -p "${artifact_dir}"
+          cargo +nightly-2026-08-01 fuzz run \
+            --fuzz-dir fuzz \
+            --jobs 1 \
+            semantic_records \
+            -- \
+            -jobs=1 \
+            -max_len=4194304 \
+            -max_total_time=600 \
+            -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="${artifact_dir}" \
+            -dict=fuzz/dictionaries/semantic_record_dictionary \
+            -print_final_stats=1
+
+      - name: Preserve reproducer after a failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: semantic-record-reproducer
+          path: ${{ runner.temp }}/sealr-semantic-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7

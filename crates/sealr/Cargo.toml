@@ -8,6 +8,10 @@ description.workspace = true
 repository.workspace = true
 publish = false
 
+[features]
+# Enables only the external cargo-fuzz entry point. This is not a shipped API.
+__internal-fuzzing = []
+
 [dependencies]
 cap-fs-ext.workspace = true
 cap-std.workspace = true

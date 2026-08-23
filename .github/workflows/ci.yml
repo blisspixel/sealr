@@ -85,8 +85,8 @@ jobs:
       - name: Verify Linux authority bootstrap
         run: cargo run --locked --release -p sealr-worker-bootstrap-lab -- conformance
 
-      - name: Compile fuzz target
-        run: cargo check --locked --manifest-path fuzz/Cargo.toml --bin protocol_decoders
+      - name: Compile fuzz targets
+        run: cargo check --locked --manifest-path fuzz/Cargo.toml --bins
 
       - name: Verify independent identity conformance
         run: >-
