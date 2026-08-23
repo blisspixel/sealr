@@ -497,6 +497,86 @@ mod tests {
     }
 
     #[test]
+    fn ordered_partition_matches_bounded_bitmap_oracle() {
+        let candidates: Vec<CheckedInterval> = (0..=5)
+            .flat_map(|start| {
+                (start..=5).map(move |end| CheckedInterval::from_bounds(start, end).unwrap())
+            })
+            .collect();
+        let mut case_count = 0;
+
+        for outer_start in 0..=5 {
+            for outer_end in outer_start..=5 {
+                let outer = CheckedInterval::from_bounds(outer_start, outer_end).unwrap();
+                let mut parts = Vec::new();
+                for part_count in 0..=3 {
+                    compare_all_ordered_part_lists(
+                        outer,
+                        &candidates,
+                        &mut parts,
+                        part_count,
+                        &mut case_count,
+                    );
+                }
+            }
+        }
+
+        assert_eq!(case_count, 204_204);
+    }
+
+    fn compare_all_ordered_part_lists(
+        outer: CheckedInterval,
+        candidates: &[CheckedInterval],
+        parts: &mut Vec<CheckedInterval>,
+        remaining: usize,
+        case_count: &mut usize,
+    ) {
+        if remaining == 0 {
+            let expected = covering_bitmap_partition_oracle(outer, parts);
+            let mut ordered = parts.clone();
+            ordered.sort_unstable_by_key(|interval| interval.start());
+            let actual = validate_ordered_partition(
+                outer,
+                &ordered,
+                "first gap",
+                "last gap",
+                "invalid partition",
+            )
+            .is_ok();
+            assert_eq!(actual, expected, "outer={outer:?}, parts={parts:?}");
+            *case_count += 1;
+            return;
+        }
+
+        for &candidate in candidates {
+            parts.push(candidate);
+            compare_all_ordered_part_lists(outer, candidates, parts, remaining - 1, case_count);
+            parts.pop();
+        }
+    }
+
+    fn covering_bitmap_partition_oracle(outer: CheckedInterval, parts: &[CheckedInterval]) -> bool {
+        if outer.is_empty() {
+            return parts.is_empty();
+        }
+        if parts.is_empty() || parts.iter().any(|part| part.is_empty()) {
+            return false;
+        }
+
+        let mut counts = vec![0_u8; (outer.end() - outer.start()) as usize];
+        for part in parts {
+            if part.start() < outer.start() || part.end() > outer.end() {
+                return false;
+            }
+            for position in part.start()..part.end() {
+                let index = (position - outer.start()) as usize;
+                counts[index] = counts[index].saturating_add(1);
+            }
+        }
+        counts.into_iter().all(|count| count == 1)
+    }
+
+    #[test]
     #[should_panic(expected = "bounded covering audit allocation failed")]
     fn compatibility_error_conversion_does_not_forge_archive_evidence() {
         let _ = CoveringAuditError::AllocationFailed.into_finding();
