@@ -117,29 +117,33 @@ Alpha.5 makes the source capability real before it crosses a process boundary.
 
 ## Alpha.6: reduced-authority Linux execution
 
-Alpha.6 gives a compromised parser materially less ambient authority while preserving the same semantic result.
+Alpha.6 gives a compromised parser materially less ambient authority while preserving the same public semantic and verified-capability contract. The work is split so Linux confinement can be measured before an incomplete worker result format is allowed to shape `Outcome` or `VerifiedArchive`.
 
-### 1. Outcome and protocol contract
+### 1. Linux authority bootstrap
 
-1. Treat protocol v1 as a bounded transport foundation, not a frozen worker contract. It carries a reduced manifest but no complete `ArchiveIR`, ranges, or independent public outcome axes.
-2. Choose and document one semantic ownership model: the isolated worker is the only interpreter and remains the semantic trusted computing base, or a revised protocol carries a complete independently checkable IR or certificate. Do not claim independent supervisor verification without the latter evidence.
-3. Preserve interpretation, admission, verification, effect, and lifecycle facts through a protocol revision or an explicitly two-phase operation.
-4. Pin round-trip vectors for admitted plus effect-failed, worker crash, malformed result, stage-audit failure, cleanup failure, and publication failure.
+1. Add a separately versioned, bounded bootstrap exchange for a same-binary Linux child. Keep operation protocol v1 byte-compatible and non-runtime.
+2. Transfer only the control channel, read-only private snapshot, and optional stage directory as out-of-band descriptors. Validate exact count, role, object type, access mode, source length, non-aliasing, truncation, and ancillary-message state.
+3. Close and report every unrelated inherited descriptor. Pre-opened descriptors are authority and must be audited separately from pathname rules.
+4. Install `no_new_privs` and a measured Landlock ruleset before any source read. Report available ABI, requested and handled rights, granted paths, and setup status separately.
+5. Return one correlated restriction-ready record, then exit and reap. This slice interprets no archive, changes no public API or CLI execution path, and makes no reduced-authority product claim.
+6. Exercise success, insufficient ABI, wrong or extra descriptors, role swaps, writable source, malformed control, crash, timeout, bounded termination, reap, and cleanup through deterministic native tests.
 
-### 2. Supervisor lifecycle and capabilities
+### 2. Consumer-preserving semantic ownership
 
-1. The supervisor owns the private snapshot, destination parent, stage creation, final name, publication, cleanup, and any recovery secret.
-2. The same-binary worker inherits only the bounded control channel, a read-only snapshot capability, and the stage capability needed for its selected effect.
-3. Validate inherited capability identity and access mode with descriptor metadata before use, then close and report every unrelated descriptor. Pre-opened descriptors are authority and must be audited separately from pathname rules.
-4. Bound start, response, timeout, termination, reap, cleanup, and retry transitions in one supervisor-owned lifecycle.
+1. Treat operation protocol v1 as a bounded transport foundation, not a frozen worker contract. It carries a reduced manifest but no complete `ArchiveIR`, ranges, independent public outcome axes, or authority for later `VerifiedArchive` reads.
+2. Choose one public-capability model before defining operation protocol v2: return a complete bounded IR or certificate that lets the supervisor reconstruct the current local capability, or define an explicit worker-backed session with bounded member reads, retention, lifetime, cancellation, and crash semantics.
+3. Preserve interpretation, admission, verification, view completeness, effect, and cleanup as separately owned facts. The worker cannot claim publication or final effect. The supervisor cannot claim independent archive interpretation unless it checks the complete evidence required for that claim.
+4. Pin conformance vectors for admitted inspect, admitted materialization, coherent denial, partial verification, worker crash, malformed result, stage-audit failure, cleanup failure, publication failure, and post-result writer activity.
+5. Keep the library, CLI, wheel laboratory, and packaged consumer on one semantic boundary. A CLI-only reduced manifest is not sufficient to complete this increment.
 
-### 3. Linux containment and publication
+### 3. Supervised execution and publication
 
-1. Install `no_new_privs` and Landlock before the first archive byte is interpreted.
-2. Require a release-runner Landlock floor that includes cross-directory refer controls and file truncation controls, currently ABI 3. A weaker kernel reports isolation unavailable and cannot satisfy the Linux reduced-authority release gate.
-3. Report available ABI, requested rights, handled rights, granted paths, inherited descriptors, and setup result separately. Do not claim complete network isolation from Landlock alone.
-4. Bound and validate the result frame, then re-audit the stage for exact object count, kind, identity, size, and SHA-256 against the validated returned manifest. Do not reparse ZIP in the supervisor.
-5. Treat worker crash, malformed response, timeout, audit mismatch, cleanup failure, publication failure, and commit as distinct lifecycle states and compare every observed receipt with an executable finite-state model.
+1. The supervisor owns the private snapshot, destination parent, stage creation, final name, publication, cleanup, timeout, termination, reap, and any recovery secret.
+2. Run the chosen semantic operation only after the bootstrap proves restriction setup. A weaker Landlock ABI may report isolation unavailable but cannot satisfy the enforced-worker gate. Do not claim complete network isolation from Landlock alone.
+3. Prevent a worker descendant from retaining writable stage authority. Use a minimal measured no-process-creation control or an equivalently proven supervisor-owned process boundary before archive interpretation; a broader syscall allowlist still waits for measured traces.
+4. After a bounded result arrives, terminate and reap the worker boundary and prove writer quiescence before validating the result, auditing the stage, or publishing. A returned result alone is not a stable audit boundary.
+5. Recompute every independently checkable identity, then audit the exact stage for object count, kind, link and reparse state, identity, size, and SHA-256. Do not reparse ZIP merely to create a second meaning.
+6. Treat restriction failure, worker crash, malformed response, timeout, quiescence failure, audit mismatch, cleanup failure, publication failure, and commit as distinct lifecycle states and compare every observed receipt with an executable finite-state model.
 
 ### Native adversarial evidence
 
@@ -153,6 +157,7 @@ Alpha.6 gives a compromised parser materially less ambient authority while prese
 - Isolation is installed before the first untrusted archive read.
 - Only the documented descriptors survive worker startup.
 - The worker cannot read the sentinel, create outside the stage, or publish.
+- No worker or descendant retains writable stage authority when audit begins.
 - The supervisor rejects every missing, extra, linked, replaced, size-mismatched, or digest-mismatched staged object.
 - At least 500 bounded hostile Linux worker iterations complete with zero outside writes and zero destination replacement, while the native in-process materializer stress remains green on all three platforms.
 - Linux fails closed when the minimum handled rights are unavailable.

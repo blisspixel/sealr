@@ -2,9 +2,9 @@
 
 use libfuzzer_sys::fuzz_target;
 use sealr_worker_protocol::{
-    decode_result, decode_start, encode_result, encode_start, ExecutionMode, FindingSeverity,
-    InterpretationProfile, ManifestEntry, ManifestKind, ProtocolFinding, ResourceLimits,
-    StartRequest, WorkerResult, WorkerStatus,
+    decode_result, decode_result_for_request, decode_start, encode_result, encode_start,
+    ExecutionMode, FindingSeverity, InterpretationProfile, ManifestEntry, ManifestKind,
+    ProtocolFinding, ResourceLimits, StartRequest, WorkerResult, WorkerStatus,
 };
 
 const OPERATION_ID: [u8; 16] = [0x42; 16];
@@ -91,6 +91,44 @@ fn exercise_result(input: &[u8]) {
             decode_result(&canonical, expected_operation_id, 0).unwrap(),
             decoded
         );
+    }
+
+    let mut request = start_request_for_result(expected_operation_id);
+    if let Some(profile) = input.get(44..76) {
+        request
+            .interpretation_profile_sha256
+            .copy_from_slice(profile);
+    }
+    if let Ok(decoded) = decode_result_for_request(input, &request, 0) {
+        assert_eq!(
+            decode_result_for_request(input, &request, 0).unwrap(),
+            decoded
+        );
+    }
+}
+
+fn start_request_for_result(operation_id: [u8; 16]) -> StartRequest {
+    StartRequest {
+        operation_id,
+        mode: ExecutionMode::Inspect,
+        interpretation_profile: InterpretationProfile::StrictAsciiV2,
+        member_sync: false,
+        capability_count: 1,
+        source_capability: 0,
+        stage_capability: None,
+        source_len: 0,
+        source_sha256: [0; 32],
+        interpretation_profile_sha256: [0; 32],
+        policy_sha256: [0; 32],
+        limits: ResourceLimits {
+            max_archive_bytes: 0,
+            max_files: u64::MAX,
+            max_member_bytes: u64::MAX,
+            max_total_bytes: u64::MAX,
+            max_ratio: None,
+            max_path_depth: u32::MAX,
+            max_metadata_bytes: u64::MAX,
+        },
     }
 }
 
