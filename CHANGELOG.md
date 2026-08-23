@@ -6,6 +6,19 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+### Added
+
+- Added protocol v1 result validation against the accepted start request. The validator binds the operation and returned interpretation profile, then enforces the requested member-count, per-member-byte, total-byte, and canonical-path-depth limits with checked aggregate arithmetic.
+- Added deterministic request-drift, aggregate-overflow, and manifest-topology regressions, and routed the request-bound decoder through the pinned fuzz target.
+
+### Changed
+
+- Split Alpha.6 planning into a nonsemantic Linux authority bootstrap, a consumer-preserving semantic-ownership decision, and supervised execution. The plan now requires writer quiescence before stage audit and keeps protocol v1 byte-compatible and non-runtime.
+
+### Fixed
+
+- Protocol manifests now reject a file that is an ancestor of another claimed object, including cases where another lexicographic entry separates the ancestor and descendant.
+
 ## [0.1.0-alpha.5] - 2026-08-22
 
 ### Added

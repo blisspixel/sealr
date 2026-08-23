@@ -58,7 +58,7 @@ The bounded source is a named `SourceSnapshot`: path inputs become Sealr-owned p
 - expose a read-only projection or content-addressed store;
 - sign or independently verify evidence.
 
-Current main also implements the non-published [worker protocol v1](worker-protocol.md) codec. It binds one operation to a source digest, selected profile, policy, resource limits, and out-of-band capability slots, then accepts only a correlated bounded result with a canonical manifest. This is an input-validation and authority-shaping component. No process boundary calls it yet, so it does not alter the current in-process trust boundary.
+Current main also implements the non-published [worker protocol v1](worker-protocol.md) codec. Its start frame binds one operation to a source digest, selected profile, policy, resource limits, and out-of-band capability slots. Its reduced result is correlated and canonical, and the request-bound validator enforces the returned profile, member count, file sizes, aggregate size, and path depth against the accepted start request. The result does not echo the source or policy digest and cannot reconstruct `ArchiveIR` or `VerifiedArchive`, so it is not complete invocation or public-capability binding. No process boundary calls it yet, and it does not alter the current in-process trust boundary.
 
 ## Target semantic pipeline
 
@@ -96,9 +96,9 @@ Interpretation profile, deterministic resource budget, target filesystem model, 
 
 ### Reduced-authority worker
 
-After semantic types stabilize, a trusted supervisor can own the destination parent, lifecycle, staged-tree audit, and publication authority. It creates the private stage and immutable snapshot, then passes the worker only bounded read-only snapshot and stage capabilities. [Protocol v1](worker-protocol.md) proves a bounded transport shape, but Alpha.6 must revise its outcome contract or split the operation into explicit phases before using it as the worker boundary. On Linux, runtime-probed Landlock and `no_new_privs` can restrict that worker before it reads the first archive byte. Equivalent credible packaging boundaries for macOS and Windows require separate work.
+Alpha.6 first proves a nonsemantic Linux authority bootstrap: a trusted supervisor creates the private stage and immutable snapshot, passes a same-binary child only bounded source and optional stage capabilities, installs restrictions, observes readiness, then exits and reaps the child without archive interpretation. This tests descriptor transfer, closure, `no_new_privs`, and runtime-probed Landlock before an incomplete result format shapes the public API. Archive execution crosses that boundary only after Sealr chooses either a complete bounded IR or certificate returned to the supervisor, or an explicit worker-backed session that preserves bounded reads, retention, lifetime, cancellation, and crash semantics. Equivalent credible packaging boundaries for macOS and Windows require separate work.
 
-The supervisor treats worker output as untrusted and audits the staged tree against the validated returned manifest before publication. This proves equality with the worker's bounded claim, not independent agreement with archive semantics. Unless a later protocol carries a complete independently checkable IR or certificate, the isolated worker remains the semantic trusted computing base. Process isolation strengthens containment and must not introduce a second archive parser.
+The supervisor treats worker output as untrusted. Before validation or audit, it must terminate and reap the worker boundary and prove that no descendant retains writable stage authority. It then audits the quiescent staged tree against the selected complete semantic evidence before publication. Equality with a reduced worker claim is not independent agreement with archive semantics. Unless the chosen contract carries a complete independently checkable IR or certificate, the isolated worker remains the semantic trusted computing base. Process isolation strengthens containment and must not introduce a second archive parser.
 
 ## Realization and reuse
 

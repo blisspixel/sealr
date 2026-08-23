@@ -1,8 +1,9 @@
 use sealr_worker_protocol::{
-    decode_result, decode_start, encode_result, encode_start, ExecutionMode, FindingSeverity,
-    InterpretationProfile, ManifestEntry, ManifestKind, ProtocolErrorKind, ProtocolFinding,
-    ResourceLimits, StartRequest, WorkerResult, WorkerStatus, FRAME_HEADER_BYTES, FRAME_MAGIC,
-    MAX_FINDINGS, MAX_FRAME_BYTES, MAX_MANIFEST_MEMBERS, PROTOCOL_VERSION, START_FRAME_BYTES,
+    decode_result, decode_result_for_request, decode_start, encode_result, encode_start,
+    validate_result_for_request, ExecutionMode, FindingSeverity, InterpretationProfile,
+    ManifestEntry, ManifestKind, ProtocolErrorKind, ProtocolFinding, ResourceLimits, StartRequest,
+    WorkerResult, WorkerStatus, FRAME_HEADER_BYTES, FRAME_MAGIC, MAX_FINDINGS, MAX_FRAME_BYTES,
+    MAX_MANIFEST_MEMBERS, PROTOCOL_VERSION, START_FRAME_BYTES,
 };
 
 const OPERATION_ID: [u8; 16] = [0x42; 16];
@@ -401,6 +402,113 @@ fn manifest_rejects_invalid_strings_order_and_directory_content() {
     assert_eq!(
         error_kind(decode_result(&frame, OPERATION_ID, 0)),
         ProtocolErrorKind::InvalidSemanticState
+    );
+}
+
+#[test]
+fn manifest_rejects_a_file_that_is_an_ancestor_of_another_entry() {
+    let mut result = complete_result();
+    result.manifest = vec![
+        ManifestEntry {
+            path: "a".into(),
+            kind: ManifestKind::File,
+            size: 1,
+            sha256: [0x10; 32],
+        },
+        ManifestEntry {
+            path: "a-b".into(),
+            kind: ManifestKind::File,
+            size: 1,
+            sha256: [0x20; 32],
+        },
+        ManifestEntry {
+            path: "a/child".into(),
+            kind: ManifestKind::File,
+            size: 1,
+            sha256: [0x30; 32],
+        },
+    ];
+
+    assert_eq!(
+        error_kind(encode_result(&result)),
+        ProtocolErrorKind::InvalidSemanticState
+    );
+}
+
+#[test]
+fn request_bound_result_validation_enforces_profile_and_resource_limits() {
+    let result = complete_result();
+    let frame = encode_result(&result).unwrap();
+    let request = start_request(ExecutionMode::Inspect);
+    assert_eq!(
+        decode_result_for_request(&frame, &request, 0).unwrap(),
+        result
+    );
+    validate_result_for_request(&result, &request).unwrap();
+
+    let mut mismatched = request.clone();
+    mismatched.interpretation_profile_sha256 = [0x99; 32];
+    assert_eq!(
+        error_kind(decode_result_for_request(&frame, &mismatched, 0)),
+        ProtocolErrorKind::RequestMismatch
+    );
+
+    let mut mismatched = request.clone();
+    mismatched.limits.max_files = 1;
+    assert_eq!(
+        error_kind(validate_result_for_request(&result, &mismatched)),
+        ProtocolErrorKind::RequestMismatch
+    );
+
+    let mut mismatched = request.clone();
+    mismatched.limits.max_member_bytes = 6;
+    assert_eq!(
+        error_kind(validate_result_for_request(&result, &mismatched)),
+        ProtocolErrorKind::RequestMismatch
+    );
+
+    let mut mismatched = request.clone();
+    mismatched.limits.max_total_bytes = 6;
+    assert_eq!(
+        error_kind(validate_result_for_request(&result, &mismatched)),
+        ProtocolErrorKind::RequestMismatch
+    );
+
+    let mut mismatched = request.clone();
+    mismatched.limits.max_path_depth = 1;
+    assert_eq!(
+        error_kind(validate_result_for_request(&result, &mismatched)),
+        ProtocolErrorKind::RequestMismatch
+    );
+
+    let mut mismatched = request;
+    mismatched.operation_id = [0x77; 16];
+    assert_eq!(
+        error_kind(decode_result_for_request(&frame, &mismatched, 0)),
+        ProtocolErrorKind::CorrelationMismatch
+    );
+
+    let mut overflowing = complete_result();
+    overflowing.manifest = vec![
+        ManifestEntry {
+            path: "a".into(),
+            kind: ManifestKind::File,
+            size: u64::MAX,
+            sha256: [0x10; 32],
+        },
+        ManifestEntry {
+            path: "b".into(),
+            kind: ManifestKind::File,
+            size: 1,
+            sha256: [0x20; 32],
+        },
+    ];
+    let mut permissive = start_request(ExecutionMode::Inspect);
+    permissive.limits.max_member_bytes = u64::MAX;
+    permissive.limits.max_total_bytes = u64::MAX;
+    assert_eq!(
+        error_kind(validate_result_for_request(&overflowing, &permissive)),
+        ProtocolErrorKind::IntegerOverflow
     );
 }
 

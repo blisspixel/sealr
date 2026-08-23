@@ -210,6 +210,8 @@ pub enum ProtocolErrorKind {
     CapabilityMismatch,
     /// A result operation ID does not match the expected invocation.
     CorrelationMismatch,
+    /// A result contradicts a constraint from its accepted start request.
+    RequestMismatch,
     /// A wire string is not valid UTF-8.
     InvalidUtf8,
     /// A wire string is outside its canonical language.
@@ -654,6 +656,84 @@ pub fn decode_result(
     Ok(result)
 }
 
+/// Decodes a result and validates every request constraint represented by
+/// protocol version 1.
+///
+/// Version 1 does not echo the source or policy digest, so this function cannot
+/// establish complete invocation binding. It does bind the operation and
+/// interpretation identity, then enforces the request's member, byte, and path
+/// limits over the returned manifest.
+pub fn decode_result_for_request(
+    input: &[u8],
+    request: &StartRequest,
+    received_capabilities: u16,
+) -> Result<WorkerResult, ProtocolError> {
+    validate_start(request, request.capability_count)?;
+    let result = decode_result(input, request.operation_id, received_capabilities)?;
+    validate_result_for_request(&result, request)?;
+    Ok(result)
+}
+
+/// Validates every version 1 result claim that can be bound to a start request.
+///
+/// This is separate from frame decoding so transports can apply the same checks
+/// after receiving or retaining a decoded value. Source and policy binding
+/// require a future protocol because version 1 does not return those fields.
+pub fn validate_result_for_request(
+    result: &WorkerResult,
+    request: &StartRequest,
+) -> Result<(), ProtocolError> {
+    validate_start(request, request.capability_count)?;
+    validate_result(result)?;
+    if result.operation_id != request.operation_id {
+        return Err(ProtocolError::new(
+            ProtocolErrorKind::CorrelationMismatch,
+            0,
+            "worker result operation ID does not match",
+        ));
+    }
+    if result.interpretation_profile_sha256 != request.interpretation_profile_sha256 {
+        return Err(ProtocolError::new(
+            ProtocolErrorKind::RequestMismatch,
+            0,
+            "worker result interpretation identity does not match the request",
+        ));
+    }
+    let member_count = u64::try_from(result.manifest.len())
+        .map_err(|_| overflow("manifest member count does not fit u64"))?;
+    if member_count > request.limits.max_files {
+        return Err(request_mismatch(
+            "worker manifest exceeds the request member limit",
+        ));
+    }
+
+    let mut total_file_bytes = 0_u64;
+    for entry in &result.manifest {
+        let depth = entry.path.bytes().filter(|byte| *byte == b'/').count() + 1;
+        if depth as u64 > u64::from(request.limits.max_path_depth) {
+            return Err(request_mismatch(
+                "manifest path exceeds the request depth limit",
+            ));
+        }
+        if entry.kind == ManifestKind::File {
+            if entry.size > request.limits.max_member_bytes {
+                return Err(request_mismatch(
+                    "manifest file exceeds the request member-byte limit",
+                ));
+            }
+            total_file_bytes = total_file_bytes
+                .checked_add(entry.size)
+                .ok_or_else(|| overflow("manifest file-byte total overflowed"))?;
+            if total_file_bytes > request.limits.max_total_bytes {
+                return Err(request_mismatch(
+                    "manifest exceeds the request total-byte limit",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn validate_start(request: &StartRequest, received_capabilities: u16) -> Result<(), ProtocolError> {
     if request.operation_id == [0; 16] {
         return Err(invalid_state("operation ID must be nonzero"));
@@ -773,11 +853,30 @@ fn validate_result(result: &WorkerResult) -> Result<(), ProtocolError> {
         }
         previous = Some(&entry.path);
     }
+    validate_manifest_topology(&result.manifest)?;
     for finding in &result.findings {
         validate_string(&finding.code, StringKind::FindingCode)?;
         validate_string(&finding.detail, StringKind::Detail)?;
         if let Some(path) = &finding.member_path {
             validate_string(path, StringKind::Path)?;
+        }
+    }
+    Ok(())
+}
+
+fn validate_manifest_topology(manifest: &[ManifestEntry]) -> Result<(), ProtocolError> {
+    for entry in manifest {
+        for (separator, _) in entry.path.match_indices('/') {
+            let ancestor = &entry.path[..separator];
+            if let Ok(index) =
+                manifest.binary_search_by(|candidate| candidate.path.as_str().cmp(ancestor))
+            {
+                if manifest[index].kind == ManifestKind::File {
+                    return Err(invalid_state(
+                        "manifest file is an ancestor of another object",
+                    ));
+                }
+            }
         }
     }
     Ok(())
@@ -1023,6 +1122,10 @@ fn limit(offset: usize, detail: &'static str) -> ProtocolError {
 
 fn invalid_state(detail: &'static str) -> ProtocolError {
     ProtocolError::new(ProtocolErrorKind::InvalidSemanticState, 0, detail)
+}
+
+fn request_mismatch(detail: &'static str) -> ProtocolError {
+    ProtocolError::new(ProtocolErrorKind::RequestMismatch, 0, detail)
 }
 
 fn overflow(detail: &'static str) -> ProtocolError {

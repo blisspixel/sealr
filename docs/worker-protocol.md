@@ -11,9 +11,9 @@ The protocol has one narrow purpose: carry a bounded operation description and b
 - Counts and fixed minimum encoded sizes are checked before a vector reservation.
 - String byte lengths, remaining input, UTF-8, and the string language are checked before a string allocation.
 - Unknown enum values, nonzero reserved fields, trailing bytes, absent-value fields with nonzero bytes, and inconsistent counts fail closed.
-- Operation IDs are nonzero. A result is accepted only for the supervisor-supplied expected operation ID.
+- Operation IDs are nonzero. A result is accepted only for the supervisor-supplied expected operation ID. The request-bound validator also requires the returned profile identity and manifest resource claims to match the accepted start request.
 - Start capability declarations must exactly match the capability count reported by the transport. Result frames cannot carry capabilities.
-- Manifest paths are canonical relative paths in strict bytewise order. Duplicates and order changes are rejected.
+- Manifest paths are canonical relative paths in strict bytewise order. Duplicates, order changes, and a file that is an ancestor of another object are rejected.
 - The decoder is pure. It returns a bounded value or a typed error before any archive or filesystem effect.
 
 The codec contains no `unsafe` and has no runtime dependency. Allocation uses fallible reservations. `ProtocolError` contains a fixed error kind, byte offset, and static detail instead of echoing hostile input.
@@ -29,6 +29,8 @@ The byte codec cannot validate operating-system handle rights. The future superv
 | Result | none | Results never grant authority back to the supervisor |
 
 The supervisor retains the destination parent, final name, publication, cleanup, staged-tree audit, and recovery authority. The worker does not receive the destination parent or an ambient archive pathname. Slot numbers are local to one received frame and do not identify a global handle table.
+
+Protocol v1 also exposes request-bound result validation. It checks the operation ID, interpretation-profile digest, manifest member count, per-file size, aggregate file size, and canonical path depth against the accepted start request. Aggregate byte overflow fails closed. The result does not echo the source digest or policy digest, so v1 cannot provide complete request/result binding and must not be described that way.
 
 A stream transport should read the fixed 16-byte header, reject a declared payload that would exceed 4 MiB, then read exactly the declared payload. End-of-stream before that point is truncation. Bytes after the declared payload are trailing input, not another implicit frame.
 
@@ -117,13 +119,13 @@ Version 1 contains no range list. If a later worker needs ranges, that protocol 
 
 Version 1 is a non-shipping transport foundation, not the final Alpha.6 semantic contract. Its single status is a worker-operation status. It does not preserve the public interpretation, admission, verification, effect, and lifecycle axes independently, and failed or rejected results intentionally discard the manifest and content root. It therefore cannot represent every admitted-but-effect-failed outcome.
 
-The result carries a reduced staged-member manifest, findings, and preview roots. It does not carry a complete `ArchiveIR`, byte ranges, or an independently checkable proof that the manifest is the unique meaning of the snapshot. A supervisor can validate the frame and prove that the stage equals the returned claim, but protocol v1 alone does not let it independently verify archive semantics.
+The result carries a reduced staged-member manifest, findings, and preview roots. It does not carry a complete `ArchiveIR`, byte ranges, compressed sizes, methods, CRC32 values, extra-field dispositions, normalization actions, snapshot ownership, or an independently checkable proof that the manifest is the unique meaning of the snapshot. It therefore cannot construct the public `Outcome`, `ArchiveIR`, or `VerifiedArchive`. A supervisor can validate the frame and, after proving that all writers are quiescent, compare a stage with the returned claim. Protocol v1 alone does not let it independently verify archive semantics or preserve bounded later member reads.
 
-Alpha.6 begins by choosing and testing either a protocol revision with the necessary independent facts or an explicitly two-phase operation. Conformance vectors must cover admitted plus effect-failed, worker crash, malformed result, stage-audit failure, cleanup failure, and publication failure before the process boundary is frozen.
+Alpha.6 begins with a separate nonsemantic Linux authority bootstrap so descriptor transfer, closure, `no_new_privs`, Landlock ordering, exit, reap, and cleanup can be tested without treating v1 as a runtime outcome format. The next semantic increment must choose either a complete bounded IR or certificate returned to the supervisor, or an explicit worker-backed session with bounded reads, retention, lifetime, cancellation, and crash behavior. Conformance vectors must cover admitted plus effect-failed, worker crash, malformed result, writer-quiescence failure, stage-audit failure, cleanup failure, and publication failure before archive execution crosses the process boundary.
 
 ## Test and fuzz evidence
 
-The deterministic protocol suite covers valid inspect and materialize round trips, complete and rejected results, every truncation of valid frames, wrong magic, version and kind, trailing input, capability and operation confusion, oversized and impossible counts, root-state confusion, malformed UTF-8, invalid paths, manifest ordering, directory content claims, and three mutations at every byte position. A decoded value must re-encode canonically and decode to the same value.
+The deterministic protocol suite covers valid inspect and materialize round trips, complete and rejected results, every truncation of valid frames, wrong magic, version and kind, trailing input, capability and operation confusion, oversized and impossible counts, root-state confusion, malformed UTF-8, invalid paths, manifest ordering and topology, directory content claims, request-bound profile and resource drift, aggregate-size overflow, and three mutations at every byte position. A decoded value must re-encode canonically and decode to the same value.
 
 The `protocol_decoders` libFuzzer target exercises arbitrary bytes and up to 64 input-directed mutations of known-valid start and result frames. Successful decodes must round trip to the identical canonical frame. The separate fuzz workspace pins:
 
@@ -142,11 +144,14 @@ The [seed manifest](../fuzz/seed-manifest.json) binds every seed and the diction
 
 The [first exact-main campaign](https://github.com/blisspixel/sealr/actions/runs/32616069888) executed 18,277,565 units in 601 seconds, averaged 30,411 executions per second, reached 503 MiB peak RSS under the 1,024 MiB limit, and produced no reproducer.
 
+The [Alpha.5 release-gate campaign](https://github.com/blisspixel/sealr/actions/runs/32618027263) ran independently on the exact released commit. It executed 17,626,137 units in 601 seconds, averaged 29,328 executions per second, added 1,424 corpus units, reached 505 MiB peak RSS, and produced no reproducer.
+
 Coverage-guided fuzzing is heuristic evidence. A clean bounded campaign does not prove that every frame or parser state is safe.
 
 ## Nonclaims
 
 - This codec does not transfer, duplicate, restrict, or close operating-system handles.
+- It does not prove that a worker and every descendant have released writable stage authority before audit.
 - It does not authenticate its transport or protect against a malicious supervisor.
 - It does not provide confidentiality for hashes, policy identities, paths, or findings.
 - It does not implement Landlock, seccomp, AppContainer, a restricted token, or a worker lifecycle.
