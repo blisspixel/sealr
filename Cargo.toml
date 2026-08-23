@@ -1,6 +1,11 @@
 [workspace]
 resolver = "2"
-members = ["crates/sealr", "crates/sealr-cli", "tools/identity-verifier"]
+members = [
+    "crates/sealr",
+    "crates/sealr-cli",
+    "tools/identity-verifier",
+    "tools/wheel-lab",
+]
 
 [workspace.package]
 version = "0.1.0-alpha.3"

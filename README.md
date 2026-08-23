@@ -15,7 +15,7 @@ The longer-term aim is an archive-to-tree admission boundary whose decision and 
 
 > Status: `v0.1.0-alpha.3` is the third development preview of the ZIP boundary. It is useful for evaluation, development, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. The limitations below are security boundaries, not fine print.
 
-> Repository status: current `main` is ahead of the published alpha.3 artifacts. `VerifiedArchive`, opt-in bounded exact-member retention, the extracted-package consumer, six finite-domain property families, and independent identity conformance are recorded under [Unreleased](CHANGELOG.md#unreleased). The [alpha.3 release notes](docs/releases/v0.1.0-alpha.3.md) remain the authority for downloaded alpha.3 binaries.
+> Repository status: current `main` is ahead of the published alpha.3 artifacts. `VerifiedArchive`, opt-in bounded exact-member retention, the extracted-package consumer, six finite-domain property families, independent identity conformance, and the first reproducible wheel compatibility pilot are recorded under [Unreleased](CHANGELOG.md#unreleased). The [alpha.3 release notes](docs/releases/v0.1.0-alpha.3.md) remain the authority for downloaded alpha.3 binaries.
 
 ## Why this exists
 
@@ -52,6 +52,7 @@ The current Rust implementation supports classic ZIP32 archives with stored or D
 - A pinned 5,927-file, 14-class ZipDiff construction gate with a deterministically generated aggregate corpus digest, exact finding-count expectations, and an explicit 73-file control allowlist.
 - An adversarial unit suite, an external-crate API fixture, a separate consumer that runs against the extracted packaged crate, strict Clippy, rustfmt, documentation checks, cross-platform tests, and cargo-deny policy in CI.
 - A versioned four-case identity-conformance bundle checked by both the production API and a standalone workspace verifier that has no dependency on the Sealr crate. It hashes exact source and profile bytes, checks the claimed covering without searching or inflating, and independently reproduces three layout and three content roots.
+- A non-shipping, byte-addressed [20-wheel compatibility pilot](docs/wheel-compatibility-pilot.md) analyzed only through Sealr's public API. The current profile admits 19 artifacts; one SciPy wheel is denied by three per-member `quota.ratio` findings. The sample is judgmental evidence, not a PyPI-wide compatibility claim or supported wheel admission.
 
 ## Security limitations
 
@@ -172,9 +173,9 @@ The semantic walkthrough is enforced by CLI integration tests on the native plat
 
 The next milestone remains the Phase 0.1 ZIP trust gate, not another archive format. Alpha.4 closes the measured semantic and adopter-facing contract. Alpha.5 replaces whole-archive ownership with a private immutable random-access snapshot. Alpha.6 passes that capability into a supervised Linux worker and independently audits its staged result.
 
-Assurance now advances with each increment rather than waiting for a late phase. A non-shipping wheel laboratory also starts now to measure real compatibility and pressure-test the generic verified-member API, while supported `python-wheel.v1` admission remains gated on its exact UTF-8 ZIP profile, canonical paths, use of the bounded retention capability, consumer budgets, and identities.
+Assurance now advances with each increment rather than waiting for a late phase. The non-shipping wheel laboratory has published its first small compatibility measurement and now expands toward wheel-aware semantic evaluation, while supported `python-wheel.v1` admission remains gated on its exact UTF-8 ZIP profile, canonical paths, use of the bounded retention capability, consumer budgets, and identities.
 
-See the [near-term execution plan](docs/near-term.md) for release-sized work and acceptance gates, the [identity-conformance contract](docs/identity-conformance.md) for the independent root checks, the [roadmap](ROADMAP.md) for the full trust gate, and the [wheel profile draft](docs/profiles/python-wheel-v1.md) for the first-consumer design. No wheel evaluator or supported consumer profile exists yet.
+See the [near-term execution plan](docs/near-term.md) for release-sized work and acceptance gates, the [identity-conformance contract](docs/identity-conformance.md) for the independent root checks, the [wheel pilot report](docs/wheel-compatibility-pilot.md) for the bounded measurement, the [roadmap](ROADMAP.md) for the full trust gate, and the [wheel profile draft](docs/profiles/python-wheel-v1.md) for the first-consumer design. No wheel evaluator or supported consumer profile exists yet.
 
 ## Research basis
 

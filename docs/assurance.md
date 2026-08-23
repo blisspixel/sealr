@@ -1,6 +1,6 @@
 # Testing, compatibility, and assurance
 
-> This page separates current evidence from the target assurance program. The published Alpha.3 has a deterministic Rust unit suite, strict cross-platform CI, cargo-deny policy, and a pinned 5,927-file ZipDiff construction gate. Current main adds six finite-domain property families, an opaque bounded-read capability with one-pass exact-member retention, a consumer that runs against the extracted packaged crate, and an independent verifier for four identity-conformance cases. Broader property families, coverage-guided fuzzing, model checking, benign ecosystem measurement, the general authenticated-evidence verifier, and an external audit remain future work.
+> This page separates current evidence from the target assurance program. The published Alpha.3 has a deterministic Rust unit suite, strict cross-platform CI, cargo-deny policy, and a pinned 5,927-file ZipDiff construction gate. Current main adds six finite-domain property families, an opaque bounded-read capability with one-pass exact-member retention, a consumer that runs against the extracted packaged crate, an independent verifier for four identity-conformance cases, and an initial 20-wheel compatibility measurement. Broader ecosystem sampling, property families, coverage-guided fuzzing, model checking, the general authenticated-evidence verifier, and an external audit remain future work.
 
 Trust is the scarce resource. Format breadth and acceleration follow stable semantics and measured compatibility.
 
@@ -10,7 +10,7 @@ Trust is the scarce resource. Format breadth and acceleration follow stable sema
 |---|---|---|
 | Unit | ZIP path grammar, topology, overlap and layout, quotas, inspect/materialize equality, rollback, destination preservation, platform materializer controls, and deterministic truncation, mutation, and noise no-panic coverage | Expand for every new semantic state and backend |
 | Public API and package | External-crate fixture exercises evidence types, `VerifiedArchive`, and bounded retention; a separate Cargo consumer runs the same retention path against the extracted packaged crate in required quality CI | Add semantic compatibility checks after publication and a wheel-aware metadata selector |
-| Corpus | All 5,927 pinned ZipDiff constructions plus local generated adversarial fixtures | Add codec-boundary, source-race, consumer-profile, and ecosystem fixtures |
+| Corpus | All 5,927 pinned ZipDiff constructions, local generated adversarial fixtures, and a byte-addressed non-shipping pilot of 20 exact PyPI wheels with an investigated denial cluster | Expand producer and feature diversity; add codec-boundary, source-race, and wheel-semantic fixtures |
 | Differential | ZipDiff expectation gate binds strict rejection and a documented valid-control allowlist | Compare major consumers on well-formed profile inputs and track disagreement frontiers |
 | Property | Six finite-domain families: compression ratio against quotient and remainder; verified-member limits against `limit >= measured_size`; retention selection over 8,125 size and limit combinations; checked `offset + len` against `u128` over 4,624 boundary pairs; exact partitions against a per-byte bitmap over 1,055,758 lists of zero through three intervals; atomic quota transitions against `u128` over 159,528 valid states and increments | Add independent bounded models for strict-profile path topology and lifecycle transitions |
 | Fuzz | None yet | `cargo fuzz` targets for interpretation, canonical paths, and inspect-only `apply()` |
@@ -75,6 +75,8 @@ Publish, per profile and release:
 The objective is not maximum acceptance. It is rejection of known ambiguous constructions with high acceptance inside the profile's explicitly supported domain.
 
 The benign corpus must respect licenses, privacy, and redistribution rules. Store digests and reproducible acquisition metadata when raw artifacts cannot be redistributed.
+
+The first [wheel compatibility pilot](wheel-compatibility-pilot.md) implements that acquisition pattern for 20 exact artifacts totaling 90,417,280 source bytes. It binds the manifest, current interpretation-profile digest, default-policy digest, and analyzer revision; records 19 admissions and one investigated three-member expansion-ratio denial; and uses no second ZIP parser. The committed report verifier checks metadata binding, internal counts, profile and policy identity, and canonical rendering in required CI. It does not reacquire or reanalyze the raw wheels in CI, and the sample does not establish ecosystem prevalence.
 
 ## Cross-platform determinism
 

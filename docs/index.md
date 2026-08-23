@@ -20,6 +20,7 @@ Start with the [README](../README.md) for the published alpha.3 boundary, the cu
 | [Invariants](invariants.md) | Properties that implementation and evidence must preserve |
 | [Assurance](assurance.md) | Current evidence and the layered verification program |
 | [Identity conformance](identity-conformance.md) | Current vectors, standalone verifier, exact root bytes, and bounded claims |
+| [Wheel compatibility pilot](wheel-compatibility-pilot.md) | Initial non-shipping corpus measurement and investigated denial evidence |
 | [Differentials](differentials.md) | Single-interpretation rules and the ZipDiff corpus |
 | [Reduced-authority execution](sandbox.md) | Supervisor and worker design |
 | [Finding registry](findings.md) | Stable machine finding codes |

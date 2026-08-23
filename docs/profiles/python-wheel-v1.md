@@ -1,6 +1,6 @@
 # Python wheel consumer profile draft
 
-> Status: design and corpus plan only. Alpha.3 does not recognize wheels as a consumer type, parse wheel metadata, validate `RECORD`, or produce an installation plan. Current main has a generic opaque verified-member capability, but no wheel-specific rule or identity on this page is a shipped contract.
+> Status: design plus initial container-compatibility evidence. Alpha.3 does not recognize wheels as a consumer type, parse wheel metadata, validate `RECORD`, or produce an installation plan. Current main has a generic opaque verified-member capability and a small non-shipping wheel pilot, but no wheel-specific rule or identity on this page is a shipped contract.
 
 The first consumer should force Sealr to prove its category: another tool receives one admitted representation and does not open the ZIP again. Python wheels are a strong target because wheel installation has archive semantics, package metadata, an internal content manifest, relocations, and target-dependent transformations.
 
@@ -132,6 +132,10 @@ The acquisition manifest records:
 - expected acquisition and profile result.
 
 Sampling should cover pure and platform wheels, common build backends, operating-system tags, `.data` use, Unicode names, metadata versions, secure `RECORD` hash algorithms, and a range of sizes. The report publishes acceptance, rejection rules, producer distribution, investigated clusters, and the exact domain to which percentages apply.
+
+The initial [20-wheel compatibility pilot](../wheel-compatibility-pilot.md) covers eight universal artifacts and twelve native artifacts across Linux x86_64, Windows x86_64, macOS arm64, and macOS universal2. It is a judgmental sample of named current releases, not a prevalence estimate. Under `sealr.profile.zip.strict-ascii.v1`, 19 artifacts are admitted. The SciPy artifact is denied by three `quota.ratio` findings on test-data members with declared expansion above the default `100:1` limit. Across the 19 interpreted artifacts, all 4,504 members use Store or Deflate, all general-purpose flags are zero, and no extra fields occur. Every interpreted artifact has one top-level `.dist-info` path, but Setuptools carries twelve additional nested vendored `.dist-info` paths. This confirms that selection must match the normalized outer filename at the top level; counting every `.dist-info` suffix is not a valid wheel rule.
+
+That result is useful but deliberately insufficient to choose the new container profile. The next corpus increment should target producers and historical artifacts known to exercise UTF-8 flag handling, data descriptors, timestamps, platform extras, `.data` trees, and Unicode paths. Ratio-boundary sampling should remain a separate resource-policy study so a benign compatibility observation cannot silently weaken the interpretation profile or default adversarial budget.
 
 The hostile corpus includes:
 

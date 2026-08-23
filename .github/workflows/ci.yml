@@ -83,6 +83,13 @@ jobs:
           cargo run --locked -p sealr-identity-verifier --
           crates/sealr/tests/conformance/identity-v1.json
 
+      - name: Verify committed wheel compatibility report
+        run: >-
+          cargo run --locked -p sealr-wheel-lab -- verify-report
+          tests/corpus/wheels/manifest.json
+          tests/corpus/wheels/report.json
+          docs/wheel-compatibility-pilot.md
+
       - name: Build optimized workspace
         run: cargo build --locked --release --workspace --all-features
 
