@@ -104,7 +104,7 @@ ViewCompleteness
 
 These axes prevent operational failures from changing semantic claims. For example, a destination publication error can be `Interpreted + Admitted + Complete + Failed`. The archive did not become unsafe because one filesystem operation failed. A source read error is `Indeterminate`, not a policy denial. A lazy read-only projection can be admitted while its verification state remains partial.
 
-The axes are visible in Rust types, view JSON, and receipt JSON. CLI exit `2` means admission did not succeed, while exit `3` means admission succeeded but the requested effect failed. Future authenticated claims and a job-oriented CLI should consume the axes rather than freeze `Verdict`.
+The axes are visible in Rust types, view JSON, and receipt JSON. CLI exit `0` requires admitted and complete verification without an effect failure. Exit `2` means admission or verification did not complete successfully, while exit `3` means admission succeeded but the requested effect failed. Future authenticated claims and a job-oriented CLI should consume the axes rather than freeze `Verdict`.
 
 ## Canonical `ArchiveIR`
 
