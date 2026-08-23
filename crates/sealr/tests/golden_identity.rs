@@ -7,8 +7,10 @@
 use std::fs;
 
 use sealr::{
-    apply, hex_sha256, AdmissionStatus, EffectStatus, InterpretationStatus, Policy, Request,
-    Source, VerificationStatus, ZIP_STRICT_ASCII_V1,
+    apply, apply_with_options, hex_sha256, zip_strict_ascii_v1_canonical_bytes,
+    zip_strict_ascii_v1_digest, zip_strict_ascii_v2_canonical_bytes, zip_strict_ascii_v2_digest,
+    AdmissionStatus, ApplyOptions, EffectStatus, InterpretationStatus, Policy, Request, Source,
+    VerificationStatus, ZipInterpretationProfile, ZIP_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2,
 };
 
 #[path = "../../../scripts/walkthrough_fixtures.rs"]
@@ -187,6 +189,31 @@ fn identity_conformance_manifest_matches_production_evidence() {
         .expect("identity vectors contain cases");
     assert!(!cases.is_empty());
 
+    let profiles = manifest["profiles"]
+        .as_array()
+        .expect("identity vectors contain profiles");
+    assert_eq!(profiles.len(), 2);
+    for profile in profiles {
+        let id = profile["id"].as_str().expect("profile id");
+        let (canonical, digest) = match id {
+            ZIP_STRICT_ASCII_V1 => (
+                zip_strict_ascii_v1_canonical_bytes(),
+                zip_strict_ascii_v1_digest(),
+            ),
+            ZIP_STRICT_ASCII_V2 => (
+                zip_strict_ascii_v2_canonical_bytes(),
+                zip_strict_ascii_v2_digest(),
+            ),
+            _ => panic!("unexpected profile vector {id}"),
+        };
+        assert_eq!(
+            decode_hex(profile["canonical_bytes_hex"].as_str().unwrap()),
+            canonical,
+            "{id} canonical profile bytes"
+        );
+        assert_eq!(profile["digest"]["sha256"], digest, "{id} digest");
+    }
+
     for case in cases {
         let id = case["id"].as_str().expect("case id");
         let bytes = decode_hex(
@@ -242,6 +269,41 @@ fn identity_conformance_manifest_matches_production_evidence() {
             "{id} content root"
         );
     }
+}
+
+#[test]
+fn strict_v2_empty_tree_identity_is_cross_platform_pinned() {
+    let policy = Policy::default_v1();
+    let options =
+        ApplyOptions::new().with_interpretation_profile(ZipInterpretationProfile::StrictAsciiV2);
+    let outcome = apply_with_options(
+        Request {
+            source: Source::Bytes {
+                path: Some("strict-v2-empty.zip"),
+                data: EMPTY_ZIP,
+            },
+            policy: &policy,
+            dest: None,
+        },
+        &options,
+    );
+
+    assert!(!outcome.rejected(), "{:?}", outcome.view.findings);
+    assert_eq!(outcome.archive_ir().unwrap().profile(), ZIP_STRICT_ASCII_V2);
+    assert_eq!(
+        outcome.receipt.identities.interpretation.digest.sha256,
+        "384dceb8623a2b32d430034fefda2a9498439927285952c10a60c9f6caa51d45"
+    );
+    pin(
+        "strict v2 empty layout",
+        outcome.receipt.identities.layout.hex(),
+        EMPTY_LAYOUT,
+    );
+    pin(
+        "strict v2 empty content",
+        outcome.receipt.identities.content.hex(),
+        EMPTY_CONTENT,
+    );
 }
 
 #[test]

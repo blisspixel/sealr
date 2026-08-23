@@ -6,7 +6,7 @@ use std::path::Path;
 use crate::covering::audit_covering;
 use crate::findings::{Finding, FindingCode, Severity};
 use crate::identity::OutcomeIdentities;
-use crate::ir::{ArchiveIR, IrMember, MemberKind, NormalizationAction};
+use crate::ir::{ArchiveIR, IrMember, MemberKind, NormalizationAction, ZipInterpretationProfile};
 use crate::jail::jail_name;
 use crate::materialize::{CapabilityMaterializer, MaterializationMeta};
 use crate::outcome::{
@@ -47,12 +47,14 @@ pub struct Request<'a> {
 
 /// Optional capabilities requested for one archive operation.
 ///
-/// Options do not participate in archive admission or policy identity. A
-/// retention request is independently bounded and reports its result through
-/// the resulting [`VerifiedArchive`].
+/// The selected interpretation profile participates in archive admission and
+/// interpretation identity, but remains separate from resource-policy
+/// identity. A retention request is independently bounded and reports its
+/// result through the resulting [`VerifiedArchive`].
 #[derive(Clone, Debug, Default)]
 pub struct ApplyOptions {
     retention: Option<RetentionPlan>,
+    interpretation_profile: ZipInterpretationProfile,
 }
 
 impl ApplyOptions {
@@ -67,9 +69,24 @@ impl ApplyOptions {
         self
     }
 
+    /// Select the exact ZIP interpretation used by this operation.
+    ///
+    /// The default preserves the Alpha.3 `strict-ascii.v1` compatibility
+    /// language. Select `StrictAsciiV2` for the closed Alpha.4 flag and
+    /// extra-field contract.
+    pub fn with_interpretation_profile(mut self, profile: ZipInterpretationProfile) -> Self {
+        self.interpretation_profile = profile;
+        self
+    }
+
     /// Return the requested retention plan, when present.
     pub fn retention_plan(&self) -> Option<&RetentionPlan> {
         self.retention.as_ref()
+    }
+
+    /// Return the selected ZIP interpretation profile.
+    pub fn interpretation_profile(&self) -> ZipInterpretationProfile {
+        self.interpretation_profile
     }
 }
 
@@ -232,7 +249,9 @@ pub fn apply(req: Request<'_>) -> Outcome {
 
 /// Apply policy and optionally request independently bounded capabilities.
 ///
-/// This has the same archive-admission and evidence semantics as [`apply`].
+/// Default options have the same semantics as [`apply`]. Selecting another
+/// interpretation profile changes the accepted ZIP language and the recorded
+/// interpretation identity; retention alone does not change admission.
 pub fn apply_with_options(req: Request<'_>, options: &ApplyOptions) -> Outcome {
     let compiled = match req.policy.compile() {
         Ok(compiled) => compiled,
@@ -244,7 +263,7 @@ pub fn apply_with_options(req: Request<'_>, options: &ApplyOptions) -> Outcome {
                 MaterializationMeta::not_started(req.dest.is_some(), req.policy.atomic),
                 SemanticAxes::policy_compile_failed(&finding),
                 SnapshotKind::Unavailable,
-                OutcomeIdentities::without_source(),
+                OutcomeIdentities::without_source_for(options.interpretation_profile),
             );
         }
     };
@@ -264,7 +283,7 @@ pub fn apply_with_options(req: Request<'_>, options: &ApplyOptions) -> Outcome {
                 MaterializationMeta::not_started(req.dest.is_some(), req.policy.atomic),
                 SemanticAxes::source_failure(&failure.finding, admission),
                 failure.snapshot_kind,
-                OutcomeIdentities::unavailable(digest),
+                OutcomeIdentities::unavailable_for(digest, options.interpretation_profile),
             )
         }
     }
@@ -365,7 +384,9 @@ fn apply_inner(
     let initial_materialization =
         MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
     let snapshot = read_source(&req.source, budget)?;
-    let identities_base = OutcomeIdentities::unavailable(snapshot.digest().clone());
+    let interpretation_profile = options.interpretation_profile;
+    let identities_base =
+        OutcomeIdentities::unavailable_for(snapshot.digest().clone(), interpretation_profile);
     let source_digest = snapshot.digest().clone();
     let source_meta = (snapshot.path_owned(), source_digest.clone(), policy.clone());
     let magic = detect_magic(snapshot.as_bytes());
@@ -402,10 +423,11 @@ fn apply_inner(
         ));
     }
 
-    let parsed = match zip::parse_zip(
+    let parsed = match zip::parse_zip_with_profile(
         snapshot.as_bytes(),
         budget.max_files,
         budget.max_metadata_bytes,
+        interpretation_profile,
     ) {
         Ok(z) => z,
         Err(f) => {
@@ -602,6 +624,7 @@ fn apply_inner(
     }
 
     let mut ir = ArchiveIR::with_covering(
+        interpretation_profile,
         source_digest.clone(),
         covering,
         planned
@@ -1376,6 +1399,23 @@ mod tests {
             writer.finish().unwrap();
         }
         cursor.into_inner()
+    }
+
+    fn apply_strict_ascii_v2(bytes: &[u8]) -> Outcome {
+        let policy = Policy::default_v1();
+        let options = ApplyOptions::new()
+            .with_interpretation_profile(ZipInterpretationProfile::StrictAsciiV2);
+        apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("strict-v2.zip"),
+                    data: bytes,
+                },
+                policy: &policy,
+                dest: None,
+            },
+            &options,
+        )
     }
 
     fn temp_dest(label: &str) -> PathBuf {
@@ -2233,6 +2273,25 @@ mod tests {
         let json = serde_json::to_value(&out.receipt.source).unwrap();
         assert_eq!(json, serde_json::json!({"status": "unavailable"}));
         assert_ne!(json, serde_json::json!({"sha256": "00".repeat(32)}));
+
+        let options = ApplyOptions::new()
+            .with_interpretation_profile(ZipInterpretationProfile::StrictAsciiV2);
+        let strict = apply_with_options(
+            Request {
+                source: Source::Path(&missing),
+                policy: &policy,
+                dest: None,
+            },
+            &options,
+        );
+        assert_eq!(
+            strict.receipt.identities.interpretation.id,
+            crate::ir::ZIP_STRICT_ASCII_V2
+        );
+        assert_eq!(
+            strict.receipt.identities.interpretation.digest.sha256,
+            crate::ir::zip_strict_ascii_v2_digest()
+        );
     }
 
     #[test]
@@ -2270,6 +2329,71 @@ mod tests {
 
         assert!(!out.rejected(), "{:?}", out.view.findings);
         assert_eq!(out.view.members[0].uncomp_bytes, 10);
+
+        let strict = apply_strict_ascii_v2(&bytes);
+        assert!(!strict.rejected(), "{:?}", strict.view.findings);
+        assert_eq!(
+            strict.receipt.identities.interpretation.id,
+            crate::ir::ZIP_STRICT_ASCII_V2
+        );
+        assert_eq!(strict.archive_ir().unwrap().members[0].flags, 0x0008);
+    }
+
+    #[test]
+    fn strict_ascii_v2_denies_every_non_descriptor_flag_bit() {
+        for bit in 0..16 {
+            if bit == 3 {
+                continue;
+            }
+            let mut bytes = make_zip(&[("flags.txt", b"content")]);
+            add_matching_flags(&mut bytes, 1 << bit);
+            let out = apply_strict_ascii_v2(&bytes);
+            assert!(out.rejected(), "flag bit {bit} was admitted");
+            assert!(
+                out.view
+                    .findings
+                    .iter()
+                    .any(|finding| finding.code == FindingCode::ZipFlags),
+                "flag bit {bit} findings: {:?}",
+                out.view.findings
+            );
+            assert_eq!(
+                out.receipt.identities.interpretation.id,
+                crate::ir::ZIP_STRICT_ASCII_V2
+            );
+            assert!(out.archive_ir().is_none());
+        }
+    }
+
+    #[test]
+    fn strict_ascii_v2_denies_the_full_extra_field_id_domain() {
+        for id in [0x0000_u16, 0x0001, 0x7855, 0x7075, 0xffff] {
+            let mut bytes = make_zip(&[("extra.txt", b"content")]);
+            let [lo, hi] = id.to_le_bytes();
+            add_matching_extra_fields(&mut bytes, &[lo, hi, 0x00, 0x00]);
+            let out = apply_strict_ascii_v2(&bytes);
+            assert!(out.rejected(), "extra field 0x{id:04x} was admitted");
+            assert!(
+                out.view
+                    .findings
+                    .iter()
+                    .any(|finding| finding.code == FindingCode::ZipExtra),
+                "extra field 0x{id:04x} findings: {:?}",
+                out.view.findings
+            );
+            assert!(out.archive_ir().is_none());
+        }
+    }
+
+    #[test]
+    fn strict_ascii_v2_denies_utf8_flag_even_for_ascii_names() {
+        let mut bytes = make_zip(&[("ascii.txt", b"content")]);
+        add_matching_flags(&mut bytes, 1 << 11);
+        let out = apply_strict_ascii_v2(&bytes);
+        assert!(out.rejected());
+        assert!(out.view.findings.iter().any(|finding| {
+            finding.code == FindingCode::ZipFlags && finding.detail.contains("0x0800")
+        }));
     }
 
     #[test]
@@ -2409,6 +2533,28 @@ mod tests {
         assert_eq!(
             out.receipt.identities.interpretation.digest.sha256.len(),
             64
+        );
+
+        let options = ApplyOptions::new()
+            .with_interpretation_profile(ZipInterpretationProfile::StrictAsciiV2);
+        let strict = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("x.zip"),
+                    data: b"not-a-zip",
+                },
+                policy: &policy,
+                dest: None,
+            },
+            &options,
+        );
+        assert_eq!(
+            strict.receipt.identities.interpretation.id,
+            crate::ir::ZIP_STRICT_ASCII_V2
+        );
+        assert_eq!(
+            strict.receipt.identities.interpretation.digest.sha256,
+            crate::ir::zip_strict_ascii_v2_digest()
         );
     }
 

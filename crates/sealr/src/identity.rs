@@ -11,7 +11,7 @@ use serde::Serialize;
 
 use crate::ir::{
     ArchiveIR, ExtraDisposition, ExtraSite, IrMember, MemberKind, MemberVerification,
-    NormalizationAction, ZIP_STRICT_ASCII_V1,
+    NormalizationAction, ZipInterpretationProfile,
 };
 use crate::outcome::{DigestHex, SourceDigest, VerificationStatus};
 use crate::policy::hex_sha256;
@@ -90,12 +90,16 @@ pub struct OutcomeIdentities {
 
 impl OutcomeIdentities {
     pub fn unavailable(source: SourceDigest) -> Self {
+        Self::unavailable_for(source, ZipInterpretationProfile::StrictAsciiV1)
+    }
+
+    pub fn unavailable_for(source: SourceDigest, profile: ZipInterpretationProfile) -> Self {
         Self {
             source,
             interpretation: InterpretationIdentity {
-                id: ZIP_STRICT_ASCII_V1.into(),
+                id: profile.id().into(),
                 digest: DigestHex {
-                    sha256: crate::ir::zip_strict_ascii_v1_digest(),
+                    sha256: profile.digest(),
                 },
             },
             layout: TreeRoot::unavailable(),
@@ -105,6 +109,10 @@ impl OutcomeIdentities {
 
     pub fn without_source() -> Self {
         Self::unavailable(SourceDigest::unavailable())
+    }
+
+    pub fn without_source_for(profile: ZipInterpretationProfile) -> Self {
+        Self::unavailable_for(SourceDigest::unavailable(), profile)
     }
 
     pub fn from_ir(

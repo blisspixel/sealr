@@ -6,9 +6,40 @@ use crate::zip::ZipMember;
 
 pub const ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.v1";
 pub const ZIP_STRICT_ASCII_V1: &str = "sealr.profile.zip.strict-ascii.v1";
+pub const ZIP_STRICT_ASCII_V2: &str = "sealr.profile.zip.strict-ascii.v2";
 
 const DENIED_EXTRA_ZIP64: u16 = 0x0001;
 const DENIED_EXTRA_UNICODE_PATH: u16 = 0x7075;
+
+/// ZIP interpretation selected for one operation.
+///
+/// `StrictAsciiV1` preserves the Alpha.3 compatibility language. It accepts
+/// unknown flag bits and records unknown extra fields as ignored. New callers
+/// that need a closed interpretation contract should select `StrictAsciiV2`,
+/// which permits only flag bit 3 and denies every extra field.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ZipInterpretationProfile {
+    #[default]
+    StrictAsciiV1,
+    StrictAsciiV2,
+}
+
+impl ZipInterpretationProfile {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::StrictAsciiV1 => ZIP_STRICT_ASCII_V1,
+            Self::StrictAsciiV2 => ZIP_STRICT_ASCII_V2,
+        }
+    }
+
+    pub fn digest(self) -> String {
+        match self {
+            Self::StrictAsciiV1 => zip_strict_ascii_v1_digest(),
+            Self::StrictAsciiV2 => zip_strict_ascii_v2_digest(),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -126,9 +157,156 @@ fn zip_strict_ascii_profile() -> ZipStrictAsciiProfile {
     }
 }
 
+#[derive(Clone, Copy, Debug, Serialize)]
+struct GeneralPurposeBitRule {
+    bit: u8,
+    mask: u16,
+    disposition: &'static str,
+    meaning: &'static str,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct ZipStrictAsciiV2Profile {
+    schema: &'static str,
+    format: &'static str,
+    methods: [u16; 2],
+    general_purpose_bits: [GeneralPurposeBitRule; 16],
+    extra_fields_semantic: [u16; 0],
+    extra_fields_permitted_nonsemantic: [u16; 0],
+    extra_fields_other: &'static str,
+    names: &'static str,
+    directories: &'static str,
+    redundant_metadata: &'static str,
+}
+
+fn zip_strict_ascii_v2_profile() -> ZipStrictAsciiV2Profile {
+    ZipStrictAsciiV2Profile {
+        schema: ZIP_STRICT_ASCII_V2,
+        format: "zip32",
+        methods: [0, 8],
+        general_purpose_bits: [
+            GeneralPurposeBitRule {
+                bit: 0,
+                mask: 0x0001,
+                disposition: "denied",
+                meaning: "traditional-encryption",
+            },
+            GeneralPurposeBitRule {
+                bit: 1,
+                mask: 0x0002,
+                disposition: "denied",
+                meaning: "method-dependent-option-1",
+            },
+            GeneralPurposeBitRule {
+                bit: 2,
+                mask: 0x0004,
+                disposition: "denied",
+                meaning: "method-dependent-option-2",
+            },
+            GeneralPurposeBitRule {
+                bit: 3,
+                mask: 0x0008,
+                disposition: "semantic",
+                meaning: "data-descriptor",
+            },
+            GeneralPurposeBitRule {
+                bit: 4,
+                mask: 0x0010,
+                disposition: "denied",
+                meaning: "enhanced-deflating",
+            },
+            GeneralPurposeBitRule {
+                bit: 5,
+                mask: 0x0020,
+                disposition: "denied",
+                meaning: "compressed-patched-data",
+            },
+            GeneralPurposeBitRule {
+                bit: 6,
+                mask: 0x0040,
+                disposition: "denied",
+                meaning: "strong-encryption",
+            },
+            GeneralPurposeBitRule {
+                bit: 7,
+                mask: 0x0080,
+                disposition: "denied",
+                meaning: "unused",
+            },
+            GeneralPurposeBitRule {
+                bit: 8,
+                mask: 0x0100,
+                disposition: "denied",
+                meaning: "unused",
+            },
+            GeneralPurposeBitRule {
+                bit: 9,
+                mask: 0x0200,
+                disposition: "denied",
+                meaning: "unused",
+            },
+            GeneralPurposeBitRule {
+                bit: 10,
+                mask: 0x0400,
+                disposition: "denied",
+                meaning: "unused",
+            },
+            GeneralPurposeBitRule {
+                bit: 11,
+                mask: 0x0800,
+                disposition: "denied",
+                meaning: "utf8-name",
+            },
+            GeneralPurposeBitRule {
+                bit: 12,
+                mask: 0x1000,
+                disposition: "denied",
+                meaning: "reserved-enhanced-compression",
+            },
+            GeneralPurposeBitRule {
+                bit: 13,
+                mask: 0x2000,
+                disposition: "denied",
+                meaning: "masked-local-header",
+            },
+            GeneralPurposeBitRule {
+                bit: 14,
+                mask: 0x4000,
+                disposition: "denied",
+                meaning: "alternate-streams",
+            },
+            GeneralPurposeBitRule {
+                bit: 15,
+                mask: 0x8000,
+                disposition: "denied",
+                meaning: "reserved",
+            },
+        ],
+        extra_fields_semantic: [],
+        extra_fields_permitted_nonsemantic: [],
+        extra_fields_other: "denied",
+        names: "ascii-only-utf8-flag-denied",
+        directories: "trailing-slash-store-empty-crc32-zero",
+        redundant_metadata: "exact-lfh-cdh-descriptor",
+    }
+}
+
 pub fn zip_strict_ascii_v1_digest() -> String {
-    let json = serde_json::to_vec(&zip_strict_ascii_profile()).expect("profile serializes");
-    hex_sha256(&json)
+    hex_sha256(&zip_strict_ascii_v1_canonical_bytes())
+}
+
+pub fn zip_strict_ascii_v2_digest() -> String {
+    hex_sha256(&zip_strict_ascii_v2_canonical_bytes())
+}
+
+/// Canonical JSON bytes hashed by the v1 interpretation identity.
+pub fn zip_strict_ascii_v1_canonical_bytes() -> Vec<u8> {
+    serde_json::to_vec(&zip_strict_ascii_profile()).expect("profile serializes")
+}
+
+/// Canonical JSON bytes hashed by the v2 interpretation identity.
+pub fn zip_strict_ascii_v2_canonical_bytes() -> Vec<u8> {
+    serde_json::to_vec(&zip_strict_ascii_v2_profile()).expect("profile serializes")
 }
 
 pub fn is_denied_extra_id(id: u16) -> bool {
@@ -302,18 +480,24 @@ pub struct ArchiveIR {
 impl ArchiveIR {
     #[cfg(test)]
     pub(crate) fn new(source_digest: SourceDigest, members: Vec<IrMember>) -> Self {
-        Self::with_covering(source_digest, ArchiveCovering::synthetic(), members)
+        Self::with_covering(
+            ZipInterpretationProfile::StrictAsciiV1,
+            source_digest,
+            ArchiveCovering::synthetic(),
+            members,
+        )
     }
 
     pub(crate) fn with_covering(
+        profile: ZipInterpretationProfile,
         source_digest: SourceDigest,
         covering: ArchiveCovering,
         members: Vec<IrMember>,
     ) -> Self {
         Self {
             schema: ARCHIVE_IR_SCHEMA,
-            profile: ZIP_STRICT_ASCII_V1,
-            profile_digest: zip_strict_ascii_v1_digest(),
+            profile: profile.id(),
+            profile_digest: profile.digest(),
             source_digest,
             covering,
             members,
@@ -368,5 +552,25 @@ mod tests {
         let json = serde_json::to_vec(&zip_strict_ascii_profile()).unwrap();
         assert!(String::from_utf8_lossy(&json).contains("28789")); // 0x7075
         assert_eq!(digest, hex_sha256(&json));
+    }
+
+    #[test]
+    fn strict_ascii_v2_profile_is_exhaustive_and_distinct() {
+        let profile = zip_strict_ascii_v2_profile();
+        assert_eq!(profile.general_purpose_bits.len(), 16);
+        for (bit, rule) in profile.general_purpose_bits.iter().enumerate() {
+            assert_eq!(usize::from(rule.bit), bit);
+            assert_eq!(rule.mask, 1_u16 << bit);
+        }
+        assert_eq!(profile.general_purpose_bits[3].disposition, "semantic");
+        assert!(profile
+            .general_purpose_bits
+            .iter()
+            .enumerate()
+            .all(|(bit, rule)| bit == 3 || rule.disposition == "denied"));
+        assert!(profile.extra_fields_semantic.is_empty());
+        assert!(profile.extra_fields_permitted_nonsemantic.is_empty());
+        assert_eq!(profile.extra_fields_other, "denied");
+        assert_ne!(zip_strict_ascii_v2_digest(), zip_strict_ascii_v1_digest());
     }
 }

@@ -1,6 +1,6 @@
 # Near-term execution plan
 
-> Status: active plan from the alpha.3 baseline. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work. It does not describe functionality already shipped.
+> Status: active plan from the Alpha.4 baseline. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
 
 The next work should produce thin, independently reviewable trust increments. Each increment must finish with a useful artifact, explicit evidence, and a bounded claim. Work that merely makes the codebase larger does not count as progress.
 
@@ -36,13 +36,13 @@ Version labels are delivery targets, not permission to cut a release with a red 
 
 Alpha.4 closes the contract before another public surface becomes accidental API.
 
-Current main has removed public `ArchiveIR` construction and mutation, exposed it through a read-only `Outcome` accessor, made evolving evidence outputs non-exhaustive and nameable, and added independent finite-domain oracles for ratio, verified-member limits, checked offset arithmetic, exact interval partitions, quota transitions, and retention selection. It returns an opaque `VerifiedArchive` after complete verification, supports independently bounded exact-path retention during the original verification pass, preserves caller-bounded fallback reads, and runs a separate consumer against the extracted packaged crate. A separate workspace verifier with no Sealr dependency checks a four-case conformance bundle, validates the recorded covering without discovery or inflation, and independently reproduces the current profile digest plus three layout and three content roots. ZIP discovery and the codec-free covering audit share one checked interval and partition kernel. Declared totals, actual totals, remaining capacity, and per-member byte counts use one atomic quota transition. A reproducible 20-wheel pilot now binds exact artifact and profile digests and records 19 admissions plus one investigated ratio denial. This is substantial progress toward the adopter-safe boundary and executable-conformance gates, not completion: the new strict profile is still open, and the initial corpus is too small and feature-uniform to settle it.
+Current main has completed the Alpha.4 measured-contract gate. It removes public `ArchiveIR` construction and mutation, exposes read-only evidence and an opaque `VerifiedArchive`, supports independently bounded exact-path retention during the original verification pass, preserves caller-bounded fallback reads, and tests a separate consumer against the extracted packaged crate. Six finite-domain property families run in required CI. A separate workspace verifier with no Sealr dependency checks a four-case conformance bundle, validates the recorded covering without discovery or inflation, and independently reproduces two exact profile digests plus three layout and three content roots. ZIP discovery and the codec-free covering audit share one checked interval and partition kernel, while declared and actual quota transitions use one atomic kernel. The reproducible 20-wheel pilot records 19 admissions plus one investigated ratio denial under the new closed strict ASCII v2 profile. The profile and identities remain preview contracts until their documented stability bar is met.
 
 ### Semantic profile
 
 1. Build a reproducible benign wheel corpus before choosing the next extra-field policy. The acquisition manifest records artifact filename, URL, SHA-256, size, upload time, selection cohort, and provenance URL when available. Raw artifacts are not committed when redistribution is unclear. **Initial pilot landed:** 20 non-yanked PyPI wheels across universal, Linux x86_64, Windows x86_64, macOS arm64, and macOS universal2 cohorts are pinned by exact bytes and reproducible acquisition metadata.
 2. Inventory flags, extra-field identifiers by local and central site, compression methods, filename encodings, path shapes, producer metadata, and current admission findings. **Initial inventory landed:** 19 artifacts and 4,504 members produced an IR; every observed member used Store or Deflate with flags `0x0000`, and no extra fields were observed. Each interpreted artifact has one top-level `.dist-info` path, while Setuptools also contains twelve nested vendored `.dist-info` paths. The only denied artifact had three `quota.ratio` findings on highly compressible SciPy test data. Because the pilot contains no nonzero flag or extra-field observations, it narrows the next sampling question but does not justify a new permit rule.
-3. Define a new strict profile with an exhaustive flag and extra-field table. Every field is semantic, explicitly permitted as nonsemantic, or denied. There is no catch-all `ignored` disposition.
+3. Define a new strict profile with an exhaustive flag and extra-field table. Every field is semantic, explicitly permitted as nonsemantic, or denied. There is no catch-all `ignored` disposition. **Landed:** [`sealr.profile.zip.strict-ascii.v2`](profiles/zip-strict-ascii-v2.md) permits only semantic data-descriptor bit 3, denies the other 15 flag bits, and denies all 65,536 extra-field identifiers at both sites.
 4. Keep `sealr.profile.zip.strict-ascii.v1` unchanged. A correction to interpretation creates a new profile identity instead of changing old bytes under an old name.
 5. Publish the measured acceptance rate and investigated rejection clusters. The objective is a documented domain, not maximum acceptance. **Initial report landed:** the [wheel compatibility pilot](wheel-compatibility-pilot.md) reports `19/20` admission, separates affected-artifact counts from finding occurrences, and retains the default `100:1` limit pending broader evidence and adversarial-cost analysis.
 
@@ -65,6 +65,8 @@ The first two capability increments are now implemented on main. `VerifiedArchiv
 5. Keep the added required-CI cost bounded and measured. Tool-only dependencies do not enter the release binary.
 
 ### Alpha.4 exit gate
+
+**Status: complete on current main.** The next release may be cut only after the release-candidate and exact-main gates pass.
 
 - The new profile has no unspecified flag or extra-field behavior.
 - Every material wheel rejection cluster above the documented review threshold is investigated.

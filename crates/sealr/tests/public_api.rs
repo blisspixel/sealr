@@ -6,6 +6,7 @@ use sealr::{
     apply, apply_with_options, ApplyOptions, EnvMeta, MaterializationMeta, MemberReadErrorKind,
     Outcome, OutcomeIdentities, Policy, PolicyMeta, Receipt, Request, RetentionPlan,
     RetentionStatus, SnapshotKind, Source, SourceMeta, ToolMeta, VerifiedArchive, View,
+    ZipInterpretationProfile, ZIP_STRICT_ASCII_V2,
 };
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
@@ -52,6 +53,35 @@ fn intended_receipt_and_view_types_are_nameable_downstream() {
 
     assert!(!outcome.rejected(), "{:?}", outcome.view.findings);
     assert_public_output_types(&outcome);
+}
+
+#[test]
+fn downstream_callers_can_select_the_closed_strict_profile() {
+    let policy = Policy::default_v1();
+    let options =
+        ApplyOptions::new().with_interpretation_profile(ZipInterpretationProfile::StrictAsciiV2);
+    assert_eq!(
+        options.interpretation_profile(),
+        ZipInterpretationProfile::StrictAsciiV2
+    );
+    let outcome = apply_with_options(
+        Request {
+            source: Source::Bytes {
+                path: Some("empty.zip"),
+                data: EMPTY_ZIP,
+            },
+            policy: &policy,
+            dest: None,
+        },
+        &options,
+    );
+
+    assert!(!outcome.rejected(), "{:?}", outcome.view.findings);
+    assert_eq!(outcome.archive_ir().unwrap().profile(), ZIP_STRICT_ASCII_V2);
+    assert_eq!(
+        outcome.receipt.identities.interpretation.id,
+        ZIP_STRICT_ASCII_V2
+    );
 }
 
 #[test]

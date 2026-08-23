@@ -1,6 +1,6 @@
 use sealr::{
     apply_with_options, ApplyOptions, MemberReadErrorKind, Policy, Request, RetentionPlan,
-    RetentionStatus, Source, VerifiedArchive,
+    RetentionStatus, Source, VerifiedArchive, ZipInterpretationProfile, ZIP_STRICT_ASCII_V2,
 };
 
 // A canonical ZIP32 archive containing stored `hello.txt` with bytes `hello`.
@@ -50,7 +50,9 @@ fn main() {
     let retention = RetentionPlan::new(5, 5)
         .with_path("hello.txt")
         .expect("canonical bounded path");
-    let options = ApplyOptions::new().with_retention(retention);
+    let options = ApplyOptions::new()
+        .with_interpretation_profile(ZipInterpretationProfile::StrictAsciiV2)
+        .with_retention(retention);
     let outcome = apply_with_options(
         Request {
             source: Source::Bytes {
@@ -64,6 +66,7 @@ fn main() {
     );
 
     assert!(!outcome.rejected(), "{:?}", outcome.view.findings);
+    assert_eq!(outcome.archive_ir().unwrap().profile(), ZIP_STRICT_ASCII_V2);
     let archive: &VerifiedArchive = outcome
         .verified_archive()
         .expect("admitted archive must expose verified authority");

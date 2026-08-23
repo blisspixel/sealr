@@ -11,9 +11,10 @@ publish = false
 [[bin]]
 name = "sealr"
 path = "src/main.rs"
+doc = false
 
 [dependencies]
 clap.workspace = true
-sealr = { version = "0.1.0-alpha.3", path = "../sealr" }
+sealr = { version = "0.1.0-alpha.4", path = "../sealr" }
 serde.workspace = true
 serde_json.workspace = true

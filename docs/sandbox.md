@@ -1,6 +1,6 @@
 # Reduced-authority execution
 
-> Target design. Alpha.3 has no process sandbox, worker process, mount command, or projected filesystem. Current receipts report `kernel_jail: unavailable`. The current parser, verifier, and materializer run in the caller's process.
+> Target design. Alpha.4 has no process sandbox, worker process, mount command, or projected filesystem. Current receipts report `kernel_jail: unavailable`. The current parser, verifier, and materializer run in the caller's process.
 
 Reduced authority follows the semantic-identity work in Roadmap Step 4. The worker protocol and supervisor audit must consume the canonical `ArchiveIR`; they must not create another interpretation or manifest format.
 
@@ -44,7 +44,7 @@ Native syscall traces must cover Store, Deflate, rejection, cleanup, worker cras
 
 ## macOS and Windows
 
-Alpha.3 keeps native macOS and Windows materialization gates, but no worker containment claim exists on either platform.
+Alpha.4 keeps native macOS and Windows materialization gates, but no worker containment claim exists on either platform.
 
 A future macOS worker needs a supported packaging and restriction mechanism with native tests. A future Windows worker must evaluate AppContainer, restricted-token, job-object, handle-inheritance, and filesystem ACL behavior together. Neither platform will inherit a Linux claim by analogy.
 

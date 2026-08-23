@@ -9,15 +9,16 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use sealr::{
-    apply, zip_strict_ascii_v1_digest, AdmissionStatus, ExtraDisposition, ExtraSite, MemberKind,
-    NormalizationAction, Policy, Request, Severity, Source, ZIP_STRICT_ASCII_V1,
+    apply_with_options, zip_strict_ascii_v2_digest, AdmissionStatus, ApplyOptions,
+    ExtraDisposition, ExtraSite, MemberKind, NormalizationAction, Policy, Request, Severity,
+    Source, ZipInterpretationProfile, ZIP_STRICT_ASCII_V2,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 const MANIFEST_SCHEMA: &str = "sealr.wheel-corpus.v1";
 const REPORT_SCHEMA: &str = "sealr.wheel-compatibility-report.v1";
-const ANALYZER_REVISION: &str = "sealr-wheel-lab.v1";
+const ANALYZER_REVISION: &str = "sealr-wheel-lab.v2";
 const MAX_ARTIFACTS: usize = 128;
 const MAX_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_CORPUS_BYTES: u64 = 2 * 1024 * 1024 * 1024;
@@ -448,8 +449,8 @@ fn analyze(manifest_path: &Path, cache_dir: &Path) -> Result<(String, String), A
         query_date: manifest.query_date,
         selection_method: manifest.selection_method,
         analyzer_revision: ANALYZER_REVISION.to_string(),
-        interpretation_profile: ZIP_STRICT_ASCII_V1.to_string(),
-        interpretation_profile_sha256: zip_strict_ascii_v1_digest(),
+        interpretation_profile: ZIP_STRICT_ASCII_V2.to_string(),
+        interpretation_profile_sha256: zip_strict_ascii_v2_digest(),
         policy: policy.id.clone(),
         policy_sha256: policy.digest_hex(),
         artifact_count: artifacts.len(),
@@ -506,14 +507,19 @@ fn analyze_artifact(
         ));
     }
 
-    let outcome = apply(Request {
-        source: Source::Bytes {
-            path: Some(&entry.filename),
-            data: &bytes,
+    let options =
+        ApplyOptions::new().with_interpretation_profile(ZipInterpretationProfile::StrictAsciiV2);
+    let outcome = apply_with_options(
+        Request {
+            source: Source::Bytes {
+                path: Some(&entry.filename),
+                data: &bytes,
+            },
+            policy,
+            dest: None,
         },
-        policy,
-        dest: None,
-    });
+        &options,
+    );
     let admission = match outcome.admission {
         AdmissionStatus::Admitted => "admitted",
         AdmissionStatus::Denied => "denied",
@@ -1042,8 +1048,8 @@ fn validate_report(
     if report.analyzer_revision != ANALYZER_REVISION {
         return invalid("report analyzer revision does not match this wheel lab");
     }
-    if report.interpretation_profile != ZIP_STRICT_ASCII_V1
-        || report.interpretation_profile_sha256 != zip_strict_ascii_v1_digest()
+    if report.interpretation_profile != ZIP_STRICT_ASCII_V2
+        || report.interpretation_profile_sha256 != zip_strict_ascii_v2_digest()
     {
         return invalid("report interpretation profile does not match this Sealr build");
     }
@@ -1362,8 +1368,8 @@ mod tests {
             query_date: manifest.query_date.clone(),
             selection_method: manifest.selection_method.clone(),
             analyzer_revision: ANALYZER_REVISION.to_string(),
-            interpretation_profile: ZIP_STRICT_ASCII_V1.to_string(),
-            interpretation_profile_sha256: zip_strict_ascii_v1_digest(),
+            interpretation_profile: ZIP_STRICT_ASCII_V2.to_string(),
+            interpretation_profile_sha256: zip_strict_ascii_v2_digest(),
             policy: policy.id.clone(),
             policy_sha256: policy.digest_hex(),
             artifact_count: artifacts.len(),
