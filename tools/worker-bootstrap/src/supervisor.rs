@@ -1,7 +1,9 @@
+use crate::fault::{ChildMode, FaultPoint};
 use crate::frame::{Frame, Kind};
 use crate::linux::{
-    configure_timeout, receive_packet, send_packet, ERROR_DESCRIPTOR, ERROR_PROTOCOL, FLAG_STAGE,
-    READY_FLAGS,
+    configure_timeout, receive_packet, send_packet, send_raw_conformance_packet, TransportError,
+    DETAIL_CONTROL_TRUNCATED, DETAIL_DATA_TRUNCATED, DETAIL_SHORT_FRAME, ERROR_DESCRIPTOR,
+    ERROR_PROTOCOL, ERROR_RESTRICTION, FLAG_STAGE, READY_FLAGS,
 };
 use crate::CHILD_MARKER;
 use landlock::{make_bitflags, Access, AccessFs, ABI};
@@ -13,7 +15,7 @@ use std::cell::Cell;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
-use std::os::unix::process::CommandExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
@@ -35,45 +37,68 @@ pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
     run_rejection(CaseMutation::DirectoryAsSource, 4)?;
     run_protocol_rejection(CaseMutation::ExtraSourceDescriptor, 4)?;
     run_protocol_rejection(CaseMutation::WrongSourceOperation, 4)?;
+    run_restriction_rejection(ChildMode::InsufficientLandlockAbi)?;
+    run_restriction_rejection(ChildMode::RestrictionProbeFailure)?;
+    run_transport_rejection(CaseMutation::ShortSource, DETAIL_SHORT_FRAME)?;
+    run_transport_rejection(CaseMutation::LongSource, DETAIL_DATA_TRUNCATED)?;
+    run_transport_rejection(
+        CaseMutation::TruncatedSourceControl,
+        DETAIL_CONTROL_TRUNCATED,
+    )?;
+    for point in FaultPoint::ALL {
+        run_crash_barrier(point)?;
+    }
     run_timeout_reap()?;
     println!(
-        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 fail-closed authority cases, 2 protocol cases, and bounded reap passed"
+        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 2 restriction failures, 3 process-boundary truncations, 17 crash barriers, and bounded reap passed"
     );
     Ok(())
 }
 
 fn run_success(with_stage: bool) -> Result<(), Box<dyn std::error::Error>> {
     let fixture = Fixture::new(with_stage, false, false)?;
-    let outcome = exchange(&fixture, CaseMutation::None)?;
-    let result = match outcome {
-        ExchangeOutcome::Complete(result) => result,
-        ExchangeOutcome::Rejected { code, phase } => {
-            return Err(io::Error::other(format!(
-                "valid bootstrap was rejected with code {code} in phase {phase}"
-            ))
-            .into());
+    let exchange_result = exchange(&fixture, CaseMutation::None, ChildMode::Normal);
+    let result = match exchange_result {
+        Err(error) => Err(error),
+        Ok(ExchangeOutcome::Complete(result)) => Ok(result),
+        Ok(ExchangeOutcome::Crashed(point)) => {
+            Err(io::Error::other(format!("valid bootstrap crashed at {point:?}")).into())
         }
+        Ok(ExchangeOutcome::Rejected {
+            code,
+            phase,
+            detail,
+        }) => Err(io::Error::other(format!(
+            "valid bootstrap was rejected with code {code}, phase {phase}, detail {detail}"
+        ))
+        .into()),
     };
-    if result.values
-        != [
-            u64::from(SOURCE_BYTES[0]),
-            libc::EACCES as u64,
-            u64::from(with_stage),
-            0,
-        ]
-    {
-        return Err(io::Error::other("worker probe evidence is inconsistent").into());
-    }
-    if with_stage {
-        let mut contents = Vec::new();
-        File::open(fixture.root.join("stage/.sealr-bootstrap-probe"))?
-            .read_to_end(&mut contents)?;
-        if contents != b"ok" {
-            return Err(io::Error::other("stage-local probe content is invalid").into());
+    let result = match result {
+        Ok(result) => result,
+        Err(error) => return finish_fixture(&fixture, Err(error)),
+    };
+    let validation = (|| -> Result<(), Box<dyn std::error::Error>> {
+        if result.values
+            != [
+                u64::from(SOURCE_BYTES[0]),
+                libc::EACCES as u64,
+                u64::from(with_stage),
+                0,
+            ]
+        {
+            return Err(io::Error::other("worker probe evidence is inconsistent").into());
         }
-    }
-    fixture.cleanup()?;
-    Ok(())
+        if with_stage {
+            let mut contents = Vec::new();
+            File::open(fixture.root.join("stage/.sealr-bootstrap-probe"))?
+                .read_to_end(&mut contents)?;
+            if contents != b"ok" {
+                return Err(io::Error::other("stage-local probe content is invalid").into());
+            }
+        }
+        Ok(())
+    })();
+    finish_fixture(&fixture, validation)
 }
 
 fn run_rejection(
@@ -90,22 +115,29 @@ fn run_rejection(
         mutation == CaseMutation::WritableSource,
         mutation == CaseMutation::FileAsStage,
     )?;
-    let result = match exchange(&fixture, mutation)? {
-        ExchangeOutcome::Rejected { code, phase }
-            if code == ERROR_DESCRIPTOR && phase == expected_phase =>
-        {
-            Ok(())
-        }
-        ExchangeOutcome::Rejected { code, phase } => Err(io::Error::other(format!(
-            "descriptor case returned code {code} in phase {phase}"
+    let result = match exchange(&fixture, mutation, ChildMode::Normal) {
+        Ok(ExchangeOutcome::Rejected {
+            code,
+            phase,
+            detail: 0,
+        }) if code == ERROR_DESCRIPTOR && phase == expected_phase => Ok(()),
+        Ok(ExchangeOutcome::Rejected {
+            code,
+            phase,
+            detail,
+        }) => Err(io::Error::other(format!(
+            "descriptor case returned code {code}, phase {phase}, detail {detail}"
         ))
         .into()),
-        ExchangeOutcome::Complete(_) => {
+        Ok(ExchangeOutcome::Complete(_)) => {
             Err(io::Error::other("invalid descriptor case was accepted").into())
         }
+        Ok(ExchangeOutcome::Crashed(point)) => {
+            Err(io::Error::other(format!("descriptor case crashed at {point:?}")).into())
+        }
+        Err(error) => Err(error),
     };
-    fixture.cleanup()?;
-    result
+    finish_fixture(&fixture, result)
 }
 
 fn run_protocol_rejection(
@@ -113,22 +145,104 @@ fn run_protocol_rejection(
     expected_phase: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let fixture = Fixture::new(false, false, false)?;
-    let result = match exchange(&fixture, mutation)? {
-        ExchangeOutcome::Rejected { code, phase }
-            if code == ERROR_PROTOCOL && phase == expected_phase =>
-        {
-            Ok(())
-        }
-        ExchangeOutcome::Rejected { code, phase } => Err(io::Error::other(format!(
-            "protocol case returned code {code} in phase {phase}"
+    let result = match exchange(&fixture, mutation, ChildMode::Normal) {
+        Ok(ExchangeOutcome::Rejected {
+            code,
+            phase,
+            detail: 0,
+        }) if code == ERROR_PROTOCOL && phase == expected_phase => Ok(()),
+        Ok(ExchangeOutcome::Rejected {
+            code,
+            phase,
+            detail,
+        }) => Err(io::Error::other(format!(
+            "protocol case returned code {code}, phase {phase}, detail {detail}"
         ))
         .into()),
-        ExchangeOutcome::Complete(_) => {
+        Ok(ExchangeOutcome::Complete(_)) => {
             Err(io::Error::other("invalid protocol case was accepted").into())
         }
+        Ok(ExchangeOutcome::Crashed(point)) => {
+            Err(io::Error::other(format!("protocol case crashed at {point:?}")).into())
+        }
+        Err(error) => Err(error),
     };
-    fixture.cleanup()?;
-    result
+    finish_fixture(&fixture, result)
+}
+
+fn run_restriction_rejection(mode: ChildMode) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::new(true, false, false)?;
+    let result = match exchange(&fixture, CaseMutation::None, mode) {
+        Ok(ExchangeOutcome::Rejected {
+            code,
+            phase,
+            detail: 0,
+        }) if code == ERROR_RESTRICTION && phase == 3 => Ok(()),
+        Ok(ExchangeOutcome::Rejected {
+            code,
+            phase,
+            detail,
+        }) => Err(io::Error::other(format!(
+            "restriction injection returned code {code}, phase {phase}, detail {detail}"
+        ))
+        .into()),
+        Ok(_) => Err(io::Error::other("restriction injection was not rejected").into()),
+        Err(error) => Err(error),
+    };
+    finish_fixture(&fixture, result)
+}
+
+fn run_transport_rejection(
+    mutation: CaseMutation,
+    expected_detail: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::new(false, false, false)?;
+    let result = match exchange(&fixture, mutation, ChildMode::Normal) {
+        Ok(ExchangeOutcome::Rejected {
+            code: ERROR_PROTOCOL,
+            phase: 4,
+            detail,
+        }) if detail == expected_detail => Ok(()),
+        Ok(_) => Err(io::Error::other("malformed process-boundary packet was accepted").into()),
+        Err(error) => Err(error),
+    };
+    finish_fixture(&fixture, result)
+}
+
+fn run_crash_barrier(point: FaultPoint) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::new(true, false, false)?;
+    let result = match exchange(&fixture, CaseMutation::None, ChildMode::ExitAt(point)) {
+        Ok(ExchangeOutcome::Crashed(actual)) if actual == point => fixture
+            .verify_authority_state(matches!(
+                point,
+                FaultPoint::StageCreate | FaultPoint::Result | FaultPoint::ExitAck
+            ))
+            .map_err(Into::into),
+        Ok(ExchangeOutcome::Crashed(actual)) => {
+            Err(io::Error::other(format!("worker exited at {actual:?}; expected {point:?}")).into())
+        }
+        Ok(_) => Err(io::Error::other(format!(
+            "worker completed past injected crash barrier {point:?}"
+        ))
+        .into()),
+        Err(error) => Err(error),
+    };
+    finish_fixture(&fixture, result)
+}
+
+fn finish_fixture<T>(
+    fixture: &Fixture,
+    result: Result<T, Box<dyn std::error::Error>>,
+) -> Result<T, Box<dyn std::error::Error>> {
+    match (result, fixture.cleanup()) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(cleanup)) => Err(cleanup.into()),
+        (Err(error), Err(cleanup)) => Err(io::Error::other(format!(
+            "{error}; checked fixture cleanup also failed: {cleanup}"
+        ))
+        .into()),
+    }
 }
 
 fn run_timeout_reap() -> Result<(), Box<dyn std::error::Error>> {
@@ -139,12 +253,21 @@ fn run_timeout_reap() -> Result<(), Box<dyn std::error::Error>> {
         None,
     )?;
     configure_timeout(&control)?;
-    let mut child = ChildBoundary::bind(spawn_child(child_socket)?)?;
+    let mut child = ChildBoundary::bind(spawn_child(child_socket, ChildMode::Normal)?)?;
     let error = child
         .wait_bounded()
         .expect_err("a worker awaiting bootstrap must exceed the supervisor deadline");
-    if error.kind() != io::ErrorKind::TimedOut || !child.reaped {
-        return Err(io::Error::other("timed-out worker was not reaped").into());
+    let status = child
+        .status()
+        .ok_or("timed-out worker has no reaped status")?;
+    if error.kind() != io::ErrorKind::TimedOut
+        || !child.is_reaped()
+        || status.signal() != Some(libc::SIGKILL)
+    {
+        return Err(io::Error::other(format!(
+            "timed-out worker was not reaped through SIGKILL: {status}"
+        ))
+        .into());
     }
     Ok(())
 }
@@ -152,6 +275,7 @@ fn run_timeout_reap() -> Result<(), Box<dyn std::error::Error>> {
 fn exchange(
     fixture: &Fixture,
     mutation: CaseMutation,
+    mode: ChildMode,
 ) -> Result<ExchangeOutcome, Box<dyn std::error::Error>> {
     let operation_id = random_operation_id()?;
     let (control, child_socket) = rustix::net::socketpair(
@@ -164,19 +288,109 @@ fn exchange(
 
     let sentinel_flags = rustix::io::fcntl_getfd(&fixture.outside_sentinel)?;
     rustix::io::fcntl_setfd(&fixture.outside_sentinel, sentinel_flags - FdFlags::CLOEXEC)?;
-    let spawn_result = spawn_child(child_socket);
+    let spawn_result = spawn_child(child_socket, mode);
+    if spawn_result.is_ok() {
+        fixture.revoke_cleanup();
+    }
     let restore_result = rustix::io::fcntl_setfd(&fixture.outside_sentinel, sentinel_flags);
-    let child = match (spawn_result, restore_result) {
-        (Ok(child), Ok(())) => child,
-        (Ok(mut child), Err(error)) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(error.into());
+    let child = match spawn_result {
+        Ok(child) => child,
+        Err(spawn) => {
+            return match restore_result {
+                Ok(()) => Err(spawn.into()),
+                Err(restore) => Err(io::Error::other(format!(
+                    "spawning worker failed: {spawn}; restoring inherited-sentinel flags also failed: {restore}"
+                ))
+                .into()),
+            };
         }
-        (Err(error), _) => return Err(error.into()),
     };
-    let mut child = ChildBoundary::bind(child)?;
+    let mut child = match ChildBoundary::bind(child) {
+        Ok(child) => child,
+        Err(bind) => {
+            if bind.reaped {
+                fixture.authorize_cleanup();
+            }
+            return match restore_result {
+                Ok(()) => Err(bind.into()),
+                Err(restore) => Err(io::Error::other(format!(
+                    "binding worker boundary failed: {bind}; restoring inherited-sentinel flags also failed: {restore}"
+                ))
+                .into()),
+            };
+        }
+    };
+    if let Err(error) = restore_result {
+        let termination = child.terminate_and_reap_bounded();
+        if child.is_reaped() {
+            fixture.authorize_cleanup();
+        }
+        return match termination {
+            Ok(_) => Err(error.into()),
+            Err(termination) => Err(io::Error::other(format!(
+                "restoring inherited-sentinel flags failed: {error}; worker termination also failed: {termination}"
+            ))
+            .into()),
+        };
+    }
 
+    let result = exchange_active(fixture, mutation, mode, operation_id, &control, &mut child);
+    let termination = if result.is_err() && !child.is_reaped() {
+        child.terminate_and_reap_bounded().map(|_| ())
+    } else {
+        Ok(())
+    };
+    if child.is_reaped() {
+        fixture.authorize_cleanup();
+    }
+    if let Err(termination) = termination {
+        return match result {
+            Ok(_) => Err(termination.into()),
+            Err(error) => Err(io::Error::other(format!(
+                "{error}; bounded worker termination also failed: {termination}"
+            ))
+            .into()),
+        };
+    }
+
+    if let ChildMode::ExitAt(point) = mode {
+        let expected = result
+            .as_ref()
+            .err()
+            .and_then(|error| error.downcast_ref::<ExpectedCrash>())
+            .is_some_and(|expected| expected.0 == point);
+        if !expected {
+            return match result {
+                Ok(_) => Err(io::Error::other(format!(
+                    "exchange completed after injected worker exit at {point:?}"
+                ))
+                .into()),
+                Err(error) => Err(error),
+            };
+        }
+        let status = child
+            .status()
+            .ok_or("injected worker exit was not reaped")?;
+        if status.code() != Some(point.exit_code()) {
+            return Err(io::Error::other(format!(
+                "injected worker exit at {point:?} produced {status}"
+            ))
+            .into());
+        }
+        return Ok(ExchangeOutcome::Crashed(point));
+    }
+
+    result
+}
+
+fn exchange_active(
+    fixture: &Fixture,
+    mutation: CaseMutation,
+    mode: ChildMode,
+    operation_id: [u8; 16],
+    control: &OwnedFd,
+    child: &mut ChildBoundary,
+) -> Result<ExchangeOutcome, Box<dyn std::error::Error>> {
     let stage_values = match &fixture.stage {
         Some(stage) => descriptor_identity(stage)?,
         None => [0; 4],
@@ -196,14 +410,36 @@ fn exchange(
         CaseMutation::ExtraInspectDescriptor => vec![fixture.outside_sentinel.as_fd()],
         _ => fixture.stage.iter().map(AsFd::as_fd).collect(),
     };
-    send_packet(&control, bootstrap, &stage_descriptors)?;
+    expect_crash_transport(
+        send_packet(control, bootstrap, &stage_descriptors),
+        mode,
+        &[
+            FaultPoint::ExecEntry,
+            FaultPoint::PeerValidation,
+            FaultPoint::InheritedClosure,
+        ],
+        child,
+    )?;
 
-    let (first_response, descriptors) = receive_packet(&control, Some(0))?;
+    let (first_response, descriptors) = expect_crash_transport(
+        receive_packet(control, Some(0)),
+        mode,
+        &[
+            FaultPoint::ExecEntry,
+            FaultPoint::PeerValidation,
+            FaultPoint::InheritedClosure,
+            FaultPoint::BootstrapReceive,
+            FaultPoint::StageValidation,
+            FaultPoint::NoNewPrivs,
+            FaultPoint::Landlock,
+        ],
+        child,
+    )?;
     if !descriptors.is_empty() {
         return Err(io::Error::other("worker returned authority in its response").into());
     }
     if first_response.kind == Kind::Error {
-        return finish_rejection(&mut child, fixture, first_response, operation_id);
+        return finish_rejection(child, first_response, operation_id);
     }
     validate_ready(&first_response, operation_id, fixture.stage.is_some())?;
     observe_restricted_child(
@@ -212,6 +448,9 @@ fn exchange(
         fixture.stage.as_ref(),
         &fixture.outside_sentinel,
     )?;
+    if mode == ChildMode::ExitAt(FaultPoint::Ready) {
+        return finish_observed_crash(control, child, operation_id, FaultPoint::Ready);
+    }
 
     let directory_source = if mutation == CaseMutation::DirectoryAsSource {
         Some(File::open(&fixture.root)?)
@@ -235,14 +474,69 @@ fn exchange(
     } else {
         vec![source_descriptor.as_fd()]
     };
-    send_packet(&control, source, &source_descriptors)?;
+    match mutation {
+        CaseMutation::ShortSource => {
+            let encoded = source.encode();
+            let written = send_raw_conformance_packet(
+                control,
+                &encoded[..encoded.len() - 1],
+                &[source_descriptor.as_fd()],
+            )?;
+            if written != encoded.len() - 1 {
+                return Err(
+                    io::Error::other("short source test packet was not sent atomically").into(),
+                );
+            }
+        }
+        CaseMutation::LongSource => {
+            let mut encoded = source.encode().to_vec();
+            encoded.push(0);
+            let written =
+                send_raw_conformance_packet(control, &encoded, &[source_descriptor.as_fd()])?;
+            if written != encoded.len() {
+                return Err(
+                    io::Error::other("long source test packet was not sent atomically").into(),
+                );
+            }
+        }
+        CaseMutation::TruncatedSourceControl => {
+            let encoded = source.encode();
+            let descriptors = [
+                source_descriptor.as_fd(),
+                fixture.outside_sentinel.as_fd(),
+                fixture.outside_sentinel.as_fd(),
+                fixture.outside_sentinel.as_fd(),
+                fixture.outside_sentinel.as_fd(),
+            ];
+            let written = send_raw_conformance_packet(control, &encoded, &descriptors)?;
+            if written != encoded.len() {
+                return Err(io::Error::other(
+                    "control-truncation test packet was not sent atomically",
+                )
+                .into());
+            }
+        }
+        _ => {
+            expect_crash_transport(
+                send_packet(control, source, &source_descriptors),
+                mode,
+                &[],
+                child,
+            )?;
+        }
+    }
 
-    let (second_response, descriptors) = receive_packet(&control, Some(0))?;
+    let (second_response, descriptors) = expect_crash_transport(
+        receive_packet(control, Some(0)),
+        mode,
+        &[FaultPoint::SourceReceive, FaultPoint::SourceValidation],
+        child,
+    )?;
     if !descriptors.is_empty() {
         return Err(io::Error::other("worker returned a source capability").into());
     }
     if second_response.kind == Kind::Error {
-        return finish_rejection(&mut child, fixture, second_response, operation_id);
+        return finish_rejection(child, second_response, operation_id);
     }
     if second_response.kind != Kind::Accepted
         || second_response.operation_id != operation_id
@@ -260,10 +554,23 @@ fn exchange(
         source_descriptor,
         &fixture.outside_sentinel,
     )?;
+    if mode == ChildMode::ExitAt(FaultPoint::Accepted) {
+        return finish_observed_crash(control, child, operation_id, FaultPoint::Accepted);
+    }
 
     let proceed = Frame::new(Kind::Proceed, operation_id);
-    send_packet(&control, proceed, &[])?;
-    let (result, descriptors) = receive_packet(&control, Some(0))?;
+    send_packet(control, proceed, &[])?;
+    let (result, descriptors) = expect_crash_transport(
+        receive_packet(control, Some(0)),
+        mode,
+        &[
+            FaultPoint::Proceed,
+            FaultPoint::SourceProbe,
+            FaultPoint::OutsideDenial,
+            FaultPoint::StageCreate,
+        ],
+        child,
+    )?;
     if !descriptors.is_empty()
         || result.kind != Kind::Result
         || result.operation_id != operation_id
@@ -271,44 +578,73 @@ fn exchange(
     {
         return Err(io::Error::other("worker result is inconsistent").into());
     }
+    if mode == ChildMode::ExitAt(FaultPoint::Result) {
+        return finish_observed_crash(control, child, operation_id, FaultPoint::Result);
+    }
 
     let ack = Frame::new(Kind::ExitAck, operation_id);
-    send_packet(&control, ack, &[])?;
-    let wait_result = child.wait_bounded();
-    if child.reaped {
-        fixture.authorize_cleanup();
+    send_packet(control, ack, &[])?;
+    let status = child.wait_bounded()?;
+    if mode == ChildMode::ExitAt(FaultPoint::ExitAck) {
+        return Err(ExpectedCrash(FaultPoint::ExitAck).into());
     }
-    let status = wait_result?;
     if !status.success() {
         return Err(io::Error::other(format!("worker exited unsuccessfully: {status}")).into());
     }
     Ok(ExchangeOutcome::Complete(result))
 }
 
+fn expect_crash_transport<T>(
+    result: Result<T, TransportError>,
+    mode: ChildMode,
+    points: &[FaultPoint],
+    child: &mut ChildBoundary,
+) -> Result<T, Box<dyn std::error::Error>> {
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            let ChildMode::ExitAt(point) = mode else {
+                return Err(error.into());
+            };
+            if !points.contains(&point) {
+                return Err(error.into());
+            }
+            child.wait_bounded()?;
+            Err(ExpectedCrash(point).into())
+        }
+    }
+}
+
+fn finish_observed_crash(
+    control: &OwnedFd,
+    child: &mut ChildBoundary,
+    operation_id: [u8; 16],
+    point: FaultPoint,
+) -> Result<ExchangeOutcome, Box<dyn std::error::Error>> {
+    send_packet(control, Frame::new(Kind::Checkpoint, operation_id), &[])?;
+    child.wait_bounded()?;
+    Err(ExpectedCrash(point).into())
+}
+
 fn finish_rejection(
     child: &mut ChildBoundary,
-    fixture: &Fixture,
     response: Frame,
     operation_id: [u8; 16],
 ) -> Result<ExchangeOutcome, Box<dyn std::error::Error>> {
-    if response.operation_id != operation_id
-        || response.flags != 0
-        || response.values[2] != 0
-        || response.values[3] != 0
-    {
+    if response.operation_id != operation_id || response.flags != 0 || response.values[3] != 0 {
         return Err(io::Error::other("worker error frame is inconsistent").into());
     }
-    let wait_result = child.wait_bounded();
-    if child.reaped {
-        fixture.authorize_cleanup();
-    }
-    let status = wait_result?;
-    if status.success() {
-        return Err(io::Error::other("worker reported rejection but exited successfully").into());
+    let status = child.wait_bounded()?;
+    if status.code() != Some(1) {
+        return Err(io::Error::other(format!(
+            "worker reported rejection but exited with {status} instead of code 1"
+        ))
+        .into());
     }
     Ok(ExchangeOutcome::Rejected {
         code: response.values[0],
         phase: response.values[1],
+        detail: response.values[2],
     })
 }
 
@@ -499,11 +835,12 @@ fn fdinfo_flags(proc_root: &Path, descriptor: i32) -> Result<u64, Box<dyn std::e
     Ok(u64::from_str_radix(raw_flags, 8)?)
 }
 
-fn spawn_child(child_socket: OwnedFd) -> io::Result<Child> {
+fn spawn_child(child_socket: OwnedFd, mode: ChildMode) -> io::Result<Child> {
     let mut command = Command::new(std::env::current_exe()?);
     command
         .arg(CHILD_MARKER)
         .arg(std::process::id().to_string())
+        .arg(mode.argument())
         .env_clear()
         .stdin(Stdio::from(child_socket))
         .stdout(Stdio::null())
@@ -541,9 +878,11 @@ fn descriptor_identity(descriptor: &File) -> Result<[u64; 4], rustix::io::Errno>
     ])
 }
 
-fn source_identity(descriptor: &File) -> Result<[u64; 4], Box<dyn std::error::Error>> {
+fn source_identity(descriptor: &File) -> io::Result<[u64; 4]> {
     let stat = rustix::fs::fstat(descriptor)?;
-    Ok([u64::try_from(stat.st_size)?, stat.st_dev, stat.st_ino, 0])
+    let length = u64::try_from(stat.st_size)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "source length is negative"))?;
+    Ok([length, stat.st_dev, stat.st_ino, 0])
 }
 
 fn random_operation_id() -> Result<[u8; 16], getrandom::Error> {
@@ -576,17 +915,27 @@ enum CaseMutation {
     DirectoryAsSource,
     ExtraSourceDescriptor,
     WrongSourceOperation,
+    ShortSource,
+    LongSource,
+    TruncatedSourceControl,
 }
 
 enum ExchangeOutcome {
     Complete(Frame),
-    Rejected { code: u64, phase: u64 },
+    Rejected { code: u64, phase: u64, detail: u64 },
+    Crashed(FaultPoint),
 }
+
+#[derive(Debug, thiserror::Error)]
+#[error("worker reached the observed crash barrier {0:?}")]
+struct ExpectedCrash(FaultPoint);
 
 struct Fixture {
     root: PathBuf,
     source: File,
+    source_identity: [u64; 4],
     stage: Option<File>,
+    stage_identity: Option<[u64; 4]>,
     outside_sentinel: File,
     cleanup_authorized: Cell<bool>,
     cleanup_complete: Cell<bool>,
@@ -614,7 +963,6 @@ impl Fixture {
             .mode(0o600)
             .open(&source_path)?;
         source_writer.write_all(SOURCE_BYTES)?;
-        source_writer.sync_all()?;
         drop(source_writer);
         let source = OpenOptions::new()
             .read(true)
@@ -652,18 +1000,27 @@ impl Fixture {
         outside_sentinel.write_all(b"outside")?;
         outside_sentinel.flush()?;
 
+        let source_identity = source_identity(&source)?;
+        let stage_identity = stage.as_ref().map(descriptor_identity).transpose()?;
+
         Ok(Self {
             root,
             source,
+            source_identity,
             stage,
+            stage_identity,
             outside_sentinel,
-            cleanup_authorized: Cell::new(false),
+            cleanup_authorized: Cell::new(true),
             cleanup_complete: Cell::new(false),
         })
     }
 
     fn authorize_cleanup(&self) {
         self.cleanup_authorized.set(true);
+    }
+
+    fn revoke_cleanup(&self) {
+        self.cleanup_authorized.set(false);
     }
 
     fn cleanup(&self) -> io::Result<()> {
@@ -673,9 +1030,96 @@ impl Fixture {
             ));
         }
         fs::remove_dir_all(&self.root)?;
+        if self.root.try_exists()? {
+            return Err(io::Error::other(
+                "fixture root still exists after checked cleanup",
+            ));
+        }
         self.cleanup_complete.set(true);
         Ok(())
     }
+
+    fn verify_authority_state(&self, expect_stage_probe: bool) -> io::Result<()> {
+        if source_identity(&self.source)? != self.source_identity {
+            return Err(io::Error::other(
+                "source descriptor identity changed during injected worker failure",
+            ));
+        }
+        let mut source = vec![0_u8; SOURCE_BYTES.len()];
+        let source_read = rustix::io::pread(&self.source, &mut source, 0)?;
+        if source_read != source.len() || source != SOURCE_BYTES {
+            return Err(io::Error::other(
+                "source changed during injected worker failure",
+            ));
+        }
+
+        let mut sentinel = [0_u8; 7];
+        let sentinel_read = rustix::io::pread(&self.outside_sentinel, &mut sentinel, 0)?;
+        if sentinel_read != sentinel.len() || &sentinel != b"outside" {
+            return Err(io::Error::other(
+                "outside sentinel changed during injected worker failure",
+            ));
+        }
+
+        let stage = self
+            .stage
+            .as_ref()
+            .ok_or_else(|| io::Error::other("crash barrier fixture has no stage"))?;
+        if Some(descriptor_identity(stage)?) != self.stage_identity {
+            return Err(io::Error::other(
+                "stage identity, owner, type, or mode changed during injected worker failure",
+            ));
+        }
+
+        let stage_path = self.root.join("stage");
+        let probe = stage_path.join(".sealr-bootstrap-probe");
+        if expect_stage_probe {
+            if fs::read(&probe)? != b"ok" {
+                return Err(io::Error::other(
+                    "stage probe is invalid after its crash barrier",
+                ));
+            }
+        } else if probe.try_exists()? {
+            return Err(io::Error::other(
+                "stage probe appeared before its lifecycle barrier",
+            ));
+        }
+
+        let stage_entries = directory_entry_names(&stage_path)?;
+        let expected_stage_entries = if expect_stage_probe {
+            vec![".sealr-bootstrap-probe".to_owned()]
+        } else {
+            Vec::new()
+        };
+        if stage_entries != expected_stage_entries {
+            return Err(io::Error::other(format!(
+                "worker left unexpected stage entries: {stage_entries:?}"
+            )));
+        }
+
+        let root_entries = directory_entry_names(&self.root)?;
+        let expected = vec!["outside-sentinel".to_owned(), "stage".to_owned()];
+        if root_entries != expected {
+            return Err(io::Error::other(format!(
+                "worker created unexpected fixture entries: {root_entries:?}"
+            )));
+        }
+        Ok(())
+    }
+}
+
+fn directory_entry_names(path: &Path) -> io::Result<Vec<String>> {
+    let mut entries = fs::read_dir(path)?
+        .map(|entry| {
+            entry.and_then(|entry| {
+                entry.file_name().into_string().map_err(|_| {
+                    io::Error::new(io::ErrorKind::InvalidData, "non-UTF-8 fixture entry")
+                })
+            })
+        })
+        .collect::<io::Result<Vec<_>>>()?;
+    entries.sort_unstable();
+    Ok(entries)
 }
 
 impl Drop for Fixture {
@@ -690,22 +1134,40 @@ struct ChildBoundary {
     child: Child,
     pidfd: OwnedFd,
     reaped: bool,
+    status: Option<ExitStatus>,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+struct BoundaryBindError {
+    message: String,
+    reaped: bool,
 }
 
 impl ChildBoundary {
-    fn bind(mut child: Child) -> Result<Self, Box<dyn std::error::Error>> {
+    fn bind(mut child: Child) -> Result<Self, BoundaryBindError> {
         let pid = rustix::process::Pid::from_child(&child);
         match rustix::process::pidfd_open(pid, PidfdFlags::empty()) {
             Ok(pidfd) => Ok(Self {
                 child,
                 pidfd,
                 reaped: false,
+                status: None,
             }),
-            Err(error) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                Err(error.into())
-            }
+            Err(error) => match terminate_unbound_child_bounded(&mut child) {
+                Ok(status) => Err(BoundaryBindError {
+                    message: format!(
+                        "binding worker pidfd failed: {error}; bounded fallback reaped it as {status}"
+                    ),
+                    reaped: true,
+                }),
+                Err(termination) => Err(BoundaryBindError {
+                    message: format!(
+                        "binding worker pidfd failed: {error}; bounded fallback termination also failed: {termination}"
+                    ),
+                    reaped: false,
+                }),
+            },
         }
     }
 
@@ -713,35 +1175,58 @@ impl ChildBoundary {
         self.child.id()
     }
 
+    fn is_reaped(&self) -> bool {
+        self.reaped
+    }
+
+    fn status(&self) -> Option<&ExitStatus> {
+        self.status.as_ref()
+    }
+
+    fn record_status(&mut self, status: ExitStatus) -> ExitStatus {
+        self.reaped = true;
+        self.status = Some(status);
+        status
+    }
+
+    fn reap_until(&mut self, deadline: Instant) -> io::Result<ExitStatus> {
+        loop {
+            if let Some(status) = self.child.try_wait()? {
+                return Ok(self.record_status(status));
+            }
+            if Instant::now() >= deadline {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "worker reap could not be proved within the deadline",
+                ));
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+
+    fn terminate_and_reap_bounded(&mut self) -> io::Result<ExitStatus> {
+        if let Some(status) = self.child.try_wait()? {
+            return Ok(self.record_status(status));
+        }
+        match rustix::process::pidfd_send_signal(&self.pidfd, Signal::KILL) {
+            Ok(()) | Err(rustix::io::Errno::SRCH) => {}
+            Err(error) => return Err(io::Error::from(error)),
+        }
+        self.reap_until(Instant::now() + KILL_REAP_TIMEOUT)
+    }
+
     fn wait_bounded(&mut self) -> io::Result<ExitStatus> {
         let deadline = Instant::now() + CHILD_EXIT_TIMEOUT;
         loop {
             if let Some(status) = self.child.try_wait()? {
-                self.reaped = true;
-                return Ok(status);
+                return Ok(self.record_status(status));
             }
             if Instant::now() >= deadline {
-                match rustix::process::pidfd_send_signal(&self.pidfd, Signal::KILL) {
-                    Ok(()) | Err(rustix::io::Errno::SRCH) => {}
-                    Err(error) => return Err(io::Error::from(error)),
-                }
-                let kill_deadline = Instant::now() + KILL_REAP_TIMEOUT;
-                loop {
-                    if let Some(status) = self.child.try_wait()? {
-                        self.reaped = true;
-                        return Err(io::Error::new(
-                            io::ErrorKind::TimedOut,
-                            format!("worker exceeded deadline and was reaped as {status}"),
-                        ));
-                    }
-                    if Instant::now() >= kill_deadline {
-                        return Err(io::Error::new(
-                            io::ErrorKind::TimedOut,
-                            "worker was killed but reap could not be proved within the deadline",
-                        ));
-                    }
-                    thread::sleep(Duration::from_millis(10));
-                }
+                let status = self.terminate_and_reap_bounded()?;
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    format!("worker exceeded deadline and was reaped as {status}"),
+                ));
             }
             thread::sleep(Duration::from_millis(10));
         }
@@ -766,5 +1251,25 @@ impl Drop for ChildBoundary {
             }
             thread::sleep(Duration::from_millis(5));
         }
+    }
+}
+
+fn terminate_unbound_child_bounded(child: &mut Child) -> io::Result<ExitStatus> {
+    if let Some(status) = child.try_wait()? {
+        return Ok(status);
+    }
+    child.kill()?;
+    let deadline = Instant::now() + KILL_REAP_TIMEOUT;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(status);
+        }
+        if Instant::now() >= deadline {
+            return Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "unbound worker reap could not be proved within the deadline",
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
     }
 }

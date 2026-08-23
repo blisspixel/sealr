@@ -15,6 +15,7 @@ pub(crate) enum Kind {
     Result = 6,
     ExitAck = 7,
     Error = 8,
+    Checkpoint = 9,
 }
 
 impl TryFrom<u8> for Kind {
@@ -30,6 +31,7 @@ impl TryFrom<u8> for Kind {
             6 => Ok(Self::Result),
             7 => Ok(Self::ExitAck),
             8 => Ok(Self::Error),
+            9 => Ok(Self::Checkpoint),
             _ => Err(FrameError::Kind(value)),
         }
     }
@@ -159,6 +161,7 @@ mod tests {
             Kind::Result,
             Kind::ExitAck,
             Kind::Error,
+            Kind::Checkpoint,
         ] {
             let frame = Frame::new(kind, OPERATION_ID);
             assert_eq!(Frame::decode(&frame.encode()), Ok(frame));

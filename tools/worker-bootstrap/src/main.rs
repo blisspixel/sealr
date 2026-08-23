@@ -2,6 +2,8 @@
 mod frame;
 
 #[cfg(target_os = "linux")]
+mod fault;
+#[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
 mod supervisor;

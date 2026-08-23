@@ -1,3 +1,4 @@
+use crate::fault::{ChildMode, FaultPoint};
 use crate::frame::{Frame, Kind};
 use crate::linux::{
     close_inherited_authority, configure_timeout, receive_packet, send_packet,
@@ -23,6 +24,12 @@ const PHASE_PROBE: u64 = 5;
 const PHASE_EXIT: u64 = 6;
 
 pub(crate) fn entry(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>> {
+    if args.len() != 3 {
+        return Err("internal child entry requires exactly three arguments".into());
+    }
+    let mode = ChildMode::parse(&args[2]).ok_or("internal child mode is invalid")?;
+    mode.exit_at(FaultPoint::ExecEntry);
+
     let expected_parent = args
         .get(1)
         .and_then(|value| value.to_str())
@@ -51,21 +58,24 @@ pub(crate) fn entry(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>>
     if rustix::net::sockopt::socket_peercred(control)?.pid != expected_parent {
         return Err(io::Error::other("worker control peer is not the expected parent").into());
     }
+    mode.exit_at(FaultPoint::PeerValidation);
     rustix::io::fcntl_setfd(control, FdFlags::CLOEXEC)?;
-    close_inherited_authority().map_err(|error| {
+    close_inherited_authority(control).map_err(|error| {
         io::Error::other(format!(
             "authority closure failed with code {ERROR_AUTHORITY_CLOSE}: {error}"
         ))
     })?;
+    mode.exit_at(FaultPoint::InheritedClosure);
     configure_timeout(control)?;
 
     let (bootstrap, descriptors) = receive_packet(control, None)?;
+    mode.exit_at(FaultPoint::BootstrapReceive);
     let operation_id = bootstrap.operation_id;
-    match run(control, bootstrap, descriptors) {
+    match run(control, bootstrap, descriptors, mode) {
         Ok(()) => Ok(()),
         Err(failure) => {
             let mut error = Frame::new(Kind::Error, operation_id);
-            error.values = [failure.code, failure.phase, 0, 0];
+            error.values = [failure.code, failure.phase, failure.detail, 0];
             let _ = send_packet(control, error, &[]);
             Err(io::Error::other(failure.message).into())
         }
@@ -76,6 +86,7 @@ fn run(
     control: rustix::fd::BorrowedFd<'_>,
     bootstrap: Frame,
     mut descriptors: Vec<OwnedFd>,
+    mode: ChildMode,
 ) -> Result<(), WorkerFailure> {
     require_kind(&bootstrap, Kind::Bootstrap, PHASE_BOOTSTRAP)?;
     if bootstrap.flags & !FLAG_STAGE != 0 {
@@ -102,6 +113,14 @@ fn run(
     } else {
         None
     };
+    mode.exit_at(FaultPoint::StageValidation);
+
+    let probed_abi = probe_landlock_abi(mode)?;
+    if probed_abi < ABI::V3 as u64 {
+        return Err(restriction(format!(
+            "Landlock ABI {probed_abi} is below the required ABI 3 floor"
+        )));
+    }
 
     rustix::thread::set_no_new_privs(true)
         .map_err(|error| restriction(format!("setting no_new_privs failed: {error}")))?;
@@ -110,6 +129,7 @@ fn run(
     {
         return Err(restriction("no_new_privs did not remain enabled"));
     }
+    mode.exit_at(FaultPoint::NoNewPrivs);
 
     let handled = AccessFs::from_all(ABI::V3);
     let stage_grant = make_bitflags!(AccessFs::{WriteFile | MakeDir | MakeReg});
@@ -138,6 +158,7 @@ fn run(
         }
         _ => return Err(restriction("Landlock ABI 3 is unavailable")),
     };
+    mode.exit_at(FaultPoint::Landlock);
 
     let operation_id = bootstrap.operation_id;
     let mut ready = Frame::new(Kind::RestrictedReady, operation_id);
@@ -152,9 +173,18 @@ fn run(
     ];
     send_packet(control, ready, &[])
         .map_err(|error| protocol(PHASE_RESTRICTION, format!("sending ready failed: {error}")))?;
+    await_observation_checkpoint(control, mode, FaultPoint::Ready, operation_id)?;
 
-    let (source_frame, mut source_descriptors) = receive_packet(control, Some(1))
-        .map_err(|error| protocol(PHASE_SOURCE, format!("receiving source failed: {error}")))?;
+    let (source_frame, mut source_descriptors) =
+        receive_packet(control, Some(1)).map_err(|error| {
+            let detail = error.protocol_detail();
+            protocol_with_detail(
+                PHASE_SOURCE,
+                detail,
+                format!("receiving source failed: {error}"),
+            )
+        })?;
+    mode.exit_at(FaultPoint::SourceReceive);
     require_kind_and_operation(&source_frame, Kind::Source, operation_id, PHASE_SOURCE)?;
     if source_frame.flags != 0 || source_frame.values[3] != 0 {
         return Err(protocol(PHASE_SOURCE, "source frame fields are invalid"));
@@ -163,12 +193,14 @@ fn run(
         .pop()
         .expect("source descriptor count was validated by the transport");
     validate_source(&source, source_frame.values, stage.as_ref())?;
+    mode.exit_at(FaultPoint::SourceValidation);
 
     let mut accepted = Frame::new(Kind::Accepted, operation_id);
     accepted.values = source_frame.values;
     accepted.values[3] = source.as_raw_fd() as u64;
     send_packet(control, accepted, &[])
         .map_err(|error| protocol(PHASE_SOURCE, format!("sending acceptance failed: {error}")))?;
+    await_observation_checkpoint(control, mode, FaultPoint::Accepted, operation_id)?;
 
     let (proceed, descriptors) = receive_packet(control, Some(0))
         .map_err(|error| protocol(PHASE_PROBE, format!("receiving proceed failed: {error}")))?;
@@ -176,11 +208,15 @@ fn run(
     if proceed.flags != 0 || proceed.values != [0; 4] || !descriptors.is_empty() {
         return Err(protocol(PHASE_PROBE, "proceed frame is not empty"));
     }
+    mode.exit_at(FaultPoint::Proceed);
 
     let source_byte = read_source_probe(&source)?;
+    mode.exit_at(FaultPoint::SourceProbe);
     let outside_errno = verify_outside_denied(stage.as_ref())?;
+    mode.exit_at(FaultPoint::OutsideDenial);
     let stage_created = if let Some(stage) = &stage {
         create_stage_probe(stage)?;
+        mode.exit_at(FaultPoint::StageCreate);
         1
     } else {
         0
@@ -191,6 +227,7 @@ fn run(
     result.values = [u64::from(source_byte), outside_errno, stage_created, 0];
     send_packet(control, result, &[])
         .map_err(|error| protocol(PHASE_PROBE, format!("sending result failed: {error}")))?;
+    await_observation_checkpoint(control, mode, FaultPoint::Result, operation_id)?;
 
     let (ack, descriptors) = receive_packet(control, Some(0))
         .map_err(|error| protocol(PHASE_EXIT, format!("receiving exit ack failed: {error}")))?;
@@ -198,7 +235,31 @@ fn run(
     if ack.flags != 0 || ack.values != [0; 4] || !descriptors.is_empty() {
         return Err(protocol(PHASE_EXIT, "exit acknowledgement is not empty"));
     }
+    mode.exit_at(FaultPoint::ExitAck);
     Ok(())
+}
+
+fn await_observation_checkpoint(
+    control: rustix::fd::BorrowedFd<'_>,
+    mode: ChildMode,
+    point: FaultPoint,
+    operation_id: [u8; 16],
+) -> Result<(), WorkerFailure> {
+    if mode != ChildMode::ExitAt(point) {
+        return Ok(());
+    }
+    let (checkpoint, descriptors) = receive_packet(control, Some(0)).map_err(|error| {
+        protocol(
+            PHASE_EXIT,
+            format!("receiving observation checkpoint failed: {error}"),
+        )
+    })?;
+    require_kind_and_operation(&checkpoint, Kind::Checkpoint, operation_id, PHASE_EXIT)?;
+    if checkpoint.flags != 0 || checkpoint.values != [0; 4] || !descriptors.is_empty() {
+        return Err(protocol(PHASE_EXIT, "observation checkpoint is not empty"));
+    }
+    mode.exit_at(point);
+    unreachable!("fault injection exits the child process")
 }
 
 fn validate_stage(stage: &OwnedFd, expected: [u64; 4]) -> Result<(), WorkerFailure> {
@@ -276,6 +337,38 @@ fn read_source_probe(source: &OwnedFd) -> Result<u8, WorkerFailure> {
     Ok(byte[0])
 }
 
+fn probe_landlock_abi(mode: ChildMode) -> Result<u64, WorkerFailure> {
+    let observed = match mode {
+        ChildMode::InsufficientLandlockAbi => 2_i64,
+        ChildMode::RestrictionProbeFailure => {
+            return Err(restriction(
+                "deterministic conformance injection rejected the Landlock ABI probe",
+            ));
+        }
+        ChildMode::Normal | ChildMode::ExitAt(_) => {
+            const LANDLOCK_CREATE_RULESET_VERSION: u32 = 1;
+            // SAFETY: a null attribute pointer and zero size are the kernel's
+            // documented Landlock ABI query. No userspace memory is read or
+            // written by this syscall form.
+            unsafe {
+                libc::syscall(
+                    libc::SYS_landlock_create_ruleset,
+                    std::ptr::null::<libc::c_void>(),
+                    0_usize,
+                    LANDLOCK_CREATE_RULESET_VERSION,
+                ) as i64
+            }
+        }
+    };
+    if observed < 0 {
+        let error = io::Error::last_os_error();
+        return Err(restriction(format!(
+            "querying the Landlock ABI failed: {error}"
+        )));
+    }
+    u64::try_from(observed).map_err(|_| restriction("Landlock ABI query overflowed u64"))
+}
+
 fn verify_outside_denied(stage: Option<&OwnedFd>) -> Result<u64, WorkerFailure> {
     let result = if let Some(stage) = stage {
         rustix::fs::openat(
@@ -340,6 +433,10 @@ fn protocol(phase: u64, message: impl Into<String>) -> WorkerFailure {
     WorkerFailure::new(ERROR_PROTOCOL, phase, message)
 }
 
+fn protocol_with_detail(phase: u64, detail: u64, message: impl Into<String>) -> WorkerFailure {
+    WorkerFailure::with_detail(ERROR_PROTOCOL, phase, detail, message)
+}
+
 fn descriptor(phase: u64, message: impl Into<String>) -> WorkerFailure {
     WorkerFailure::new(ERROR_DESCRIPTOR, phase, message)
 }
@@ -355,6 +452,7 @@ fn probe(message: impl Into<String>) -> WorkerFailure {
 struct WorkerFailure {
     code: u64,
     phase: u64,
+    detail: u64,
     message: String,
 }
 
@@ -363,6 +461,16 @@ impl WorkerFailure {
         Self {
             code,
             phase,
+            detail: 0,
+            message: message.into(),
+        }
+    }
+
+    fn with_detail(code: u64, phase: u64, detail: u64, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            phase,
+            detail,
             message: message.into(),
         }
     }

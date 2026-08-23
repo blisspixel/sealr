@@ -64,7 +64,7 @@ The version 1 start payload is exactly 196 bytes.
 | 28 | 8 | Source length | At most `max_archive_bytes` |
 | 36 | 32 | Source SHA-256 | Digest of the complete immutable snapshot |
 | 68 | 32 | Interpretation profile SHA-256 | Exact selected profile identity |
-| 100 | 32 | Policy SHA-256 | Exact compiled policy identity |
+| 100 | 32 | Policy SHA-256 | Opaque supervisor-supplied policy identity; v1 defines no compiled-policy preimage |
 | 132 | 8 | Maximum archive bytes | Resource limit |
 | 140 | 8 | Maximum files | Resource limit |
 | 148 | 8 | Maximum member bytes | Resource limit |
@@ -121,7 +121,7 @@ Version 1 is a non-shipping transport foundation, not the final Alpha.6 semantic
 
 The result carries a reduced staged-member manifest, findings, and preview roots. It does not carry a complete `ArchiveIR`, byte ranges, compressed sizes, methods, CRC32 values, extra-field dispositions, normalization actions, snapshot ownership, or an independently checkable proof that the manifest is the unique meaning of the snapshot. It therefore cannot construct the public `Outcome`, `ArchiveIR`, or `VerifiedArchive`. A supervisor can validate the frame and, after proving that all writers are quiescent, compare a stage with the returned claim. Protocol v1 alone does not let it independently verify archive semantics or preserve bounded later member reads.
 
-The first Alpha.6 slice has landed as a separate repository-only, nonsemantic Linux authority-bootstrap lab. It tests descriptor transfer and identity, pre-exec and child-entry closure, `no_new_privs`, fixed Landlock ABI 3 ordering before source transfer, pidfd-backed termination and reap, and checked post-reap fixture cleanup without treating v1 as a runtime outcome format. The lab does not depend on or invoke protocol v1. The next semantic increment must choose either a complete bounded IR or certificate returned to the supervisor, or an explicit worker-backed session with bounded reads, retention, lifetime, cancellation, and crash behavior. Conformance vectors must cover admitted plus effect-failed, worker crash, malformed result, writer-quiescence failure, stage-audit failure, cleanup failure, and publication failure before archive execution crosses the process boundary.
+The first Alpha.6 slice has landed as a separate repository-only, nonsemantic Linux authority-bootstrap lab. It tests descriptor transfer and identity, pre-exec and child-entry closure, `no_new_privs`, fixed Landlock ABI 3 ordering before source transfer, pidfd-backed termination and reap, and checked post-reap fixture cleanup without treating v1 as a runtime outcome format. The lab does not depend on or invoke protocol v1. The [semantic-ownership decision](decisions/0001-alpha6-semantic-ownership.md) next accepts a private split-phase semantic-record experiment while keeping retained-content transfer, isolated non-retained reads, materializing-writer quiescence, and helper packaging separate. Record tests and end-to-end merge tests must preserve IR on destination setup failure, distinguish worker and supervisor facts, and cover worker crash, malformed results, writer-quiescence failure, stage-audit failure, cleanup failure, publication failure, clone and drop behavior, retained borrows, and bounded reads before archive execution crosses the process boundary.
 
 ## Test and fuzz evidence
 
