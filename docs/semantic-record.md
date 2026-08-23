@@ -6,7 +6,7 @@ This experiment makes the split-phase handoff in the [semantic-ownership decisio
 
 ## Record boundary
 
-The experimental format has independent `SEALRSEM` magic, version `1`, planning and completion kinds, a zero reserved byte, little-endian fixed integers, an exact body length, and a 64 MiB encoded-length limit. The encoder checks each required length before requesting buffer growth or copying field bytes, uses bounded fallible reserve requests, and stops appending after the first error. An allocator may retain capacity beyond the logical encoded length, so the limit is not an allocator-capacity claim. The decoder checks counts against semantic maxima and the minimum bytes remaining before fallible vector reservation. After exact equality with the supervisor-supplied expected binding succeeds, it also applies the bound `max_path_depth` before allocating owned component strings and bounds normalization reservation by actions representable by the encoded member name. Strings are length-bounded and validated as UTF-8 before typed conversion. Unknown tags, nonzero reserved state, truncation, trailing bytes, range overflow, and cross-phase decoding fail closed with a typed static-detail error.
+The experimental format has independent `SEALRSEM` magic, version `1`, planning and completion kinds, a zero reserved byte, little-endian fixed integers, an exact body length, and a 64 MiB encoded-length limit. The encoder checks each required length before requesting buffer growth or copying field bytes, uses bounded fallible reserve requests, and stops appending after the first error. An allocator may retain capacity beyond the logical encoded length, so the limit is not an allocator-capacity claim. The decoder checks counts against semantic maxima and the minimum bytes remaining before fallible vector reservation. After exact equality with the supervisor-supplied expected binding succeeds, it also applies the bound `max_path_depth` before allocating owned component strings and bounds normalization reservation by actions representable by the encoded member name. Input-sized validation scratch is either allocation-free or reserved fallibly: path topology sorts one borrowed-path vector with allocation-free ASCII folding, detects adjacent equality, and binary-searches every slash-delimited ancestor so an interleaving sibling cannot hide a file conflict; extra-field duplicate detection uses a fixed ID bitset; and covering reproduction reserves its two range vectors before population. Strings are length-bounded and validated as UTF-8 before typed conversion. Unknown tags, nonzero reserved state, truncation, trailing bytes, range overflow, allocation failure, and cross-phase decoding fail closed with a typed static-detail error.
 
 Successful decode must re-encode to the exact same bytes. The format is private and experimental, so these bytes are pinned as repository evidence rather than promised as a public compatibility surface.
 
@@ -35,13 +35,13 @@ The request ID hashes a domain-separated canonical invocation binding. The plan 
 
 ### Completion record
 
-A completion echoes the exact operation, request ID, and plan ID before any variable allocation. It does not duplicate or mutate structural IR. Instead, it carries one verification state for every member in planning order:
+A completion echoes the exact operation, request ID, and plan ID before any variable allocation. It does not duplicate or mutate structural IR on wire. Instead, it carries one verification state for every member in planning order:
 
 - `Verified` with actual size, CRC32, and binary SHA-256;
 - one optional `Failed` frontier with a closed finding-code cause; or
 - `Pending` after that frontier.
 
-A complete record requires every member verified and no error finding. A stopped record requires the exact `Verified*`, `Failed`, `Pending*` sequence. Its public `pending_members` count remains the total minus the verified prefix, so it includes the failed frontier member, matching current behavior. Interpretation, admission, verification, and view completeness are derived from the first error and the validated member vector instead of trusting duplicated worker-authored axes.
+A complete record requires every member verified and no error finding. A stopped record requires the exact `Verified*`, `Failed`, `Pending*` sequence. Its public `pending_members` count remains the total minus the verified prefix, so it includes the failed frontier member, matching current behavior. Interpretation, admission, verification, and view completeness are derived from the first error and the validated member vector instead of trusting duplicated worker-authored axes. Semantic validation borrows the accepted planning IR. Canonical re-encoding uses that proof without validating or cloning the IR again. Accepted decode drops the canonical byte buffer before one fallible IR reconstruction, applies the validated member states, and moves decoded findings into the result. Direct encode and rejected decode materialize no IR.
 
 Effect, cleanup, audit, publication, compatibility verdict, `wrote`, CLI exit, view and receipt schemas, environment evidence, tree-root claims, retained bytes, and later member-read authority are absent. Those remain supervisor-owned.
 
@@ -83,10 +83,13 @@ Focused deterministic tests cover:
 - materialization-only setup merging with setup-owned error causes;
 - parity with the public parser for 257 path components and 257 normalization actions, plus rejection of the same deep plan before component allocation when its authenticated depth is reduced;
 - rejection at a deliberately small encoder limit before the attempted field can grow the output;
+- zero completion IR materializations for direct encode, stale correlation, and a late-invalid frontier; exactly one for accepted Complete and Stopped decode;
+- a deterministic failpoint walk across every completion-reconstruction reservation, with typed `AllocationFailed` results and the accepted plan left pending and unchanged;
+- a record above 64 KiB that measures the exact logical reconstruction budget, rejects one byte under that budget, and succeeds with one materialization at the exact budget;
 - distinct absent and present-empty retention bindings;
 - pinned plan and completion vector digests.
 
-A separate `semantic_records` libFuzzer target uses a hidden, nondefault fuzz-only feature to reach this private boundary. It decodes arbitrary planning and completion bytes, applies up to 128 input-directed mutations per canonical Ready, terminal-admission, Complete, and Stopped frame, requires stable success or error class and error offset on repeated decode, checks exact Ready-plan IR equality with the production pending IR, rejects stale completion correlation, and exercises every valid record kind. A committed dictionary and four seed cases have their paths, lengths, and SHA-256 digests checked by required CI. The verifier binds the complete Cargo manifest, parsed exact bin, hidden driver source, lock checksum, and registry-rooted crates.io libFuzzer package while refusing Cargo configuration, then compares the complete scheduled workflow with a manifest-derived contract covering its weekly trigger, permissions, concurrency, setup, shell programs, resource bounds, dictionaries, and failure artifacts. Executable negative fixtures reject inert TOML remapping, local, patched, or vendored fuzz-engine substitution, manual-only drift, direct weakening, inactive or appended commands, inert artifact evidence, and raw or quoted duplicate last-wins arguments. The target compiles under the pinned fuzz workspace. The first clean exact-commit Linux AddressSanitizer campaign passed in [on-demand run 32634689922](https://github.com/blisspixel/sealr/actions/runs/32634689922) at `384781fcba15409dd4a30a3202dc2844a06e7dce`: 194,476 units in 601 seconds at 512 MiB peak RSS, with no crash or reproducer. Because the event was `workflow_dispatch`, the first scheduled-event run and accumulated scheduled history remain pending.
+A separate `semantic_records` libFuzzer target uses a hidden, nondefault fuzz-only feature to reach this private boundary. It decodes arbitrary planning and completion bytes, applies up to 128 input-directed mutations per canonical Ready, terminal-admission, Complete, and Stopped frame, requires stable success or error class and error offset on repeated decode, checks exact Ready-plan IR equality with the production pending IR, rejects stale completion correlation, and exercises every valid record kind. A committed dictionary and four seed cases have their paths, lengths, and SHA-256 digests checked by required CI. The verifier binds the complete Cargo manifest, parsed exact bin, hidden driver source, lock checksum, and registry-rooted crates.io libFuzzer package while refusing Cargo configuration, then compares the complete scheduled workflow with a manifest-derived contract covering its weekly trigger, permissions, concurrency, setup, shell programs, resource bounds, dictionaries, and failure artifacts. Executable negative fixtures reject inert TOML remapping, local, patched, or vendored fuzz-engine substitution, manual-only drift, direct weakening, inactive or appended commands, inert artifact evidence, and raw or quoted duplicate last-wins arguments. The target compiles under the pinned fuzz workspace. Clean exact-main on-demand evidence is recorded in the [assurance report](assurance.md#current-evidence); the first scheduled-event run and accumulated scheduled history remain pending.
 
 These tests establish parity for the named deterministic record, source-binding, and codec cases. They do not establish broader shadow parity or full `VerifiedArchive` equivalence.
 
@@ -94,13 +97,14 @@ These tests establish parity for the named deterministic record, source-binding,
 
 Before any runtime or public activation, Alpha.6 still requires:
 
-1. broader semantic shadow parity against the current `apply()` corpus, including malformed structure, quota stops, and codec stops; data descriptors and v1 ignored extras now have focused source-binding coverage;
-2. execution that consumes the validated plan without structurally reparsing the source;
-3. immutable retained-content transfer and original-pass retention semantics;
-4. isolated, caller-bounded non-retained reads with clone, cancellation, crash, and last-owner behavior;
-5. sealed immutable blob transport with exact seals, length, digest, clean exit, and reap;
-6. no-descendant and stage-permission-mutation controls, writer quiescence, stage audit, and supervisor-owned publication;
-7. a helper packaging and discovery model that works for both library and CLI consumers;
-8. the first scheduled-event campaign and accumulated clean scheduled history, with every reproducible failure promoted to a deterministic regression.
+1. an isolated allocator or process measurement near the private 64 MiB record limit proving that completion reconstruction adds only a bounded delta and no second full-IR-sized live allocation;
+2. broader semantic shadow parity against the current `apply()` corpus, including malformed structure, quota stops, and codec stops; data descriptors and v1 ignored extras now have focused source-binding coverage;
+3. execution that consumes the validated plan without structurally reparsing the source;
+4. immutable retained-content transfer and original-pass retention semantics;
+5. isolated, caller-bounded non-retained reads with clone, cancellation, crash, and last-owner behavior;
+6. sealed immutable blob transport with exact seals, length, digest, clean exit, and reap;
+7. no-descendant and stage-permission-mutation controls, writer quiescence, stage audit, and supervisor-owned publication;
+8. a helper packaging and discovery model that works for both library and CLI consumers;
+9. the first scheduled-event campaign and accumulated clean scheduled history, with every reproducible failure promoted to a deterministic regression.
 
 Invalid records, bad transport state, worker crash, and timeout are infrastructure failures. They must never be translated into archive denial, malformed interpretation, failed effect, or another worker-authored semantic claim.

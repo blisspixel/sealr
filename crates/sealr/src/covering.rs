@@ -5,7 +5,7 @@
 //! second parser.
 
 use crate::findings::{Finding, FindingCode};
-use crate::interval::{exact_partition, CheckedInterval, IntervalError, PartitionError};
+use crate::interval::{CheckedInterval, IntervalError};
 use crate::ir::{ArchiveIR, ByteRange};
 use crate::snapshot::SourceSnapshot;
 
@@ -13,19 +13,63 @@ const LFH_SIG: [u8; 4] = [0x50, 0x4b, 0x03, 0x04];
 const CDH_SIG: [u8; 4] = [0x50, 0x4b, 0x01, 0x02];
 const EOCD_SIG: [u8; 4] = [0x50, 0x4b, 0x05, 0x06];
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum CoveringAuditError<'member> {
+    Inconsistent {
+        detail: &'static str,
+        member: Option<&'member str>,
+    },
+    AllocationFailed,
+}
+
+impl<'member> CoveringAuditError<'member> {
+    fn on(self, member: &'member str) -> Self {
+        match self {
+            Self::Inconsistent { detail, .. } => Self::Inconsistent {
+                detail,
+                member: Some(member),
+            },
+            Self::AllocationFailed => Self::AllocationFailed,
+        }
+    }
+
+    fn into_finding(self) -> Finding {
+        match self {
+            Self::Inconsistent { detail, member } => {
+                let finding = Finding::error(FindingCode::CoveringInconsistent, detail);
+                match member {
+                    Some(member) => finding.on(member),
+                    None => finding,
+                }
+            }
+            Self::AllocationFailed => panic!("bounded covering audit allocation failed"),
+        }
+    }
+}
+
 /// Check that `ir.covering` is a labeled partition of `snapshot` with the
 /// claimed member header signatures at the recorded offsets.
 pub(crate) fn audit_covering(snapshot: &SourceSnapshot<'_>, ir: &ArchiveIR) -> Result<(), Finding> {
+    audit_covering_fallible(snapshot, ir).map_err(CoveringAuditError::into_finding)
+}
+
+pub(crate) fn audit_covering_fallible<'member>(
+    snapshot: &SourceSnapshot<'_>,
+    ir: &'member ArchiveIR,
+) -> Result<(), CoveringAuditError<'member>> {
     let digest = snapshot.digest();
     if ir.source_digest != *digest {
         return Err(inconsistent("source digest does not match the snapshot"));
     }
 
     let covering = &ir.covering;
-    let local_cover = checked_interval(covering.local_records, "local-record covering")?;
-    let central_cover = checked_interval(covering.central_directory, "central-directory covering")?;
-    let eocd_cover = checked_interval(covering.eocd, "EOCD covering")?;
-    let comment_cover = checked_interval(covering.comment, "comment covering")?;
+    let local_cover = checked_interval(covering.local_records, "local-record covering overflow")?;
+    let central_cover = checked_interval(
+        covering.central_directory,
+        "central-directory covering overflow",
+    )?;
+    let eocd_cover = checked_interval(covering.eocd, "EOCD covering overflow")?;
+    let comment_cover = checked_interval(covering.comment, "comment covering overflow")?;
 
     if local_cover.start() != 0 {
         return Err(inconsistent("local-record covering must start at offset 0"));
@@ -96,22 +140,31 @@ pub(crate) fn audit_covering(snapshot: &SourceSnapshot<'_>, ir: &ArchiveIR) -> R
     }
 
     let mut local_ranges = Vec::new();
+    local_ranges
+        .try_reserve_exact(ir.members.len())
+        .map_err(|_| CoveringAuditError::AllocationFailed)?;
     let mut central_ranges = Vec::new();
+    central_ranges
+        .try_reserve_exact(ir.members.len())
+        .map_err(|_| CoveringAuditError::AllocationFailed)?;
     for member in &ir.members {
-        let local_header = checked_interval(member.source_ranges.local_header, "local header")
-            .map_err(|finding| finding.on(&member.decoded_name))?;
+        let local_header =
+            checked_interval(member.source_ranges.local_header, "local header overflow")
+                .map_err(|finding| finding.on(&member.decoded_name))?;
         let payload = checked_interval(
             member.source_ranges.compressed_payload,
-            "compressed payload",
+            "compressed payload overflow",
         )
         .map_err(|finding| finding.on(&member.decoded_name))?;
-        let central_header =
-            checked_interval(member.source_ranges.central_header, "central header")
-                .map_err(|finding| finding.on(&member.decoded_name))?;
+        let central_header = checked_interval(
+            member.source_ranges.central_header,
+            "central header overflow",
+        )
+        .map_err(|finding| finding.on(&member.decoded_name))?;
         let descriptor = member
             .source_ranges
             .data_descriptor
-            .map(|range| checked_interval(range, "data descriptor"))
+            .map(|range| checked_interval(range, "data descriptor overflow"))
             .transpose()
             .map_err(|finding| finding.on(&member.decoded_name))?;
 
@@ -204,30 +257,66 @@ pub(crate) fn audit_covering(snapshot: &SourceSnapshot<'_>, ir: &ArchiveIR) -> R
         }
         return Ok(());
     }
-    exact_partition(local_cover, &local_ranges).map_err(|error| match error {
-        PartitionError::GapBeforeFirst { .. } => {
-            inconsistent("first local record does not start the local covering")
-        }
-        PartitionError::GapAfterLast { .. } => {
-            inconsistent("last local record does not end the local covering")
-        }
-        _ => inconsistent("local records do not form a partition of the covering"),
-    })?;
-    exact_partition(central_cover, &central_ranges).map_err(|error| match error {
-        PartitionError::GapBeforeFirst { .. } => {
-            inconsistent("first central header does not start the CD covering")
-        }
-        PartitionError::GapAfterLast { .. } => {
-            inconsistent("last central header does not end the CD covering")
-        }
-        _ => inconsistent("central headers do not form a partition of the covering"),
-    })?;
+    local_ranges.sort_unstable_by_key(|interval| interval.start());
+    validate_ordered_partition(
+        local_cover,
+        &local_ranges,
+        "first local record does not start the local covering",
+        "last local record does not end the local covering",
+        "local records do not form a partition of the covering",
+    )?;
+    central_ranges.sort_unstable_by_key(|interval| interval.start());
+    validate_ordered_partition(
+        central_cover,
+        &central_ranges,
+        "first central header does not start the CD covering",
+        "last central header does not end the CD covering",
+        "central headers do not form a partition of the covering",
+    )?;
     Ok(())
 }
 
-fn checked_interval(range: ByteRange, what: &str) -> Result<CheckedInterval, Finding> {
+fn validate_ordered_partition<'member>(
+    outer: CheckedInterval,
+    parts: &[CheckedInterval],
+    first_gap: &'static str,
+    last_gap: &'static str,
+    invalid: &'static str,
+) -> Result<(), CoveringAuditError<'member>> {
+    if parts.is_empty() {
+        return if outer.is_empty() {
+            Ok(())
+        } else {
+            Err(inconsistent(invalid))
+        };
+    }
+    if parts
+        .iter()
+        .any(|part| part.is_empty() || !outer.contains(*part))
+    {
+        return Err(inconsistent(invalid));
+    }
+    if parts[0].start() != outer.start() {
+        return Err(inconsistent(first_gap));
+    }
+    if parts
+        .windows(2)
+        .any(|window| window[0].end() != window[1].start())
+    {
+        return Err(inconsistent(invalid));
+    }
+    if parts[parts.len() - 1].end() != outer.end() {
+        return Err(inconsistent(last_gap));
+    }
+    Ok(())
+}
+
+fn checked_interval<'member>(
+    range: ByteRange,
+    overflow_detail: &'static str,
+) -> Result<CheckedInterval, CoveringAuditError<'member>> {
     CheckedInterval::from_offset_len(range.offset, range.len).map_err(|error| match error {
-        IntervalError::EndOverflow => inconsistent(&format!("{what} overflow")),
+        IntervalError::EndOverflow => inconsistent(overflow_detail),
         IntervalError::Reversed => unreachable!("offset-plus-length cannot produce reversal"),
     })
 }
@@ -245,8 +334,11 @@ fn le_u32(bytes: &[u8], offset: usize) -> u32 {
     ])
 }
 
-fn inconsistent(detail: &str) -> Finding {
-    Finding::error(FindingCode::CoveringInconsistent, detail)
+fn inconsistent(detail: &'static str) -> CoveringAuditError<'static> {
+    CoveringAuditError::Inconsistent {
+        detail,
+        member: None,
+    }
 }
 
 #[cfg(test)]
@@ -402,5 +494,11 @@ mod tests {
         assert_eq!(ir.covering.central_directory.len, 0);
         let snapshot = crate::snapshot::SourceSnapshot::borrowed(None, &bytes);
         audit_covering(&snapshot, &ir).expect("empty covering should certify the snapshot");
+    }
+
+    #[test]
+    #[should_panic(expected = "bounded covering audit allocation failed")]
+    fn compatibility_error_conversion_does_not_forge_archive_evidence() {
+        let _ = CoveringAuditError::AllocationFailed.into_finding();
     }
 }
