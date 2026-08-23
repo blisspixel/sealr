@@ -5,9 +5,9 @@
 - Query date: `2026-08-22`
 - Artifacts: `20`
 - Source bytes: `90417280`
-- Analyzer revision: `sealr-wheel-lab.v1`
-- Interpretation profile: `sealr.profile.zip.strict-ascii.v1`
-- Interpretation profile SHA-256: `da3a2145d48decf8f8995ea01f1ddd0adb587f7f3544d4642bb8bb07b8f039f5`
+- Analyzer revision: `sealr-wheel-lab.v2`
+- Interpretation profile: `sealr.profile.zip.strict-ascii.v2`
+- Interpretation profile SHA-256: `384dceb8623a2b32d430034fefda2a9498439927285952c10a60c9f6caa51d45`
 - Policy: `sealr:policy/default/v1`
 - Policy SHA-256: `8298b205c981ed140a52ba555c0499712436969faf4ebc28d88d8d9e7024c340`
 - Admitted by current strict ASCII ZIP profile: `19/20`

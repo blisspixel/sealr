@@ -29,9 +29,9 @@ Anything that would require guessing is a finding and, under default policy, a h
 
 ## Polyglots and magic
 
-- Alpha.3 selects the parser from magic bytes and does not assign security meaning to the filename extension. The `magic_vs_extension` policy field is reserved and no extension-mismatch finding is emitted today.
-- Alpha.3 has no mixed-container allow profile. A future consumer such as OOXML, wheel, JAR, or APK needs a versioned interpretation and consumer profile that defines its permitted container structure and identity files.
-- Alpha.3 never recursively opens a nested archive. A future nested-content profile would need a separate resource and evidence design; changing the reserved `nested_depth` field does not enable recursion.
+- Alpha.4 selects the parser from magic bytes and does not assign security meaning to the filename extension. The `magic_vs_extension` policy field is reserved and no extension-mismatch finding is emitted today.
+- Alpha.4 has no mixed-container allow profile. A future consumer such as OOXML, wheel, JAR, or APK needs a versioned interpretation and consumer profile that defines its permitted container structure and identity files.
+- Alpha.4 never recursively opens a nested archive. A future nested-content profile would need a separate resource and evidence design; changing the reserved `nested_depth` field does not enable recursion.
 
 ## Format-specific extras (not ZipDiff, still differentials)
 

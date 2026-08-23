@@ -1,14 +1,16 @@
 # Architecture
 
-> This page separates the implemented alpha.3 architecture from the target semantic architecture. Projection, process isolation, acceleration, stable lock semantics, and an expanded crate graph are not current features. See [semantic-model.md](semantic-model.md) for the normative target.
+> This page separates the implemented Alpha.4 architecture from the target semantic architecture. Projection, process isolation, acceleration, stable lock semantics, and an expanded shipping crate graph are not current features. See [semantic-model.md](semantic-model.md) for the normative target.
 
-## Implemented in alpha.3
+## Implemented through Alpha.4
 
-Sealr is a two-crate Rust workspace:
+Sealr is a four-package Rust workspace. Two packages ship; two are repository-only assurance tools:
 
 ```text
-crates/sealr      security boundary, parser, policy, verification, evidence, materializer
-crates/sealr-cli  thin command-line facade
+crates/sealr             published security boundary, parser, policy, verification, evidence, materializer
+crates/sealr-cli         native command-line facade
+tools/identity-verifier  independent conformance verifier with no sealr dependency
+tools/wheel-lab          non-shipping compatibility measurement and report verifier
 ```
 
 The library exposes one `apply()` path for inspect and materialize. Both modes use the same interpreted member plan. There is no recovery parser and no second extraction implementation.
@@ -48,7 +50,7 @@ The receipt's `materialization` object records the selected backend, stage prote
 
 The format parser, path grammar, quota counters, content verification, and policy decision share one in-process trust boundary. The materializer receives validated relative components rather than archive-controlled ambient paths.
 
-Alpha.3's bounded in-memory source is a named `SourceSnapshot`: path inputs become owned bytes, caller byte inputs remain borrowed, and the recorded digest is SHA-256 of the complete object. ZIP payload reads use checked ranges over the snapshot. Receipt v2 reports `source_snapshot` as `memory-owned`, `memory-borrowed`, or `unavailable`. It does not yet:
+Alpha.4's bounded in-memory source is a named `SourceSnapshot`: path inputs become owned bytes, caller byte inputs remain borrowed, and the recorded digest is SHA-256 of the complete object. ZIP payload reads use checked ranges over the snapshot. Receipt v2 reports `source_snapshot` as `memory-owned`, `memory-borrowed`, or `unavailable`. It does not yet:
 
 - freeze preview `sealrTreeV1` roots as a stable lock or authenticated subject; committed cross-platform golden fixtures now pin the preview encoding;
 - replace whole-archive buffering with a private spool or verified filesystem snapshot;
@@ -82,7 +84,7 @@ Bounded random access must preserve the security property currently provided by 
 
 ### Canonical intermediate representation
 
-The versioned `ArchiveIR` preserves raw name bytes, decoded and canonical names, source ranges, flags, extra-field dispositions, declared and actual sizes, content commitments, and verification state. It is the source of preview layout and content-tree identities. The encoding, committed cross-platform vectors, and [independent identity verifier](identity-conformance.md) now exist. The roots remain explicitly unstable until the profile's extra-field rules close and the semantic surface freezes.
+The versioned `ArchiveIR` preserves raw name bytes, decoded and canonical names, source ranges, flags, extra-field dispositions, declared and actual sizes, content commitments, and verification state. It is the source of preview layout and content-tree identities. The encoding, committed cross-platform vectors, and [independent identity verifier](identity-conformance.md) now exist. Strict ASCII v2 closes the flag and extra-field interpretation gap; the roots remain preview identities until the broader semantic surface and release stability bar freeze.
 
 ### Separated policy layers
 

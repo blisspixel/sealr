@@ -4,7 +4,7 @@ use crate::findings::{Finding, FindingCode};
 use crate::interval::{exact_partition, CheckedInterval, IntervalError, PartitionError};
 use crate::ir::{
     is_denied_extra_id, ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite,
-    MemberSourceRanges,
+    MemberSourceRanges, ZipInterpretationProfile,
 };
 use crate::snapshot::SourceSnapshot;
 use std::collections::BTreeSet;
@@ -68,10 +68,25 @@ impl ZipArchive<'_> {
     }
 }
 
+#[cfg(test)]
 pub fn parse_zip(
     bytes: &[u8],
     max_files: u64,
     max_metadata_bytes: u64,
+) -> Result<ZipArchive<'_>, Finding> {
+    parse_zip_with_profile(
+        bytes,
+        max_files,
+        max_metadata_bytes,
+        ZipInterpretationProfile::StrictAsciiV1,
+    )
+}
+
+pub fn parse_zip_with_profile(
+    bytes: &[u8],
+    max_files: u64,
+    max_metadata_bytes: u64,
+    profile: ZipInterpretationProfile,
 ) -> Result<ZipArchive<'_>, Finding> {
     if bytes.len() < EOCD_MIN {
         return Err(Finding::error(
@@ -193,6 +208,7 @@ pub fn parse_zip(
             ExtraSite::Central,
             "central directory",
             name_bytes,
+            profile,
         )?;
         reject_structural_metadata(central_comment, "central-directory comment")?;
         let lfh = lfh_offset as usize;
@@ -203,6 +219,7 @@ pub fn parse_zip(
             ExtraSite::Local,
             "local header",
             name_bytes,
+            profile,
         )?);
         let display_name = String::from_utf8_lossy(name_bytes);
         if local.name != name_bytes {
@@ -225,6 +242,7 @@ pub fn parse_zip(
             };
             return Err(Finding::error(code, "CDH flags != LFH flags").on(display_name.as_ref()));
         }
+        validate_general_purpose_flags(flags, profile, name_bytes)?;
         let gp3 = flags & 0x8 != 0;
         if !gp3 && (local.comp_size != comp || local.uncomp_size != uncomp) {
             return Err(
@@ -250,7 +268,7 @@ pub fn parse_zip(
             )
             .on(display_name.as_ref()));
         }
-        let name = decode_name(name_bytes, flags)?;
+        let name = decode_name_for_profile(name_bytes, flags, profile)?;
         validate_directory_metadata(
             &name,
             version_made_by,
@@ -394,6 +412,7 @@ fn classify_extra_fields(
     site: ExtraSite,
     context: &str,
     name: &[u8],
+    profile: ZipInterpretationProfile,
 ) -> Result<Vec<ExtraFieldRecord>, Finding> {
     let mut position = 0usize;
     let mut ids = BTreeSet::new();
@@ -430,6 +449,16 @@ fn classify_extra_fields(
             )
             .on(String::from_utf8_lossy(name)));
         }
+        if profile == ZipInterpretationProfile::StrictAsciiV2 {
+            return Err(Finding::error(
+                FindingCode::ZipExtra,
+                format!(
+                    "extra field 0x{id:04x} is denied by {} in {context}",
+                    profile.id()
+                ),
+            )
+            .on(String::from_utf8_lossy(name)));
+        }
         if is_denied_extra_id(id) {
             let code = if id == 0x0001 {
                 FindingCode::ZipDiffC5Zip64
@@ -461,6 +490,28 @@ fn classify_extra_fields(
         position = end;
     }
     Ok(records)
+}
+
+fn validate_general_purpose_flags(
+    flags: u16,
+    profile: ZipInterpretationProfile,
+    name: &[u8],
+) -> Result<(), Finding> {
+    if profile == ZipInterpretationProfile::StrictAsciiV2 {
+        const ALLOWED: u16 = 1 << 3;
+        let denied = flags & !ALLOWED;
+        if denied != 0 {
+            return Err(Finding::error(
+                FindingCode::ZipFlags,
+                format!(
+                    "general-purpose flags 0x{flags:04x} contain denied bits 0x{denied:04x} under {}",
+                    profile.id()
+                ),
+            )
+            .on(String::from_utf8_lossy(name)));
+        }
+    }
+    Ok(())
 }
 
 fn reject_structural_metadata(data: &[u8], context: &str) -> Result<(), Finding> {
@@ -552,7 +603,20 @@ fn validate_directory_metadata(
     Ok(())
 }
 
-fn decode_name(bytes: &[u8], flags: u16) -> Result<String, Finding> {
+fn decode_name_for_profile(
+    bytes: &[u8],
+    flags: u16,
+    profile: ZipInterpretationProfile,
+) -> Result<String, Finding> {
+    if profile == ZipInterpretationProfile::StrictAsciiV2 {
+        if bytes.is_ascii() {
+            return Ok(String::from_utf8(bytes.to_vec()).expect("ASCII is valid UTF-8"));
+        }
+        return Err(Finding::error(
+            FindingCode::ZipEncoding,
+            format!("non-ASCII member name is denied by {}", profile.id()),
+        ));
+    }
     if (flags & (1 << 11)) != 0 {
         return std::str::from_utf8(bytes).map(str::to_owned).map_err(|_| {
             Finding::error(
@@ -834,5 +898,44 @@ mod tests {
             Err(finding) => finding,
         };
         assert_eq!(finding.code, FindingCode::ZipDiffC4Offset);
+    }
+
+    #[test]
+    fn strict_ascii_v2_flag_language_is_exhaustive() {
+        for flags in 0..=u16::MAX {
+            let accepted = validate_general_purpose_flags(
+                flags,
+                ZipInterpretationProfile::StrictAsciiV2,
+                b"member",
+            )
+            .is_ok();
+            assert_eq!(
+                accepted,
+                flags == 0 || flags == 0x0008,
+                "unexpected disposition for flag word 0x{flags:04x}"
+            );
+        }
+    }
+
+    #[test]
+    fn strict_ascii_v2_extra_field_language_is_exhaustive() {
+        for id in 0..=u16::MAX {
+            let [lo, hi] = id.to_le_bytes();
+            let field = [lo, hi, 0, 0];
+            let finding = classify_extra_fields(
+                &field,
+                0,
+                ExtraSite::Local,
+                "local header",
+                b"member",
+                ZipInterpretationProfile::StrictAsciiV2,
+            )
+            .expect_err("strict ASCII v2 admitted an extra field");
+            assert_eq!(
+                finding.code,
+                FindingCode::ZipExtra,
+                "extra field 0x{id:04x}"
+            );
+        }
     }
 }

@@ -1,6 +1,6 @@
 {
   "schema": "sealr.readme-walkthrough.v1",
-  "tool_version": "0.1.0-alpha.3",
+  "tool_version": "0.1.0-alpha.4",
   "presentation": "rendered-terminal-style-summary",
   "fixtures": {
     "allowed.zip": "580606f3b53229ab60ff1d786bac90c91f75c054269c11142cd971f380d3fc25",

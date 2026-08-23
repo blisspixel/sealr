@@ -15,13 +15,13 @@ Policy evaluation, content verification, materialization, projection, caching, a
 
 This is a stronger and narrower claim than safe extraction. Archive formats contain redundant metadata and consumer-specific semantics. The same byte digest can produce different trees when parsers disagree. The ZipDiff study found 14 ambiguity classes across 50 ZIP parsers in 19 languages, and Python wheel advisories have demonstrated same-bytes, different-installation behavior in practice.
 
-The intended mathematics of that statement, including unique covering, partial interpretation, and effect independence, is sketched in [theory.md](theory.md). That sketch is a research program, not a claim that alpha.3 has a uniqueness proof.
+The intended mathematics of that statement, including unique covering, partial interpretation, and effect independence, is sketched in [theory.md](theory.md). That sketch is a research program, not a claim that Alpha.4 has a uniqueness proof.
 
 The short product statement is:
 
 > One archive. One tree. Evidence.
 
-Do not use "proven" in current product claims. Alpha.3 emits deterministic unsigned evidence and a preview `sealrTreeV1` encoding. It does not emit an authenticated attestation or a formal uniqueness proof.
+Do not use "proven" in current product claims. Alpha.4 emits deterministic unsigned evidence and a preview `sealrTreeV1` encoding. It does not emit an authenticated attestation or a formal uniqueness proof.
 
 ## Research disposition
 
@@ -50,11 +50,11 @@ The architecture review produced useful priorities, speculative extensions, and 
 | Numeric risk scoring, permissive recovery, or best-effort interpretation | Rejected | These weaken deterministic, explainable, fail-closed admission. |
 | Malware, prompt-injection, model-identity, or credential governance in the core | Out of scope | Sealr establishes archive structure, resource, namespace, content-integrity, and provenance properties. |
 
-## Published alpha.3 and current-main baseline
+## Published Alpha.4 baseline
 
-Alpha.3 has one Rust `apply()` path for inspect and materialize. It uses one bounded in-memory ZIP32 source: path inputs become owned bytes, while byte inputs are borrowed immutably for the call. It applies a strict ASCII path and ZIP interpretation, builds one `ArchiveIR`, verifies accepted Store and Deflate members, emits a view and unsigned receipt, and optionally realizes and audits the same planned members through a capability-relative staged materializer.
+Alpha.4 has one Rust `apply()` path for inspect and materialize. It uses one bounded in-memory ZIP32 source: path inputs become owned bytes, while byte inputs are borrowed immutably for the call. It applies the selected strict ASCII ZIP interpretation, builds one `ArchiveIR`, verifies accepted Store and Deflate members, emits a view and unsigned receipt, and optionally realizes and audits the same planned members through a capability-relative staged materializer.
 
-Current main adds `VerifiedArchive` without changing that interpretation. A completely verified admitted outcome retains the exact snapshot and IR behind an opaque capability. Canonical member reads enforce a caller limit before allocation and recheck size, CRC32, and SHA-256 when reading from the recorded payload. Callers may instead request a bounded exact-path set whose bytes are retained from the original checked verification stream. Neither path reopens the input or runs a second parser. Content-addressed reuse and reuse of the complete tree remain later work.
+Alpha.4 adds `VerifiedArchive` and the explicitly selectable strict ASCII v2 interpretation. A completely verified admitted outcome retains the exact snapshot and IR behind an opaque capability. Canonical member reads enforce a caller limit before allocation and recheck size, CRC32, and SHA-256 when reading from the recorded payload. Callers may instead request a bounded exact-path set whose bytes are retained from the original checked verification stream. Neither path reopens the input or runs a second parser. Content-addressed reuse and reuse of the complete tree remain later work.
 
 The current public outcome is:
 
@@ -172,7 +172,7 @@ The target configuration separates five layers.
 
 ### Interpretation profile
 
-Defines what source bytes mean. It binds redundant metadata rules, encodings, allowed flags, extra fields, offsets, and structural layout. Examples such as `zip.strict-ascii.v1` or `zip.strict-unicode.v1` are future identifiers, not current CLI options.
+Defines what source bytes mean. It binds redundant metadata rules, encodings, allowed flags, extra fields, offsets, and structural layout. `sealr.profile.zip.strict-ascii.v1` remains the `apply()` compatibility default. [`sealr.profile.zip.strict-ascii.v2`](profiles/zip-strict-ascii-v2.md) is explicitly selectable through the Rust options API and closes every flag and extra-field disposition. A future Unicode profile receives a separate identifier and evidence.
 
 ### Deterministic resource budget
 
@@ -203,7 +203,7 @@ Target operations establish different facts:
 | `materialize` | complete | complete while writing | transactional publication |
 | `project` | complete | partial, advancing on read | read-only namespace |
 
-Alpha.3 `inspect` currently verifies accepted members fully rather than performing a structure-only pass. The target operation names above are not current CLI verbs.
+Alpha.4 `inspect` currently verifies accepted members fully rather than performing a structure-only pass. The target operation names above are not current CLI verbs.
 
 A partial view must say where and why it stopped. A partial member list must never look complete. A projected tree receives a complete content-tree identity only after all required members have been verified.
 
@@ -278,7 +278,7 @@ The archive content root therefore cannot be relabeled as a universal installed-
 3. **Hermetic build inputs**: make the canonical tree, not a second extraction, the build input and cache key.
 4. **OCI layers and other rich formats**: later, because whiteouts, ownership, xattrs, links, devices, and ordered application require a dedicated consumer model.
 
-No wheel profile, projection, content-addressed store, semantic lock, or GitHub admission action exists in alpha.3.
+No wheel consumer profile, projection, content-addressed store, semantic lock, or GitHub admission action exists in Alpha.4.
 
 ## Compatibility is part of assurance
 

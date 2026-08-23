@@ -6,6 +6,8 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+## [0.1.0-alpha.4] - 2026-08-22
+
 ### Added
 
 - Added the opaque `VerifiedArchive` capability for fully verified admitted outcomes. It retains the exact snapshot and verified IR, supports canonical-path lookup, and returns member bytes only after a caller-supplied limit and a second size, CRC32, and SHA-256 check pass.
@@ -18,6 +20,8 @@ The project is in initial development. Compatibility may change between preview 
 - Added a sixth finite-domain property family that compares deterministic retention selection with an independent small-domain oracle over 8,125 member-size and limit combinations.
 - Added a reproducible, non-shipping compatibility pilot over 20 exact PyPI wheels and 90,417,280 source bytes. Its bounded manifest pins acquisition metadata and digests; analysis uses only Sealr's public outcome and read-only IR. The profile admits 19 artifacts and denies one SciPy artifact for three investigated per-member expansion-ratio findings. Structural inventory also distinguishes top-level wheel metadata from nested vendored `.dist-info` trees.
 - Added an offline committed-report verifier to required CI. It binds the wheel report to the analyzer revision plus exact manifest, current interpretation-profile, and default-policy digests; recomputes rollups; and requires canonical JSON and Markdown without downloading or reparsing the corpus.
+- Added the opt-in `sealr.profile.zip.strict-ascii.v2` interpretation. Its canonical bytes assign a disposition to all 16 general-purpose flag bits, permit only semantic data-descriptor bit 3, and deny every extra-field identifier. The immutable v1 bytes and default `apply()` behavior remain unchanged.
+- Added public profile selection through `ApplyOptions`, canonical profile-byte accessors, a second independently checked profile vector, cross-platform empty-tree identity coverage, and finite-domain regression coverage over all 65,536 flag words and all 65,536 extra-field identifiers.
 
 ### Changed
 
@@ -30,6 +34,7 @@ The project is in initial development. Compatibility may change between preview 
 - Unified ZIP discovery and codec-free covering audit on one pure checked half-open interval and exact-partition kernel. The audit now rejects offset-plus-length overflow before using an interval in adjacency or containment decisions.
 - Unified declared totals, actual totals, remaining capacity, and per-member byte counts on one pure quota transition. Successful updates are monotone, and failed updates cannot partially mutate the counter.
 - Preserved `apply()` as the compatibility facade and kept retention outside policy, receipt identity, and admission. Deterministic selection uses canonical-path order; missing paths, directories, limit failures, platform limits, allocation failures, and defensive integrity disagreement remain explicit capability statuses and do not weaken verification.
+- Re-executed the 20-wheel pilot under strict ASCII v2. The measured result remains 19 admissions and one policy-ratio denial, confirming that the closed flag and extra-field contract does not change the exact pilot cohort.
 
 ### Fixed
 
@@ -37,6 +42,8 @@ The project is in initial development. Compatibility may change between preview 
 - File-count enforcement now bounds the number of central headers actually parsed, even when the EOCD understates it, and compares the parsed count to the EOCD without a truncating `usize` to `u16` cast.
 - Local-header bounds use checked offset arithmetic, so a hostile near-`usize::MAX` offset returns `zip.diff.c4_offset` instead of overflowing before the bounds check on narrower targets or debug builds.
 - The default encryption denial now covers traditional encryption bit 0, strong-encryption bit 6, and masked-header bit 13. A matching LFH/CDH flag pair can no longer bypass `encrypted = "deny"` by omitting bit 0.
+- Early source, format, structure, and policy failures now bind the interpretation identity selected in `ApplyOptions` instead of incorrectly reporting the v1 identity for a v2 operation.
+- The non-shipping wheel laboratory now follows the workspace release version, and the release-candidate gate rejects version drift before a tag can reach release validation.
 
 ## [0.1.0-alpha.3] - 2026-08-22
 
@@ -111,7 +118,8 @@ First public development preview of the ZIP boundary.
 
 This preview is not a production-ready security boundary and has not received an external security audit. See the security limitations in the README and the reporting policy in `SECURITY.md` before evaluating it.
 
-[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.3...HEAD
+[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.4...HEAD
+[0.1.0-alpha.4]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.3...v0.1.0-alpha.4
 [0.1.0-alpha.3]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.2...v0.1.0-alpha.3
 [0.1.0-alpha.2]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.1...v0.1.0-alpha.2
 [0.1.0-alpha.1]: https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.1

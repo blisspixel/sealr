@@ -2,7 +2,7 @@
 
 > Current implementation: classic ZIP32 with Store and Deflate members only. Every other format or ZIP extension is unsupported, rejected, or deferred. Format sequencing is governed by the [roadmap](../ROADMAP.md), not this page.
 
-## Current alpha.3 profile
+## Current profiles
 
 Sealr applies one strict ZIP32 interpretation:
 
@@ -49,8 +49,8 @@ The first layer constructs one archive tree. The second assigns Python packaging
 
 | Format or profile | Status | Entry condition |
 |---|---|---|
-| Strict ZIP32 Store and Deflate | Current alpha.3 | Existing preview boundary |
-| Exact strict ASCII ZIP profile | Alpha.4 target; verified capability, bounded retention, and independent identity vectors landed | Compatibility inventory plus exhaustive flags and extra fields |
+| Strict ZIP32 Store and Deflate | Alpha.4 compatibility default | Immutable v1 preview boundary |
+| Exact strict ASCII ZIP profile | Alpha.4 implementation complete | Opt-in v2 has an exhaustive flag table, denies every extra field, and is measured against the pinned pilot |
 | Private file-backed ZIP snapshot | Alpha.5 target | Copy-hash-retain source capability, checked random access, mutation tests, and bounded memory |
 | Supervised Linux ZIP worker | Alpha.6 target | Immutable snapshot capability, bounded protocol, minimum Landlock rights, and supervisor audit |
 | Canonical general ZIP path and tree profile | Phase 0.1 closure | UTF-8 and separately justified legacy CP437 rules, target collision model, and assurance gates |

@@ -1,6 +1,6 @@
 # Testing, compatibility, and assurance
 
-> This page separates current evidence from the target assurance program. The published Alpha.3 has a deterministic Rust unit suite, strict cross-platform CI, cargo-deny policy, and a pinned 5,927-file ZipDiff construction gate. Current main adds six finite-domain property families, an opaque bounded-read capability with one-pass exact-member retention, a consumer that runs against the extracted packaged crate, an independent verifier for four identity-conformance cases, and an initial 20-wheel compatibility measurement. Broader ecosystem sampling, property families, coverage-guided fuzzing, model checking, the general authenticated-evidence verifier, and an external audit remain future work.
+> This page separates current evidence from the target assurance program. Alpha.4 has a deterministic Rust suite, strict cross-platform CI, cargo-deny policy, a pinned 5,927-file ZipDiff construction gate, six finite-domain property families, an opaque bounded-read capability with one-pass exact-member retention, a consumer that runs against the extracted packaged crate, an independent verifier for two profile vectors and four identity-conformance cases, and a 20-wheel compatibility measurement. Broader ecosystem sampling, coverage-guided fuzzing, model checking, the general authenticated-evidence verifier, and an external audit remain future work.
 
 Trust is the scarce resource. Format breadth and acceleration follow stable semantics and measured compatibility.
 
@@ -8,7 +8,7 @@ Trust is the scarce resource. Format breadth and acceleration follow stable sema
 
 | Layer | Current evidence | Remaining work |
 |---|---|---|
-| Unit | ZIP path grammar, topology, overlap and layout, quotas, inspect/materialize equality, rollback, destination preservation, platform materializer controls, and deterministic truncation, mutation, and noise no-panic coverage | Expand for every new semantic state and backend |
+| Unit | ZIP path grammar, topology, overlap and layout, quotas, inspect/materialize equality, rollback, destination preservation, platform materializer controls, exhaustive strict-v2 flag-word and extra-field-ID domains, and deterministic truncation, mutation, and noise no-panic coverage | Expand for every new semantic state and backend |
 | Public API and package | External-crate fixture exercises evidence types, `VerifiedArchive`, and bounded retention; a separate Cargo consumer runs the same retention path against the extracted packaged crate in required quality CI | Add semantic compatibility checks after publication and a wheel-aware metadata selector |
 | Corpus | All 5,927 pinned ZipDiff constructions, local generated adversarial fixtures, and a byte-addressed non-shipping pilot of 20 exact PyPI wheels with an investigated denial cluster | Expand producer and feature diversity; add codec-boundary, source-race, and wheel-semantic fixtures |
 | Differential | ZipDiff expectation gate binds strict rejection and a documented valid-control allowlist | Compare major consumers on well-formed profile inputs and track disagreement frontiers |

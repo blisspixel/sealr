@@ -1,6 +1,6 @@
 # API contract
 
-This page distinguishes the published alpha.3 contract plus compatible hardening on current main from the target semantic API. Current callers must pin to the implemented section. The target is specified further in [semantic-model.md](semantic-model.md).
+This page distinguishes the published Alpha.4 contract from the target semantic API. Current callers must pin to the implemented section. The target is specified further in [semantic-model.md](semantic-model.md).
 
 ## Implemented surface
 
@@ -103,7 +103,7 @@ One document. The current CLI emits pretty JSON; JSONL is planned. The current d
 
 `verdict`: `allowed` or `rejected` compatibility adapter. `wrote` is Boolean. The axes are the precise record: an admitted archive whose destination fails is `admission: admitted`, `effect: failed`, and still `verdict: rejected`. A rejection before member processing has an empty member list. A later payload or materialization rejection retains every member completed before the failure. The finding that caused rejection is always present. Callers must use `view_completeness` plus the axes rather than assuming a rejected view is a complete member inventory.
 
-Projection and hydration on read are target surfaces. They are not part of alpha.3.
+Projection and hydration on read are target surfaces. They are not part of Alpha.4.
 
 ---
 
@@ -134,7 +134,7 @@ The current receipt is versioned unsigned JSON (`signed: false`). DSSE and in-to
     "content": { "sealrTreeV1": "..." }
   },
   "view_digest": { "sha256": "..." },
-  "tool": { "name": "sealr", "version": "0.1.0-alpha.3" },
+  "tool": { "name": "sealr", "version": "0.1.0-alpha.4" },
   "environment": { "os": "windows", "arch": "x86_64", "kernel_jail": "unavailable" },
   "materialization": {
     "schema": "sealr.materialization.v2",
@@ -160,10 +160,10 @@ On reject, `members` in the view may be partial; `view_digest` still covers exac
 `receipt.identities` is separate from `view_digest`:
 
 - `source` is the archive SHA-256, or `{ "status": "unavailable" }`.
-- `interpretation` binds `sealr.profile.zip.strict-ascii.v1` and the SHA-256 of that profile's method, flag, extra-field, and name rules.
+- `interpretation` binds the selected profile identifier and the SHA-256 of its canonical method, flag, extra-field, and name rules. `apply()` selects `sealr.profile.zip.strict-ascii.v1`; `ApplyOptions::with_interpretation_profile(StrictAsciiV2)` selects the [closed v2 contract](profiles/zip-strict-ascii-v2.md). Profile selection affects admission and interpretation identity but not the resource-policy digest.
 - `layout` is `sealrTreeV1` over canonical paths, kinds, raw names, flags, methods, declared sizes, complete local-header, payload, optional-descriptor, and central-header ranges, extra-field dispositions, and normalization actions. It is present once an `ArchiveIR` exists. It is `{ "status": "unavailable" }` when planning never produced a tree.
 - `content` is `sealrTreeV1` over canonical paths, kinds, actual sizes, and member SHA-256 digests. It is present only when verification is complete. An admitted archive whose destination fails keeps its layout root and does not claim a content root until members are verified.
-- Layout and content encodings are Git-style domain-separated preimages (`sealr.tree.layout.v1` and `sealr.tree.content.v1`) over little-endian length-prefixed covering ranges and member records. They do not use JSON, so they are independent of `view_digest` and of later RFC 8785 work. The interpretation profile is a sibling identity, not mixed into the tree bytes. The production golden test and a standalone no-Sealr-dependency verifier consume the same [identity-conformance bundle](identity-conformance.md), independently reproducing the current profile digest plus three layout and three content roots. Layout identity includes the source covering (local prefix, central directory, EOCD, comment). Content identity does not. The standalone checker and internal codec-free audit follow claimed ranges without searching or inflating; materialization audits the staged tree against the same IR before publication.
+- Layout and content encodings are Git-style domain-separated preimages (`sealr.tree.layout.v1` and `sealr.tree.content.v1`) over little-endian length-prefixed covering ranges and member records. They do not use JSON, so they are independent of `view_digest` and of later RFC 8785 work. The interpretation profile is a sibling identity, not mixed into the tree bytes. The production golden test and a standalone no-Sealr-dependency verifier consume the same [identity-conformance bundle](identity-conformance.md), independently reproducing both published profile digests plus three layout and three content roots. Layout identity includes the source covering (local prefix, central directory, EOCD, comment). Content identity does not. The standalone checker and internal codec-free audit follow claimed ranges without searching or inflating; materialization audits the staged tree against the same IR before publication.
 
 ## Target semantic API
 
@@ -221,13 +221,18 @@ This path does not reopen the caller path or parse ZIP structure again. Without 
 Callers that know the small semantic members they will need can request them before verification:
 
 ```rust
-use sealr::{apply_with_options, ApplyOptions, RetentionPlan, RetentionStatus};
+use sealr::{
+    apply_with_options, ApplyOptions, RetentionPlan, RetentionStatus,
+    ZipInterpretationProfile,
+};
 
 let retention = RetentionPlan::new(256 * 1024, 1024 * 1024)
     .with_path("package.dist-info/WHEEL")?
     .with_path("package.dist-info/METADATA")?
     .with_path("package.dist-info/RECORD")?;
-let options = ApplyOptions::new().with_retention(retention);
+let options = ApplyOptions::new()
+    .with_interpretation_profile(ZipInterpretationProfile::StrictAsciiV2)
+    .with_retention(retention);
 let outcome = apply_with_options(request, &options);
 let archive = outcome
     .verified_archive()
@@ -255,7 +260,7 @@ let metadata = archive
 - `NotFound`, `NotFile`, `MemberLimitExceeded`, `TotalLimitExceeded`, `PlatformLimit`, `AllocationFailed`, and defensive `IntegrityMismatch` results are observable without changing the archive verdict;
 - bytes become available only on a `VerifiedArchive`, after every archive member has passed verification.
 
-The retention limits are operation capabilities, not archive-admission policy. They do not change policy identity, receipt bytes, view bytes, tree identities, or the allow or reject result. A consumer that requires a retained member must inspect its `RetentionStatus` and fail its own higher-level evaluation when the status is not `Retained`. `apply(request)` is exactly the no-retention compatibility path.
+The retention limits are operation capabilities, not archive-admission policy. They do not change policy identity, receipt bytes, view bytes, tree identities, or the allow or reject result. Interpretation-profile selection is different: it changes the accepted container language and the recorded interpretation identity while remaining separate from resource-policy identity. A consumer that requires a retained member must inspect its `RetentionStatus` and fail its own higher-level evaluation when the status is not `Retained`. `apply(request)` is exactly the v1, no-retention compatibility path.
 
 During inspect-only verification, selected bytes are the verification writer. During materialization, a bounded tee sends the same checked chunks to the staged file and selected buffer. There is no second codec invocation. Unselected or unsuccessfully retained members still support the ordinary caller-bounded `read_member` fallback, which re-inflates and revalidates from the immutable snapshot.
 
@@ -273,7 +278,7 @@ verified.materialize(destination)?;
 verified.write_evidence(output)?;
 ```
 
-`SourceSnapshot` and `ArchiveIR` landed in alpha.3 as the ingest object and the inspect/materialize member plan. Current main adds `VerifiedArchive` as the first concrete verified type-state result while preserving `apply()` as the compatibility facade. `AdmittedArchive` and the earlier transition methods remain design notation. Their required property is that every operation consumes one immutable interpretation and no operation reparses the original archive through another parser.
+`SourceSnapshot` and `ArchiveIR` landed in Alpha.3 as the ingest object and the inspect/materialize member plan. Alpha.4 adds `VerifiedArchive` as the first concrete verified type-state result while preserving `apply()` as the compatibility facade. `AdmittedArchive` and the earlier transition methods remain design notation. Their required property is that every operation consumes one immutable interpretation and no operation reparses the original archive through another parser.
 
 ### Rust compatibility
 

@@ -1,6 +1,6 @@
 # Identity conformance and independent verification
 
-> Status: implemented on current main after the alpha.3 release. The vectors and verifier protect preview identities. They do not make the current profile stable or turn unsigned evidence into an attestation.
+> Status: included in Alpha.4. The vectors and verifier protect preview identities. They do not make either profile stable or turn unsigned evidence into an attestation.
 
 Sealr now publishes a small, versioned identity-conformance bundle and checks it two ways:
 
@@ -41,7 +41,9 @@ The verifier does not independently interpret ZIP flags, names, extras, or metho
 | `cases[].archive_ir` | Full serializable IR evidence, or `null` when no IR exists |
 | `layout_root`, `content_root` | `sealrTreeV1` root or explicit unavailability |
 
-The current bundle has four cases:
+The current bundle has two profile vectors and four source cases. The v1 and v2 canonical profile bytes are compared directly with production serialization before the standalone verifier independently hashes them. Source cases currently exercise v1 tree evidence; a separate cross-platform production golden pins the v2 empty-tree identities.
+
+The source cases are:
 
 | Case | Purpose |
 |---|---|

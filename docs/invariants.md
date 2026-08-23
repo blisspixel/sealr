@@ -2,7 +2,7 @@
 
 These are **properties**, not features. They are the *type* of `inspect` / `materialize` / `mount`. Files on disk are a side effect that is only allowed if this boundary returns yes.
 
-This document is the target safety contract. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) are authoritative for current implementation status. Alpha.3 intentionally fails closed where canonical Unicode handling is unfinished, and it does not yet satisfy every filesystem-race, fuzzing, proof, isolation, or bounded-input obligation below.
+This document is the target safety contract. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) are authoritative for current implementation status. Alpha.4 intentionally fails closed where canonical Unicode handling is unfinished, and it does not yet satisfy every filesystem-race, fuzzing, proof, isolation, or bounded-input obligation below.
 
 Each invariant MUST appear in the assurance claim ledger and receive evidence appropriate to its kind. Pure input properties require deterministic tests and generated properties; byte parsers require finite hostile corpora and coverage-guided fuzzing; bounded arithmetic and finite state machines are model-checking candidates; filesystem and authority properties require native fault and race tests. A finding code is required when an invocation can report the violation. CI infrastructure failures and excluded-adversary assumptions are recorded as evidence or limitations rather than invented archive findings.
 
@@ -14,7 +14,7 @@ Detail for ZIP differentials: [threat-model.md](threat-model.md). Path grammar: 
 
 ## I1 - Path containment
 
-Every extracted (or hydrated) path, with `/` as the only accepted archive separator, canonical Unicode normalization, case-fold where the destination filesystem is case-insensitive, and rejection of backslashes, reserved names, ADS names, and trailing-dot names, MUST be `dest` or a strict child. Alpha.3 rejects non-ASCII paths until that canonical Unicode representation exists.
+Every extracted (or hydrated) path, with `/` as the only accepted archive separator, canonical Unicode normalization, case-fold where the destination filesystem is case-insensitive, and rejection of backslashes, reserved names, ADS names, and trailing-dot names, MUST be `dest` or a strict child. Alpha.4 strict ASCII v2 rejects non-ASCII paths until that canonical Unicode representation exists.
 
 - No symlink or hardlink is followed when computing the dest (`O_NOFOLLOW` / `FILE_FLAG_OPEN_REPARSE_POINT`).
 - Pre-existing reparse points inside the private stage are hostile and are never traversed for member creation.
@@ -57,7 +57,7 @@ The inspect API and the materialize API MUST NOT diverge (LibreOffice recovery-m
 
 ## I7 - Streaming + bounded allocation
 
-Target state: no whole-archive load. Header-driven allocations go through `try_reserve` and I2. Expanded bytes stream in bounded chunks. A future whole-buffer codec is allowed only under a RAM gate. Alpha.3 still reads the archive into one input buffer capped at 512 MiB; removing that buffer is an explicit Phase 0.1 gate.
+Target state: no whole-archive load. Header-driven allocations go through `try_reserve` and I2. Expanded bytes stream in bounded chunks. A future whole-buffer codec is allowed only under a RAM gate. Alpha.4 still reads the archive into one input buffer capped at 512 MiB; removing that buffer is the Alpha.5 gate.
 
 ## I8 - Staged publication and optional durability
 

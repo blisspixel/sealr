@@ -1,6 +1,6 @@
 # Documentation
 
-Start with the [README](../README.md) for the published alpha.3 boundary, the current-main delta, and a short walkthrough. This index separates current contracts from plans and research notes.
+Start with the [README](../README.md) for the published Alpha.4 boundary and a short walkthrough. This index separates current contracts from plans and research notes.
 
 ## Start and integrate
 
@@ -8,7 +8,7 @@ Start with the [README](../README.md) for the published alpha.3 boundary, the cu
 |---|---|
 | [Usage](usage.md) | Current CLI behavior and examples |
 | [API contract](api.md) | Current Rust and JSON surface, plus clearly marked target notation |
-| [Current release notes](releases/v0.1.0-alpha.3.md) | Alpha.3 contents and limitations |
+| [Current release notes](releases/v0.1.0-alpha.4.md) | Alpha.4 contents and limitations |
 | [Release verification](release-verification.md) | Verify checksums, provenance, tag, and immutable release state |
 
 ## Trust boundary
@@ -21,6 +21,7 @@ Start with the [README](../README.md) for the published alpha.3 boundary, the cu
 | [Assurance](assurance.md) | Current evidence and the layered verification program |
 | [Identity conformance](identity-conformance.md) | Current vectors, standalone verifier, exact root bytes, and bounded claims |
 | [Wheel compatibility pilot](wheel-compatibility-pilot.md) | Initial non-shipping corpus measurement and investigated denial evidence |
+| [Strict ASCII ZIP32 profile v2](profiles/zip-strict-ascii-v2.md) | Executable exhaustive flag and extra-field interpretation contract |
 | [Differentials](differentials.md) | Single-interpretation rules and the ZipDiff corpus |
 | [Reduced-authority execution](sandbox.md) | Supervisor and worker design |
 | [Finding registry](findings.md) | Stable machine finding codes |

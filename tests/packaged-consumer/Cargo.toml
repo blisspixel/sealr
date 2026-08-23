@@ -8,4 +8,4 @@ publish = false
 [workspace]
 
 [dependencies]
-sealr = { version = "=0.1.0-alpha.3", path = "../../target/package/sealr-0.1.0-alpha.3" }
+sealr = { version = "=0.1.0-alpha.4", path = "../../target/package/sealr-0.1.0-alpha.4" }

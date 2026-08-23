@@ -8,9 +8,9 @@ There is no insecure mode.
 
 ## Operation options are not policy
 
-`apply_with_options` accepts operation-scoped capabilities such as a bounded `RetentionPlan`. These options do not change which archive bytes the profile interprets, which archives the policy admits, any receipt or tree identity, or whether a destination is requested. They therefore remain outside `sealr.policy.v1` and its digest.
+`apply_with_options` accepts two kinds of operation-scoped input outside `sealr.policy.v1`: interpretation-profile selection and capabilities such as a bounded `RetentionPlan`. Selecting a profile changes the container language and interpretation identity, but it does not change the resource-policy digest. A retention plan does not change interpretation, archive admission, receipt or tree identity, or whether a destination is requested.
 
-A retention plan names only exact canonical paths and supplies independent per-member and aggregate retained-byte ceilings. Failure to retain a requested path is reported through `VerifiedArchive::retention_status`; it does not relax an archive rule or convert a rejection into an admission. A higher-level consumer that requires those bytes must fail its own evaluation unless every required status is `Retained`. The full contract and limits are in [bounded one-pass retention](api.md#bounded-one-pass-retention).
+`apply()` selects the immutable compatibility profile `sealr.profile.zip.strict-ascii.v1`. Callers can explicitly select the [closed strict ASCII v2 profile](profiles/zip-strict-ascii-v2.md) through `ApplyOptions`. A retention plan names only exact canonical paths and supplies independent per-member and aggregate retained-byte ceilings. Failure to retain a requested path is reported through `VerifiedArchive::retention_status`; it does not relax an archive rule or convert a rejection into an admission. A higher-level consumer that requires those bytes must fail its own evaluation unless every required status is `Retained`. The full contract and limits are in [bounded one-pass retention](api.md#bounded-one-pass-retention).
 
 ## Current default
 

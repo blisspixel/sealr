@@ -1111,7 +1111,7 @@ mod tests {
     #[test]
     fn committed_vectors_verify_independently() {
         let summary = verify_manifest_json(VECTORS).expect("committed vectors");
-        assert_eq!(summary.profiles, 1);
+        assert_eq!(summary.profiles, 2);
         assert_eq!(summary.cases, 4);
         assert_eq!(summary.layout_roots, 3);
         assert_eq!(summary.content_roots, 3);

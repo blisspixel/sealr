@@ -1,6 +1,6 @@
 # Interpretation theory
 
-> Status: research notes. This page names the mathematical object Sealr is aiming at. It is not a proof, not a qualification claim, and not a description of capabilities that alpha.3 already has. Implemented predicates and the ideal function are distinguished throughout. The current executable contract is the [README](../README.md), [invariants](invariants.md), and [semantic model](semantic-model.md).
+> Status: research notes. This page names the mathematical object Sealr is aiming at. It is not a proof, not a qualification claim, and not a description of capabilities that Alpha.4 already has. Implemented predicates and the ideal function are distinguished throughout. The current executable contract is the [README](../README.md), [invariants](invariants.md), and [semantic model](semantic-model.md).
 
 Sealr is trying to give untrusted archive bytes a denotation: **at most one canonical IR per versioned profile, or no IR.** Git, Nix, and in-toto already know how to hash a tree you have. ZipDiff showed that ZIP, as deployed, does not uniquely produce one. The work is the missing compiler in the middle.
 
@@ -36,7 +36,7 @@ Effect is a different morphism. A failed destination does not retract the coveri
 | \(\mathbb{B} = \{0,\ldots,255\}\) | Bytes. |
 | \(b \in \mathbb{B}^n\) | A source snapshot, identified with the half-open interval \([0,n)\). |
 | \([i,j)\) | Byte range. Empty iff \(i=j\). Adjacent ranges meet: \([i,j) \cup [j,k) = [i,k)\). |
-| \(\pi\) | Versioned interpretation profile. Current executable: `sealr.profile.zip.strict-ascii.v1`. |
+| \(\pi\) | Versioned interpretation profile. Executable profiles: compatibility-default `sealr.profile.zip.strict-ascii.v1` and opt-in closed `sealr.profile.zip.strict-ascii.v2`. |
 | \(I_\pi : \mathbb{B}^* \rightharpoonup \mathsf{IR}\) | Partial interpretation. Undefined means no admitted tree. |
 | \(L(\pi) = \mathrm{dom}(I_\pi)\) | The unique-parse language of the profile: a **strict subset** of APPNOTE. |
 | \(\mathsf{H}\) | SHA-256, treated as a collision-resistant hash **assumption**, not a theorem. |
@@ -50,7 +50,7 @@ Partial function means: for each \(b\), \(I_\pi(b)\) is undefined or a single IR
 
 ### Source as an interval
 
-A `SourceSnapshot` is an immutable \(b \in \mathbb{B}^n\). Alpha.3 realizes this as owned or borrowed whole-buffer bytes. A path, file descriptor, ETag, or content-length is not a snapshot: another writer can change the bytes under the parse.
+A `SourceSnapshot` is an immutable \(b \in \mathbb{B}^n\). Alpha.4 realizes this as owned or borrowed whole-buffer bytes. A path, file descriptor, ETag, or content-length is not a snapshot: another writer can change the bytes under the parse.
 
 Source identity \(S(b) = \mathsf{H}(b)\), or explicit unavailability if bytes were never held.
 
@@ -86,7 +86,7 @@ Defined only when the covering exists, CDH/LFH/descriptor agreement holds, names
 - `Unsupported`: ZIP64, encryption, methods other than Store/Deflate, spanned, non-ASCII names;
 - `Indeterminate`: bytes never held, I/O, cancellation.
 
-Ideal \(I_\pi\) depends only on \((b,\pi)\). Alpha.3 still folds resource budget into `parse_zip` (`max_files`, `max_metadata_bytes`). That interference is named below.
+Ideal \(I_\pi\) depends only on \((b,\pi)\). Alpha.4 still folds resource budget into `parse_zip` (`max_files`, `max_metadata_bytes`). That interference is named below.
 
 `ArchiveIR` is an effect-independent term: profile id and digest, source digest, members with raw names, canonical paths, kinds, flags, methods, declared sizes, source ranges, extra dispositions, normalization actions, and after verification, actual sizes and content SHA-256. Inspect and materialize walk that object. They do not search for a second EOCD.
 
@@ -118,11 +118,11 @@ E : \mathsf{IR} \times \text{target} \times \text{effect policy}
     \longrightarrow \{\mathsf{NotRequested},\;\mathsf{Committed},\;\mathsf{Failed}\}
 \]
 
-A failed rename is `Interpreted + Admitted + Complete + Failed`, not a different tree. Alpha.3 axes represent this. The compatibility `Verdict` still maps it to `rejected`.
+A failed rename is `Interpreted + Admitted + Complete + Failed`, not a different tree. Alpha.4 axes represent this. The compatibility `Verdict` still maps it to `rejected`.
 
 ## Implemented versus ideal
 
-| Object | Ideal | Alpha.3 |
+| Object | Ideal | Alpha.4 |
 |---|---|---|
 | \(I_\pi\) | Partial function of \((b,\pi)\) only | Parser also sees budget; Unicode absent |
 | Unique covering | At most one admitted partition of \([0,n)\) | Local-prefix partition + CD land + last exact-suffix EOCD |

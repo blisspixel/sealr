@@ -5,11 +5,11 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 $workspace = Split-Path -Parent $PSScriptRoot
-$trackedMarkdown = @(& git -C $workspace ls-files -- '*.md')
+$repositoryMarkdown = @(& git -C $workspace ls-files --cached --others --exclude-standard -- '*.md')
 if ($LASTEXITCODE -ne 0) {
-    throw 'Could not enumerate tracked Markdown files'
+    throw 'Could not enumerate repository Markdown files'
 }
-$markdownFiles = @($trackedMarkdown | ForEach-Object {
+$markdownFiles = @($repositoryMarkdown | Sort-Object -Unique | ForEach-Object {
     Get-Item -LiteralPath (Join-Path $workspace $_)
 })
 

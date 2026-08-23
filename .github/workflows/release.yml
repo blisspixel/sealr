@@ -13,7 +13,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  RELEASE_VERSION: 0.1.0-alpha.3
+  RELEASE_VERSION: 0.1.0-alpha.4
   RUST_VERSION: 1.98.0
 
 jobs:
@@ -361,7 +361,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          release_title="sealr ${RELEASE_VERSION}: semantic identity preview"
+          release_title="sealr ${RELEASE_VERSION}: measured semantic contract preview"
           notes_file="docs/releases/v${RELEASE_VERSION}.md"
           if [[ ! -f "${notes_file}" ]]; then
             echo "::error::missing release notes: ${notes_file}"

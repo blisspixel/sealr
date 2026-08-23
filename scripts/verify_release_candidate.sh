@@ -2,15 +2,26 @@
 set -euo pipefail
 
 selector="scripts/release_candidate.jq"
-tag="v0.1.0-alpha.3"
-title="sealr 0.1.0-alpha.3: semantic identity preview"
-notes=$'# sealr 0.1.0-alpha.3\n'
+tag="v0.1.0-alpha.4"
+title="sealr 0.1.0-alpha.4: measured semantic contract preview"
+notes=$'# sealr 0.1.0-alpha.4\n'
 allowed='[
   "SHA256SUMS",
-  "sealr-0.1.0-alpha.3-aarch64-apple-darwin.tar.gz",
-  "sealr-0.1.0-alpha.3-x86_64-pc-windows-msvc.zip",
-  "sealr-0.1.0-alpha.3-x86_64-unknown-linux-gnu.tar.gz"
+  "sealr-0.1.0-alpha.4-aarch64-apple-darwin.tar.gz",
+  "sealr-0.1.0-alpha.4-x86_64-pc-windows-msvc.zip",
+  "sealr-0.1.0-alpha.4-x86_64-unknown-linux-gnu.tar.gz"
 ]'
+
+mapfile -t workspace_versions < <(
+  cargo metadata --locked --no-deps --format-version 1 |
+    jq -r '.packages[].version' |
+    sort -u
+)
+if [[ "${#workspace_versions[@]}" -ne 1 || "${workspace_versions[0]}" != "${tag#v}" ]]; then
+  echo "release candidate workspace versions do not match ${tag#v}"
+  printf 'observed version: %s\n' "${workspace_versions[@]:-none}"
+  exit 1
+fi
 
 make_release() {
   jq -cn \
