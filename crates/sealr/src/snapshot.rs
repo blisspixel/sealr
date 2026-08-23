@@ -104,6 +104,73 @@ pub struct SourceSnapshot<'a> {
     digest: SourceDigest,
 }
 
+#[cfg(test)]
+#[derive(Clone, Copy)]
+struct TestReadFailure {
+    start: u64,
+    end: u64,
+    armed: bool,
+}
+
+#[cfg(test)]
+thread_local! {
+    static TEST_READ_FAILURE: std::cell::RefCell<Option<TestReadFailure>> = const { std::cell::RefCell::new(None) };
+}
+
+#[cfg(test)]
+#[must_use]
+pub(crate) struct TestReadFailureGuard {
+    previous: Option<TestReadFailure>,
+}
+
+#[cfg(test)]
+impl Drop for TestReadFailureGuard {
+    fn drop(&mut self) {
+        TEST_READ_FAILURE.with(|failure| *failure.borrow_mut() = self.previous.take());
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn inject_read_failure(start: u64, len: u64) -> TestReadFailureGuard {
+    let end = start
+        .checked_add(len)
+        .expect("test snapshot failure range must not overflow");
+    let previous = TEST_READ_FAILURE.with(|failure| {
+        failure.borrow_mut().replace(TestReadFailure {
+            start,
+            end,
+            armed: false,
+        })
+    });
+    TestReadFailureGuard { previous }
+}
+
+#[cfg(test)]
+pub(crate) fn arm_test_read_failure() {
+    TEST_READ_FAILURE.with(|failure| {
+        if let Some(failure) = failure.borrow_mut().as_mut() {
+            failure.armed = true;
+        }
+    });
+}
+
+#[cfg(test)]
+fn injected_read_failure(offset: u64, len: u64) -> bool {
+    let Some(end) = offset.checked_add(len) else {
+        return false;
+    };
+    TEST_READ_FAILURE.with(|failure| {
+        let mut failure = failure.borrow_mut();
+        let should_fail = failure
+            .as_ref()
+            .is_some_and(|failure| failure.armed && offset < failure.end && end > failure.start);
+        if should_fail {
+            failure.as_mut().unwrap().armed = false;
+        }
+        should_fail
+    })
+}
+
 impl fmt::Debug for SourceSnapshot<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
@@ -390,6 +457,13 @@ impl<'a> SourceSnapshot<'a> {
             )
         })?;
         self.checked_range(offset, len)?;
+        #[cfg(test)]
+        if injected_read_failure(offset, len) {
+            return Err(Finding::error(
+                FindingCode::SourceIo,
+                format!("injected snapshot read failure at offset {offset}"),
+            ));
+        }
         match &self.backing {
             SnapshotBacking::Memory(bytes) => {
                 let start = usize::try_from(offset).map_err(|_| {

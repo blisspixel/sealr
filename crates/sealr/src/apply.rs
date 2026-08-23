@@ -621,6 +621,10 @@ fn apply_inner(
             ir,
         ));
     }
+    #[cfg(test)]
+    capture_planning_boundary_ir(&ir);
+    #[cfg(test)]
+    crate::snapshot::arm_test_read_failure();
     let mut retention = RetentionBuild::plan(options.retention_plan(), &ir);
     let planned_count = ir.members.len() as u64;
     let mut members_view = Vec::new();
@@ -999,6 +1003,75 @@ impl<W: Write> Write for RetainingWriter<'_, W> {
 #[cfg(test)]
 thread_local! {
     static PROCESS_MEMBER_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
+    static PLANNING_BOUNDARY_CAPTURE: std::cell::RefCell<PlanningBoundaryCapture> =
+        const { std::cell::RefCell::new(PlanningBoundaryCapture::disabled()) };
+}
+
+#[cfg(test)]
+fn capture_planning_boundary_ir(ir: &ArchiveIR) {
+    PLANNING_BOUNDARY_CAPTURE.with(|capture| {
+        let mut capture = capture.borrow_mut();
+        if capture.armed {
+            capture.armed = false;
+            capture.ir = Some(ir.clone());
+        }
+    });
+}
+
+#[cfg(test)]
+struct PlanningBoundaryCapture {
+    armed: bool,
+    ir: Option<ArchiveIR>,
+}
+
+#[cfg(test)]
+impl PlanningBoundaryCapture {
+    const fn disabled() -> Self {
+        Self {
+            armed: false,
+            ir: None,
+        }
+    }
+}
+
+#[cfg(test)]
+#[must_use]
+pub(crate) struct PlanningBoundaryCaptureGuard {
+    previous: Option<PlanningBoundaryCapture>,
+}
+
+#[cfg(test)]
+impl PlanningBoundaryCaptureGuard {
+    pub(crate) fn take(&self) -> Option<ArchiveIR> {
+        PLANNING_BOUNDARY_CAPTURE.with(|capture| capture.borrow_mut().ir.take())
+    }
+}
+
+#[cfg(test)]
+impl Drop for PlanningBoundaryCaptureGuard {
+    fn drop(&mut self) {
+        let previous = self
+            .previous
+            .take()
+            .expect("planning-boundary capture guard drops once");
+        PLANNING_BOUNDARY_CAPTURE.with(|capture| *capture.borrow_mut() = previous);
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn capture_next_planning_boundary() -> PlanningBoundaryCaptureGuard {
+    let previous = PLANNING_BOUNDARY_CAPTURE.with(|capture| {
+        std::mem::replace(
+            &mut *capture.borrow_mut(),
+            PlanningBoundaryCapture {
+                armed: true,
+                ir: None,
+            },
+        )
+    });
+    PlanningBoundaryCaptureGuard {
+        previous: Some(previous),
+    }
 }
 
 #[cfg(test)]
@@ -1354,12 +1427,9 @@ fn first_error(findings: &[Finding]) -> Finding {
 fn parse_failure_axes(finding: &Finding) -> SemanticAxes {
     let interpretation = match finding.code {
         FindingCode::SourceIo => InterpretationStatus::Indeterminate,
-        FindingCode::FormatUnsupported
-        | FindingCode::FormatMagic
-        | FindingCode::ZipDiffC5Zip64
-        | FindingCode::ZipEncoding
-        | FindingCode::ZipEncrypted
-        | FindingCode::MethodUnsupported => InterpretationStatus::Unsupported,
+        FindingCode::FormatUnsupported | FindingCode::ZipDiffC5Zip64 | FindingCode::ZipEncoding => {
+            InterpretationStatus::Unsupported
+        }
         FindingCode::QuotaFiles | FindingCode::QuotaMetadata | FindingCode::QuotaOverflow => {
             InterpretationStatus::Interpreted
         }

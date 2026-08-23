@@ -1,6 +1,6 @@
 # Private semantic-record experiment
 
-Status: implemented as dormant crate-private Alpha.6 code. No `apply`, CLI, worker, receipt, default-feature, supported API, or release path invokes it. Only the unsupported hidden driver enabled explicitly by the fuzz workspace reaches it.
+Status: implemented as dormant crate-private Alpha.6 code. No production `apply`, CLI, worker, receipt, default-feature, supported API, or release path invokes it. Outside crate tests, only the unsupported hidden driver enabled explicitly by the fuzz workspace reaches it.
 
 This experiment makes the split-phase handoff in the [semantic-ownership decision](decisions/0001-alpha6-semantic-ownership.md) executable without defining operation protocol v2 or changing public behavior. It establishes a bounded representation and hostile decoder for semantic proposals. It does not establish process isolation or a public verified capability.
 
@@ -89,16 +89,18 @@ Focused deterministic tests cover:
 - distinct absent and present-empty retention bindings;
 - pinned plan and completion vector digests.
 
+The committed [`semantic-shadow-v1` manifest](../crates/sealr/tests/conformance/semantic-shadow-v1.json) pins 12 ordered `StrictAsciiV1`, memory-backed cases. Each entry exposes the profile, policy identity and digest, requested effect, and retention state instead of relying only on transitive request correlation. The harness captures the production pending IR after covering and before setup or verification, then compares decoded planning and completion evidence with exact pending and final IR where present, semantic axes, phase and cause, verification counts and frontier, ordered record-owned findings, and source, request, plan, and frame identities. The cases cover Store and Deflate completion, a matching descriptor, unsupported magic, LFH/CDH name disagreement, member quota denial, CRC after a verified prefix, declared-size lie, invalid and trailing Deflate streams, post-planning source I/O, and an existing destination. The setup case pins its deterministic finding signature rather than its path-bearing detail. Unknown manifest fields fail closed. The manifest SHA-256 is `b064c6945ca31603914d45a3d18775750bf30ddb667c356eb6d331673a9feb59`.
+
 A separate `semantic_records` libFuzzer target uses a hidden, nondefault fuzz-only feature to reach this private boundary. It decodes arbitrary planning and completion bytes, applies up to 128 input-directed mutations per canonical Ready, terminal-admission, Complete, and Stopped frame, requires stable success or error class and error offset on repeated decode, checks exact Ready-plan IR equality with the production pending IR, rejects stale completion correlation, and exercises every valid record kind. A committed dictionary and four seed cases have their paths, lengths, and SHA-256 digests checked by required CI. The verifier binds the complete Cargo manifest, parsed exact bin, hidden driver source, lock checksum, and registry-rooted crates.io libFuzzer package while refusing Cargo configuration, then compares the complete scheduled workflow with a manifest-derived contract covering its weekly trigger, permissions, concurrency, setup, shell programs, resource bounds, dictionaries, and failure artifacts. Executable negative fixtures reject inert TOML remapping, local, patched, or vendored fuzz-engine substitution, manual-only drift, direct weakening, inactive or appended commands, inert artifact evidence, and raw or quoted duplicate last-wins arguments. The target compiles under the pinned fuzz workspace. Clean exact-main on-demand evidence is recorded in the [assurance report](assurance.md#current-evidence); the first scheduled-event run and accumulated scheduled history remain pending.
 
-These tests establish parity for the named deterministic record, source-binding, and codec cases. They do not establish broader shadow parity or full `VerifiedArchive` equivalence.
+These tests establish zero-difference in-process parity only for the 12 named memory-backed strict-v1 cases. They do not establish corpus-wide semantic equivalence, strict-v2 or private-file parity, an independent implementation, full `VerifiedArchive` equivalence, or runtime-worker parity.
 
 ## Remaining gates
 
 Before any runtime or public activation, Alpha.6 still requires:
 
 1. an isolated allocator or process measurement near the private 64 MiB record limit proving that completion reconstruction adds only a bounded delta and no second full-IR-sized live allocation;
-2. broader semantic shadow parity against the current `apply()` corpus, including malformed structure, quota stops, and codec stops; data descriptors and v1 ignored extras now have focused source-binding coverage;
+2. expansion of the pinned matrix across strict-v2, memory and private-file backends, ignored extras, IR-bearing covering terminals, path and topology stops, and size, ratio, and total-budget stops, preserving every discrepancy as a deterministic regression;
 3. execution that consumes the validated plan without structurally reparsing the source;
 4. immutable retained-content transfer and original-pass retention semantics;
 5. isolated, caller-bounded non-retained reads with clone, cancellation, crash, and last-owner behavior;

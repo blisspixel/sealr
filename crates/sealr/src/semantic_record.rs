@@ -4389,14 +4389,20 @@ mod fuzzing {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
     use std::io::{Cursor as IoCursor, Write};
+    use std::path::PathBuf;
 
     use ::zip::write::SimpleFileOptions;
-    use ::zip::{CompressionMethod, ZipWriter};
+    use ::zip::{CompressionMethod, DateTime, System, ZipWriter};
 
     use super::*;
-    use crate::apply::{apply_with_options, ApplyOptions, Request, Source};
+    use crate::apply::{
+        apply_with_options, capture_next_planning_boundary, ApplyOptions, Outcome, Request, Source,
+    };
+    use crate::outcome::EffectStatus;
     use crate::policy::Policy;
+    use crate::snapshot::inject_read_failure;
 
     fn reset_completion_materializations() {
         COMPLETION_IR_MATERIALIZATIONS.with(|count| count.set(0));
@@ -4419,8 +4425,15 @@ mod tests {
     }
 
     fn make_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        make_zip_with_method(entries, CompressionMethod::Stored)
+    }
+
+    fn make_zip_with_method(entries: &[(&str, &[u8])], method: CompressionMethod) -> Vec<u8> {
         let mut writer = ZipWriter::new(IoCursor::new(Vec::new()));
-        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        let options = SimpleFileOptions::default()
+            .compression_method(method)
+            .last_modified_time(DateTime::default())
+            .system(System::Dos);
         for (name, bytes) in entries {
             if name.ends_with('/') {
                 writer.add_directory(*name, options).unwrap();
@@ -4440,6 +4453,14 @@ mod tests {
             .collect();
         assert_eq!(offsets.len(), 1);
         offsets[0]
+    }
+
+    fn signature_offsets(bytes: &[u8], signature: [u8; 4]) -> Vec<usize> {
+        bytes
+            .windows(signature.len())
+            .enumerate()
+            .filter_map(|(index, window)| (window == signature).then_some(index))
+            .collect()
     }
 
     fn u16_at(bytes: &[u8], offset: usize) -> u16 {
@@ -4538,6 +4559,62 @@ mod tests {
         put_u32(bytes, eocd + 16, u32::try_from(shifted_central).unwrap());
     }
 
+    fn replace_declared_deflate_payload(bytes: &mut Vec<u8>, replacement: &[u8]) {
+        let local = signature_offset(bytes, [0x50, 0x4b, 0x03, 0x04]);
+        let central = signature_offset(bytes, [0x50, 0x4b, 0x01, 0x02]);
+        let old_size = usize::try_from(u32_at(bytes, local + 18)).unwrap();
+        assert_eq!(u32_at(bytes, central + 20) as usize, old_size);
+        let name_len = usize::from(u16_at(bytes, local + 26));
+        let extra_len = usize::from(u16_at(bytes, local + 28));
+        let payload = local + 30 + name_len + extra_len;
+        assert_eq!(payload + old_size, central);
+        bytes.splice(payload..central, replacement.iter().copied());
+        let new_size = u32::try_from(replacement.len()).unwrap();
+        put_u32(bytes, local + 18, new_size);
+        let shifted_central = payload + replacement.len();
+        put_u32(bytes, shifted_central + 20, new_size);
+        let eocd = signature_offset(bytes, [0x50, 0x4b, 0x05, 0x06]);
+        put_u32(bytes, eocd + 16, u32::try_from(shifted_central).unwrap());
+    }
+
+    fn extend_declared_deflate_payload(bytes: &mut Vec<u8>, suffix: &[u8]) {
+        let local = signature_offset(bytes, [0x50, 0x4b, 0x03, 0x04]);
+        let central = signature_offset(bytes, [0x50, 0x4b, 0x01, 0x02]);
+        let old_size = usize::try_from(u32_at(bytes, local + 18)).unwrap();
+        let name_len = usize::from(u16_at(bytes, local + 26));
+        let extra_len = usize::from(u16_at(bytes, local + 28));
+        let payload = local + 30 + name_len + extra_len;
+        assert_eq!(payload + old_size, central);
+        let mut replacement = bytes[payload..central].to_vec();
+        replacement.extend_from_slice(suffix);
+        replace_declared_deflate_payload(bytes, &replacement);
+    }
+
+    fn understate_declared_uncompressed_size(bytes: &mut [u8], size: u32) {
+        let local = signature_offset(bytes, [0x50, 0x4b, 0x03, 0x04]);
+        let central = signature_offset(bytes, [0x50, 0x4b, 0x01, 0x02]);
+        put_u32(bytes, local + 22, size);
+        put_u32(bytes, central + 24, size);
+    }
+
+    fn member_payload_range(bytes: &[u8]) -> (u64, u64) {
+        let local = signature_offset(bytes, [0x50, 0x4b, 0x03, 0x04]);
+        let name_len = usize::from(u16_at(bytes, local + 26));
+        let extra_len = usize::from(u16_at(bytes, local + 28));
+        let payload = local + 30 + name_len + extra_len;
+        (payload as u64, u64::from(u32_at(bytes, local + 18)))
+    }
+
+    fn corrupt_second_member_crc(bytes: &mut [u8]) {
+        let locals = signature_offsets(bytes, [0x50, 0x4b, 0x03, 0x04]);
+        let centrals = signature_offsets(bytes, [0x50, 0x4b, 0x01, 0x02]);
+        assert_eq!(locals.len(), 2);
+        assert_eq!(centrals.len(), 2);
+        let wrong_crc = u32_at(bytes, centrals[1] + 16) ^ 1;
+        put_u32(bytes, locals[1] + 14, wrong_crc);
+        put_u32(bytes, centrals[1] + 16, wrong_crc);
+    }
+
     fn rebind_source(binding: &mut InvocationBinding, ir: &mut ArchiveIR, source: &[u8]) {
         let digest: [u8; 32] = Sha256::digest(source).into();
         binding.source_len = source.len() as u64;
@@ -4574,6 +4651,7 @@ mod tests {
     ) -> (InvocationBinding, ArchiveIR, ArchiveIR) {
         let controls = policy.compile().unwrap();
         let options = ApplyOptions::new().with_interpretation_profile(profile);
+        let capture = capture_next_planning_boundary();
         let outcome = apply_with_options(
             Request {
                 source: Source::Bytes {
@@ -4588,13 +4666,7 @@ mod tests {
         assert_eq!(outcome.admission, AdmissionStatus::Admitted);
         assert_eq!(outcome.verification, VerificationStatus::Complete);
         let completed = outcome.archive_ir().unwrap().clone();
-        let mut pending = completed.clone();
-        for member in &mut pending.members {
-            member.actual_uncomp_size = None;
-            member.actual_crc = None;
-            member.content_sha256 = None;
-            member.verification = MemberVerification::Pending;
-        }
+        let pending = capture.take().expect("apply reached the planning boundary");
         let source_sha256: [u8; 32] = Sha256::digest(bytes).into();
         let binding = InvocationBinding {
             operation_id: [0x41; 16],
@@ -4666,6 +4738,777 @@ mod tests {
             serde_json::to_vec(left).unwrap(),
             serde_json::to_vec(right).unwrap()
         );
+    }
+
+    fn binding_for(
+        bytes: &[u8],
+        profile: ZipInterpretationProfile,
+        policy: &Policy,
+        requested_effect: RequestedEffect,
+    ) -> InvocationBinding {
+        let controls = policy.compile().unwrap();
+        InvocationBinding {
+            operation_id: match requested_effect {
+                RequestedEffect::Inspect => [0x41; 16],
+                RequestedEffect::Materialize => [0x52; 16],
+            },
+            source_len: bytes.len() as u64,
+            source_sha256: Sha256::digest(bytes).into(),
+            profile,
+            profile_sha256: parse_hex_32(&profile.digest()).unwrap(),
+            policy_id: policy.id.clone(),
+            policy_sha256: parse_hex_32(&policy.digest_hex()).unwrap(),
+            budget: controls.budget,
+            target: controls.target,
+            consumer: controls.consumer,
+            requested_effect,
+            target_sha256: (requested_effect == RequestedEffect::Materialize).then_some([0x54; 32]),
+            member_sync: controls.effect.member_sync,
+            retention: RetentionBinding::None,
+        }
+    }
+
+    fn enum_name(value: &impl serde::Serialize) -> String {
+        let value = serde_json::to_value(value).unwrap();
+        value
+            .as_str()
+            .or_else(|| value.get("status").and_then(serde_json::Value::as_str))
+            .unwrap()
+            .to_owned()
+    }
+
+    fn verification_name(value: &VerificationStatus) -> String {
+        match value {
+            VerificationStatus::StructureOnly => "structure-only",
+            VerificationStatus::Partial { .. } => "partial",
+            VerificationStatus::Complete => "complete",
+        }
+        .to_owned()
+    }
+
+    fn ir_digest(ir: &ArchiveIR) -> String {
+        hex_32(&Sha256::digest(serde_json::to_vec(ir).unwrap()).into())
+    }
+
+    fn bytes_digest(bytes: &[u8]) -> String {
+        hex_32(&Sha256::digest(bytes).into())
+    }
+
+    fn hex_bytes(bytes: &[u8]) -> String {
+        bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+    }
+
+    fn frontier(ir: &ArchiveIR) -> Vec<String> {
+        ir.members
+            .iter()
+            .map(|member| match &member.verification {
+                MemberVerification::Pending => "pending".to_owned(),
+                MemberVerification::Verified => "verified".to_owned(),
+                MemberVerification::Failed { cause } => format!("failed:{cause}"),
+            })
+            .collect()
+    }
+
+    fn phase_and_cause(completeness: &ViewCompleteness) -> (Option<String>, Option<String>) {
+        match completeness {
+            ViewCompleteness::Complete => (None, None),
+            ViewCompleteness::Partial { phase, cause } => {
+                (Some(enum_name(phase)), Some(cause.clone()))
+            }
+        }
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+    #[serde(deny_unknown_fields)]
+    struct FindingSignature {
+        severity: String,
+        code: String,
+        member: Option<String>,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+    #[serde(deny_unknown_fields)]
+    struct ShadowEvidence {
+        name: String,
+        profile_id: String,
+        policy_id: String,
+        policy_sha256: String,
+        requested_effect: String,
+        retention: String,
+        finding_code: Option<String>,
+        interpretation: String,
+        admission: String,
+        verification: String,
+        effect: String,
+        phase: Option<String>,
+        cause: Option<String>,
+        verified_members: Option<u64>,
+        pending_members: Option<u64>,
+        source_sha256: String,
+        request_id: String,
+        plan_id: String,
+        pending_ir_sha256: Option<String>,
+        final_ir_sha256: Option<String>,
+        frontier: Vec<String>,
+        findings: Vec<FindingSignature>,
+        findings_sha256: Option<String>,
+        planning_frame_sha256: String,
+        completion_frame_sha256: Option<String>,
+    }
+
+    #[derive(Debug, serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct ShadowManifest {
+        schema: String,
+        operation_ids: Vec<String>,
+        cases: Vec<ShadowEvidence>,
+    }
+
+    struct CompletionArtifact {
+        plan: ValidatedPlanningRecord,
+        bytes: Vec<u8>,
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn evidence(
+        name: &str,
+        bytes: &[u8],
+        outcome: &Outcome,
+        finding_code: Option<FindingCode>,
+        plan: &ValidatedPlanningRecord,
+        pending: Option<&ArchiveIR>,
+        planning_frame: &[u8],
+        completion_frame: Option<&[u8]>,
+        hash_findings: bool,
+    ) -> ShadowEvidence {
+        let (phase, cause) = phase_and_cause(&outcome.view_completeness);
+        let (verified_members, pending_members) = match &outcome.verification {
+            VerificationStatus::Partial {
+                verified_members,
+                pending_members,
+            } => (Some(*verified_members), Some(*pending_members)),
+            _ => (None, None),
+        };
+        ShadowEvidence {
+            name: name.to_owned(),
+            profile_id: plan.record.binding.profile.id().to_owned(),
+            policy_id: plan.record.binding.policy_id.clone(),
+            policy_sha256: hex_32(&plan.record.binding.policy_sha256),
+            requested_effect: match plan.record.binding.requested_effect {
+                RequestedEffect::Inspect => "inspect",
+                RequestedEffect::Materialize => "materialize",
+            }
+            .to_owned(),
+            retention: match &plan.record.binding.retention {
+                RetentionBinding::None => "none",
+                RetentionBinding::Plan { .. } => "plan",
+            }
+            .to_owned(),
+            finding_code: finding_code.map(|code| code.as_str().to_owned()),
+            interpretation: enum_name(&outcome.interpretation),
+            admission: enum_name(&outcome.admission),
+            verification: verification_name(&outcome.verification),
+            effect: enum_name(&outcome.effect),
+            phase,
+            cause,
+            verified_members,
+            pending_members,
+            source_sha256: hex_32(&Sha256::digest(bytes).into()),
+            request_id: hex_32(&plan.request_id),
+            plan_id: hex_32(&plan.plan_id),
+            pending_ir_sha256: pending.map(ir_digest),
+            final_ir_sha256: outcome.archive_ir().map(ir_digest),
+            frontier: outcome.archive_ir().map(frontier).unwrap_or_default(),
+            findings: outcome
+                .view
+                .findings
+                .iter()
+                .map(|finding| FindingSignature {
+                    severity: enum_name(&finding.severity),
+                    code: finding.code.as_str().to_owned(),
+                    member: finding.member.clone(),
+                })
+                .collect(),
+            findings_sha256: hash_findings
+                .then(|| bytes_digest(&serde_json::to_vec(&outcome.view.findings).unwrap())),
+            planning_frame_sha256: bytes_digest(planning_frame),
+            completion_frame_sha256: completion_frame.map(bytes_digest),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn assert_outcome(
+        name: &str,
+        outcome: &Outcome,
+        interpretation: InterpretationStatus,
+        admission: AdmissionStatus,
+        verification: VerificationStatus,
+        effect: EffectStatus,
+        completeness: ViewCompleteness,
+        finding_code: Option<FindingCode>,
+    ) {
+        assert_eq!(outcome.interpretation, interpretation, "{name}");
+        assert_eq!(outcome.admission, admission, "{name}");
+        assert_eq!(outcome.verification, verification, "{name}");
+        assert_eq!(outcome.effect, effect, "{name}");
+        assert_eq!(outcome.view_completeness, completeness, "{name}");
+        assert_eq!(outcome.view.findings, outcome.receipt.findings, "{name}");
+        let errors: Vec<_> = outcome
+            .view
+            .findings
+            .iter()
+            .filter(|finding| finding.severity == Severity::Error)
+            .collect();
+        match finding_code {
+            None => assert!(errors.is_empty(), "{name}: {errors:?}"),
+            Some(code) => {
+                assert_eq!(errors.len(), 1, "{name}: {errors:?}");
+                assert_eq!(errors[0].code, code, "{name}");
+            }
+        }
+    }
+
+    fn member_completions(
+        ir: &ArchiveIR,
+        finding_code: Option<FindingCode>,
+    ) -> Vec<MemberCompletion> {
+        ir.members
+            .iter()
+            .map(|member| match &member.verification {
+                MemberVerification::Pending => MemberCompletion::Pending,
+                MemberVerification::Verified => MemberCompletion::Verified {
+                    actual_uncomp_size: member.actual_uncomp_size.unwrap(),
+                    actual_crc: member.actual_crc.unwrap(),
+                    content_sha256: parse_hex_32(member.content_sha256.as_deref().unwrap())
+                        .unwrap(),
+                },
+                MemberVerification::Failed { cause } => {
+                    let code = finding_code.expect("failed frontier has a pinned cause");
+                    assert_eq!(cause, code.as_str());
+                    MemberCompletion::Failed { cause: code }
+                }
+            })
+            .collect()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_completion_shadow(
+        name: &str,
+        bytes: &[u8],
+        policy: &Policy,
+        expected_interpretation: InterpretationStatus,
+        expected_admission: AdmissionStatus,
+        expected_verification: VerificationStatus,
+        expected_effect: EffectStatus,
+        expected_completeness: ViewCompleteness,
+        finding_code: Option<FindingCode>,
+    ) -> (ShadowEvidence, CompletionArtifact) {
+        let profile = ZipInterpretationProfile::StrictAsciiV1;
+        let binding = binding_for(bytes, profile, policy, RequestedEffect::Inspect);
+        let capture = capture_next_planning_boundary();
+        let outcome = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("semantic-shadow.zip"),
+                    data: bytes,
+                },
+                policy,
+                dest: None,
+            },
+            &ApplyOptions::new().with_interpretation_profile(profile),
+        );
+        let pending = capture.take().expect("case reached the planning boundary");
+        assert_outcome(
+            name,
+            &outcome,
+            expected_interpretation,
+            expected_admission,
+            expected_verification.clone(),
+            expected_effect,
+            expected_completeness,
+            finding_code,
+        );
+        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending.clone())).unwrap();
+        let plan = decode_plan(&plan_bytes, &binding, bytes).unwrap();
+        assert_eq!(encode_planning(&plan.record).unwrap(), plan_bytes, "{name}");
+        assert_eq!(plan.record.binding, binding, "{name}");
+        assert!(plan.record.findings.is_empty(), "{name}");
+        assert_ir_eq(plan.record.ir.as_ref().unwrap(), &pending);
+        assert_eq!(plan.request_id, request_id(&binding).unwrap(), "{name}");
+        assert_eq!(plan.plan_id, plan_id(&plan_bytes), "{name}");
+
+        let final_ir = outcome.archive_ir().expect("completion outcome retains IR");
+        let disposition = match expected_verification {
+            VerificationStatus::Complete => CompletionDisposition::Complete,
+            VerificationStatus::Partial {
+                verified_members,
+                pending_members,
+            } => CompletionDisposition::Stopped {
+                verified_members,
+                pending_members,
+            },
+            VerificationStatus::StructureOnly => panic!("completion case stopped before execution"),
+        };
+        let completion = CompletionRecord {
+            operation_id: binding.operation_id,
+            request_id: plan.request_id,
+            plan_id: plan.plan_id,
+            disposition,
+            members: member_completions(final_ir, finding_code),
+            findings: outcome.view.findings.clone(),
+        };
+        let completion_bytes = encode_completion(&completion, &plan).unwrap();
+        let decoded = decode_completion(&completion_bytes, &plan).unwrap();
+        assert_eq!(decoded.interpretation, outcome.interpretation, "{name}");
+        assert_eq!(decoded.admission, outcome.admission, "{name}");
+        assert_eq!(decoded.verification, outcome.verification, "{name}");
+        assert_eq!(
+            decoded.view_completeness, outcome.view_completeness,
+            "{name}"
+        );
+        assert_eq!(decoded.findings, outcome.view.findings, "{name}");
+        assert_ir_eq(&decoded.ir, final_ir);
+        assert_eq!(frontier(&decoded.ir), frontier(final_ir), "{name}");
+        (
+            evidence(
+                name,
+                bytes,
+                &outcome,
+                finding_code,
+                &plan,
+                Some(&pending),
+                &plan_bytes,
+                Some(&completion_bytes),
+                true,
+            ),
+            CompletionArtifact {
+                plan,
+                bytes: completion_bytes,
+            },
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_terminal_shadow(
+        name: &str,
+        bytes: &[u8],
+        policy: &Policy,
+        interpretation: InterpretationStatus,
+        admission: AdmissionStatus,
+        phase: StoppingPhase,
+        finding_code: FindingCode,
+    ) -> ShadowEvidence {
+        let profile = ZipInterpretationProfile::StrictAsciiV1;
+        let binding = binding_for(bytes, profile, policy, RequestedEffect::Inspect);
+        let capture = capture_next_planning_boundary();
+        let outcome = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("semantic-shadow-terminal.bin"),
+                    data: bytes,
+                },
+                policy,
+                dest: None,
+            },
+            &ApplyOptions::new().with_interpretation_profile(profile),
+        );
+        assert!(capture.take().is_none(), "{name}");
+        let completeness = ViewCompleteness::Partial {
+            phase,
+            cause: finding_code.as_str().to_owned(),
+        };
+        assert_outcome(
+            name,
+            &outcome,
+            interpretation.clone(),
+            admission.clone(),
+            VerificationStatus::StructureOnly,
+            EffectStatus::NotRequested,
+            completeness.clone(),
+            Some(finding_code),
+        );
+        assert!(outcome.archive_ir().is_none(), "{name}");
+        let record = PlanningRecord {
+            binding: binding.clone(),
+            disposition: PlanningDisposition::Terminal(TerminalPlanningAxes {
+                interpretation,
+                admission,
+                verification: VerificationStatus::StructureOnly,
+                view_completeness: completeness,
+            }),
+            ir: None,
+            findings: outcome.view.findings.clone(),
+        };
+        let bytes_record = encode_planning(&record).unwrap();
+        let plan = decode_plan(&bytes_record, &binding, bytes).unwrap();
+        assert_eq!(
+            encode_planning(&plan.record).unwrap(),
+            bytes_record,
+            "{name}"
+        );
+        assert_eq!(plan.record.disposition, record.disposition, "{name}");
+        assert_eq!(plan.record.findings, outcome.view.findings, "{name}");
+        assert!(plan.record.ir.is_none(), "{name}");
+        assert_eq!(plan.request_id, request_id(&binding).unwrap(), "{name}");
+        assert_eq!(plan.plan_id, plan_id(&bytes_record), "{name}");
+        evidence(
+            name,
+            bytes,
+            &outcome,
+            Some(finding_code),
+            &plan,
+            None,
+            &bytes_record,
+            None,
+            true,
+        )
+    }
+
+    fn temp_shadow_dest(label: &str) -> PathBuf {
+        let mut random = [0_u8; 12];
+        getrandom::fill(&mut random).unwrap();
+        let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        std::env::temp_dir().join(format!("sealr-semantic-shadow-{label}-{suffix}"))
+    }
+
+    fn run_setup_failure_shadow(bytes: &[u8], policy: &Policy) -> ShadowEvidence {
+        let name = "setup-failure";
+        let profile = ZipInterpretationProfile::StrictAsciiV1;
+        let binding = binding_for(bytes, profile, policy, RequestedEffect::Materialize);
+        let destination = temp_shadow_dest("existing");
+        fs::create_dir(&destination).unwrap();
+        fs::write(destination.join("sentinel.txt"), b"unchanged").unwrap();
+        let capture = capture_next_planning_boundary();
+        let outcome = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("semantic-shadow-setup.zip"),
+                    data: bytes,
+                },
+                policy,
+                dest: Some(&destination),
+            },
+            &ApplyOptions::new().with_interpretation_profile(profile),
+        );
+        let pending = capture.take().expect("setup case reached planning");
+        let completeness = ViewCompleteness::Partial {
+            phase: StoppingPhase::Effect,
+            cause: FindingCode::MaterializeExists.as_str().to_owned(),
+        };
+        assert_outcome(
+            name,
+            &outcome,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Admitted,
+            VerificationStatus::StructureOnly,
+            EffectStatus::Failed,
+            completeness,
+            Some(FindingCode::MaterializeExists),
+        );
+        assert_ir_eq(outcome.archive_ir().unwrap(), &pending);
+        assert_eq!(
+            fs::read(destination.join("sentinel.txt")).unwrap(),
+            b"unchanged"
+        );
+        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending.clone())).unwrap();
+        let plan = decode_plan(&plan_bytes, &binding, bytes).unwrap();
+        assert_eq!(encode_planning(&plan.record).unwrap(), plan_bytes);
+        let finding = outcome
+            .view
+            .findings
+            .iter()
+            .find(|finding| finding.severity == Severity::Error)
+            .unwrap();
+        let axes = plan.setup_failure_axes(finding).unwrap();
+        assert_eq!(axes.interpretation, outcome.interpretation);
+        assert_eq!(axes.admission, outcome.admission);
+        assert_eq!(axes.verification, outcome.verification);
+        assert_eq!(axes.effect, outcome.effect);
+        assert_eq!(axes.view_completeness, outcome.view_completeness);
+        let result = evidence(
+            name,
+            bytes,
+            &outcome,
+            Some(FindingCode::MaterializeExists),
+            &plan,
+            Some(&pending),
+            &plan_bytes,
+            None,
+            false,
+        );
+        fs::remove_dir_all(destination).unwrap();
+        result
+    }
+
+    fn assert_cross_case_id_swaps_reject(left: &CompletionArtifact, right: &CompletionArtifact) {
+        assert_ne!(left.plan.request_id, right.plan.request_id);
+        assert_ne!(left.plan.plan_id, right.plan.plan_id);
+        let request_offset = HEADER_BYTES + 16;
+        let plan_offset = request_offset + 32;
+
+        let mut swapped_request = left.bytes.clone();
+        swapped_request[request_offset..request_offset + 32]
+            .copy_from_slice(&right.plan.request_id);
+        assert_eq!(
+            decode_completion(&swapped_request, &left.plan)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::BindingMismatch
+        );
+
+        let mut swapped_plan = left.bytes.clone();
+        swapped_plan[plan_offset..plan_offset + 32].copy_from_slice(&right.plan.plan_id);
+        assert_eq!(
+            decode_completion(&swapped_plan, &left.plan)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::BindingMismatch
+        );
+    }
+
+    #[test]
+    fn semantic_shadow_v1_matches_reachable_apply_outcomes() {
+        let policy = Policy::default_v1();
+        let mut cases = Vec::new();
+
+        let store = make_zip(&[("stored/a.txt", b"stored"), ("stored/b.txt", b"bytes")]);
+        let (store_evidence, store_artifact) = run_completion_shadow(
+            "store-complete",
+            &store,
+            &policy,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Admitted,
+            VerificationStatus::Complete,
+            EffectStatus::NotRequested,
+            ViewCompleteness::Complete,
+            None,
+        );
+        cases.push(store_evidence);
+
+        let deflate = make_zip_with_method(
+            &[("deflated.txt", b"deflated payload")],
+            CompressionMethod::Deflated,
+        );
+        let (deflate_evidence, deflate_artifact) = run_completion_shadow(
+            "deflate-complete",
+            &deflate,
+            &policy,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Admitted,
+            VerificationStatus::Complete,
+            EffectStatus::NotRequested,
+            ViewCompleteness::Complete,
+            None,
+        );
+        cases.push(deflate_evidence);
+
+        let mut descriptor = make_zip(&[("descriptor.txt", b"descriptor payload")]);
+        add_matching_data_descriptor(&mut descriptor);
+        let (descriptor_evidence, _) = run_completion_shadow(
+            "descriptor-complete",
+            &descriptor,
+            &policy,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Admitted,
+            VerificationStatus::Complete,
+            EffectStatus::NotRequested,
+            ViewCompleteness::Complete,
+            None,
+        );
+        cases.push(descriptor_evidence);
+
+        let unknown_magic = b"not an archive".to_vec();
+        cases.push(run_terminal_shadow(
+            "unknown-magic-terminal",
+            &unknown_magic,
+            &policy,
+            InterpretationStatus::Unsupported,
+            AdmissionStatus::NotEvaluated,
+            StoppingPhase::Structure,
+            FindingCode::FormatUnsupported,
+        ));
+
+        let mut malformed = make_zip(&[("mismatch.txt", b"malformed")]);
+        let local = signature_offset(&malformed, [0x50, 0x4b, 0x03, 0x04]);
+        malformed[local + 30] ^= 1;
+        cases.push(run_terminal_shadow(
+            "name-mismatch-terminal",
+            &malformed,
+            &policy,
+            InterpretationStatus::Malformed,
+            AdmissionStatus::NotEvaluated,
+            StoppingPhase::Structure,
+            FindingCode::ZipDiffA3Name,
+        ));
+
+        let mut admission_quota_policy = policy.clone();
+        admission_quota_policy.max_member_bytes = 0;
+        let admission_quota = make_zip(&[("quota.txt", b"q")]);
+        cases.push(run_terminal_shadow(
+            "member-quota-terminal",
+            &admission_quota,
+            &admission_quota_policy,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Denied,
+            StoppingPhase::Admission,
+            FindingCode::QuotaMember,
+        ));
+
+        let mut crc_mismatch = make_zip(&[("first.txt", b"first"), ("second.txt", b"second")]);
+        corrupt_second_member_crc(&mut crc_mismatch);
+        let (crc_evidence, _) = run_completion_shadow(
+            "crc-mismatch-stopped",
+            &crc_mismatch,
+            &policy,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Denied,
+            VerificationStatus::Partial {
+                verified_members: 1,
+                pending_members: 1,
+            },
+            EffectStatus::NotRequested,
+            ViewCompleteness::Partial {
+                phase: StoppingPhase::Verification,
+                cause: FindingCode::CrcMismatch.as_str().to_owned(),
+            },
+            Some(FindingCode::CrcMismatch),
+        );
+        cases.push(crc_evidence);
+
+        let mut declared_lie = make_zip_with_method(
+            &[("declared-lie.txt", b"more than one byte")],
+            CompressionMethod::Deflated,
+        );
+        understate_declared_uncompressed_size(&mut declared_lie, 1);
+        let (declared_lie_evidence, _) = run_completion_shadow(
+            "declared-lie-stopped",
+            &declared_lie,
+            &policy,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Denied,
+            VerificationStatus::Partial {
+                verified_members: 0,
+                pending_members: 1,
+            },
+            EffectStatus::NotRequested,
+            ViewCompleteness::Partial {
+                phase: StoppingPhase::Verification,
+                cause: FindingCode::QuotaDeclaredLie.as_str().to_owned(),
+            },
+            Some(FindingCode::QuotaDeclaredLie),
+        );
+        cases.push(declared_lie_evidence);
+
+        let mut invalid_stream = make_zip_with_method(
+            &[("invalid-deflate.txt", b"deflate payload")],
+            CompressionMethod::Deflated,
+        );
+        replace_declared_deflate_payload(&mut invalid_stream, &[0xff]);
+        let (invalid_stream_evidence, _) = run_completion_shadow(
+            "invalid-deflate-stopped",
+            &invalid_stream,
+            &policy,
+            InterpretationStatus::Malformed,
+            AdmissionStatus::NotEvaluated,
+            VerificationStatus::Partial {
+                verified_members: 0,
+                pending_members: 1,
+            },
+            EffectStatus::NotRequested,
+            ViewCompleteness::Partial {
+                phase: StoppingPhase::Verification,
+                cause: FindingCode::CodecDeflateInvalidStream.as_str().to_owned(),
+            },
+            Some(FindingCode::CodecDeflateInvalidStream),
+        );
+        cases.push(invalid_stream_evidence);
+
+        let mut trailing_input = make_zip_with_method(
+            &[("trailing-deflate.txt", b"deflate payload")],
+            CompressionMethod::Deflated,
+        );
+        extend_declared_deflate_payload(&mut trailing_input, &[0xde, 0xad, 0xbe, 0xef]);
+        let (trailing_input_evidence, _) = run_completion_shadow(
+            "trailing-deflate-stopped",
+            &trailing_input,
+            &policy,
+            InterpretationStatus::Malformed,
+            AdmissionStatus::NotEvaluated,
+            VerificationStatus::Partial {
+                verified_members: 0,
+                pending_members: 1,
+            },
+            EffectStatus::NotRequested,
+            ViewCompleteness::Partial {
+                phase: StoppingPhase::Verification,
+                cause: FindingCode::CodecDeflateTrailingInput.as_str().to_owned(),
+            },
+            Some(FindingCode::CodecDeflateTrailingInput),
+        );
+        cases.push(trailing_input_evidence);
+
+        let source_io = make_zip(&[("source-io.txt", b"source bytes")]);
+        let (payload_offset, payload_len) = member_payload_range(&source_io);
+        let source_io_guard = inject_read_failure(payload_offset, payload_len);
+        let (source_io_evidence, _) = run_completion_shadow(
+            "source-io-stopped",
+            &source_io,
+            &policy,
+            InterpretationStatus::Indeterminate,
+            AdmissionStatus::Admitted,
+            VerificationStatus::Partial {
+                verified_members: 0,
+                pending_members: 1,
+            },
+            EffectStatus::NotRequested,
+            ViewCompleteness::Partial {
+                phase: StoppingPhase::Verification,
+                cause: FindingCode::SourceIo.as_str().to_owned(),
+            },
+            Some(FindingCode::SourceIo),
+        );
+        drop(source_io_guard);
+        cases.push(source_io_evidence);
+
+        let setup = make_zip(&[("setup.txt", b"setup")]);
+        cases.push(run_setup_failure_shadow(&setup, &policy));
+
+        assert_cross_case_id_swaps_reject(&store_artifact, &deflate_artifact);
+
+        let expected_cases = [
+            "store-complete",
+            "deflate-complete",
+            "descriptor-complete",
+            "unknown-magic-terminal",
+            "name-mismatch-terminal",
+            "member-quota-terminal",
+            "crc-mismatch-stopped",
+            "declared-lie-stopped",
+            "invalid-deflate-stopped",
+            "trailing-deflate-stopped",
+            "source-io-stopped",
+            "setup-failure",
+        ];
+        assert_eq!(cases.len(), expected_cases.len());
+        assert_eq!(
+            cases
+                .iter()
+                .map(|case| case.name.as_str())
+                .collect::<Vec<_>>(),
+            expected_cases
+        );
+
+        let manifest_json = include_str!("../tests/conformance/semantic-shadow-v1.json");
+        let manifest: ShadowManifest = serde_json::from_str(manifest_json).unwrap();
+        let unknown_field =
+            manifest_json.replacen("\"schema\":", "\"unexpected\": true,\n  \"schema\":", 1);
+        assert!(serde_json::from_str::<ShadowManifest>(&unknown_field).is_err());
+        assert_eq!(manifest.schema, "sealr.semantic-shadow.v1");
+        assert_eq!(
+            manifest.operation_ids,
+            vec![hex_bytes(&[0x41; 16]), hex_bytes(&[0x52; 16])]
+        );
+        assert_eq!(manifest.cases, cases);
     }
 
     #[test]
