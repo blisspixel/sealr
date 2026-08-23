@@ -25,6 +25,7 @@ Start with the [README](../README.md) for the published Alpha.4 boundary and a s
 | [Differentials](differentials.md) | Single-interpretation rules and the ZipDiff corpus |
 | [Reduced-authority execution](sandbox.md) | Supervisor and worker design |
 | [Finding registry](findings.md) | Stable machine finding codes |
+| [Worker protocol v1](worker-protocol.md) | Bounded control frames, capability slots, decoder rules, and fuzz evidence |
 | [Policy](policy.md) | Current policy schema, compilation, and defaults |
 
 Repository vulnerability reporting and supported-version policy are in [SECURITY.md](../SECURITY.md).

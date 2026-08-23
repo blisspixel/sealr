@@ -13,6 +13,9 @@ The project is in initial development. Compatibility may change between preview 
 - Added path-replacement, truncation, growth, short-read, interrupted-read, private-directory cleanup, file-versus-memory parity, and post-source-deletion verified-read regressions.
 - Added deterministic same-length mutation coverage. Windows source opens now deny concurrent write sharing for the duration of the copy; Unix source admission compares device, inode, mode, length, modification time, and change time before and after the copy.
 - Added a physically sparse ZIP32 fixture generator, a required 1 MiB versus 128 MiB child-process peak-resident-memory and heap-allocation gate, and a monthly three-platform 3 GiB sparse gate. The local Windows 3 GiB run used 131,072 allocated source bytes and 210,427 tracked heap bytes.
+- Added the non-published, zero-dependency `sealr-worker-protocol` crate. Protocol v1 has a fixed 212-byte start frame, a 4 MiB whole-frame cap, out-of-band source and stage capability slots, operation correlation, bounded canonical manifests and findings, fallible allocation, and typed non-allocating errors.
+- Added deterministic protocol regressions for valid state round trips, every truncation point, header and capability confusion, count inconsistency, malformed strings, invalid result states, canonical ordering, and three mutations at every byte position.
+- Added a separate pinned libFuzzer workspace and weekly AddressSanitizer workflow for both protocol decoders. Required CI authenticates the seed manifest, dictionary, toolchain, tool versions, and explicit input, time, timeout, RSS, job, and reproducer-retention bounds.
 
 ### Changed
 

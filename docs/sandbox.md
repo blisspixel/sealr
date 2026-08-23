@@ -1,10 +1,10 @@
 # Reduced-authority execution
 
-> Target design. Alpha.4 has no process sandbox, worker process, mount command, or projected filesystem. Current receipts report `kernel_jail: unavailable`. The current parser, verifier, and materializer run in the caller's process.
+> Target design. The current repository has a bounded worker-protocol codec but no process sandbox, worker process, mount command, or projected filesystem. Current receipts report `kernel_jail: unavailable`. The parser, verifier, and materializer still run in the caller's process.
 
 Reduced authority follows the semantic-identity work in Roadmap Step 4. The worker protocol and supervisor audit must consume the canonical `ArchiveIR`; they must not create another interpretation or manifest format.
 
-The [near-term plan](near-term.md) made the private file-backed `SourceSnapshot` a prerequisite, and that first capability has landed. The worker must receive its retained read-only handle and a bounded control frame, never the archive as an in-memory protocol payload. This keeps source immutability, memory limits, and process authority on one design path.
+The [near-term plan](near-term.md) made the private file-backed `SourceSnapshot` a prerequisite, and that capability has landed. [Worker protocol v1](worker-protocol.md) now defines the bounded control and result frames. The future transport must pair its source and stage slots with out-of-band handles; it never embeds the archive in the protocol payload. This keeps source immutability, memory limits, and process authority on one design path.
 
 Correctness cannot depend on a kernel sandbox. Path, structure, quota, codec, content, and publication invariants remain mandatory. Process confinement reduces the authority available if that logic is compromised.
 

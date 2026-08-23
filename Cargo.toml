@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "crates/sealr",
     "crates/sealr-cli",
+    "crates/sealr-protocol",
     "tools/identity-verifier",
     "tools/wheel-lab",
 ]

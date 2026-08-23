@@ -1,0 +1,36 @@
+{
+  "schema": "sealr.fuzz-seeds.v1",
+  "target": "protocol_decoders",
+  "toolchain": "nightly-2026-08-01",
+  "cargoFuzzVersion": "0.13.2",
+  "libfuzzerSysVersion": "0.4.13",
+  "bounds": {
+    "maxInputBytes": 4194304,
+    "maxTotalSeconds": 600,
+    "perInputTimeoutSeconds": 5,
+    "rssLimitMiB": 1024,
+    "jobs": 1
+  },
+  "dictionary": {
+    "path": "fuzz/dictionaries/protocol_dictionary",
+    "bytes": 71,
+    "sha256": "454fe56a81049db04d927d0880025e7ade3bbfa87e0a78eb9c33d93ebc2d9f24"
+  },
+  "seeds": [
+    {
+      "path": "fuzz/corpus/protocol_decoders/empty",
+      "bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "path": "fuzz/corpus/protocol_decoders/field-mutations",
+      "bytes": 57,
+      "sha256": "c28e34a6e6c4022f6110160ed834f2540b50a50e5dccb65a87b372fa23f75538"
+    },
+    {
+      "path": "fuzz/corpus/protocol_decoders/header",
+      "bytes": 9,
+      "sha256": "c6d592edfdc764bb07913a1f9c8f80cb2e451b0433687402cb1f0e6c8e70b373"
+    }
+  ]
+}

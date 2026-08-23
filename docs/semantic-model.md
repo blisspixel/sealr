@@ -58,6 +58,8 @@ Alpha.4 adds `VerifiedArchive` and the explicitly selectable strict ASCII v2 int
 
 Current main adds the first Alpha.5 backend without changing the Alpha.4 interpretation profiles or tree encodings. Successful path ingest reports `private-file`, uses a capped fixed-buffer copy and digest pass into a native-private directory, reopens the spool read-only, removes its filename, and retains the unnamed positional-I/O handle. Caller byte inputs remain `memory-borrowed` in the receipt and become process-owned only inside a returned capability that must outlive the borrow. The two backends produce identical IR, findings, and roots for the same bytes.
 
+The Alpha.5 [worker protocol v1](worker-protocol.md) preparation encodes the selected source, profile, policy, resource limits, and authority slots without serializing the archive or inventing another archive interpretation. Its result manifest is a bounded, correlated claim from an untrusted future worker. Alpha.6 must compare that claim and the staged tree with the supervisor-owned `ArchiveIR` before publication.
+
 The current public outcome is:
 
 ```text

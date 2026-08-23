@@ -63,6 +63,10 @@ jobs:
         shell: pwsh
         run: pwsh -NoLogo -NoProfile -File scripts/verify_docs.ps1
 
+      - name: Verify fuzz seeds and bounds
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
       - name: Install pinned Rust
         run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal --component clippy,rustfmt
 
@@ -77,6 +81,9 @@ jobs:
 
       - name: Run tests
         run: cargo test --locked --workspace --all-features
+
+      - name: Compile fuzz target
+        run: cargo check --locked --manifest-path fuzz/Cargo.toml --bin protocol_decoders
 
       - name: Verify independent identity conformance
         run: >-
@@ -103,7 +110,7 @@ jobs:
       - name: Build documentation
         env:
           RUSTDOCFLAGS: -D warnings
-        run: cargo doc --locked -p sealr --all-features --no-deps
+        run: cargo doc --locked -p sealr -p sealr-worker-protocol --all-features --no-deps
 
       - name: Verify packaged library and downstream API
         run: |
@@ -204,6 +211,7 @@ jobs:
       - name: Check advisories, licenses, bans, and sources
         run: |
           cargo deny check
+          cargo deny --manifest-path fuzz/Cargo.toml check
           cargo package --locked -p sealr
           cargo deny --manifest-path tests/packaged-consumer/Cargo.toml check
 

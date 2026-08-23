@@ -58,6 +58,8 @@ The bounded source is a named `SourceSnapshot`: path inputs become Sealr-owned p
 - expose a read-only projection or content-addressed store;
 - sign or independently verify evidence.
 
+Current main also implements the non-published [worker protocol v1](worker-protocol.md) codec. It binds one operation to a source digest, selected profile, policy, resource limits, and out-of-band capability slots, then accepts only a correlated bounded result with a canonical manifest. This is an input-validation and authority-shaping component. No process boundary calls it yet, so it does not alter the current in-process trust boundary.
+
 ## Target semantic pipeline
 
 The next architecture is centered on one canonical intermediate representation:
@@ -94,7 +96,7 @@ Interpretation profile, deterministic resource budget, target filesystem model, 
 
 ### Reduced-authority worker
 
-After semantic types stabilize, a trusted supervisor can own the destination parent, lifecycle, staged-tree audit, and publication authority. It creates the private stage and immutable snapshot, then passes the worker only bounded read-only snapshot and stage capabilities through a versioned protocol. On Linux, runtime-probed Landlock and `no_new_privs` can restrict that worker before it reads the first archive byte. Equivalent credible packaging boundaries for macOS and Windows require separate work.
+After semantic types stabilize, a trusted supervisor can own the destination parent, lifecycle, staged-tree audit, and publication authority. It creates the private stage and immutable snapshot, then passes the worker only bounded read-only snapshot and stage capabilities through [protocol v1](worker-protocol.md). On Linux, runtime-probed Landlock and `no_new_privs` can restrict that worker before it reads the first archive byte. Equivalent credible packaging boundaries for macOS and Windows require separate work.
 
 The supervisor treats worker output as untrusted and audits the staged tree against the admitted IR before publication. Process isolation strengthens containment, but does not define archive semantics and must not own a second parser.
 
