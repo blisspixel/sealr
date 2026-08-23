@@ -401,6 +401,139 @@ struct StageCreateError {
     created: bool,
 }
 
+/// A randomly named directory whose namespace is private to the effective
+/// principal and which is owned through retained directory capabilities.
+///
+/// Source snapshots use this for bounded spooling. Keeping the primitive here
+/// ensures temporary archive bytes receive the same native ownership, mode,
+/// ACL, reparse-point, and parent-filesystem checks as extraction staging.
+pub(crate) struct PrivateDirectory {
+    parent: CapDir,
+    root: Option<CapDir>,
+    name: PathBuf,
+    #[cfg(test)]
+    parent_path: PathBuf,
+}
+
+impl PrivateDirectory {
+    pub(crate) fn create_in_system_temp(prefix: &str) -> io::Result<Self> {
+        ensure_platform_supported().map_err(finding_as_io)?;
+        if prefix.is_empty()
+            || !prefix
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'_'))
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "private-directory prefix is not a safe filename fragment",
+            ));
+        }
+
+        let parent_path = fs::canonicalize(std::env::temp_dir())?;
+        let parent = CapDir::open_ambient_dir(&parent_path, ambient_authority())?;
+        #[cfg(not(windows))]
+        ensure_parent_namespace_safe(&parent).map_err(finding_as_io)?;
+        #[cfg(windows)]
+        windows::probe_supported_parent(&parent).map_err(|error| {
+            io::Error::new(
+                error.error.kind(),
+                format!("unsupported private-spool parent: {}", error.error),
+            )
+        })?;
+
+        for _ in 0..128 {
+            let mut random = [0_u8; 16];
+            getrandom::fill(&mut random)
+                .map_err(|error| io::Error::other(format!("generate private name: {error}")))?;
+            let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+            let name = PathBuf::from(format!("{prefix}{suffix}"));
+            match create_stage(&parent, &name) {
+                Ok(root) => {
+                    if let Err(finding) = ensure_stage_namespace_safe(&root) {
+                        let detail = finding.detail.clone();
+                        let cleanup = root
+                            .remove_open_dir_all()
+                            .or_else(|_| parent.remove_dir_all(&name));
+                        return Err(match cleanup {
+                            Ok(()) => io::Error::new(io::ErrorKind::PermissionDenied, detail),
+                            Err(error) => io::Error::other(format!(
+                                "{detail}; private-directory cleanup also failed: {error}"
+                            )),
+                        });
+                    }
+                    if let Err(error) = ensure_directory_handle_is_not_reparse(&root) {
+                        let cleanup = root
+                            .remove_open_dir_all()
+                            .or_else(|_| parent.remove_dir_all(&name));
+                        return Err(match cleanup {
+                            Ok(()) => error,
+                            Err(cleanup_error) => io::Error::other(format!(
+                                "private directory is a reparse point: {error}; cleanup also failed: {cleanup_error}"
+                            )),
+                        });
+                    }
+                    return Ok(Self {
+                        parent,
+                        root: Some(root),
+                        name,
+                        #[cfg(test)]
+                        parent_path,
+                    });
+                }
+                Err(error)
+                    if !error.created && error.error.kind() == io::ErrorKind::AlreadyExists =>
+                {
+                    continue;
+                }
+                Err(error) if error.created => {
+                    let cleanup = parent.remove_dir_all(&name);
+                    return Err(match cleanup {
+                        Ok(()) => error.error,
+                        Err(cleanup_error) => io::Error::other(format!(
+                            "open private-directory capability: {}; cleanup also failed: {cleanup_error}",
+                            error.error
+                        )),
+                    });
+                }
+                Err(error) => return Err(error.error),
+            }
+        }
+        Err(io::Error::new(
+            io::ErrorKind::AlreadyExists,
+            "could not allocate a unique private directory",
+        ))
+    }
+
+    pub(crate) fn root(&self) -> io::Result<&CapDir> {
+        self.root
+            .as_ref()
+            .ok_or_else(|| io::Error::other("private-directory capability is unavailable"))
+    }
+
+    fn cleanup(&mut self) -> io::Result<()> {
+        let Some(root) = self.root.take() else {
+            return Ok(());
+        };
+        root.remove_open_dir_all()
+            .or_else(|_| self.parent.remove_dir_all(&self.name))
+    }
+
+    #[cfg(test)]
+    pub(crate) fn path(&self) -> PathBuf {
+        self.parent_path.join(&self.name)
+    }
+}
+
+impl Drop for PrivateDirectory {
+    fn drop(&mut self) {
+        let _ = self.cleanup();
+    }
+}
+
+fn finding_as_io(finding: Finding) -> io::Error {
+    io::Error::new(io::ErrorKind::PermissionDenied, finding.detail)
+}
+
 impl CapabilityMaterializer {
     pub(crate) fn create(dest: &Path, atomic: bool) -> Result<Self, MaterializationSetupError> {
         ensure_platform_supported()?;
@@ -1263,12 +1396,12 @@ fn ensure_directory_handle_is_not_reparse(dir: &CapDir) -> io::Result<()> {
 }
 
 #[cfg(not(windows))]
-fn ensure_file_handle_is_not_reparse(_file: &CapFile) -> io::Result<()> {
+pub(crate) fn ensure_file_handle_is_not_reparse(_file: &CapFile) -> io::Result<()> {
     Ok(())
 }
 
 #[cfg(windows)]
-fn ensure_file_handle_is_not_reparse(file: &CapFile) -> io::Result<()> {
+pub(crate) fn ensure_file_handle_is_not_reparse(file: &CapFile) -> io::Result<()> {
     use std::os::windows::fs::MetadataExt;
 
     let metadata = file.try_clone()?.into_std().metadata()?;

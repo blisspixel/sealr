@@ -4,7 +4,7 @@
 
 Reduced authority follows the semantic-identity work in Roadmap Step 4. The worker protocol and supervisor audit must consume the canonical `ArchiveIR`; they must not create another interpretation or manifest format.
 
-The [near-term plan](near-term.md) adds a prerequisite: the private file-backed `SourceSnapshot` lands before worker IPC. The worker receives a retained read-only source capability and a bounded control frame, never the archive as an in-memory protocol payload. This keeps source immutability, memory limits, and process authority on one design path.
+The [near-term plan](near-term.md) made the private file-backed `SourceSnapshot` a prerequisite, and that first capability has landed. The worker must receive its retained read-only handle and a bounded control frame, never the archive as an in-memory protocol payload. This keeps source immutability, memory limits, and process authority on one design path.
 
 Correctness cannot depend on a kernel sandbox. Path, structure, quota, codec, content, and publication invariants remain mandatory. Process confinement reduces the authority available if that logic is compromised.
 

@@ -9,15 +9,20 @@ The project is in initial development. Compatibility may change between preview 
 ### Added
 
 - Added checked `u64` exact reads, bounded owned reads, and range-limited streaming readers to the internal `SourceSnapshot` boundary. Regression coverage now exercises maximum-distance EOCD discovery, repeated short reads, stream signatures split across 64 KiB boundaries, invalid ranges before allocation, and semantic parity between owned and borrowed memory backends.
+- Added the first private file-backed snapshot for path inputs. Sealr opens the caller path once, copies and hashes through a fixed 64 KiB buffer under the archive cap, verifies the opened source length and modification state, reopens only the Sealr-owned file read-only, removes its filename, and retains the unnamed capability for parsing, verification, materialization, and later `VerifiedArchive` reads.
+- Added path-replacement, truncation, growth, short-read, interrupted-read, private-directory cleanup, file-versus-memory parity, and post-source-deletion verified-read regressions. A required large-input probe compares valid 1 MiB and 32 MiB stored ZIPs and fails if tracked heap allocation exceeds 8 MiB or grows by more than 1 MiB with the archive.
 
 ### Changed
 
 - Routed magic detection, EOCD discovery, central-directory and local-header parsing, data-descriptor checks, the codec-free covering audit, initial content verification, and later `VerifiedArchive` member reads through the snapshot random-access interface. The central directory is copied only after the metadata cap passes, and compressed payloads are no longer exposed to production code as whole slices.
+- Path-input receipts now report `source_snapshot: private-file`; caller byte inputs remain `memory-borrowed`, and a borrowed snapshot becomes `memory-owned` only when a returned verified capability must outlive the call.
 
 ### Fixed
 
 - Snapshot-owned buffer reads now validate the complete offset and length before attempting allocation, so an invalid hostile range cannot trigger a large reservation attempt before it is rejected.
 - Snapshot-access failures during structural interpretation now report an indeterminate interpretation with admission not evaluated instead of being mislabeled as malformed archive structure.
+- Underlying snapshot I/O failures observed through Deflate now retain `source.io` identity instead of being mislabeled as invalid compressed syntax.
+- Later private-snapshot I/O failures from `VerifiedArchive::read_member` now use `MemberReadErrorKind::SourceIo` instead of being conflated with verified-byte integrity disagreement.
 
 ## [0.1.0-alpha.4] - 2026-08-22
 

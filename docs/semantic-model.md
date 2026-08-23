@@ -34,7 +34,7 @@ The architecture review produced useful priorities, speculative extensions, and 
 | Unsigned evidence terminology | Adopted now | Current JSON is an EvidenceRecord or receipt, not an authenticated attestation. |
 | Separate interpretation, admission, verification, effect, and completeness axes | Landed in receipt v2 and the view | The `Allowed` or `Rejected` compatibility verdict remains, but the axes and CLI exit classes expose the independent facts. |
 | Versioned `ArchiveIR` and separate source, interpretation, layout, content, and effect identities | ArchiveIR landed; preview tree identities landed | `sealr.archive-ir.v1` is the inspect/materialize member plan and now records ranges, extra-field dispositions, and normalization actions. Receipts carry `sealrTreeV1` layout and content roots. Golden ZIP fixtures and lock semantics remain. |
-| Immutable `SourceSnapshot` abstraction | Checked access landed for in-memory sources | Path inputs become owned whole-buffer bytes and byte inputs are borrowed immutably for the call. Interpretation and verification now use checked `u64` exact reads and range-limited readers; the private file-backed object remains open. |
+| Immutable `SourceSnapshot` abstraction | Private path spool and checked access landed | Path inputs are copied and hashed once into a Sealr-owned private file, while byte inputs are borrowed immutably for the call. Interpretation and verification use the same checked `u64` exact reads and range-limited readers for both backends. Multi-gigabyte sparse, peak-resident-memory, and hostile same-file mutation gates remain open. |
 | Typed interpretation, budget, target, consumer, and effect profiles | Preview compilation landed | `Policy::compile()` produces typed supported controls before ingest. The long-term external five-layer document is still unspecified. |
 | Semantic lock | Scheduled after canonical encoding and roots | A lock is useful only when profile and tree identities are normative and stable. |
 | Hostile and benign compatibility corpora | Scheduled for trust gate | Strictness must be measured within named supported domains on all release platforms. |
@@ -55,6 +55,8 @@ The architecture review produced useful priorities, speculative extensions, and 
 Alpha.4 has one Rust `apply()` path for inspect and materialize. It uses one bounded in-memory ZIP32 source: path inputs become owned bytes, while byte inputs are borrowed immutably for the call. It applies the selected strict ASCII ZIP interpretation, builds one `ArchiveIR`, verifies accepted Store and Deflate members, emits a view and unsigned receipt, and optionally realizes and audits the same planned members through a capability-relative staged materializer.
 
 Alpha.4 adds `VerifiedArchive` and the explicitly selectable strict ASCII v2 interpretation. A completely verified admitted outcome retains the exact snapshot and IR behind an opaque capability. Canonical member reads enforce a caller limit before allocation and recheck size, CRC32, and SHA-256 when reading from the recorded payload. Callers may instead request a bounded exact-path set whose bytes are retained from the original checked verification stream. Neither path reopens the input or runs a second parser. Content-addressed reuse and reuse of the complete tree remain later work.
+
+Current main adds the first Alpha.5 backend without changing the Alpha.4 interpretation profiles or tree encodings. Successful path ingest reports `private-file`, uses a capped fixed-buffer copy and digest pass into a native-private directory, reopens the spool read-only, removes its filename, and retains the unnamed positional-I/O handle. Caller byte inputs remain `memory-borrowed` in the receipt and become process-owned only inside a returned capability that must outlive the borrow. The two backends produce identical IR, findings, and roots for the same bytes.
 
 The current public outcome is:
 
@@ -152,21 +154,22 @@ Sealr should keep these identities distinct:
 
 ## Immutable source snapshots
 
-The current bounded in-memory source provides invocation-scoped immutability: path inputs are owned after ingestion and borrowed bytes are immutable for the call through the safe Rust API. Replacing it with arbitrary `ReadAt` would lose that property.
+The current source provides invocation-scoped immutability through two concrete ownership modes. A path is opened once and copied into a Sealr-owned private file before interpretation; caller bytes are immutable for the call through the safe Rust API. Replacing either with arbitrary `ReadAt` would lose that property.
 
 The target API names and generalizes this property as an immutable snapshot:
 
 ```text
 SourceSnapshot
-  = CallerOwnedImmutableBytes
+  = BorrowedImmutableBytes
+  | ProcessOwnedImmutableBytes
   | SealrOwnedCASObject
   | PrivateSpool
   | VerifiedImmutableFilesystemObject
 ```
 
-The current owned and borrowed byte variants now implement this abstraction as `SourceSnapshot`. Parsing, payload reads, and digest recording use that one object. A later file-backed implementation can use a private spool or content-addressed object behind the same bounded access interface, but holding a file descriptor, ETag, length, or path alone is not enough if another writer can mutate the underlying bytes. Source truncation, growth, replacement, and same-file mutation need deterministic adversarial tests on Linux, macOS, and Windows.
+Owned and borrowed memory plus the first private spool implement this abstraction as `SourceSnapshot`. Parsing, payload reads, and digest recording use that one object. The spool does not treat the caller's file descriptor as immutable: it copies once while hashing and enforcing the cap, checks opened-source length and observable modification state, closes its writer, reopens only its own file read-only, and removes the spool filename. Holding a caller file descriptor, ETag, length, or path alone would not be enough if another writer could mutate the underlying bytes. Truncation, cap growth, replacement after open, short reads, interruption, cleanup, and backend parity have deterministic tests. Same-length hostile mutation during construction and broader native stress remain open.
 
-Current main has separated access from backing: parser discovery, metadata reads, covering checks, and content verification use checked `u64` exact reads or range-limited readers. The central directory is buffered only after its size passes the metadata budget, while compressed payloads are streamed. This is an implementation seam, not the Alpha.5 memory claim. Both current variants still retain the complete archive in memory until the private spool backend and its mutation and memory evidence land.
+Current main has separated access from backing: parser discovery, metadata reads, covering checks, and content verification use checked `u64` exact reads or range-limited readers. The central directory is buffered only after its size passes the metadata budget, while compressed payloads are streamed. A required valid 1 MiB versus 32 MiB probe caps tracked heap allocation at 8 MiB and size-related growth at 1 MiB; both cases measured 144,065 bytes on the current Windows run. This establishes the regression boundary for path-input heap allocation, not the remaining multi-gigabyte sparse or peak-resident-memory claims.
 
 ## Profiles and compiled policy
 
@@ -311,7 +314,7 @@ The strategic performance result is reuse of the exact admitted tree. Cores belo
 ### Gate 1: semantic identity
 
 - refined outcome axes;
-- defined `SourceSnapshot` abstraction with current owned and caller-borrowed immutable byte implementations;
+- defined `SourceSnapshot` abstraction with owned-memory, caller-borrowed-memory, and Sealr-owned private-file implementations;
 - canonical versioned `ArchiveIR`;
 - exact codec input-consumption rules;
 - normative layout and content roots;
@@ -319,7 +322,7 @@ The strategic performance result is reuse of the exact admitted tree. Cores belo
 - typed policy compilation and versioned profiles;
 - no placeholder digest or apparently enforced unsupported policy.
 
-Bounded random-access I/O is not required to complete this semantic definition. It is a later memory-scaling step that must implement the snapshot contract without reopening mutation races.
+Bounded random-access I/O was not required to define semantic identity, but it now implements the same snapshot contract for memory and private-file backends. Remaining scale work must preserve that contract without reopening mutation races.
 
 Definition of done:
 

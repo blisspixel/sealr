@@ -306,6 +306,7 @@ pub enum MemberReadErrorKind {
     LimitExceeded,
     PlatformLimit,
     AllocationFailed,
+    SourceIo,
     IntegrityMismatch,
 }
 
@@ -555,7 +556,7 @@ impl VerifiedArchive {
 
         let zip_member = member.as_zip_member();
         let payload = zip::payload_reader(&self.inner.snapshot, &zip_member)
-            .map_err(|finding| integrity_error(canonical_path, &finding))?;
+            .map_err(|finding| member_read_error(canonical_path, &finding))?;
         let payload = BufReader::with_capacity(64 * 1024, payload);
         let (actual, crc, sha256) = process_member(
             payload,
@@ -564,7 +565,7 @@ impl VerifiedArchive {
             expected_size,
             &mut bytes,
         )
-        .map_err(|finding| integrity_error(canonical_path, &finding))?;
+        .map_err(|finding| member_read_error(canonical_path, &finding))?;
 
         if actual != expected_size
             || Some(crc) != member.actual_crc
@@ -591,9 +592,14 @@ impl fmt::Debug for VerifiedArchive {
     }
 }
 
-fn integrity_error(path: &str, finding: &crate::Finding) -> MemberReadError {
+fn member_read_error(path: &str, finding: &crate::Finding) -> MemberReadError {
+    let kind = if finding.code == crate::FindingCode::SourceIo {
+        MemberReadErrorKind::SourceIo
+    } else {
+        MemberReadErrorKind::IntegrityMismatch
+    };
     MemberReadError::new(
-        MemberReadErrorKind::IntegrityMismatch,
+        kind,
         path,
         format!("{}: {}", finding.code.as_str(), finding.detail),
     )
@@ -610,7 +616,24 @@ mod tests {
 
     use super::*;
     use crate::apply::{process_member_calls, reset_process_member_calls};
-    use crate::{apply, apply_with_options, ApplyOptions, Policy, Request, Source};
+    use crate::{
+        apply, apply_with_options, ApplyOptions, Finding, FindingCode, Policy, Request, Source,
+    };
+
+    #[test]
+    fn verified_read_distinguishes_source_io_from_integrity_disagreement() {
+        let source = Finding::error(FindingCode::SourceIo, "snapshot unavailable");
+        let integrity = Finding::error(FindingCode::CrcMismatch, "content changed");
+
+        assert_eq!(
+            member_read_error("member.bin", &source).kind(),
+            MemberReadErrorKind::SourceIo
+        );
+        assert_eq!(
+            member_read_error("member.bin", &integrity).kind(),
+            MemberReadErrorKind::IntegrityMismatch
+        );
+    }
 
     fn make_zip() -> Vec<u8> {
         let mut cursor = Cursor::new(Vec::new());

@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
-use std::fs::{self, File};
 use std::io::{self, BufRead, BufReader, Read, Write};
 use std::path::Path;
+
+#[cfg(test)]
+use std::fs;
 
 use crate::covering::audit_covering;
 use crate::findings::{Finding, FindingCode, Severity};
@@ -15,7 +17,7 @@ use crate::outcome::{
 };
 use crate::policy::{hex_sha256, ratio_exceeds, Policy, ResourceBudget};
 use crate::quota::{QuotaError, QuotaState};
-use crate::snapshot::{SnapshotKind, SourceSnapshot};
+use crate::snapshot::{finding_from_io, SnapshotKind, SourceSnapshot};
 use crate::verified::{RetentionBuild, RetentionPlan, VerifiedArchive};
 use crate::zip::{self, ZipMember};
 use cap_std::fs::File as CapFile;
@@ -309,49 +311,8 @@ fn read_source<'a>(
                 finding,
                 snapshot_kind: SnapshotKind::Unavailable,
             };
-            let len = fs::metadata(p)
-                .map_err(|e| {
-                    unavailable(Finding::error(
-                        FindingCode::SourceIo,
-                        format!("metadata: {e}"),
-                    ))
-                })?
-                .len();
-            if len > budget.max_archive_bytes {
-                return Err(unavailable(Finding::error(
-                    FindingCode::QuotaArchive,
-                    format!(
-                        "archive is {len} bytes; cap is {}",
-                        budget.max_archive_bytes
-                    ),
-                )));
-            }
-            let mut file = File::open(p).map_err(|e| {
-                unavailable(Finding::error(FindingCode::SourceIo, format!("open: {e}")))
-            })?;
-            let initial_capacity = usize::try_from(len)
-                .unwrap_or(usize::MAX)
-                .min(8 * 1024 * 1024);
-            let mut bytes = Vec::with_capacity(initial_capacity);
-            let take_limit = budget.max_archive_bytes.saturating_add(1);
-            (&mut file)
-                .take(take_limit)
-                .read_to_end(&mut bytes)
-                .map_err(|e| {
-                    unavailable(Finding::error(FindingCode::SourceIo, format!("read: {e}")))
-                })?;
-            if bytes.len() as u64 > budget.max_archive_bytes {
-                return Err(SourceFailure {
-                    path,
-                    digest: SourceDigest::unavailable(),
-                    finding: Finding::error(
-                        FindingCode::QuotaArchive,
-                        "archive grew beyond the input cap while being read",
-                    ),
-                    snapshot_kind: SnapshotKind::Unavailable,
-                });
-            }
-            Ok(SourceSnapshot::owned(path, bytes))
+            SourceSnapshot::private_file_from_path(p, path.clone(), budget.max_archive_bytes)
+                .map_err(unavailable)
         }
         Source::Bytes { path, data } => {
             let path = path.map(|s| s.to_string());
@@ -1123,10 +1084,12 @@ pub(crate) fn process_member(
             let mut buffer = [0_u8; 64 * 1024];
             loop {
                 let read = payload.read(&mut buffer).map_err(|error| {
-                    Finding::error(
-                        FindingCode::SourceIo,
-                        format!("read stored member payload: {error}"),
-                    )
+                    finding_from_io(&error).unwrap_or_else(|| {
+                        Finding::error(
+                            FindingCode::SourceIo,
+                            format!("read stored member payload: {error}"),
+                        )
+                    })
                 })?;
                 if read == 0 {
                     break;
@@ -1139,10 +1102,12 @@ pub(crate) fn process_member(
             let mut buffer = [0_u8; 64 * 1024];
             loop {
                 let read = decoder.read(&mut buffer).map_err(|error| {
-                    Finding::error(
-                        FindingCode::CodecDeflateInvalidStream,
-                        format!("deflate: {error}"),
-                    )
+                    finding_from_io(&error).unwrap_or_else(|| {
+                        Finding::error(
+                            FindingCode::CodecDeflateInvalidStream,
+                            format!("deflate: {error}"),
+                        )
+                    })
                 })?;
                 if read == 0 {
                     break;
@@ -1417,6 +1382,31 @@ mod tests {
         }
     }
 
+    struct FailingSnapshotReader {
+        bytes: Vec<u8>,
+        position: usize,
+        fail_at: usize,
+    }
+
+    impl Read for FailingSnapshotReader {
+        fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+            if self.position >= self.fail_at {
+                return Err(crate::snapshot::as_io_error(Finding::error(
+                    FindingCode::SourceIo,
+                    "injected private snapshot read failure",
+                )));
+            }
+            let count = output
+                .len()
+                .min(7)
+                .min(self.fail_at - self.position)
+                .min(self.bytes.len() - self.position);
+            output[..count].copy_from_slice(&self.bytes[self.position..self.position + count]);
+            self.position += count;
+            Ok(count)
+        }
+    }
+
     fn make_zip(files: &[(&str, &[u8])]) -> Vec<u8> {
         let mut cursor = Cursor::new(Vec::new());
         {
@@ -1662,7 +1652,7 @@ mod tests {
     }
 
     #[test]
-    fn path_source_uses_an_owned_memory_snapshot() {
+    fn path_source_uses_a_private_file_snapshot_that_outlives_the_caller_path() {
         let bytes = make_zip(&[("nested/hello.txt", b"hello")]);
         let dir = temp_dest("owned-snap");
         fs::create_dir_all(&dir).unwrap();
@@ -1676,13 +1666,21 @@ mod tests {
         });
         let digest = hex_sha256(&bytes);
         assert!(!out.rejected(), "{:?}", out.view.findings);
-        assert_eq!(out.receipt.source_snapshot, SnapshotKind::MemoryOwned);
+        assert_eq!(out.receipt.source_snapshot, SnapshotKind::PrivateFile);
         assert_eq!(out.receipt.source.sha256(), Some(digest.as_str()));
+        fs::remove_file(&archive).unwrap();
+        assert_eq!(
+            out.verified_archive()
+                .unwrap()
+                .read_member("nested/hello.txt", 5)
+                .unwrap(),
+            b"hello"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn owned_and_borrowed_snapshot_backends_have_semantic_parity() {
+    fn private_file_and_borrowed_snapshot_backends_have_semantic_parity() {
         let bytes = make_zip(&[("nested/hello.txt", b"hello"), ("other.bin", b"bytes")]);
         let dir = temp_dest("snapshot-parity");
         fs::create_dir_all(&dir).unwrap();
@@ -1699,26 +1697,26 @@ mod tests {
             policy: &policy,
             dest: None,
         });
-        let owned = apply(Request {
+        let private = apply(Request {
             source: Source::Path(&archive),
             policy: &policy,
             dest: None,
         });
 
         assert_eq!(
-            serde_json::to_value(&owned.view).unwrap(),
+            serde_json::to_value(&private.view).unwrap(),
             serde_json::to_value(&borrowed.view).unwrap()
         );
         assert_eq!(
-            serde_json::to_value(&owned.receipt.identities).unwrap(),
+            serde_json::to_value(&private.receipt.identities).unwrap(),
             serde_json::to_value(&borrowed.receipt.identities).unwrap()
         );
         assert_eq!(
-            serde_json::to_value(owned.archive_ir().unwrap()).unwrap(),
+            serde_json::to_value(private.archive_ir().unwrap()).unwrap(),
             serde_json::to_value(borrowed.archive_ir().unwrap()).unwrap()
         );
         assert_eq!(
-            owned
+            private
                 .verified_archive()
                 .unwrap()
                 .read_member("nested/hello.txt", 5)
@@ -1729,7 +1727,7 @@ mod tests {
                 .read_member("nested/hello.txt", 5)
                 .unwrap()
         );
-        assert_eq!(owned.receipt.source_snapshot, SnapshotKind::MemoryOwned);
+        assert_eq!(private.receipt.source_snapshot, SnapshotKind::PrivateFile);
         assert_eq!(
             borrowed.receipt.source_snapshot,
             SnapshotKind::MemoryBorrowed
@@ -1803,6 +1801,62 @@ mod tests {
             process_member(&[0xff][..], &member, budget, u64::MAX, &mut sink).unwrap_err();
 
         assert_eq!(finding.code, FindingCode::CodecDeflateInvalidStream);
+    }
+
+    #[test]
+    fn deflate_preserves_private_snapshot_io_failure_identity() {
+        let mut state = 0x91e1_0da5_u32;
+        let payload: Vec<u8> = std::iter::repeat_with(|| {
+            state ^= state << 13;
+            state ^= state >> 17;
+            state ^= state << 5;
+            state as u8
+        })
+        .take(128 * 1024)
+        .collect();
+        let mut encoder =
+            flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&payload).unwrap();
+        let compressed = encoder.finish().unwrap();
+        let member = ZipMember {
+            raw_name: b"io-failure.bin".to_vec(),
+            name: "io-failure.bin".to_owned(),
+            method: 8,
+            flags: 0,
+            crc: 0,
+            comp_size: compressed.len() as u64,
+            uncomp_size: payload.len() as u64,
+            lfh_offset: 0,
+            data_offset: 0,
+            record_end: compressed.len() as u64,
+            is_dir: false,
+            extra_fields: Vec::new(),
+            source_ranges: crate::ir::MemberSourceRanges {
+                local_header: crate::ir::ByteRange { offset: 0, len: 0 },
+                compressed_payload: crate::ir::ByteRange {
+                    offset: 0,
+                    len: compressed.len() as u64,
+                },
+                data_descriptor: None,
+                central_header: crate::ir::ByteRange { offset: 0, len: 0 },
+            },
+        };
+        let fail_at = compressed.len() / 2;
+        let reader = BufReader::with_capacity(
+            13,
+            FailingSnapshotReader {
+                bytes: compressed,
+                position: 0,
+                fail_at,
+            },
+        );
+        let budget = Policy::default_v1().compile().unwrap().budget;
+        let mut sink = io::sink();
+
+        let finding = process_member(reader, &member, budget, u64::MAX, &mut sink).unwrap_err();
+
+        assert_eq!(finding.code, FindingCode::SourceIo);
+        assert_eq!(finding.detail, "injected private snapshot read failure");
     }
 
     #[test]
