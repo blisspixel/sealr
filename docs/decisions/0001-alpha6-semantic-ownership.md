@@ -1,6 +1,6 @@
 # Alpha.6 semantic ownership
 
-Status: accepted for repository experiment.
+Status: accepted; first dormant record and hostile-decoder slice implemented.
 
 Date: 2026-08-22.
 
@@ -16,6 +16,12 @@ The eventual public capability is likely hybrid:
 4. the supervisor alone owns effect, cleanup, publication, and final receipt facts.
 
 This decision does not activate worker execution. It preserves operation protocol v1, public Rust symbols, CLI behavior, receipt schemas, and release assets.
+
+## Implementation checkpoint
+
+The first [private semantic-record experiment](../semantic-record.md) is now compiled and tested inside the library crate but is unreachable from shipped call paths. It uses independent magic and a canonical bounded binary format. Planning carries exact invocation binding plus complete pending IR in central-directory order. Completion carries exact operation, request, and plan correlation plus one verification state for every planned member. The supervisor adapter derives non-effect completion axes from the first error and verified-prefix state rather than trusting duplicated axes.
+
+The checkpoint pins canonical vector digests and covers hostile truncation, trailing data, kind confusion, structured binding mutation, stale correlation, path and topology state, range overflow, partial-frontier coherence, hostile diagnostic labels, and destination-setup merge semantics. It establishes covered record and semantic-evidence parity only. Retained bytes, later reads, `VerifiedArchive`, process transport, lifecycle, and public activation remain open gates.
 
 ## Why the previous binary choice was incomplete
 

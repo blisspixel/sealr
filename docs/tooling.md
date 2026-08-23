@@ -67,6 +67,8 @@ The single required `CI` workflow verifies the library package with `cargo packa
 
 `sealr-worker-bootstrap-lab` is a Linux-only executable conformance tool with a trivial non-Linux build path and cross-platform fixed-frame unit tests. It has no dependency on `sealr`, `sealr-cli`, or `sealr-worker-protocol`, and it is not a release asset. Linux-only `rustix` and `landlock` dependencies exercise sequenced-packet descriptor transfer, two-layer authority closure, a direct Landlock floor query plus fixed ABI 3 enforcement, exact truncation flags, parent observation, point-specific abrupt exit, pidfd termination, reap, and checked cleanup ordering. The tool proves only those mechanics with synthetic source and stage objects. Product execution waits for the [semantic-ownership gates](decisions/0001-alpha6-semantic-ownership.md), no-descendant and permission-mutation controls, stress evidence, and a packaging design that works for both CLI and library consumers.
 
+The first [private semantic-record experiment](semantic-record.md) is a dormant crate-private module, not another workspace executable or dependency. It reuses the shipped crate's existing SHA-256 implementation, adds no runtime dependency or public feature, and remains unreachable from library and CLI call paths. Its custom bounded codec exists to exercise pre-allocation count checks, exact correlation, hostile range validation, and semantic state coherence without adding a second general serialization stack.
+
 ## CLI rule
 
 The CLI is a thin presentation layer over typed library outcomes. Human formatting can improve, but machine JSON, rule identities, and exit classes remain versioned contracts. No UI dependency may become a second policy engine or parser.

@@ -15,6 +15,10 @@ mod outcome;
 mod policy;
 mod quota;
 mod snapshot;
+// Dormant Alpha.6 experiment. It is compiled and tested, but no shipped path
+// can invoke it until the remaining authority and packaging gates close.
+#[allow(dead_code)]
+mod semantic_record;
 mod verified;
 mod zip;
 
