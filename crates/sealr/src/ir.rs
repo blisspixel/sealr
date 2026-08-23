@@ -368,24 +368,6 @@ impl IrMember {
         }
     }
 
-    pub(crate) fn as_zip_member(&self) -> ZipMember {
-        ZipMember {
-            raw_name: self.raw_name_bytes.clone(),
-            name: self.decoded_name.clone(),
-            method: self.method,
-            flags: self.flags,
-            crc: self.declared_crc,
-            comp_size: self.declared_comp_size,
-            uncomp_size: self.declared_uncomp_size,
-            lfh_offset: self.source_ranges.local_header.offset,
-            data_offset: self.source_ranges.compressed_payload.offset,
-            record_end: self.source_ranges.record_end(),
-            is_dir: matches!(self.kind, MemberKind::Directory),
-            extra_fields: self.extra_fields.clone(),
-            source_ranges: self.source_ranges.clone(),
-        }
-    }
-
     pub(crate) fn mark_directory_verified(&mut self) {
         self.actual_uncomp_size = Some(0);
         self.actual_crc = Some(self.declared_crc);

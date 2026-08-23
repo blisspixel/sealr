@@ -115,6 +115,7 @@ struct TestReadFailure {
 #[cfg(test)]
 thread_local! {
     static TEST_READ_FAILURE: std::cell::RefCell<Option<TestReadFailure>> = const { std::cell::RefCell::new(None) };
+    static TEST_READ_RANGES: std::cell::RefCell<Vec<(u64, u64)>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
 #[cfg(test)]
@@ -152,6 +153,26 @@ pub(crate) fn arm_test_read_failure() {
             failure.armed = true;
         }
     });
+}
+
+#[cfg(test)]
+pub(crate) fn test_read_failure_is_armed() -> bool {
+    TEST_READ_FAILURE.with(|failure| {
+        failure
+            .borrow()
+            .as_ref()
+            .is_some_and(|failure| failure.armed)
+    })
+}
+
+#[cfg(test)]
+pub(crate) fn reset_test_read_ranges() {
+    TEST_READ_RANGES.with(|ranges| ranges.borrow_mut().clear());
+}
+
+#[cfg(test)]
+pub(crate) fn test_read_ranges() -> Vec<(u64, u64)> {
+    TEST_READ_RANGES.with(|ranges| ranges.borrow().clone())
 }
 
 #[cfg(test)]
@@ -457,6 +478,8 @@ impl<'a> SourceSnapshot<'a> {
             )
         })?;
         self.checked_range(offset, len)?;
+        #[cfg(test)]
+        TEST_READ_RANGES.with(|ranges| ranges.borrow_mut().push((offset, len)));
         #[cfg(test)]
         if injected_read_failure(offset, len) {
             return Err(Finding::error(

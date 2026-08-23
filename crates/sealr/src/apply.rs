@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::io::{self, BufRead, BufReader, Read, Write};
+use std::io::{self, BufRead, BufReader, Write};
 use std::path::Path;
 
 #[cfg(test)]
@@ -17,14 +17,12 @@ use crate::outcome::{
 };
 use crate::policy::{hex_sha256, ratio_exceeds, Policy, ResourceBudget};
 use crate::quota::{QuotaError, QuotaState};
-use crate::snapshot::{finding_from_io, SnapshotKind, SourceSnapshot};
+use crate::snapshot::{SnapshotKind, SourceSnapshot};
+use crate::verification::{digest_hex, verify_payload, PayloadSpec};
 use crate::verified::{RetentionBuild, RetentionPlan, VerifiedArchive};
 use crate::zip::{self, ZipMember};
 use cap_std::fs::File as CapFile;
-use crc32fast::Hasher as Crc;
-use flate2::bufread::DeflateDecoder;
 use serde::Serialize;
-use sha2::{Digest, Sha256};
 
 // PKWARE APPNOTE 4.4.4: traditional encryption, strong encryption, and
 // central-directory encryption with masked local-header values.
@@ -700,8 +698,8 @@ fn apply_inner(
 
         let canonical_path = ir.members[index].canonical_path.clone();
         let mut capture = retention.begin_capture(&canonical_path);
-        let zip_member = ir.members[index].as_zip_member();
-        let payload = match zip::payload_reader(&snapshot, &zip_member) {
+        let payload_spec = PayloadSpec::from_ir(&ir.members[index]);
+        let payload = match zip::planned_payload_reader(&snapshot, &ir.members[index]) {
             Ok(payload) => payload,
             Err(finding) => {
                 ir.members[index].mark_failed(finding.code.as_str());
@@ -737,7 +735,7 @@ fn apply_inner(
                 .and_then(|file| {
                     process_member_to_file(
                         payload,
-                        &zip_member,
+                        payload_spec,
                         budget,
                         remaining,
                         policy.atomic,
@@ -747,10 +745,10 @@ fn apply_inner(
                 })
         } else {
             match capture.as_mut() {
-                Some(bytes) => process_member(payload, &zip_member, budget, remaining, bytes),
+                Some(bytes) => verify_payload(payload, payload_spec, budget, remaining, bytes),
                 None => {
                     let mut sink = io::sink();
-                    process_member(payload, &zip_member, budget, remaining, &mut sink)
+                    verify_payload(payload, payload_spec, budget, remaining, &mut sink)
                 }
             }
         };
@@ -850,7 +848,7 @@ fn apply_inner(
             ));
         }
         retention.finish_capture(&canonical_path, capture);
-        ir.members[index].mark_file_verified(actual, crc, sha);
+        ir.members[index].mark_file_verified(actual, crc, digest_hex(&sha));
         members_view.push(member_view(&ir.members[index]));
     }
 
@@ -956,19 +954,19 @@ fn path_conflict(seen: &BTreeMap<String, bool>, path: &str, is_dir: bool) -> Opt
 
 fn process_member_to_file(
     payload: impl BufRead,
-    member: &ZipMember,
+    member: PayloadSpec,
     budget: ResourceBudget,
     remaining_total: u64,
     member_sync: bool,
     capture: Option<&mut Vec<u8>>,
     mut file: CapFile,
-) -> Result<(u64, u32, String), Finding> {
+) -> Result<(u64, u32, [u8; 32]), Finding> {
     let result = {
         let mut writer = RetainingWriter {
             primary: &mut file,
             capture,
         };
-        process_member(payload, member, budget, remaining_total, &mut writer)?
+        verify_payload(payload, member, budget, remaining_total, &mut writer)?
     };
     file.flush().map_err(|error| {
         Finding::error(FindingCode::MaterializeIo, format!("flush member: {error}"))
@@ -1002,7 +1000,6 @@ impl<W: Write> Write for RetainingWriter<'_, W> {
 
 #[cfg(test)]
 thread_local! {
-    static PROCESS_MEMBER_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
     static PLANNING_BOUNDARY_CAPTURE: std::cell::RefCell<PlanningBoundaryCapture> =
         const { std::cell::RefCell::new(PlanningBoundaryCapture::disabled()) };
 }
@@ -1072,152 +1069,6 @@ pub(crate) fn capture_next_planning_boundary() -> PlanningBoundaryCaptureGuard {
     PlanningBoundaryCaptureGuard {
         previous: Some(previous),
     }
-}
-
-#[cfg(test)]
-pub(crate) fn reset_process_member_calls() {
-    PROCESS_MEMBER_CALLS.with(|calls| calls.set(0));
-}
-
-#[cfg(test)]
-pub(crate) fn process_member_calls() -> u64 {
-    PROCESS_MEMBER_CALLS.with(std::cell::Cell::get)
-}
-
-pub(crate) fn process_member(
-    mut payload: impl BufRead,
-    member: &ZipMember,
-    budget: ResourceBudget,
-    remaining_total: u64,
-    writer: &mut impl Write,
-) -> Result<(u64, u32, String), Finding> {
-    #[cfg(test)]
-    PROCESS_MEMBER_CALLS.with(|calls| calls.set(calls.get() + 1));
-
-    let mut actual = QuotaState::new(u64::MAX);
-    let mut crc = Crc::new();
-    let mut sha = Sha256::new();
-    let mut consume = |chunk: &[u8]| -> Result<(), Finding> {
-        let actual_bytes = actual
-            .consume(chunk.len() as u64)
-            .map_err(|error| match error {
-                QuotaError::Overflow => Finding::error(
-                    FindingCode::QuotaOverflow,
-                    "actual member size overflowed u64",
-                ),
-                QuotaError::Exceeded { .. } => {
-                    unreachable!("u64::MAX quota cannot be exceeded without overflow")
-                }
-            })?;
-        if actual_bytes > member.uncomp_size {
-            return Err(Finding::error(
-                FindingCode::QuotaDeclaredLie,
-                "actual bytes exceeded the declared uncompressed size",
-            ));
-        }
-        if actual_bytes > budget.max_member_bytes {
-            return Err(Finding::error(
-                FindingCode::QuotaMember,
-                "actual bytes exceeded the member cap",
-            ));
-        }
-        if actual_bytes > remaining_total {
-            return Err(Finding::error(
-                FindingCode::QuotaTotal,
-                "actual bytes exceeded the remaining archive cap",
-            ));
-        }
-        if let Some(max_ratio) = budget.max_ratio {
-            if ratio_exceeds(actual_bytes, member.comp_size, max_ratio) {
-                return Err(Finding::error(
-                    FindingCode::QuotaRatio,
-                    format!(
-                        "actual {}:{} exceeded {max_ratio}:1",
-                        actual_bytes, member.comp_size
-                    ),
-                ));
-            }
-        }
-        writer.write_all(chunk).map_err(|error| {
-            Finding::error(FindingCode::MaterializeIo, format!("write member: {error}"))
-        })?;
-        crc.update(chunk);
-        sha.update(chunk);
-        Ok(())
-    };
-
-    match member.method {
-        0 => {
-            let mut buffer = [0_u8; 64 * 1024];
-            loop {
-                let read = payload.read(&mut buffer).map_err(|error| {
-                    finding_from_io(&error).unwrap_or_else(|| {
-                        Finding::error(
-                            FindingCode::SourceIo,
-                            format!("read stored member payload: {error}"),
-                        )
-                    })
-                })?;
-                if read == 0 {
-                    break;
-                }
-                consume(&buffer[..read])?;
-            }
-        }
-        8 => {
-            let mut decoder = DeflateDecoder::new(payload);
-            let mut buffer = [0_u8; 64 * 1024];
-            loop {
-                let read = decoder.read(&mut buffer).map_err(|error| {
-                    finding_from_io(&error).unwrap_or_else(|| {
-                        Finding::error(
-                            FindingCode::CodecDeflateInvalidStream,
-                            format!("deflate: {error}"),
-                        )
-                    })
-                })?;
-                if read == 0 {
-                    break;
-                }
-                consume(&buffer[..read])?;
-            }
-            let consumed = decoder.total_in();
-            if consumed != member.comp_size {
-                return Err(Finding::error(
-                    FindingCode::CodecDeflateTrailingInput,
-                    format!(
-                        "deflate consumed {consumed} of {} declared compressed bytes",
-                        member.comp_size
-                    ),
-                ));
-            }
-            if decoder.total_out() != actual.used() {
-                return Err(Finding::error(
-                    FindingCode::CodecDeflateInvalidStream,
-                    "deflate output accounting disagreed with the verified byte count",
-                ));
-            }
-        }
-        _ => {
-            return Err(Finding::error(
-                FindingCode::MethodUnsupported,
-                format!("method {}", member.method),
-            ));
-        }
-    }
-    let actual = actual.used();
-    if actual != member.uncomp_size {
-        return Err(Finding::error(
-            FindingCode::QuotaDeclaredLie,
-            format!(
-                "actual size {actual} != declared size {}",
-                member.uncomp_size
-            ),
-        ));
-    }
-    let digest = sha.finalize();
-    let sha256 = digest.iter().map(|byte| format!("{byte:02x}")).collect();
-    Ok((actual, crc.finalize(), sha256))
 }
 
 fn detect_magic(snapshot: &SourceSnapshot<'_>) -> Result<&'static str, Finding> {
@@ -1449,7 +1300,7 @@ mod tests {
     use super::*;
     use ::zip::write::SimpleFileOptions;
     use ::zip::{CompressionMethod, ZipWriter};
-    use std::io::{Cursor, Write};
+    use std::io::{Cursor, Read, Write};
     use std::path::PathBuf;
 
     struct ChunkedReader<R> {
@@ -1879,8 +1730,14 @@ mod tests {
         };
         let mut sink = io::sink();
         let budget = Policy::default_v1().compile().unwrap().budget;
-        let finding =
-            process_member(&[0xff][..], &member, budget, u64::MAX, &mut sink).unwrap_err();
+        let finding = verify_payload(
+            &[0xff][..],
+            PayloadSpec::from_zip(&member),
+            budget,
+            u64::MAX,
+            &mut sink,
+        )
+        .unwrap_err();
 
         assert_eq!(finding.code, FindingCode::CodecDeflateInvalidStream);
     }
@@ -1935,7 +1792,14 @@ mod tests {
         let budget = Policy::default_v1().compile().unwrap().budget;
         let mut sink = io::sink();
 
-        let finding = process_member(reader, &member, budget, u64::MAX, &mut sink).unwrap_err();
+        let finding = verify_payload(
+            reader,
+            PayloadSpec::from_zip(&member),
+            budget,
+            u64::MAX,
+            &mut sink,
+        )
+        .unwrap_err();
 
         assert_eq!(finding.code, FindingCode::SourceIo);
         assert_eq!(finding.detail, "injected private snapshot read failure");
@@ -1975,8 +1839,14 @@ mod tests {
         let budget = Policy::default_v1().compile().unwrap().budget;
         let mut output = Vec::new();
 
-        let (actual, _, _) =
-            process_member(reader, &member, budget, u64::MAX, &mut output).unwrap();
+        let (actual, _, _) = verify_payload(
+            reader,
+            PayloadSpec::from_zip(&member),
+            budget,
+            u64::MAX,
+            &mut output,
+        )
+        .unwrap();
 
         assert_eq!(actual, payload.len() as u64);
         assert_eq!(output, payload);
@@ -2028,8 +1898,14 @@ mod tests {
         let budget = Policy::default_v1().compile().unwrap().budget;
         let mut output = Vec::new();
 
-        let (actual, _, _) =
-            process_member(reader, &member, budget, u64::MAX, &mut output).unwrap();
+        let (actual, _, _) = verify_payload(
+            reader,
+            PayloadSpec::from_zip(&member),
+            budget,
+            u64::MAX,
+            &mut output,
+        )
+        .unwrap();
 
         assert_eq!(actual, payload.len() as u64);
         assert_eq!(output, payload);
@@ -2347,6 +2223,44 @@ mod tests {
         assert_eq!(out.verification, VerificationStatus::StructureOnly);
         assert_eq!(out.effect, EffectStatus::Failed);
         assert!(matches!(out.verdict, Verdict::Rejected));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn destination_setup_failure_precedes_hostile_payload_verification() {
+        let bytes = make_crc_mismatch_zip();
+        let policy = Policy::default_v1();
+        let dir = temp_dest("existing-hostile-payload");
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir(&dir).unwrap();
+        fs::write(dir.join("keep.txt"), b"keep").unwrap();
+        crate::verification::reset_verify_payload_calls();
+
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("existing-hostile-payload.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: Some(&dir),
+        });
+
+        assert_eq!(crate::verification::verify_payload_calls(), 0);
+        assert_eq!(out.interpretation, InterpretationStatus::Interpreted);
+        assert_eq!(out.admission, AdmissionStatus::Admitted);
+        assert_eq!(out.verification, VerificationStatus::StructureOnly);
+        assert_eq!(out.effect, EffectStatus::Failed);
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::MaterializeExists));
+        assert!(!out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CrcMismatch));
+        assert_eq!(fs::read(dir.join("keep.txt")).unwrap(), b"keep");
         let _ = fs::remove_dir_all(&dir);
     }
 
