@@ -1,4 +1,8 @@
 use std::fs;
+#[cfg(unix)]
+use std::os::fd::OwnedFd;
+#[cfg(unix)]
+use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::process::Stdio;
@@ -62,17 +66,15 @@ fn sealr_text(arguments: &[&str]) -> Output {
 
 #[cfg(unix)]
 fn sealr_with_closed_stdout(arguments: &[&Path]) -> Output {
-    let mut command = Command::new("sh");
-    command
-        .arg("-c")
-        .arg("exec 1>&-; exec \"$@\"")
-        .arg("sealr-closed-stdout")
-        .arg(env!("CARGO_BIN_EXE_sealr"));
+    let (reader, writer) = UnixStream::pair().expect("stdout socket pair should be created");
+    drop(reader);
+
+    let mut command = Command::new(env!("CARGO_BIN_EXE_sealr"));
     for argument in arguments {
         command.arg(argument);
     }
     command
-        .stdout(Stdio::piped())
+        .stdout(Stdio::from(OwnedFd::from(writer)))
         .stderr(Stdio::piped())
         .output()
         .expect("sealr should start with stdout closed")
