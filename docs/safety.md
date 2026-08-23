@@ -6,7 +6,7 @@ Goals: no path escape, no disk/RAM bomb, no silent corruption, no extra files (A
 
 Language: MUST / SHOULD / MAY.
 
-This is the target safety specification. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) record current implementation status. Options described as future policy surfaces are not accepted by the Alpha.4 CLI.
+This is the target safety specification. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) record current implementation status. Options described as future policy surfaces are not accepted by the Alpha.5 CLI.
 
 ## Path jail (hard, not a flag)
 
@@ -38,9 +38,9 @@ On Windows, sealr supports only a retained parent handle that reports non-remote
 
 ## Symlinks and reparse points
 
-Current Alpha.4 behavior: **do not create them.** ZIP external attributes that describe a special file type are rejected, and file/directory attribute disagreements are rejected.
+Current Alpha.5 behavior: **do not create them.** ZIP external attributes that describe a special file type are rejected, and file/directory attribute disagreements are rejected.
 
-A future named policy may allow constrained links only after the target passes the jail relative to the link parent and is proven non-absolute. Such links must be created only after regular files. Member creation never opens through a symlink or reparse point: each canonical component is opened separately with no-follow semantics from a retained directory handle. Windows also rejects a reparse-point attribute on each opened directory or file handle. Alpha.4 has no link-enabling CLI option. Repeated hostile race stress remains a Phase 0.1 gate.
+A future named policy may allow constrained links only after the target passes the jail relative to the link parent and is proven non-absolute. Such links must be created only after regular files. Member creation never opens through a symlink or reparse point: each canonical component is opened separately with no-follow semantics from a retained directory handle. Windows also rejects a reparse-point attribute on each opened directory or file handle. Alpha.5 has no link-enabling CLI option. Repeated hostile race stress remains a Phase 0.1 gate.
 
 ## Overlap (ZIP)
 
@@ -59,7 +59,7 @@ MAX_COMPRESSION_RATIO = 100
 CURRENT_CHUNK      = 64 KiB
 ```
 
-| Control | Alpha.4 default | Future named policy surface |
+| Control | Alpha.5 default | Future named policy surface |
 |---|---|---|
 | Jail, ADS `:`, reserved names, no `..`, no overlap | on | none |
 | No symlink creation | on | constrained links may be considered later |
@@ -77,7 +77,7 @@ Ratio 100 is stricter than DEFLATE’s theoretical max (~1032:1) and will reject
 
 | Check | szips | sealr |
 |---|---|---|
-| `testzip()` full pre-pass | yes | **Do not default.** Inspection already inflates to a sink in Alpha.4. |
+| `testzip()` full pre-pass | yes | **Do not default.** Inspection already inflates to a sink in Alpha.5. |
 | CRC | re-read from disk | **During write**, one pass |
 | SHA-256 | log every file | Current receipt path hashes every member during the same pass. Hash selection is a later policy surface. |
 | Other checksums | ZIP CRC only | Always verify when present (gzip CRC, zstd xxHash, 7z CRC) |
@@ -90,13 +90,13 @@ Current behavior: refuse if the destination exists. Replacement is not implement
 
 Do not preserve setuid/setgid. Mask to `0777` minus umask, or `0755`/`0644`.
 
-The Rust policy field `atomic` defaults to false. When true, completed member files are synced before publication. Directory durability and crash recovery are not yet guaranteed. There is no Alpha.4 CLI switch for this field.
+The Rust policy field `atomic` defaults to false. When true, completed member files are synced before publication. Directory durability and crash recovery are not yet guaranteed. There is no Alpha.5 CLI switch for this field.
 
 Publication is native and no-replace on the three release platforms. Linux uses `renameat2` with `RENAME_NOREPLACE`; macOS uses `renameatx_np` with `RENAME_EXCL`. Windows creates the stage relative to the retained parent handle with `NtCreateFile`, `FILE_CREATE`, reparse-point-open semantics, and the explicit protected DACL. It withholds delete sharing, retains the returned stage handle for the full write, and publishes that same object with `NtSetInformationFile`, the retained parent as `RootDirectory`, and replacement disabled.
 
 Linux, macOS, and Windows are the supported materialization platforms. Every other target fails closed with `materialize.unsupported`; Windows storage outside the matrix below fails with `materialize.unsupported_filesystem`.
 
-| Windows parent observed through the retained handle | Alpha.4 status | Reason |
+| Windows parent observed through the retained handle | Alpha.5 status | Reason |
 |---|---|---|
 | Non-remote, writable NTFS with `FILE_PERSISTENT_ACLS` | Supported | Creation-time descriptor and descendant inheritance are natively tested. |
 | ReFS, including Dev Drive | Rejected | ACL support is documented but the complete stage, inheritance, reparse, cleanup, and publication path is not natively qualified. |
@@ -132,7 +132,7 @@ Root, administrators, SYSTEM, principals matching the effective token's default-
 
 MUST keep or strengthen: path jail (reject backslash, absolute, `..`, empty, and `:`), containment checks, the four caps, skip ratio when `compress_size == 0`, chunked I/O, CRC verification, no nested recursion, and non-recursive folder scan.
 
-MUST drop: a redundant `testzip()` pre-pass, silent overwrite, and shell-out 7z. Alpha.4 computes CRC32 and SHA-256 together while streaming each expanded member, then independently streams the staged file hash before publication when materializing.
+MUST drop: a redundant `testzip()` pre-pass, silent overwrite, and shell-out 7z. Alpha.5 computes CRC32 and SHA-256 together while streaming each expanded member, then independently streams the staged file hash before publication when materializing.
 
 MUST add: reserved names, trailing dot/space, ZIP overlap reject, no symlink extract, actual-byte caps, ZipDiff A1–C5 deny-or-finding, TAR PAX/GNU metadata size cap, inspect ≡ materialize.
 

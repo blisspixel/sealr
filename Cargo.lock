@@ -443,7 +443,7 @@ dependencies = [
 
 [[package]]
 name = "sealr"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "cap-fs-ext",
  "cap-std",
@@ -462,7 +462,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-cli"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "clap",
  "sealr",
@@ -472,7 +472,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-identity-verifier"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "serde",
  "serde_json",
@@ -481,7 +481,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-wheel-lab"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 dependencies = [
  "sealr",
  "serde",
@@ -491,7 +491,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-worker-protocol"
-version = "0.1.0-alpha.4"
+version = "0.1.0-alpha.5"
 
 [[package]]
 name = "serde"

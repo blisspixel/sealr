@@ -1,6 +1,6 @@
 # Evidence and attestations
 
-> Current status: Alpha.4 emits a versioned deterministic unsigned JSON receipt and preview `sealrTreeV1` identities. A separate verifier checks finite identity-conformance vectors. RFC 8785 canonicalization, stable lock semantics, DSSE, Sigstore, standardized predicates, SBOM output, and a general authenticated-evidence verifier remain planned work.
+> Current status: Alpha.5 emits a versioned deterministic unsigned JSON receipt and preview `sealrTreeV1` identities. A separate verifier checks finite identity-conformance vectors. RFC 8785 canonicalization, stable lock semantics, DSSE, Sigstore, standardized predicates, SBOM output, and a general authenticated-evidence verifier remain planned work.
 
 The current receipt is always returned, including on rejection. `sealr.receipt.v2` records source digest availability, interpretation/admission/verification/effect/completeness axes, the invocation-specific view digest, tool and environment fields, materialization lifecycle evidence, the compatibility verdict, and findings.
 
@@ -46,7 +46,7 @@ The target authenticated form should use existing envelope and identity systems 
 
 GitHub Artifact Attestations are a possible distribution path for standard envelopes, not a separate trust model. A signature alone is insufficient. Consumers must verify the expected signer identity, workflow or issuer constraints, subject digest, and time policy.
 
-The Alpha.4 program does not produce DSSE, in-toto, Sigstore, or GitHub Artifact Attestations for archive decisions. Separately, the GitHub release workflow records build provenance attestations for the native release archives. That provenance binds a packaged binary to its source workflow; it does not authenticate an individual Sealr decision receipt.
+The Alpha.5 program does not produce DSSE, in-toto, Sigstore, or GitHub Artifact Attestations for archive decisions. Separately, the GitHub release workflow records build provenance attestations for the native release archives. That provenance binds a packaged binary to its source workflow; it does not authenticate an individual Sealr decision receipt.
 
 ## Tree subjects
 

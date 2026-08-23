@@ -113,19 +113,19 @@ The repository now has:
 - an opaque `VerifiedArchive` on completely verified admitted outcomes, with canonical member lookup, caller-bounded reads, and opt-in exact-path retention under independent member and total byte ceilings during the original verification pass;
 - a separate locked Cargo consumer that runs against the extracted packaged crate rather than the workspace source;
 - a reproducible, byte-addressed 20-wheel compatibility pilot that uses only the public Sealr outcome and read-only IR, binds its manifest and interpretation-profile digests, and records 19 admissions plus one investigated three-member expansion-ratio denial without advertising wheel support;
-- a non-published, zero-dependency bounded worker-protocol codec with out-of-band capability slots, canonical result manifests, fallible decode, adversarial regressions, authenticated fuzz seeds, and a pinned scheduled AddressSanitizer campaign;
+- a non-published, zero-dependency bounded worker-protocol codec with out-of-band capability slots, canonical result manifests, fallible decode, adversarial regressions, source-controlled seed digests, and a pinned weekly and on-demand AddressSanitizer campaign;
 - dependency update automation and an explicit permissive-license policy;
 - protected `main` requiring pull requests, linear history, resolved conversations, and all five current required CI checks;
-- the `v0.1.0-alpha.4` measured-semantic-contract preview line, built from protected `main` through all five required main CI checks and the release workflow, with immutable releases enabled.
+- the `v0.1.0-alpha.5` bounded-immutable-input preview line, built from protected `main` through all five required main CI checks, exact-commit on-demand fuzz evidence, and the release workflow, with immutable releases enabled.
 
-This is the current main baseline: the released Alpha.4 contract plus unreleased Alpha.5 access, private-spool, source-change, resource-evidence, and bounded-protocol increments. It is incomplete and is not a production security boundary. Path inputs no longer retain the complete archive in heap memory; caller byte inputs remain memory-backed by definition. The first clean scheduled protocol-fuzz campaign remains the Alpha.5 release gate. Broader native stress and open-handle measurement continue as later assurance work.
+This is the released Alpha.5 baseline. It is incomplete and is not a production security boundary. Path inputs no longer retain the complete archive in heap memory; caller byte inputs remain memory-backed by definition. Checked random access, private-spool ownership, source-change controls, backend parity, resource evidence, and the bounded capability protocol have passed their release gates. Broader native stress and open-handle measurement continue as later assurance work.
 
 ## Active execution queue
 
 The detailed release-sized plan is [docs/near-term.md](docs/near-term.md). It corrects three dependencies in the older numbered sequence below: the private file-backed snapshot lands before worker IPC, assurance foundations land alongside each feature, and a non-shipping wheel laboratory begins before Phase 0.1 completes.
 
 1. **Alpha.4 measured semantic contract: complete on current main.** The opaque verified capability, caller-bounded member reads, bounded one-pass exact-member retention, packaged consumer, six finite-domain property families, independent identity-conformance verifier, shared checked interval and partition kernel, pure quota transition, first wheel compatibility pilot, and [closed strict ASCII v2 profile](docs/profiles/zip-strict-ascii-v2.md) have landed. The compatibility `apply()` facade preserves v1 while callers can select v2 explicitly.
-2. **Alpha.5 in progress: bounded immutable input.** Checked random access now serves the parser, covering audit, and verifier. Path inputs are copied and hashed once into a verified private directory, reopened read-only, unlinked, and retained without reopening the caller path. File-backed and borrowed-memory inputs have semantic-parity coverage. Native source-change checks, a required 1 MiB versus 128 MiB sparse heap and peak-resident-memory comparison, and a monthly three-platform 3 GiB sparse gate have landed. [Worker protocol v1](docs/worker-protocol.md) is specified and implemented over capability slots rather than archive blobs, with deterministic malformed-frame coverage and pinned fuzz infrastructure. A clean scheduled campaign and exact-main release gates close Alpha.5.
+2. **Alpha.5 bounded immutable input: complete on current main.** Checked random access serves the parser, covering audit, and verifier. Path inputs are copied and hashed once into a verified private directory, reopened read-only, unlinked, and retained without reopening the caller path. File-backed and borrowed-memory inputs have semantic-parity coverage. Native source-change checks, a required 1 MiB versus 128 MiB sparse heap and peak-resident-memory comparison, and a monthly three-platform 3 GiB sparse gate have passed. [Worker protocol v1](docs/worker-protocol.md) is specified and implemented over capability slots rather than archive blobs, with deterministic malformed-frame coverage, pinned fuzz infrastructure, and a clean bounded AddressSanitizer campaign.
 3. **Alpha.6 target: supervised Linux worker.** The supervisor alone owns the destination parent, publication, cleanup, and recovery authority. The worker receives the immutable snapshot and stage capabilities, installs a measured Landlock boundary before the first archive read, and returns an untrusted bounded result that the supervisor audits without reparsing ZIP.
 4. **Continuous assurance lane.** Pure range, quota, path, and lifecycle models; property tests; bounded model checking; fuzzing; and native race stress begin with the increments they protect. Step 8 completes and operationalizes this program instead of starting it late.
 5. **Parallel wheel laboratory.** The first reproducible benign [compatibility pilot](docs/wheel-compatibility-pilot.md) is published. Expand it around observed decision boundaries, maintain hostile wheel fixtures, and advance the [Python wheel consumer profile](docs/profiles/python-wheel-v1.md). The lab is not shipped support. It becomes experimental admission only after the exact wheel ZIP profile, canonical UTF-8 paths, verified-member access, consumer budgets, and consumer identities pass their gates.
@@ -247,15 +247,16 @@ Dependency correction: the minimum private file-backed `SourceSnapshot` slice fr
 Deliverables:
 
 1. Split a trusted supervisor from a same-binary worker. A library call must not unexpectedly sandbox its caller.
-2. Let the supervisor open the archive and destination parent, create and retain the private stage, and remain the only component with publication authority.
-3. Give the worker only the archive and stage capabilities through a bounded, versioned protocol. Never give it the destination parent or final name.
-4. Apply `no_new_privs` and runtime-probed Landlock before the worker reads the first archive byte on Linux. Add seccomp only after the real syscall surface is measured.
-5. Treat the worker result as untrusted. Audit the exact staged tree, identities, sizes, and SHA-256 digests before publication.
-6. Record process mode, protocol, Landlock ABI, handled and granted rights, inherited archive authority, publication ownership, and degraded or failed setup in the receipt.
-7. Add deterministic barriers and bounded repeated hostile namespace and content-mutation tests. Require zero outside writes, zero destination replacement, and exact manifest equality on success.
-8. Keep macOS and Windows behavior green and report isolation unavailable there until their credible worker packaging boundaries are implemented.
+2. Resolve IR ownership and preserve interpretation, admission, verification, effect, and lifecycle states in a protocol revision or an explicitly two-phase operation. Protocol v1 is not sufficient for this gate.
+3. Let the supervisor open the archive and destination parent, create and retain the private stage, and remain the only component with publication authority.
+4. Give the worker only the archive and stage capabilities through a bounded, versioned protocol. Never give it the destination parent or final name.
+5. Apply `no_new_privs` and runtime-probed Landlock before the worker reads the first archive byte on Linux. Add seccomp only after the real syscall surface is measured.
+6. Treat the worker result as untrusted. Validate its bounded manifest and audit the exact staged tree, identities, sizes, and SHA-256 digests before publication.
+7. Record process mode, protocol, Landlock ABI, handled and granted rights, inherited archive authority, publication ownership, and degraded or failed setup in the receipt.
+8. Add deterministic barriers and bounded repeated hostile namespace and content-mutation tests. Require zero outside writes, zero destination replacement, and exact manifest equality on success.
+9. Keep macOS and Windows behavior green and report isolation unavailable there until their credible worker packaging boundaries are implemented.
 
-Why this follows the snapshot slice: the Windows DACL removes inherited DACL grants to other principals but does not reduce a compromised parser's ambient authority. Windows descendants still receive the creating token's default owner, and a principal matching that SID remains outside this milestone. The worker protocol carries the retained snapshot capability, canonical IR, and staged-tree manifest rather than inventing another source or representation. A supervisor-owned lifecycle also defines the correct owner for recovery. Landlock confines the worker itself; it does not constrain another process running as the same user. Same-principal containment requires a distinct service identity or equivalent mandatory-access-control boundary and remains outside this milestone.
+Why this follows the snapshot slice: the Windows DACL removes inherited DACL grants to other principals but does not reduce a compromised parser's ambient authority. Windows descendants still receive the creating token's default owner, and a principal matching that SID remains outside this milestone. Protocol v1 binds retained snapshot and stage capability slots to a bounded reduced manifest, but it carries neither a complete `ArchiveIR` nor independent public outcome axes. Alpha.6 must resolve that contract before isolation work freezes. A supervisor-owned lifecycle also defines the correct owner for recovery. Landlock confines the worker itself; it does not constrain another process running as the same user. Same-principal containment requires a distinct service identity or equivalent mandatory-access-control boundary and remains outside this milestone.
 
 Exit proof:
 
@@ -434,6 +435,16 @@ Phase 0.1 is complete only when every row is green.
 | Honesty | README limitations match executable behavior. Walkthrough PNGs are not the usefulness gate. |
 | Usefulness | Phase 0.1 makes the ZIP32 boundary strict and cross-platform. The category is proven only in Phase 0.2, when a consumer imports the crate and does not reparse. |
 | Trusted computing base | No unreviewed runtime dependency; no fallback extractor; Store and Deflate remain the only ZIP methods until their exact-consumption bar is cloned per adapter |
+
+### Stable 1.0 distribution gate
+
+Preview binaries and internal package extraction are not sufficient evidence for a stable crate or native support promise. Before 1.0:
+
+1. Decide which crates are published, remove `publish = false` only after that API review, and include explicit README and Apache-2.0 license material in every published package.
+2. Make required CI inspect `cargo package --list` for the exact metadata and license files in addition to compiling an extracted downstream consumer.
+3. Define the minimum supported OS, kernel, and libc or deployment ABI for each native archive. Build or smoke-test the packaged binary on that floor instead of inferring compatibility from mutable `*-latest` runners.
+4. Pin the stable MSRV and SemVer commitments in package metadata, docs, and compatibility tests before publishing the 1.0 tag.
+5. Keep source-package publication and native-archive support as separate promises with separate evidence.
 
 ## After Phase 0.1: common codec adapters
 

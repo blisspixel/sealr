@@ -1,6 +1,6 @@
 # Near-term execution plan
 
-> Status: active plan from the Alpha.4 baseline. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
+> Status: active plan from the Alpha.5 baseline. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
 
 The next work should produce thin, independently reviewable trust increments. Each increment must finish with a useful artifact, explicit evidence, and a bounded claim. Work that merely makes the codebase larger does not count as progress.
 
@@ -80,7 +80,7 @@ The first two capability increments are now implemented on main. `VerifiedArchiv
 
 Alpha.5 makes the source capability real before it crosses a process boundary.
 
-**Current main status:** the backend-neutral access substrate and first private spool have landed. Magic detection, ZIP discovery, central and local metadata reads, descriptor checks, covering audit, original member verification, and later verified-member reads use checked `u64` ranges or range-limited readers. Central-directory buffering occurs only after the metadata cap passes, and compressed payloads stream in fixed buffers. A path is opened once and copied under the source cap into a random native-private directory through a fixed 64 KiB buffer while SHA-256 is computed. Sealr validates the opened source length and native change fingerprint, reopens only its own file read-only, removes its filename, and retains that unnamed capability. Windows denies write sharing during the copy. Private-file and borrowed-memory runs produce byte-identical semantic evidence. Same-length mutation, physically sparse 128 MiB, isolated peak-memory, and 3 GiB native matrix gates have landed. The bounded protocol codec, malformed-frame suite, seed manifest, and pinned fuzz workflow have landed. A clean scheduled fuzz campaign remains before Alpha.5 release.
+**Current main status:** complete. Magic detection, ZIP discovery, central and local metadata reads, descriptor checks, covering audit, original member verification, and later verified-member reads use checked `u64` ranges or range-limited readers. Central-directory buffering occurs only after the metadata cap passes, and compressed payloads stream in fixed buffers. A path is opened once and copied under the source cap into a random native-private directory through a fixed 64 KiB buffer while SHA-256 is computed. Sealr validates the opened source length and native change fingerprint, reopens only its own file read-only, removes its filename, and retains that unnamed capability. Windows denies write sharing during the copy. Private-file and borrowed-memory runs produce byte-identical semantic evidence. Same-length mutation, physically sparse 128 MiB, isolated peak-memory, and 3 GiB native matrix gates have passed. The bounded protocol codec, malformed-frame suite, source-controlled seed digest manifest, pinned fuzz workflow, and first clean AddressSanitizer campaign complete the increment.
 
 ### Snapshot backend
 
@@ -106,7 +106,7 @@ Alpha.5 makes the source capability real before it crosses a process boundary.
 
 ### Alpha.5 exit gate
 
-**Status: awaiting scheduled evidence.** The snapshot, mutation, backend-parity, required resource, scheduled multi-gigabyte, bounded protocol, and deterministic malformed-frame gates are complete. The first clean scheduled AddressSanitizer protocol campaign and exact-main release gates remain release blockers.
+**Status: complete on current main.** The snapshot, mutation, backend-parity, required resource, scheduled multi-gigabyte, bounded protocol, deterministic malformed-frame, and bounded AddressSanitizer fuzz gates have passed. Release promotion requires both exact-main CI and exact-commit on-demand fuzz evidence.
 
 - Resident memory is bounded independently of accepted archive size.
 - Interpretation and payload verification cannot observe different source versions.
@@ -119,27 +119,32 @@ Alpha.5 makes the source capability real before it crosses a process boundary.
 
 Alpha.6 gives a compromised parser materially less ambient authority while preserving the same semantic result.
 
-### Worker boundary
+### 1. Outcome and protocol contract
+
+1. Treat protocol v1 as a bounded transport foundation, not a frozen worker contract. It carries a reduced manifest but no complete `ArchiveIR`, ranges, or independent public outcome axes.
+2. Choose and document one semantic ownership model: the isolated worker is the only interpreter and remains the semantic trusted computing base, or a revised protocol carries a complete independently checkable IR or certificate. Do not claim independent supervisor verification without the latter evidence.
+3. Preserve interpretation, admission, verification, effect, and lifecycle facts through a protocol revision or an explicitly two-phase operation.
+4. Pin round-trip vectors for admitted plus effect-failed, worker crash, malformed result, stage-audit failure, cleanup failure, and publication failure.
+
+### 2. Supervisor lifecycle and capabilities
 
 1. The supervisor owns the private snapshot, destination parent, stage creation, final name, publication, cleanup, and any recovery secret.
 2. The same-binary worker inherits only the bounded control channel, a read-only snapshot capability, and the stage capability needed for its selected effect.
-3. Close every unrelated descriptor before restriction. Pre-opened descriptors are authority and must be audited separately from pathname rules.
-4. Install `no_new_privs` and Landlock before the first archive byte is interpreted.
-5. Require a release-runner Landlock floor that includes cross-directory refer controls and file truncation controls, currently ABI 3. A weaker kernel reports isolation unavailable and cannot satisfy the Linux reduced-authority release gate.
-6. Report available ABI, requested rights, handled rights, granted paths, inherited descriptors, and setup result separately. Do not claim complete network isolation from Landlock alone.
+3. Validate inherited capability identity and access mode with descriptor metadata before use, then close and report every unrelated descriptor. Pre-opened descriptors are authority and must be audited separately from pathname rules.
+4. Bound start, response, timeout, termination, reap, cleanup, and retry transitions in one supervisor-owned lifecycle.
 
-### Untrusted worker result
+### 3. Linux containment and publication
 
-1. Bound and validate the result frame before use.
-2. The supervisor consumes the same admitted manifest and never reparses ZIP.
-3. Re-audit the stage for exact object count, kind, identity, size, and SHA-256 before publication.
-4. Treat worker crash, malformed response, timeout, audit mismatch, cleanup failure, publication failure, and commit as distinct lifecycle states.
-5. Compare every observed lifecycle receipt with an executable finite-state model.
+1. Install `no_new_privs` and Landlock before the first archive byte is interpreted.
+2. Require a release-runner Landlock floor that includes cross-directory refer controls and file truncation controls, currently ABI 3. A weaker kernel reports isolation unavailable and cannot satisfy the Linux reduced-authority release gate.
+3. Report available ABI, requested rights, handled rights, granted paths, inherited descriptors, and setup result separately. Do not claim complete network isolation from Landlock alone.
+4. Bound and validate the result frame, then re-audit the stage for exact object count, kind, identity, size, and SHA-256 against the validated returned manifest. Do not reparse ZIP in the supervisor.
+5. Treat worker crash, malformed response, timeout, audit mismatch, cleanup failure, publication failure, and commit as distinct lifecycle states and compare every observed receipt with an executable finite-state model.
 
 ### Native adversarial evidence
 
 1. Keep deterministic namespace and content-substitution tests in required CI.
-2. Run bounded repeated race and fault stress on native Linux, macOS, and Windows schedules.
+2. Run at least 500 bounded Linux worker race and fault iterations. Keep separate repeated in-process materializer stress on native Linux, macOS, and Windows schedules.
 3. Require the Linux worker to fail opening an unrelated sentinel, creating a sibling beside the stage, or publishing the final destination.
 4. Keep macOS and Windows parser, identity, and materialization gates green while reporting process isolation unavailable on those platforms.
 
@@ -149,7 +154,7 @@ Alpha.6 gives a compromised parser materially less ambient authority while prese
 - Only the documented descriptors survive worker startup.
 - The worker cannot read the sentinel, create outside the stage, or publish.
 - The supervisor rejects every missing, extra, linked, replaced, size-mismatched, or digest-mismatched staged object.
-- At least 500 bounded hostile iterations per native platform complete with zero outside writes and zero destination replacement.
+- At least 500 bounded hostile Linux worker iterations complete with zero outside writes and zero destination replacement, while the native in-process materializer stress remains green on all three platforms.
 - Linux fails closed when the minimum handled rights are unavailable.
 - Receipts distinguish enforcement, protocol, worker, audit, effect, and cleanup outcomes without changing archive admission into an effect verdict.
 
@@ -202,6 +207,8 @@ Two implementation lanes can proceed in parallel without inventing another meani
 - **Systems lane:** authenticated abandoned-stage recovery, explicit durability levels, and platform-specific worker research.
 
 Both lanes consume the same snapshot, `ArchiveIR`, identities, findings discipline, and conformance bundles. Common codecs and TAR remain behind the Phase 0.1 trust gate.
+
+Stable crate and native-binary distribution remain explicit later gates. Before 1.0, every published crate must package its README and Apache-2.0 license and required CI must inspect the exact package file list. Native archives must name a minimum OS, kernel, and libc or deployment ABI and must be smoke-tested on that floor; green builds on mutable `*-latest` runners alone do not establish a support range.
 
 ## Primary sources
 

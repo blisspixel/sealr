@@ -18,7 +18,7 @@ The trusted supervisor will:
 4. start a same-binary worker with only bounded archive and stage capabilities;
 5. retain the final destination name and all publication authority;
 6. treat the worker result as untrusted;
-7. audit the staged tree against the admitted IR;
+7. audit the staged tree against the validated returned manifest;
 8. publish without replacement or clean up and report failure.
 
 The worker will:
@@ -29,6 +29,8 @@ The worker will:
 4. interpret, verify, and write only through its archive and stage capabilities;
 5. return a bounded result and member manifest;
 6. never receive the destination parent, final name, recovery key, or publication authority.
+
+Protocol v1 is only the bounded transport foundation for this split. It does not carry a complete `ArchiveIR` or independent interpretation, admission, verification, effect, and lifecycle axes. Alpha.6 must resolve those facts through a revised protocol or an explicitly two-phase operation before claiming that supervisor validation preserves the same semantic outcome. With only a reduced manifest, the worker remains the semantic trusted computing base and the supervisor can prove stage equality with the returned claim, not independently re-derive archive meaning.
 
 ## Linux first
 
@@ -44,7 +46,7 @@ Native syscall traces must cover Store, Deflate, rejection, cleanup, worker cras
 
 ## macOS and Windows
 
-Alpha.4 keeps native macOS and Windows materialization gates, but no worker containment claim exists on either platform.
+Alpha.5 keeps native macOS and Windows materialization gates, but no worker containment claim exists on either platform.
 
 A future macOS worker needs a supported packaging and restriction mechanism with native tests. A future Windows worker must evaluate AppContainer, restricted-token, job-object, handle-inheritance, and filesystem ACL behavior together. Neither platform will inherit a Linux claim by analogy.
 
