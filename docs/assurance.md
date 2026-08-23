@@ -1,6 +1,6 @@
 # Testing, compatibility, and assurance
 
-> This page separates current evidence from the target assurance program. Alpha.4 has a deterministic Rust suite, strict cross-platform CI, cargo-deny policy, a pinned 5,927-file ZipDiff construction gate, six finite-domain property families, an opaque bounded-read capability with one-pass exact-member retention, a consumer that runs against the extracted packaged crate, an independent verifier for two profile vectors and four identity-conformance cases, and a 20-wheel compatibility measurement. Broader ecosystem sampling, coverage-guided fuzzing, model checking, the general authenticated-evidence verifier, and an external audit remain future work.
+> This page separates current evidence from the target assurance program. The Alpha.4 baseline has a deterministic Rust suite, strict cross-platform CI, cargo-deny policy, a pinned 5,927-file ZipDiff construction gate, six finite-domain property families, an opaque bounded-read capability with one-pass exact-member retention, a consumer that runs against the extracted packaged crate, an independent verifier for two profile vectors and four identity-conformance cases, and a 20-wheel compatibility measurement. Current main also has the first private file-backed source and a required bounded-heap probe. Broader ecosystem sampling, coverage-guided fuzzing, model checking, the general authenticated-evidence verifier, and an external audit remain future work.
 
 Trust is the scarce resource. Format breadth and acceleration follow stable semantics and measured compatibility.
 
@@ -8,7 +8,8 @@ Trust is the scarce resource. Format breadth and acceleration follow stable sema
 
 | Layer | Current evidence | Remaining work |
 |---|---|---|
-| Unit | ZIP path grammar, topology, overlap and layout, quotas, inspect/materialize equality, rollback, destination preservation, platform materializer controls, exhaustive strict-v2 flag-word and extra-field-ID domains, and deterministic truncation, mutation, and noise no-panic coverage | Expand for every new semantic state and backend |
+| Unit | ZIP path grammar, topology, overlap and layout, quotas, inspect/materialize equality, rollback, destination preservation, platform materializer controls, exhaustive strict-v2 flag-word and extra-field-ID domains, deterministic truncation, mutation, and noise no-panic coverage, plus private-source length, replacement, short-read, interruption, cleanup, and backend-parity cases | Add deterministic same-length hostile-writer and broader native race stress |
+| Resource allocation | A required integration probe applies valid 1 MiB and 32 MiB stored ZIPs through path inputs, caps tracked heap allocation at 8 MiB, and permits at most a 1 MiB size-related delta; both measured 144,065 bytes on the current Windows run | Add a multi-gigabyte sparse fixture, peak resident memory, open-handle peak, and scheduled native measurements |
 | Public API and package | External-crate fixture exercises evidence types, `VerifiedArchive`, and bounded retention; a separate Cargo consumer runs the same retention path against the extracted packaged crate in required quality CI | Add semantic compatibility checks after publication and a wheel-aware metadata selector |
 | Corpus | All 5,927 pinned ZipDiff constructions, local generated adversarial fixtures, and a byte-addressed non-shipping pilot of 20 exact PyPI wheels with an investigated denial cluster | Expand producer and feature diversity; add codec-boundary, source-race, and wheel-semantic fixtures |
 | Differential | ZipDiff expectation gate binds strict rejection and a documented valid-control allowlist | Compare major consumers on well-formed profile inputs and track disagreement frontiers |
@@ -94,14 +95,11 @@ Golden semantic fixtures should run across x86_64 and aarch64 where release infr
 
 ## Immutable-source tests
 
-The future bounded random-access implementation must retain the whole-buffer guarantee that interpretation and verification use the same byte object.
+The bounded random-access implementation must preserve the guarantee that interpretation and verification use the same byte object. The first private spool copies the opened source once before interpretation and serves every later range from the retained Sealr-owned read-only file.
 
-Test at least:
+Current deterministic coverage includes opened-handle path replacement, source-length mismatch, growth beyond the cap, repeated short reads, interrupted reads, private-directory cleanup, original-path deletion before verified reads, and file-versus-memory semantic parity. Remaining tests include:
 
-- truncation after structural interpretation;
-- growth and alternate payload insertion;
 - in-place payload mutation through another handle;
-- path replacement while a snapshot is active;
 - remote object mutation or inconsistent range responses;
 - cache lookup under mismatched source or profile identity.
 
@@ -200,6 +198,6 @@ The detailed budgets and promotion gates are in the [near-term execution plan](n
 
 ## Unsafe policy
 
-The parser, path grammar, and quota core contain no `unsafe`. The current macOS descriptor-ACL and Windows native storage, stage, security-descriptor, and publication adapters are isolated exceptions with focused invariants and tests.
+The parser, path grammar, and quota core contain no `unsafe`. The shipped crate's current `unsafe` blocks are isolated in the macOS descriptor-ACL and Windows native storage, stage, security-descriptor, and publication adapters with focused invariants and tests. The allocation-probe integration executable has a small documented `GlobalAlloc` wrapper around the system allocator; it is test instrumentation and is not packaged.
 
 A future memory-mapped source may require a small I/O exception, but mapping mutable archive storage is not an immutable snapshot. Any such adapter must document source-stability requirements and remain outside output handling.

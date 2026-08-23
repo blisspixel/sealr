@@ -54,7 +54,7 @@ Current main has completed the Alpha.4 measured-contract gate. It removes public
 4. Replace direct construction of evolving configuration with validated constructors or builders. Mark evolving public enums and records non-exhaustive where exhaustive downstream matching is not part of the contract.
 5. Add a downstream compile fixture, packaged-crate build, rustdoc examples, and an explicit MSRV policy. Keep crates unpublished until this API review is complete.
 
-The first two capability increments are now implemented on main. `VerifiedArchive` is Sealr-constructed, retains the exact in-memory snapshot and verified IR, and supports canonical-path reads with a caller-supplied maximum. `apply_with_options` can also request exact canonical paths through a validated `RetentionPlan`. Selection is deterministic in canonical-path order and bounded by 64 paths, 4,096 bytes per path, 16,384 total path bytes, and caller-selected per-member and aggregate content ceilings. Selected content is captured during the original verification stream, including the materialization stream. A retained borrow performs no reopen, parse, inflation, allocation, or hash. Retention failure is reported per path and never weakens archive admission. Non-retained `read_member` calls preserve the original re-inflate and revalidate behavior. The packaged consumer and Rust 1.98 MSRV policy are required-CI contracts.
+The first two capability increments are now implemented on main. `VerifiedArchive` is Sealr-constructed, retains the exact snapshot and verified IR, and supports canonical-path reads with a caller-supplied maximum. `apply_with_options` can also request exact canonical paths through a validated `RetentionPlan`. Selection is deterministic in canonical-path order and bounded by 64 paths, 4,096 bytes per path, 16,384 total path bytes, and caller-selected per-member and aggregate content ceilings. Selected content is captured during the original verification stream, including the materialization stream. A retained borrow performs no reopen, parse, inflation, allocation, or hash. Retention failure is reported per path and never weakens archive admission. Non-retained `read_member` calls preserve the original re-inflate and revalidate behavior. The packaged consumer and Rust 1.98 MSRV policy are required-CI contracts.
 
 ### Executable conformance
 
@@ -80,22 +80,22 @@ The first two capability increments are now implemented on main. `VerifiedArchiv
 
 Alpha.5 makes the source capability real before it crosses a process boundary.
 
-**Current main status:** the backend-neutral access substrate has landed. Magic detection, ZIP discovery, central and local metadata reads, descriptor checks, covering audit, original member verification, and later verified-member reads use checked `u64` ranges or range-limited readers. Central-directory buffering occurs only after the metadata cap passes, and compressed payloads stream in fixed buffers. Owned and borrowed memory snapshots produce byte-identical semantic evidence in regression tests. The backing object is still the bounded whole-archive memory snapshot, so the private spool, mutation suite, large sparse fixture, and memory-independence gate remain open.
+**Current main status:** the backend-neutral access substrate and first private spool have landed. Magic detection, ZIP discovery, central and local metadata reads, descriptor checks, covering audit, original member verification, and later verified-member reads use checked `u64` ranges or range-limited readers. Central-directory buffering occurs only after the metadata cap passes, and compressed payloads stream in fixed buffers. A path is opened once and copied under the source cap into a random native-private directory through a fixed 64 KiB buffer while SHA-256 is computed. Sealr verifies the opened source and copied lengths, reopens only its own file read-only, removes its filename, and retains that unnamed capability. Private-file and borrowed-memory runs produce byte-identical semantic evidence. Same-length hostile mutation during construction, multi-gigabyte sparse, peak-resident-memory, and protocol gates remain open.
 
 ### Snapshot backend
 
 1. Make the first file-backed source a Sealr-owned private spool: copy once while hashing and enforcing the source cap, retain the resulting object, and stop relying on the original path.
-2. Give interpretation and verification read-only random access to that retained object. No later phase reopens the input path. **Access layer landed; private spool integration remains.**
-3. Keep offsets and lengths as checked `u64`, with explicit bounded conversion at each I/O boundary. **Landed for the memory backends and parser/verifier call paths.**
-4. Bind the snapshot to its exact length and source digest. A partial copy never receives the digest of a bounded prefix as though it were the whole source.
+2. Give interpretation and verification read-only random access to that retained object. No later phase reopens the input path. **Landed for path and byte inputs.**
+3. Keep offsets and lengths as checked `u64`, with explicit bounded conversion at each I/O boundary. **Landed for memory and private-file backends and every parser/verifier call path.**
+4. Bind the snapshot to its exact length and source digest. A partial copy never receives the digest of a bounded prefix as though it were the whole source. **Landed for the first private spool; failures before exact EOF keep the digest unavailable.**
 5. Prefer the simple copy, hash, retain design over direct mmap or unproven filesystem immutability. Content-addressed reuse and zero-copy backends can follow measured need.
 
 ### Resource and mutation evidence
 
-1. Test truncation, growth, in-place source mutation, path replacement, stale handles, short reads, and copy interruption.
-2. Verify that memory stays within a declared budget independently of archive size.
-3. Inspect a large sparse valid fixture without a proportionally large allocation.
-4. Require the memory-backed and file-backed snapshots to produce byte-identical IR, findings, and roots for the same bytes.
+1. Test truncation, growth, in-place source mutation, path replacement, stale handles, short reads, and copy interruption. **Landed except for a deterministic same-length in-place hostile-writer test:** the suite covers length mismatch, cap growth, replacement after the source handle opens, repeated short reads, interruption retry, private-directory cleanup, original-path deletion, and retained reads.
+2. Verify that memory stays within a declared budget independently of archive size. **Initial heap gate landed:** a required integration test generates valid 1 MiB and 32 MiB stored ZIPs, caps tracked allocation at 8 MiB, and permits at most a 1 MiB size-related delta. Both allocated 144,065 tracked heap bytes on the current Windows run. Peak resident memory and larger native measurements remain open.
+3. Inspect a large sparse valid fixture without a proportionally large allocation. **Partially landed:** the 32 MiB generated valid fixture proves the regression would catch whole-archive heap buffering. The multi-gigabyte sparse gate remains open.
+4. Require the memory-backed and file-backed snapshots to produce byte-identical IR, findings, and roots for the same bytes. **Landed for the current borrowed-memory and private-file backends.**
 
 ### Protocol preparation
 
@@ -105,6 +105,8 @@ Alpha.5 makes the source capability real before it crosses a process boundary.
 4. Pin fuzz tool versions and toolchains, record resource limits and seed-manifest digests, and promote every reproducible crash into a deterministic regression.
 
 ### Alpha.5 exit gate
+
+**Status: open.** The private-file capability and bounded-heap regression are complete, but the same-file mutation, multi-gigabyte sparse, peak-resident-memory, protocol, and fuzz gates below are not.
 
 - Resident memory is bounded independently of accepted archive size.
 - Interpretation and payload verification cannot observe different source versions.

@@ -50,7 +50,7 @@ Partial function means: for each \(b\), \(I_\pi(b)\) is undefined or a single IR
 
 ### Source as an interval
 
-A `SourceSnapshot` is an immutable \(b \in \mathbb{B}^n\). Alpha.4 realizes this as owned or borrowed whole-buffer bytes. A path, file descriptor, ETag, or content-length is not a snapshot: another writer can change the bytes under the parse.
+A `SourceSnapshot` is an immutable \(b \in \mathbb{B}^n\). Alpha.4 realizes this as owned or borrowed whole-buffer bytes. Current main also realizes path input as a bounded copy into a Sealr-owned private file whose exact length and digest are fixed before interpretation. A caller path, mutable file descriptor, ETag, or content length alone is not a snapshot: another writer can change the bytes under the parse.
 
 Source identity \(S(b) = \mathsf{H}(b)\), or explicit unavailability if bytes were never held.
 

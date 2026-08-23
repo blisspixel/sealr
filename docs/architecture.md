@@ -17,7 +17,7 @@ The library exposes one `apply()` path for inspect and materialize. Both modes u
 
 The current input and interpretation boundary is:
 
-1. Ingest a `SourceSnapshot`. Path inputs become owned bytes; borrowed byte inputs remain borrowed for the call. The digest is SHA-256 of that object.
+1. Ingest a `SourceSnapshot`. A path is opened once and copied under the archive cap into a Sealr-owned private file while SHA-256 is computed; borrowed byte inputs remain borrowed for the call. The exact length and digest belong to the resulting snapshot object.
 2. Locate and validate ZIP32 EOCD through bounded tail access, then copy the central directory only after its declared size passes the metadata cap.
 3. Read fixed headers and bounded metadata through checked `u64` ranges, compare redundant central and local metadata, validate source ranges, reject overlaps and hidden structural records, and apply the strict path grammar.
 4. If a destination was requested, create and retain its private stage after structural planning and before member processing.
@@ -29,7 +29,7 @@ The current input and interpretation boundary is:
 
 Current support is seekable ZIP32 with Store and Deflate members plus validated data descriptors. Encryption, ZIP64, spanned archives, recovery parsing, recursive nested extraction, links, devices, and unsupported structures fail closed. The [README](../README.md) is authoritative for the complete support and limitation list.
 
-Safe Rust is the default. The current `unsafe` blocks are isolated in the macOS descriptor-ACL module and the Windows native storage, security-descriptor, stage, and publication module. Those modules are the explicit platform FFI audit boundary.
+Safe Rust is the default. The shipped crate's current `unsafe` blocks are isolated in the macOS descriptor-ACL module and the Windows native storage, security-descriptor, stage, and publication module. Those modules are the explicit platform FFI audit boundary. The separate bounded-allocation integration executable wraps the system allocator with documented test-only `unsafe`; it is not packaged.
 
 ## Implemented materialization boundary
 
@@ -50,10 +50,10 @@ The receipt's `materialization` object records the selected backend, stage prote
 
 The format parser, path grammar, quota counters, content verification, and policy decision share one in-process trust boundary. The materializer receives validated relative components rather than archive-controlled ambient paths.
 
-The bounded in-memory source is a named `SourceSnapshot`: path inputs become owned bytes, caller byte inputs remain borrowed, and the recorded digest is SHA-256 of the complete object. Current main routes parsing, codec-free covering checks, initial payload verification, and later verified-member reads through checked exact reads or range-limited readers. Owned and borrowed memory variants have semantic-parity coverage. Receipt v2 reports `source_snapshot` as `memory-owned`, `memory-borrowed`, or `unavailable`. It does not yet:
+The bounded source is a named `SourceSnapshot`: path inputs become Sealr-owned private files, caller byte inputs remain borrowed, and the recorded digest is SHA-256 of the complete object. Current main routes parsing, codec-free covering checks, initial payload verification, and later verified-member reads through checked exact reads or range-limited readers. Private-file and borrowed-memory variants have semantic-parity coverage. Receipt v2 reports `source_snapshot` as `private-file`, `memory-owned`, `memory-borrowed`, or `unavailable`. `memory-owned` remains a stable compatibility variant for process-owned memory; current public path and byte calls report `private-file` and `memory-borrowed`, respectively. It does not yet:
 
 - freeze preview `sealrTreeV1` roots as a stable lock or authenticated subject; committed cross-platform golden fixtures now pin the preview encoding;
-- replace whole-archive buffering with a private spool or verified filesystem snapshot;
+- close the multi-gigabyte sparse, peak-resident-memory, alternate-backend, or hostile same-file mutation gates;
 - run parsing in a reduced-authority worker;
 - expose a read-only projection or content-addressed store;
 - sign or independently verify evidence.
@@ -80,7 +80,9 @@ The critical rule is that every operation after interpretation consumes the IR a
 
 ### Source ownership
 
-Bounded random access must preserve the security property currently provided by the in-memory source. The target `SourceSnapshot` first names the existing owned and caller-borrowed byte cases, then supports immutable alternatives for the complete interpretation and verification lifetime. A caller path can be copied into a private spool while it is hashed, then retained as a read-only capability. Reflink or content-addressed variants require an equally strong mutation contract. Remote metadata such as an ETag or content length does not replace possession of the exact bytes. The first private file-backed implementation is a prerequisite for worker IPC so the protocol never embeds a whole archive buffer. Broader alternate-backend and sparse-fixture work remains the later memory-scaling milestone.
+Bounded random access preserves the property first supplied by the in-memory source. The current path implementation opens the source once, reads opened-handle metadata, copies and hashes through a fixed 64 KiB buffer, checks the copied and opened lengths plus observable modification state, closes its writer, reopens only the Sealr-owned file read-only, and removes its filename before returning. Later reads use positional I/O against the unnamed handle and never reopen the caller path. The private directory uses the same native mode, ownership, ACL, parent-filesystem, and reparse-point checks as extraction staging. It remains empty until the snapshot is dropped, then cleanup runs after the read handle closes. Abrupt termination during construction can leave a protected partial spool; termination after successful ingest or later cleanup failure can leave the empty random directory. Same-principal races during construction remain outside the in-process privacy claim.
+
+Reflink or content-addressed variants require an equally strong mutation contract. Remote metadata such as an ETag or content length does not replace possession of the exact bytes. The file-backed implementation is now available for worker IPC so the protocol need not embed a whole archive buffer. Broader alternate-backend, hostile same-file mutation, multi-gigabyte sparse, and peak-resident-memory work remains the later memory-scaling milestone.
 
 ### Canonical intermediate representation
 

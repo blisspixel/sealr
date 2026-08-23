@@ -58,8 +58,8 @@ Invariants:
 
 - `receipt.view_digest` is currently SHA-256 of deterministic `serde_json` bytes for the versioned Rust struct. RFC 8785 JCS is a Phase 0.1 gate.
 - `receipt.policy.digest` uses the same current deterministic struct serialization. It is not yet a cross-encoder canonical JSON promise.
-- After the complete source bytes are available, `receipt.source` is `{ "sha256": "..." }`. A source open, read, pre-read path-size rejection, or path growth beyond the bounded read uses `{ "status": "unavailable" }` and omits `sha256`. An over-cap `Source::Bytes` input is complete caller-owned data, so it is hashed. The inspectable view keeps the same digest object so `receipt.source` equals `view.source.digest`.
-- `receipt.source_snapshot` is `memory-owned` for accepted path inputs and `memory-borrowed` for caller byte slices, including an over-cap slice rejected before parsing. It is `unavailable` when no complete snapshot was retained. Parse and payload reads use that snapshot; they do not reopen the caller path.
+- After the complete source bytes are available, `receipt.source` is `{ "sha256": "..." }`. A source open, metadata, copy, stability-check, or cap failure before exact EOF uses `{ "status": "unavailable" }` and omits `sha256`. An over-cap `Source::Bytes` input is complete caller-owned data, so it is hashed. The inspectable view keeps the same digest object so `receipt.source` equals `view.source.digest`.
+- `receipt.source_snapshot` is `private-file` for successful path ingest and `memory-borrowed` for caller byte slices, including an over-cap slice rejected before parsing. It is `unavailable` when no complete snapshot was retained. `memory-owned` remains a stable variant for process-owned in-memory snapshots. Parse and payload reads use the recorded snapshot; they do not reopen the caller path.
 - The same source bytes, source metadata, and policy produce the same interpreted member tree and findings. Materialization may add an I/O finding, but it must not reinterpret archive bytes. **This is the LibreOffice bug we refuse:** inspect and materialize cannot disagree about the archive tree.
 
 `ArchiveIR` is constructed only by Sealr. Its fields cannot be mutated outside the crate, and evolving IR records and enums are non-exhaustive. `Outcome::archive_ir()` provides a read-only serializable evidence view after planning. It does not retain verified member bytes and is not the planned `AdmittedArchive` capability. A consumer cannot use it as permission to reopen the source through another ZIP parser.
@@ -122,7 +122,7 @@ The current receipt is versioned unsigned JSON (`signed: false`). DSSE and in-to
   "effect": { "status": "not-requested" },
   "view_completeness": { "status": "complete" },
   "source": { "sha256": "..." },
-  "source_snapshot": "memory-owned",
+  "source_snapshot": "private-file",
   "policy": { "id": "sealr:policy/default/v1", "digest": { "sha256": "..." } },
   "identities": {
     "source": { "sha256": "..." },
@@ -204,7 +204,7 @@ The capability is opaque and cheap to clone. Clones share one immutable snapshot
 - `read_member(canonical_path, max_bytes)` reads only regular files and checks the caller's limit before reserving memory;
 - a non-retained read streams only the IR's recorded compressed payload range and rechecks actual size, CRC32, and SHA-256 before returning bytes;
 - a retained read through `read_member` still checks the caller limit, validates the retained length, and returns an owned copy;
-- absent paths, directories, caller-limit failures, platform or allocation limits, and internal integrity disagreement have distinct `MemberReadErrorKind` values.
+- absent paths, directories, caller-limit failures, platform or allocation limits, later snapshot I/O failure, and internal integrity disagreement have distinct `MemberReadErrorKind` values.
 
 ```rust
 let outcome = sealr::apply(request);
@@ -214,7 +214,7 @@ let archive = outcome
 let metadata = archive.read_member("package.dist-info/METADATA", 256 * 1024)?;
 ```
 
-This path does not reopen the caller path or parse ZIP structure again. Without an explicit retention request, the current in-memory implementation opens a range-limited reader over the recorded payload, re-inflates a selected Deflate member, and revalidates it for each call. The backing snapshot still holds the complete archive in memory. The next section describes the opt-in path that avoids this repeated work for a small, known member set.
+This path does not reopen the caller path or parse ZIP structure again. Without an explicit retention request, the current implementation opens a range-limited reader over the recorded payload, re-inflates a selected Deflate member, and revalidates it for each call. A path outcome reads from its retained private file; a byte outcome reads from the process-owned copy created when the capability outlives the caller borrow. The next section describes the opt-in path that avoids this repeated work for a small, known member set.
 
 ### Bounded one-pass retention
 
