@@ -111,18 +111,38 @@ A separate `semantic_records` libFuzzer target uses a hidden, nondefault fuzz-on
 
 The manifest establishes zero-difference executor parity only for its executable memory-backed strict-v1 cases. Focused regressions add one strict-v2 mixed directory and file case plus private-file backend parity, but do not establish corpus-wide semantic equivalence, broad strict-v2 or backend parity, an independent implementation, full `VerifiedArchive` equivalence, transport safety, isolation, or runtime-worker parity.
 
+### Near-limit completion heap evidence
+
+A required, explicitly invoked regression measures completion decode and reconstruction in four isolated child processes. Its deterministic strict-v2 Store fixture has 349 one-byte files with unique 64,000-byte single-component names. The source is 44,698,895 bytes. Its canonical planning frame is 67,041,104 bytes with SHA-256 `e697bec9023d83f1983c90ee35d9e09f8edf94f6053404d517755d9351773c72`, leaving 67,760 bytes below the private 64 MiB frame limit.
+
+The accepted Complete control first warms the decoder and uses the existing allocation budget to derive an 89,486,520-byte logical reconstruction size. After the source, encoded plan, completed reference IR, and warm result are dropped, a test-only system-allocator wrapper samples requested live Rust heap while retaining the decoded result. The local Windows sample added 89,503,272 peak bytes, only 16,752 bytes above the logical reconstruction, and retained exactly 89,486,520 bytes at the sample point. It materialized IR once.
+
+An accepted Stopped control fails the final member with `crc.mismatch`, fills the 65,535-byte diagnostic-member limit, and fills the 1,024-byte finding-detail limit. Its logical reconstruction was 89,486,480 bytes. The local Windows sample peaked at 89,569,847 bytes and retained 89,553,095 bytes, including the moved record-owned finding. It also materialized IR exactly once. Required CI repeats all four controls in release mode on 64-bit Ubuntu, macOS, and Windows and enforces these relational limits:
+
+- each accepted peak delta is at least the logical reconstruction and no more than 1 MiB above it;
+- each accepted final live delta retains at least the logical reconstruction and no more than 256 KiB above it;
+- peak delta is less than two logical reconstructions;
+- stale correlation performs no IR materialization and peaks at no more than 64 KiB;
+- a full-member-vector completion with a late invalid frontier performs no IR materialization and peaks at no more than 1 MiB.
+
+The local stale-correlation control allocated no bytes. The full-member-vector late-invalid control peaked at 16,752 bytes, returned to its baseline, and did not materialize IR. These controls distinguish early correlation rejection from a record that decodes its complete member vector before semantic rejection.
+
+This is a requested Rust-heap measurement of `decode_completion` against accepted Complete and Stopped records plus two hostile controls. It excludes fixture planning, source parsing, the already retained validated plan, allocator metadata and fragmentation, native codec storage, stacks, mappings, RSS, handles, executor memory, transport, isolation, materialization, cancellation, and retained-content behavior. It closes the completion-reconstruction peak-live prerequisite, not the worker resource envelope.
+
 ## Remaining gates
 
 Before any runtime or public activation, Alpha.6 still requires:
 
-1. an isolated allocator or process measurement near the private 64 MiB record limit proving that completion reconstruction adds only a bounded delta and no second full-IR-sized live allocation;
-2. expansion of the pinned matrix across strict-v2, memory and private-file backends, ignored extras, IR-bearing covering terminals, path and topology stops, and size, ratio, and total-budget stops, preserving every discrepancy as a deterministic regression;
-3. isolated execution that transports and consumes the validated plan while preserving the no-structural-reparse boundary, typed infrastructure failures, bounded lifecycle, clean exit, and reap;
-4. immutable retained-content transfer and original-pass retention semantics;
-5. isolated, caller-bounded non-retained reads with clone, cancellation, crash, and last-owner behavior;
-6. sealed immutable blob transport with exact seals, length, digest, clean exit, and reap;
-7. no-descendant and stage-permission-mutation controls, writer quiescence, stage audit, and supervisor-owned publication;
+1. expansion of the pinned matrix across strict-v2, memory and private-file backends, ignored extras, IR-bearing covering terminals, path and topology stops, and size, ratio, and total-budget stops, preserving every discrepancy as a deterministic regression;
+2. closure of the pre-parser authority gate: no process or thread creation, no descendant or stage-permission mutation, per-epoch stalls, raw unknown-ancillary rejection, and repeated native stress;
+3. one real crate-private plan-only seam shared by in-process `apply` and a repository lab, rather than using the test-only planning capture and repeating completed verification;
+4. sealed immutable plan and completion blobs with exact seals, length, digest, expected invocation binding, clean exit, and reap, followed by isolated consumption of the validated plan without structural reparse;
+5. independent content authority that verifies exact file bytes and their source relationship before any worker proposal shapes public semantic state, plus immutable retained-content transfer and original-pass retention semantics;
+6. isolated, caller-bounded non-retained reads with clone, cancellation, crash, and last-owner behavior;
+7. writer quiescence, stage audit, and supervisor-owned publication;
 8. a helper packaging and discovery model that works for both library and CLI consumers;
 9. the first scheduled-event campaign and accumulated clean scheduled history, with every reproducible failure promoted to a deterministic regression.
+
+The first honest isolated bridge is Linux-only, repository-only, inspect-only, and without retention or a destination. The supervisor retains the snapshot, expected invocation, accepted plan, replay state, deadlines, lifecycle, and all public semantic merging. After restriction readiness, the worker receives the read-only snapshot and a sealed plan blob. Record validation may read represented structural ranges without invoking the ZIP parser; after plan acceptance, the executor reads only recorded Store or Deflate payload ranges. The worker returns a sealed completion blob, exits cleanly, and is reaped. The supervisor then checks blob seals and length, independently recomputes the digest from the exact kernel-sealed bytes, and treats any worker-reported digest as untrusted metadata before decoding the record against its retained plan. Only after clean exit, reap, and binding-validated, bounded semantic decode may the supervisor retain the result as an untrusted, plan-bound proposal. Correlation, seals, and canonical decoding do not prove that payload processing ran: a file proposal can echo declared size and CRC while supplying an arbitrary content SHA-256. The lab must not translate that proposal into public interpretation, admission, verification, `ArchiveIR`, or `VerifiedArchive` state. This lab may prove isolated plan consumption, but it cannot activate a public worker, construct `VerifiedArchive`, claim complete parser confinement, or close content-authority, retained-content, later-read, materialization, stage-audit, publication, helper-packaging, receipt, macOS, or Windows gates.
 
 Invalid records, bad transport state, worker crash, and timeout are infrastructure failures. They must never be translated into archive denial, malformed interpretation, failed effect, or another worker-authored semantic claim.

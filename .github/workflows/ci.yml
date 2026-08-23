@@ -82,6 +82,12 @@ jobs:
       - name: Run tests
         run: cargo test --locked --workspace --all-features
 
+      - name: Measure near-limit semantic completion heap
+        run: >-
+          cargo test --locked --release -p sealr --lib
+          semantic_record::peak_live::completion_reconstruction_peak_live_is_bounded --
+          --ignored --exact --nocapture --test-threads=1
+
       - name: Verify Linux authority bootstrap
         run: cargo run --locked --release -p sealr-worker-bootstrap-lab -- conformance
 
@@ -148,6 +154,12 @@ jobs:
 
       - name: Run release tests
         run: cargo test --locked --release --workspace --all-features
+
+      - name: Measure near-limit semantic completion heap
+        run: >-
+          cargo test --locked --release -p sealr --lib
+          semantic_record::peak_live::completion_reconstruction_peak_live_is_bounded --
+          --ignored --exact --nocapture --test-threads=1
 
   zipdiff:
     name: ZipDiff 14-class gate

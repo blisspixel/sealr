@@ -4,12 +4,14 @@
 
 ## Implemented on current main
 
-Sealr is a four-package Rust workspace. Two packages ship; two are repository-only assurance tools:
+Sealr is a six-package Rust workspace. The library and CLI are the release-facing components; four packages remain repository-only protocol, conformance, bootstrap, or compatibility tools:
 
 ```text
-crates/sealr             published security boundary, parser, policy, verification, evidence, materializer
+crates/sealr             unpublished preview library boundary, parser, policy, verification, evidence, materializer
 crates/sealr-cli         native command-line facade
+crates/sealr-protocol    non-published bounded worker protocol experiment
 tools/identity-verifier  independent conformance verifier with no sealr dependency
+tools/worker-bootstrap   repository-only Linux authority and lifecycle conformance lab
 tools/wheel-lab          non-shipping compatibility measurement and report verifier
 ```
 
@@ -29,7 +31,7 @@ The current input and interpretation boundary is:
 
 Current support is seekable ZIP32 with Store and Deflate members plus validated data descriptors. Encryption, ZIP64, spanned archives, recovery parsing, recursive nested extraction, links, devices, and unsupported structures fail closed. The [README](../README.md) is authoritative for the complete support and limitation list.
 
-Safe Rust is the default. The shipped crate's current `unsafe` blocks are isolated in the macOS descriptor-ACL module and the Windows native storage, security-descriptor, stage, and publication module. Those modules are the explicit platform FFI audit boundary. The separate bounded-allocation integration executable wraps the system allocator with documented test-only `unsafe`; it is not packaged.
+Safe Rust is the default. The shipped crate's current `unsafe` blocks are isolated in the macOS descriptor-ACL module and the Windows native storage, security-descriptor, stage, and publication module. Those modules are the explicit platform FFI audit boundary. Test-only bounded-allocation probes wrap the system allocator with documented `unsafe`. Their source is included in the source package, but they are not compiled or linked into normal library and CLI runtime artifacts.
 
 ## Implemented materialization boundary
 

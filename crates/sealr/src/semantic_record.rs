@@ -48,6 +48,8 @@ const REQUEST_DOMAIN: &[u8] = b"sealr.semantic-request.experimental.v1\0";
 const PLAN_DOMAIN: &[u8] = b"sealr.semantic-plan.experimental.v1\0";
 
 mod executor;
+#[cfg(test)]
+mod peak_live;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RequestedEffect {
@@ -200,8 +202,15 @@ struct CompletionRecord {
     findings: Vec<Finding>,
 }
 
+/// A canonically decoded, plan-bound worker proposal.
+///
+/// Correlation and semantic validation do not prove that the worker processed
+/// file payloads. In particular, non-directory content digests remain
+/// worker-supplied claims. This private type must not shape public semantic
+/// state until a separate content-authority gate verifies the exact bytes.
+#[must_use = "a bound completion proposal is not independently verified content authority"]
 #[derive(Clone, Debug)]
-struct ValidatedCompletionRecord {
+struct BoundCompletionProposal {
     interpretation: InterpretationStatus,
     admission: AdmissionStatus,
     verification: VerificationStatus,
@@ -3260,7 +3269,7 @@ fn encode_completion_validated(record: &CompletionRecord) -> Result<Vec<u8>, Rec
 fn decode_completion(
     input: &[u8],
     planning: &ValidatedPlanningRecord,
-) -> Result<ValidatedCompletionRecord, RecordError> {
+) -> Result<BoundCompletionProposal, RecordError> {
     let mut cursor = Cursor::frame(input, KIND_COMPLETION)?;
     let operation_id = cursor.fixed()?;
     let request_id_value = cursor.fixed()?;
@@ -3646,7 +3655,7 @@ fn completion_stop_axes(cause: FindingCode) -> (InterpretationStatus, AdmissionS
 fn materialize_completion(
     record: CompletionRecord,
     validation: CompletionValidation<'_>,
-) -> Result<ValidatedCompletionRecord, RecordError> {
+) -> Result<BoundCompletionProposal, RecordError> {
     #[cfg(test)]
     COMPLETION_IR_MATERIALIZATIONS.with(|count| count.set(count.get() + 1));
 
@@ -3689,7 +3698,7 @@ fn materialize_completion(
             )?,
         },
     };
-    Ok(ValidatedCompletionRecord {
+    Ok(BoundCompletionProposal {
         interpretation: validation.interpretation,
         admission: validation.admission,
         verification: validation.verification,
@@ -6125,6 +6134,41 @@ mod tests {
         assert_eq!(decoded.verification, VerificationStatus::Complete);
         assert_eq!(decoded.view_completeness, ViewCompleteness::Complete);
         assert_ir_eq(&decoded.ir, &completed);
+    }
+
+    #[test]
+    fn bound_completion_proposal_does_not_prove_file_content_digest() {
+        let bytes = make_zip(&[("payload.bin", b"actual payload")]);
+        let (binding, pending, completed) =
+            reference(&bytes, ZipInterpretationProfile::StrictAsciiV2);
+        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending)).unwrap();
+        let plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+        let forged_digest = [0xa5; 32];
+        let mut members = complete_states(&completed);
+        let MemberCompletion::Verified { content_sha256, .. } = &mut members[0] else {
+            panic!("file reference state must be verified");
+        };
+        *content_sha256 = forged_digest;
+        let completion = CompletionRecord {
+            operation_id: binding.operation_id,
+            request_id: plan.request_id,
+            plan_id: plan.plan_id,
+            disposition: CompletionDisposition::Complete,
+            members,
+            findings: Vec::new(),
+        };
+
+        let encoded = encode_completion(&completion, &plan).unwrap();
+        let proposal = decode_completion(&encoded, &plan).unwrap();
+        let forged_hex = hex_32(&forged_digest);
+        assert_eq!(
+            proposal.ir.members[0].content_sha256.as_deref(),
+            Some(forged_hex.as_str())
+        );
+        assert_ne!(
+            proposal.ir.members[0].content_sha256,
+            completed.members[0].content_sha256
+        );
     }
 
     #[test]
