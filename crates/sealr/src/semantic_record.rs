@@ -1,0 +1,3887 @@
+//! Dormant Alpha.6 semantic handoff experiment.
+//!
+//! This is a crate-private, behavior-neutral record codec. It is deliberately
+//! independent from worker protocol v1 and is not invoked by a shipped path.
+
+use std::collections::BTreeMap;
+use std::fmt;
+
+use sha2::{Digest, Sha256};
+
+use crate::covering::audit_covering;
+use crate::findings::{Finding, FindingCode, Severity};
+use crate::ir::{
+    ArchiveCovering, ArchiveIR, ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite, IrMember,
+    MemberKind, MemberSourceRanges, MemberVerification, NormalizationAction,
+    ZipInterpretationProfile,
+};
+use crate::jail::jail_name;
+use crate::outcome::{
+    AdmissionStatus, InterpretationStatus, SemanticAxes, SourceDigest, StoppingPhase,
+    VerificationStatus, ViewCompleteness,
+};
+use crate::policy::{ratio_exceeds, ConsumerProfile, ResourceBudget, TargetModel};
+use crate::snapshot::SourceSnapshot;
+use crate::verified::{
+    RetentionPlan, MAX_RETENTION_PATHS, MAX_RETENTION_PATH_BYTES, MAX_RETENTION_TOTAL_PATH_BYTES,
+};
+
+const MAGIC: [u8; 8] = *b"SEALRSEM";
+const VERSION: u16 = 1;
+const HEADER_BYTES: usize = 16;
+const KIND_PLANNING: u8 = 1;
+const KIND_COMPLETION: u8 = 2;
+const MAX_RECORD_BYTES: usize = 64 * 1024 * 1024;
+const MAX_MEMBERS: usize = 65_535;
+const MAX_FINDINGS: usize = 65_535;
+const MAX_NAME_BYTES: usize = 65_535;
+const MAX_COMPONENTS: usize = 256;
+const MAX_EXTRA_FIELDS_PER_MEMBER: usize = 65_535;
+const MAX_NORMALIZATIONS_PER_MEMBER: usize = 256;
+const MAX_POLICY_ID_BYTES: usize = 256;
+const MAX_FINDING_DETAIL_BYTES: usize = 1_024;
+const MIN_MEMBER_BYTES: usize = 90;
+const MIN_FINDING_BYTES: usize = 8;
+const REQUEST_DOMAIN: &[u8] = b"sealr.semantic-request.experimental.v1\0";
+const PLAN_DOMAIN: &[u8] = b"sealr.semantic-plan.experimental.v1\0";
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RequestedEffect {
+    Inspect,
+    Materialize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum RetentionBinding {
+    None,
+    Plan {
+        paths: Vec<String>,
+        max_member_bytes: u64,
+        max_total_bytes: u64,
+    },
+}
+
+impl RetentionBinding {
+    fn from_plan(plan: Option<&RetentionPlan>) -> Self {
+        match plan {
+            None => Self::None,
+            Some(plan) => Self::Plan {
+                paths: plan.paths().map(str::to_owned).collect(),
+                max_member_bytes: plan.max_member_bytes(),
+                max_total_bytes: plan.max_total_bytes(),
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct InvocationBinding {
+    operation_id: [u8; 16],
+    source_len: u64,
+    source_sha256: [u8; 32],
+    profile: ZipInterpretationProfile,
+    profile_sha256: [u8; 32],
+    policy_id: String,
+    policy_sha256: [u8; 32],
+    budget: ResourceBudget,
+    target: TargetModel,
+    consumer: ConsumerProfile,
+    requested_effect: RequestedEffect,
+    target_sha256: Option<[u8; 32]>,
+    member_sync: bool,
+    retention: RetentionBinding,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct TerminalPlanningAxes {
+    interpretation: InterpretationStatus,
+    admission: AdmissionStatus,
+    verification: VerificationStatus,
+    view_completeness: ViewCompleteness,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum PlanningDisposition {
+    ReadyForVerification,
+    Terminal(TerminalPlanningAxes),
+}
+
+#[derive(Clone, Debug)]
+struct PlanningRecord {
+    binding: InvocationBinding,
+    disposition: PlanningDisposition,
+    ir: Option<ArchiveIR>,
+    findings: Vec<Finding>,
+}
+
+#[derive(Clone, Debug)]
+struct ValidatedPlanningRecord {
+    record: PlanningRecord,
+    request_id: [u8; 32],
+    plan_id: [u8; 32],
+}
+
+impl ValidatedPlanningRecord {
+    fn setup_failure_axes(&self, finding: &Finding) -> Result<SemanticAxes, RecordError> {
+        if !matches!(
+            self.record.disposition,
+            PlanningDisposition::ReadyForVerification
+        ) {
+            return Err(RecordError::new(
+                RecordErrorKind::PhaseMismatch,
+                0,
+                "only a ready plan can merge a setup failure",
+            ));
+        }
+        Ok(SemanticAxes::admitted_setup_failed(finding))
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum CompletionDisposition {
+    Complete,
+    Stopped {
+        verified_members: u64,
+        pending_members: u64,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum MemberCompletion {
+    Pending,
+    Verified {
+        actual_uncomp_size: u64,
+        actual_crc: u32,
+        content_sha256: [u8; 32],
+    },
+    Failed {
+        cause: FindingCode,
+    },
+}
+
+#[derive(Clone, Debug)]
+struct CompletionRecord {
+    operation_id: [u8; 16],
+    request_id: [u8; 32],
+    plan_id: [u8; 32],
+    disposition: CompletionDisposition,
+    members: Vec<MemberCompletion>,
+    findings: Vec<Finding>,
+}
+
+#[derive(Clone, Debug)]
+struct ValidatedCompletionRecord {
+    interpretation: InterpretationStatus,
+    admission: AdmissionStatus,
+    verification: VerificationStatus,
+    view_completeness: ViewCompleteness,
+    ir: ArchiveIR,
+    findings: Vec<Finding>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RecordErrorKind {
+    TooLarge,
+    Truncated,
+    TrailingBytes,
+    InvalidMagic,
+    UnsupportedVersion,
+    UnexpectedKind,
+    ReservedNonZero,
+    LimitExceeded,
+    InvalidEnum,
+    InvalidUtf8,
+    InvalidString,
+    BindingMismatch,
+    PhaseMismatch,
+    NonCanonicalOrder,
+    InvalidSemanticState,
+    IntegerOverflow,
+    AllocationFailed,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct RecordError {
+    kind: RecordErrorKind,
+    offset: usize,
+    detail: &'static str,
+}
+
+impl RecordError {
+    const fn new(kind: RecordErrorKind, offset: usize, detail: &'static str) -> Self {
+        Self {
+            kind,
+            offset,
+            detail,
+        }
+    }
+}
+
+impl fmt::Display for RecordError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "semantic record error at byte {}: {}",
+            self.offset, self.detail
+        )
+    }
+}
+
+impl std::error::Error for RecordError {}
+
+struct Encoder {
+    bytes: Vec<u8>,
+}
+
+impl Encoder {
+    fn new(kind: u8) -> Self {
+        let mut bytes = Vec::with_capacity(4096);
+        bytes.extend_from_slice(&MAGIC);
+        bytes.extend_from_slice(&VERSION.to_le_bytes());
+        bytes.push(kind);
+        bytes.push(0);
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        Self { bytes }
+    }
+
+    fn finish(mut self) -> Result<Vec<u8>, RecordError> {
+        if self.bytes.len() > MAX_RECORD_BYTES {
+            return Err(RecordError::new(
+                RecordErrorKind::TooLarge,
+                self.bytes.len(),
+                "record exceeds the hard byte limit",
+            ));
+        }
+        let body_len = self
+            .bytes
+            .len()
+            .checked_sub(HEADER_BYTES)
+            .and_then(|len| u32::try_from(len).ok())
+            .ok_or_else(|| {
+                RecordError::new(
+                    RecordErrorKind::IntegerOverflow,
+                    self.bytes.len(),
+                    "record length cannot be represented",
+                )
+            })?;
+        self.bytes[12..16].copy_from_slice(&body_len.to_le_bytes());
+        Ok(self.bytes)
+    }
+
+    fn u8(&mut self, value: u8) {
+        self.bytes.push(value);
+    }
+
+    fn u16(&mut self, value: u16) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn u32(&mut self, value: u32) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn u64(&mut self, value: u64) {
+        self.bytes.extend_from_slice(&value.to_le_bytes());
+    }
+
+    fn fixed<const N: usize>(&mut self, value: &[u8; N]) {
+        self.bytes.extend_from_slice(value);
+    }
+
+    fn bytes(&mut self, value: &[u8]) -> Result<(), RecordError> {
+        let len = u32::try_from(value.len()).map_err(|_| {
+            RecordError::new(
+                RecordErrorKind::LimitExceeded,
+                self.bytes.len(),
+                "byte string length exceeds the record integer limit",
+            )
+        })?;
+        self.u32(len);
+        self.bytes.extend_from_slice(value);
+        Ok(())
+    }
+
+    fn string(&mut self, value: &str) -> Result<(), RecordError> {
+        self.bytes(value.as_bytes())
+    }
+}
+
+struct Cursor<'a> {
+    input: &'a [u8],
+    pos: usize,
+}
+
+impl<'a> Cursor<'a> {
+    fn frame(input: &'a [u8], expected_kind: u8) -> Result<Self, RecordError> {
+        if input.len() > MAX_RECORD_BYTES {
+            return Err(RecordError::new(
+                RecordErrorKind::TooLarge,
+                input.len(),
+                "record exceeds the hard byte limit",
+            ));
+        }
+        if input.len() < HEADER_BYTES {
+            return Err(RecordError::new(
+                RecordErrorKind::Truncated,
+                input.len(),
+                "record header is truncated",
+            ));
+        }
+        if input[..8] != MAGIC {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidMagic,
+                0,
+                "record magic is invalid",
+            ));
+        }
+        let version = u16::from_le_bytes([input[8], input[9]]);
+        if version != VERSION {
+            return Err(RecordError::new(
+                RecordErrorKind::UnsupportedVersion,
+                8,
+                "record version is unsupported",
+            ));
+        }
+        if input[10] != expected_kind {
+            return Err(RecordError::new(
+                RecordErrorKind::UnexpectedKind,
+                10,
+                "record phase kind is unexpected",
+            ));
+        }
+        if input[11] != 0 {
+            return Err(RecordError::new(
+                RecordErrorKind::ReservedNonZero,
+                11,
+                "record reserved byte is nonzero",
+            ));
+        }
+        let body_len = u32::from_le_bytes([input[12], input[13], input[14], input[15]]) as usize;
+        let total = HEADER_BYTES.checked_add(body_len).ok_or_else(|| {
+            RecordError::new(
+                RecordErrorKind::IntegerOverflow,
+                12,
+                "record length overflows the host size",
+            )
+        })?;
+        if total > input.len() {
+            return Err(RecordError::new(
+                RecordErrorKind::Truncated,
+                input.len(),
+                "record body is truncated",
+            ));
+        }
+        if total < input.len() {
+            return Err(RecordError::new(
+                RecordErrorKind::TrailingBytes,
+                total,
+                "bytes follow the declared record body",
+            ));
+        }
+        Ok(Self {
+            input,
+            pos: HEADER_BYTES,
+        })
+    }
+
+    fn offset(&self) -> usize {
+        self.pos
+    }
+
+    fn remaining(&self) -> usize {
+        self.input.len().saturating_sub(self.pos)
+    }
+
+    fn take(&mut self, len: usize) -> Result<&'a [u8], RecordError> {
+        let end = self.pos.checked_add(len).ok_or_else(|| {
+            RecordError::new(
+                RecordErrorKind::IntegerOverflow,
+                self.pos,
+                "field length overflows the host size",
+            )
+        })?;
+        let value = self.input.get(self.pos..end).ok_or_else(|| {
+            RecordError::new(
+                RecordErrorKind::Truncated,
+                self.input.len(),
+                "record field is truncated",
+            )
+        })?;
+        self.pos = end;
+        Ok(value)
+    }
+
+    fn u8(&mut self) -> Result<u8, RecordError> {
+        Ok(self.take(1)?[0])
+    }
+
+    fn u16(&mut self) -> Result<u16, RecordError> {
+        Ok(u16::from_le_bytes(self.take(2)?.try_into().unwrap()))
+    }
+
+    fn u32(&mut self) -> Result<u32, RecordError> {
+        Ok(u32::from_le_bytes(self.take(4)?.try_into().unwrap()))
+    }
+
+    fn u64(&mut self) -> Result<u64, RecordError> {
+        Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
+    }
+
+    fn fixed<const N: usize>(&mut self) -> Result<[u8; N], RecordError> {
+        Ok(self.take(N)?.try_into().unwrap())
+    }
+
+    fn bytes(&mut self, max: usize, detail: &'static str) -> Result<Vec<u8>, RecordError> {
+        let len = self.u32()? as usize;
+        if len > max {
+            return Err(RecordError::new(
+                RecordErrorKind::LimitExceeded,
+                self.pos.saturating_sub(4),
+                detail,
+            ));
+        }
+        let source = self.take(len)?;
+        let mut value = Vec::new();
+        value.try_reserve_exact(len).map_err(|_| {
+            RecordError::new(
+                RecordErrorKind::AllocationFailed,
+                self.pos.saturating_sub(len),
+                "bounded byte allocation failed",
+            )
+        })?;
+        value.extend_from_slice(source);
+        Ok(value)
+    }
+
+    fn string(&mut self, max: usize, detail: &'static str) -> Result<String, RecordError> {
+        let offset = self.pos;
+        let bytes = self.bytes(max, detail)?;
+        String::from_utf8(bytes).map_err(|_| {
+            RecordError::new(
+                RecordErrorKind::InvalidUtf8,
+                offset,
+                "record string is not valid UTF-8",
+            )
+        })
+    }
+
+    fn count(
+        &mut self,
+        max: usize,
+        min_item_bytes: usize,
+        detail: &'static str,
+    ) -> Result<usize, RecordError> {
+        let offset = self.pos;
+        let count = self.u32()? as usize;
+        if count > max || count > self.remaining() / min_item_bytes.max(1) {
+            return Err(RecordError::new(
+                RecordErrorKind::LimitExceeded,
+                offset,
+                detail,
+            ));
+        }
+        Ok(count)
+    }
+
+    fn finish(self) -> Result<(), RecordError> {
+        if self.pos == self.input.len() {
+            Ok(())
+        } else {
+            Err(RecordError::new(
+                RecordErrorKind::TrailingBytes,
+                self.pos,
+                "record body was not consumed exactly",
+            ))
+        }
+    }
+}
+
+fn plan_id(bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(PLAN_DOMAIN);
+    hasher.update(bytes);
+    hasher.finalize().into()
+}
+
+fn request_id(binding: &InvocationBinding) -> Result<[u8; 32], RecordError> {
+    let mut encoder = Encoder { bytes: Vec::new() };
+    encode_binding(&mut encoder, binding)?;
+    let mut hasher = Sha256::new();
+    hasher.update(REQUEST_DOMAIN);
+    hasher.update(&encoder.bytes);
+    Ok(hasher.finalize().into())
+}
+
+fn encode_binding(encoder: &mut Encoder, binding: &InvocationBinding) -> Result<(), RecordError> {
+    validate_binding(binding)?;
+    encoder.fixed(&binding.operation_id);
+    encoder.u64(binding.source_len);
+    encoder.fixed(&binding.source_sha256);
+    encoder.u8(match binding.profile {
+        ZipInterpretationProfile::StrictAsciiV1 => 1,
+        ZipInterpretationProfile::StrictAsciiV2 => 2,
+    });
+    encoder.fixed(&binding.profile_sha256);
+    encoder.string(&binding.policy_id)?;
+    encoder.fixed(&binding.policy_sha256);
+    encoder.u8(0); // Compiled-controls identity is unavailable until its preimage is specified.
+    encoder.u64(binding.budget.max_archive_bytes);
+    encoder.u64(binding.budget.max_files);
+    encoder.u64(binding.budget.max_member_bytes);
+    encoder.u64(binding.budget.max_total_bytes);
+    match binding.budget.max_ratio {
+        None => {
+            encoder.u8(0);
+            encoder.u64(0);
+        }
+        Some(value) => {
+            encoder.u8(1);
+            encoder.u64(value);
+        }
+    }
+    encoder.u32(binding.budget.max_path_depth);
+    encoder.u64(binding.budget.max_metadata_bytes);
+    encoder.u8(match binding.target {
+        TargetModel::PortableV1 => 1,
+    });
+    encoder.u8(match binding.consumer {
+        ConsumerProfile::GenericArchive => 1,
+    });
+    encoder.u8(match binding.requested_effect {
+        RequestedEffect::Inspect => 0,
+        RequestedEffect::Materialize => 1,
+    });
+    match binding.target_sha256 {
+        None => encoder.u8(0),
+        Some(digest) => {
+            encoder.u8(1);
+            encoder.fixed(&digest);
+        }
+    }
+    encoder.u8(u8::from(binding.member_sync));
+    match &binding.retention {
+        RetentionBinding::None => encoder.u8(0),
+        RetentionBinding::Plan {
+            paths,
+            max_member_bytes,
+            max_total_bytes,
+        } => {
+            encoder.u8(1);
+            encoder.u64(*max_member_bytes);
+            encoder.u64(*max_total_bytes);
+            encoder.u32(u32::try_from(paths.len()).map_err(|_| {
+                RecordError::new(
+                    RecordErrorKind::LimitExceeded,
+                    encoder.bytes.len(),
+                    "retention path count exceeds the record integer limit",
+                )
+            })?);
+            for path in paths {
+                encoder.string(path)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn decode_binding(cursor: &mut Cursor<'_>) -> Result<InvocationBinding, RecordError> {
+    let operation_id = cursor.fixed()?;
+    let source_len = cursor.u64()?;
+    let source_sha256 = cursor.fixed()?;
+    let profile = match cursor.u8()? {
+        1 => ZipInterpretationProfile::StrictAsciiV1,
+        2 => ZipInterpretationProfile::StrictAsciiV2,
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidEnum,
+                cursor.offset().saturating_sub(1),
+                "interpretation profile tag is invalid",
+            ));
+        }
+    };
+    let profile_sha256 = cursor.fixed()?;
+    let policy_id = cursor.string(
+        MAX_POLICY_ID_BYTES,
+        "policy identifier exceeds its byte limit",
+    )?;
+    let policy_sha256 = cursor.fixed()?;
+    if cursor.u8()? != 0 {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidEnum,
+            cursor.offset().saturating_sub(1),
+            "compiled-controls identity must be unavailable",
+        ));
+    }
+    let max_archive_bytes = cursor.u64()?;
+    let max_files = cursor.u64()?;
+    let max_member_bytes = cursor.u64()?;
+    let max_total_bytes = cursor.u64()?;
+    let max_ratio = match cursor.u8()? {
+        0 => {
+            if cursor.u64()? != 0 {
+                return Err(RecordError::new(
+                    RecordErrorKind::ReservedNonZero,
+                    cursor.offset().saturating_sub(8),
+                    "absent ratio has nonzero backing bytes",
+                ));
+            }
+            None
+        }
+        1 => Some(cursor.u64()?),
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidEnum,
+                cursor.offset().saturating_sub(1),
+                "ratio presence tag is invalid",
+            ));
+        }
+    };
+    let max_path_depth = cursor.u32()?;
+    let max_metadata_bytes = cursor.u64()?;
+    let target = match cursor.u8()? {
+        1 => TargetModel::PortableV1,
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidEnum,
+                cursor.offset().saturating_sub(1),
+                "target model tag is invalid",
+            ));
+        }
+    };
+    let consumer = match cursor.u8()? {
+        1 => ConsumerProfile::GenericArchive,
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidEnum,
+                cursor.offset().saturating_sub(1),
+                "consumer profile tag is invalid",
+            ));
+        }
+    };
+    let requested_effect = match cursor.u8()? {
+        0 => RequestedEffect::Inspect,
+        1 => RequestedEffect::Materialize,
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidEnum,
+                cursor.offset().saturating_sub(1),
+                "requested effect tag is invalid",
+            ));
+        }
+    };
+    let target_sha256 = match cursor.u8()? {
+        0 => None,
+        1 => Some(cursor.fixed()?),
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidEnum,
+                cursor.offset().saturating_sub(1),
+                "target identity presence tag is invalid",
+            ));
+        }
+    };
+    let member_sync = decode_bool(cursor.u8()?, cursor.offset().saturating_sub(1))?;
+    let retention = match cursor.u8()? {
+        0 => RetentionBinding::None,
+        1 => {
+            let max_member_bytes = cursor.u64()?;
+            let max_total_bytes = cursor.u64()?;
+            let count = cursor.count(
+                MAX_RETENTION_PATHS,
+                4,
+                "retention path count exceeds its bound or remaining bytes",
+            )?;
+            let mut paths = Vec::new();
+            paths.try_reserve_exact(count).map_err(|_| {
+                RecordError::new(
+                    RecordErrorKind::AllocationFailed,
+                    cursor.offset(),
+                    "bounded retention-path allocation failed",
+                )
+            })?;
+            for _ in 0..count {
+                paths.push(cursor.string(
+                    MAX_RETENTION_PATH_BYTES,
+                    "retention path exceeds its byte limit",
+                )?);
+            }
+            RetentionBinding::Plan {
+                paths,
+                max_member_bytes,
+                max_total_bytes,
+            }
+        }
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidEnum,
+                cursor.offset().saturating_sub(1),
+                "retention presence tag is invalid",
+            ));
+        }
+    };
+    let binding = InvocationBinding {
+        operation_id,
+        source_len,
+        source_sha256,
+        profile,
+        profile_sha256,
+        policy_id,
+        policy_sha256,
+        budget: ResourceBudget {
+            max_archive_bytes,
+            max_files,
+            max_member_bytes,
+            max_total_bytes,
+            max_ratio,
+            max_path_depth,
+            max_metadata_bytes,
+        },
+        target,
+        consumer,
+        requested_effect,
+        target_sha256,
+        member_sync,
+        retention,
+    };
+    validate_binding(&binding)?;
+    Ok(binding)
+}
+
+fn validate_binding(binding: &InvocationBinding) -> Result<(), RecordError> {
+    if binding.operation_id == [0; 16] {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "operation identifier must be nonzero",
+        ));
+    }
+    if binding.source_len > binding.budget.max_archive_bytes {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "source length exceeds the bound resource budget",
+        ));
+    }
+    if binding.policy_id.is_empty() || binding.policy_id.len() > MAX_POLICY_ID_BYTES {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidString,
+            0,
+            "policy identifier is empty or exceeds its byte limit",
+        ));
+    }
+    let expected_profile = parse_hex_32(&binding.profile.digest()).ok_or_else(|| {
+        RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "compiled profile digest is not a SHA-256 value",
+        )
+    })?;
+    if binding.profile_sha256 != expected_profile {
+        return Err(RecordError::new(
+            RecordErrorKind::BindingMismatch,
+            0,
+            "profile digest does not match the selected profile",
+        ));
+    }
+    match (binding.requested_effect, binding.target_sha256) {
+        (RequestedEffect::Inspect, None) | (RequestedEffect::Materialize, Some(_)) => {}
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "target identity does not match the requested effect",
+            ));
+        }
+    }
+    if let RetentionBinding::Plan { paths, .. } = &binding.retention {
+        if paths.len() > MAX_RETENTION_PATHS {
+            return Err(RecordError::new(
+                RecordErrorKind::LimitExceeded,
+                0,
+                "retention path count exceeds its bound",
+            ));
+        }
+        let mut total = 0_usize;
+        let mut previous: Option<&str> = None;
+        for path in paths {
+            if path.len() > MAX_RETENTION_PATH_BYTES {
+                return Err(RecordError::new(
+                    RecordErrorKind::LimitExceeded,
+                    0,
+                    "retention path exceeds its byte limit",
+                ));
+            }
+            total = total.checked_add(path.len()).ok_or_else(|| {
+                RecordError::new(
+                    RecordErrorKind::IntegerOverflow,
+                    0,
+                    "retention path-byte total overflowed",
+                )
+            })?;
+            if total > MAX_RETENTION_TOTAL_PATH_BYTES {
+                return Err(RecordError::new(
+                    RecordErrorKind::LimitExceeded,
+                    0,
+                    "retention path-byte total exceeds its bound",
+                ));
+            }
+            if previous.is_some_and(|prior| prior >= path.as_str()) {
+                return Err(RecordError::new(
+                    RecordErrorKind::NonCanonicalOrder,
+                    0,
+                    "retention paths are not strictly byte-sorted",
+                ));
+            }
+            let jailed = jail_name(path, u32::MAX).map_err(|_| {
+                RecordError::new(
+                    RecordErrorKind::InvalidString,
+                    0,
+                    "retention path is not canonical",
+                )
+            })?;
+            if !jailed.actions.is_empty() || jailed.components.join("/") != *path {
+                return Err(RecordError::new(
+                    RecordErrorKind::InvalidString,
+                    0,
+                    "retention path is not canonical",
+                ));
+            }
+            previous = Some(path);
+        }
+    }
+    Ok(())
+}
+
+fn decode_bool(value: u8, offset: usize) -> Result<bool, RecordError> {
+    match value {
+        0 => Ok(false),
+        1 => Ok(true),
+        _ => Err(RecordError::new(
+            RecordErrorKind::InvalidEnum,
+            offset,
+            "Boolean tag is invalid",
+        )),
+    }
+}
+
+fn parse_hex_32(value: &str) -> Option<[u8; 32]> {
+    if value.len() != 64 {
+        return None;
+    }
+    let mut result = [0_u8; 32];
+    for (index, pair) in value.as_bytes().as_chunks::<2>().0.iter().enumerate() {
+        result[index] = (hex_nibble(pair[0])? << 4) | hex_nibble(pair[1])?;
+    }
+    Some(result)
+}
+
+fn hex_nibble(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        _ => None,
+    }
+}
+
+fn hex_32(value: &[u8; 32]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut result = String::with_capacity(64);
+    for byte in value {
+        result.push(HEX[(byte >> 4) as usize] as char);
+        result.push(HEX[(byte & 0x0f) as usize] as char);
+    }
+    result
+}
+
+fn encode_finding(encoder: &mut Encoder, finding: &Finding) -> Result<(), RecordError> {
+    validate_finding(finding)?;
+    encoder.u16(finding_code_tag(finding.code));
+    encoder.u8(match finding.severity {
+        Severity::Error => 0,
+        Severity::Deny => 1,
+        Severity::Warn => 2,
+        Severity::Info => 3,
+    });
+    match &finding.member {
+        None => encoder.u8(0),
+        Some(member) => {
+            encoder.u8(1);
+            encoder.string(member)?;
+        }
+    }
+    encoder.string(&finding.detail)
+}
+
+fn decode_finding(cursor: &mut Cursor<'_>) -> Result<Finding, RecordError> {
+    let code = finding_code_from_tag(cursor.u16()?, cursor.offset().saturating_sub(2))?;
+    let severity = match cursor.u8()? {
+        0 => Severity::Error,
+        1 => Severity::Deny,
+        2 => Severity::Warn,
+        3 => Severity::Info,
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidEnum,
+                cursor.offset().saturating_sub(1),
+                "finding severity tag is invalid",
+            ));
+        }
+    };
+    let member = match cursor.u8()? {
+        0 => None,
+        1 => Some(cursor.string(
+            MAX_NAME_BYTES,
+            "finding member label exceeds its byte limit",
+        )?),
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidEnum,
+                cursor.offset().saturating_sub(1),
+                "finding member presence tag is invalid",
+            ));
+        }
+    };
+    let detail = cursor.string(
+        MAX_FINDING_DETAIL_BYTES,
+        "finding detail exceeds its byte limit",
+    )?;
+    let finding = Finding {
+        code,
+        severity,
+        member,
+        detail,
+    };
+    validate_finding(&finding)?;
+    Ok(finding)
+}
+
+fn validate_finding(finding: &Finding) -> Result<(), RecordError> {
+    if finding.detail.len() > MAX_FINDING_DETAIL_BYTES {
+        return Err(RecordError::new(
+            RecordErrorKind::LimitExceeded,
+            0,
+            "finding detail exceeds its byte limit",
+        ));
+    }
+    if finding
+        .member
+        .as_ref()
+        .is_some_and(|member| member.len() > MAX_NAME_BYTES)
+    {
+        return Err(RecordError::new(
+            RecordErrorKind::LimitExceeded,
+            0,
+            "finding member label exceeds its byte limit",
+        ));
+    }
+    Ok(())
+}
+
+fn finding_code_tag(code: FindingCode) -> u16 {
+    match code {
+        FindingCode::PathAbsolute => 0,
+        FindingCode::PathDotDot => 1,
+        FindingCode::PathEmpty => 2,
+        FindingCode::PathAds => 3,
+        FindingCode::PathReserved => 4,
+        FindingCode::PathTrailing => 5,
+        FindingCode::PathEscape => 6,
+        FindingCode::PathDepth => 7,
+        FindingCode::PathNul => 8,
+        FindingCode::PathInvalidChar => 9,
+        FindingCode::PathUnicode => 10,
+        FindingCode::PathCaseFold => 11,
+        FindingCode::PathConflict => 12,
+        FindingCode::MaterializeExists => 13,
+        FindingCode::MaterializeIo => 14,
+        FindingCode::MaterializeCommit => 15,
+        FindingCode::MaterializeUnsafeParent => 16,
+        FindingCode::MaterializeUnsafeComponent => 17,
+        FindingCode::MaterializeCleanup => 18,
+        FindingCode::MaterializeUnsupported => 19,
+        FindingCode::MaterializeUnsupportedFilesystem => 20,
+        FindingCode::MaterializeUnsafeStage => 21,
+        FindingCode::MaterializeAudit => 22,
+        FindingCode::SourceIo => 23,
+        FindingCode::QuotaArchive => 24,
+        FindingCode::QuotaMetadata => 25,
+        FindingCode::QuotaFiles => 26,
+        FindingCode::QuotaMember => 27,
+        FindingCode::QuotaTotal => 28,
+        FindingCode::QuotaRatio => 29,
+        FindingCode::QuotaOverflow => 30,
+        FindingCode::QuotaDeclaredLie => 31,
+        FindingCode::PolicyUnsupported => 32,
+        FindingCode::ZipDiffA1Method => 33,
+        FindingCode::ZipDiffA2Size => 34,
+        FindingCode::ZipDiffA3Name => 35,
+        FindingCode::ZipDiffA4Dir => 36,
+        FindingCode::ZipDiffA5Crypt => 37,
+        FindingCode::ZipDiffB1Dup => 38,
+        FindingCode::ZipDiffB2Chars => 39,
+        FindingCode::ZipDiffC1Stream => 40,
+        FindingCode::ZipDiffC2Eocd => 41,
+        FindingCode::ZipDiffC3Count => 42,
+        FindingCode::ZipDiffC4Offset => 43,
+        FindingCode::ZipDiffC5Zip64 => 44,
+        FindingCode::ZipOverlap => 45,
+        FindingCode::CoveringInconsistent => 46,
+        FindingCode::ZipEncrypted => 47,
+        FindingCode::ZipEncoding => 48,
+        FindingCode::ZipExtra => 49,
+        FindingCode::ZipFlags => 50,
+        FindingCode::FormatUnsupported => 51,
+        FindingCode::FormatMagic => 52,
+        FindingCode::CodecDeflateInvalidStream => 53,
+        FindingCode::CodecDeflateTrailingInput => 54,
+        FindingCode::CrcMismatch => 55,
+        FindingCode::MethodUnsupported => 56,
+    }
+}
+
+fn finding_code_from_tag(tag: u16, offset: usize) -> Result<FindingCode, RecordError> {
+    let code = match tag {
+        0 => FindingCode::PathAbsolute,
+        1 => FindingCode::PathDotDot,
+        2 => FindingCode::PathEmpty,
+        3 => FindingCode::PathAds,
+        4 => FindingCode::PathReserved,
+        5 => FindingCode::PathTrailing,
+        6 => FindingCode::PathEscape,
+        7 => FindingCode::PathDepth,
+        8 => FindingCode::PathNul,
+        9 => FindingCode::PathInvalidChar,
+        10 => FindingCode::PathUnicode,
+        11 => FindingCode::PathCaseFold,
+        12 => FindingCode::PathConflict,
+        13 => FindingCode::MaterializeExists,
+        14 => FindingCode::MaterializeIo,
+        15 => FindingCode::MaterializeCommit,
+        16 => FindingCode::MaterializeUnsafeParent,
+        17 => FindingCode::MaterializeUnsafeComponent,
+        18 => FindingCode::MaterializeCleanup,
+        19 => FindingCode::MaterializeUnsupported,
+        20 => FindingCode::MaterializeUnsupportedFilesystem,
+        21 => FindingCode::MaterializeUnsafeStage,
+        22 => FindingCode::MaterializeAudit,
+        23 => FindingCode::SourceIo,
+        24 => FindingCode::QuotaArchive,
+        25 => FindingCode::QuotaMetadata,
+        26 => FindingCode::QuotaFiles,
+        27 => FindingCode::QuotaMember,
+        28 => FindingCode::QuotaTotal,
+        29 => FindingCode::QuotaRatio,
+        30 => FindingCode::QuotaOverflow,
+        31 => FindingCode::QuotaDeclaredLie,
+        32 => FindingCode::PolicyUnsupported,
+        33 => FindingCode::ZipDiffA1Method,
+        34 => FindingCode::ZipDiffA2Size,
+        35 => FindingCode::ZipDiffA3Name,
+        36 => FindingCode::ZipDiffA4Dir,
+        37 => FindingCode::ZipDiffA5Crypt,
+        38 => FindingCode::ZipDiffB1Dup,
+        39 => FindingCode::ZipDiffB2Chars,
+        40 => FindingCode::ZipDiffC1Stream,
+        41 => FindingCode::ZipDiffC2Eocd,
+        42 => FindingCode::ZipDiffC3Count,
+        43 => FindingCode::ZipDiffC4Offset,
+        44 => FindingCode::ZipDiffC5Zip64,
+        45 => FindingCode::ZipOverlap,
+        46 => FindingCode::CoveringInconsistent,
+        47 => FindingCode::ZipEncrypted,
+        48 => FindingCode::ZipEncoding,
+        49 => FindingCode::ZipExtra,
+        50 => FindingCode::ZipFlags,
+        51 => FindingCode::FormatUnsupported,
+        52 => FindingCode::FormatMagic,
+        53 => FindingCode::CodecDeflateInvalidStream,
+        54 => FindingCode::CodecDeflateTrailingInput,
+        55 => FindingCode::CrcMismatch,
+        56 => FindingCode::MethodUnsupported,
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidEnum,
+                offset,
+                "finding code tag is invalid",
+            ));
+        }
+    };
+    Ok(code)
+}
+
+fn encode_range(encoder: &mut Encoder, range: ByteRange) {
+    encoder.u64(range.offset);
+    encoder.u64(range.len);
+}
+
+fn decode_range(cursor: &mut Cursor<'_>) -> Result<ByteRange, RecordError> {
+    Ok(ByteRange {
+        offset: cursor.u64()?,
+        len: cursor.u64()?,
+    })
+}
+
+fn encode_ir(encoder: &mut Encoder, ir: &ArchiveIR) -> Result<(), RecordError> {
+    encode_range(encoder, ir.covering.local_records);
+    encode_range(encoder, ir.covering.central_directory);
+    encode_range(encoder, ir.covering.eocd);
+    encode_range(encoder, ir.covering.comment);
+    encoder.u32(u32::try_from(ir.members.len()).map_err(|_| {
+        RecordError::new(
+            RecordErrorKind::LimitExceeded,
+            encoder.bytes.len(),
+            "IR member count exceeds the record integer limit",
+        )
+    })?);
+    for member in &ir.members {
+        encoder.bytes(&member.raw_name_bytes)?;
+        encoder.string(&member.decoded_name)?;
+        encoder.string(&member.canonical_path)?;
+        encoder.u8(match member.kind {
+            MemberKind::File => 0,
+            MemberKind::Directory => 1,
+        });
+        encoder.u16(member.method);
+        encoder.u16(member.flags);
+        encoder.u32(member.declared_crc);
+        encoder.u64(member.declared_comp_size);
+        encoder.u64(member.declared_uncomp_size);
+        encode_range(encoder, member.source_ranges.local_header);
+        encode_range(encoder, member.source_ranges.compressed_payload);
+        match member.source_ranges.data_descriptor {
+            None => encoder.u8(0),
+            Some(range) => {
+                encoder.u8(1);
+                encode_range(encoder, range);
+            }
+        }
+        encode_range(encoder, member.source_ranges.central_header);
+        encoder.u32(u32::try_from(member.extra_fields.len()).map_err(|_| {
+            RecordError::new(
+                RecordErrorKind::LimitExceeded,
+                encoder.bytes.len(),
+                "extra-field count exceeds the record integer limit",
+            )
+        })?);
+        for extra in &member.extra_fields {
+            encoder.u8(match extra.site {
+                ExtraSite::Central => 0,
+                ExtraSite::Local => 1,
+            });
+            encoder.u16(extra.id);
+            encode_range(encoder, extra.header_range);
+            encode_range(encoder, extra.data_range);
+            encoder.u8(match extra.disposition {
+                ExtraDisposition::Semantic => 0,
+                ExtraDisposition::Ignored => 1,
+                ExtraDisposition::Denied => 2,
+            });
+        }
+        encoder.u32(
+            u32::try_from(member.normalization_actions.len()).map_err(|_| {
+                RecordError::new(
+                    RecordErrorKind::LimitExceeded,
+                    encoder.bytes.len(),
+                    "normalization count exceeds the record integer limit",
+                )
+            })?,
+        );
+        for action in &member.normalization_actions {
+            match action {
+                NormalizationAction::StripDirectoryTrailingSlash => encoder.u8(0),
+                NormalizationAction::DropDotComponent { component_index } => {
+                    encoder.u8(1);
+                    encoder.u32(*component_index);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn decode_ir(
+    cursor: &mut Cursor<'_>,
+    binding: &InvocationBinding,
+) -> Result<ArchiveIR, RecordError> {
+    let covering = ArchiveCovering {
+        local_records: decode_range(cursor)?,
+        central_directory: decode_range(cursor)?,
+        eocd: decode_range(cursor)?,
+        comment: decode_range(cursor)?,
+    };
+    let max_members = usize::try_from(binding.budget.max_files)
+        .unwrap_or(usize::MAX)
+        .min(MAX_MEMBERS);
+    let count = cursor.count(
+        max_members,
+        MIN_MEMBER_BYTES,
+        "IR member count exceeds its bound or remaining bytes",
+    )?;
+    let mut members = Vec::new();
+    members.try_reserve_exact(count).map_err(|_| {
+        RecordError::new(
+            RecordErrorKind::AllocationFailed,
+            cursor.offset(),
+            "bounded IR member allocation failed",
+        )
+    })?;
+    for _ in 0..count {
+        let raw_name_bytes = cursor.bytes(
+            MAX_NAME_BYTES,
+            "raw member name exceeds the ZIP16 byte limit",
+        )?;
+        let decoded_name = cursor.string(
+            MAX_NAME_BYTES,
+            "decoded member name exceeds the ZIP16 byte limit",
+        )?;
+        let canonical_path = cursor.string(
+            MAX_NAME_BYTES,
+            "canonical member path exceeds the ZIP16 byte limit",
+        )?;
+        let kind = match cursor.u8()? {
+            0 => MemberKind::File,
+            1 => MemberKind::Directory,
+            _ => {
+                return Err(RecordError::new(
+                    RecordErrorKind::InvalidEnum,
+                    cursor.offset().saturating_sub(1),
+                    "member kind tag is invalid",
+                ));
+            }
+        };
+        let method = cursor.u16()?;
+        let flags = cursor.u16()?;
+        let declared_crc = cursor.u32()?;
+        let declared_comp_size = cursor.u64()?;
+        let declared_uncomp_size = cursor.u64()?;
+        let local_header = decode_range(cursor)?;
+        let compressed_payload = decode_range(cursor)?;
+        let data_descriptor = match cursor.u8()? {
+            0 => None,
+            1 => Some(decode_range(cursor)?),
+            _ => {
+                return Err(RecordError::new(
+                    RecordErrorKind::InvalidEnum,
+                    cursor.offset().saturating_sub(1),
+                    "data-descriptor presence tag is invalid",
+                ));
+            }
+        };
+        let central_header = decode_range(cursor)?;
+        let extra_count = cursor.count(
+            MAX_EXTRA_FIELDS_PER_MEMBER,
+            36,
+            "extra-field count exceeds its bound or remaining bytes",
+        )?;
+        let mut extra_fields = Vec::new();
+        extra_fields.try_reserve_exact(extra_count).map_err(|_| {
+            RecordError::new(
+                RecordErrorKind::AllocationFailed,
+                cursor.offset(),
+                "bounded extra-field allocation failed",
+            )
+        })?;
+        for _ in 0..extra_count {
+            let site = match cursor.u8()? {
+                0 => ExtraSite::Central,
+                1 => ExtraSite::Local,
+                _ => {
+                    return Err(RecordError::new(
+                        RecordErrorKind::InvalidEnum,
+                        cursor.offset().saturating_sub(1),
+                        "extra-field site tag is invalid",
+                    ));
+                }
+            };
+            let id = cursor.u16()?;
+            let header_range = decode_range(cursor)?;
+            let data_range = decode_range(cursor)?;
+            let disposition = match cursor.u8()? {
+                0 => ExtraDisposition::Semantic,
+                1 => ExtraDisposition::Ignored,
+                2 => ExtraDisposition::Denied,
+                _ => {
+                    return Err(RecordError::new(
+                        RecordErrorKind::InvalidEnum,
+                        cursor.offset().saturating_sub(1),
+                        "extra-field disposition tag is invalid",
+                    ));
+                }
+            };
+            extra_fields.push(ExtraFieldRecord {
+                site,
+                id,
+                header_range,
+                data_range,
+                disposition,
+            });
+        }
+        let normalization_count = cursor.count(
+            MAX_NORMALIZATIONS_PER_MEMBER,
+            1,
+            "normalization count exceeds its bound or remaining bytes",
+        )?;
+        let mut normalization_actions = Vec::new();
+        normalization_actions
+            .try_reserve_exact(normalization_count)
+            .map_err(|_| {
+                RecordError::new(
+                    RecordErrorKind::AllocationFailed,
+                    cursor.offset(),
+                    "bounded normalization allocation failed",
+                )
+            })?;
+        for _ in 0..normalization_count {
+            normalization_actions.push(match cursor.u8()? {
+                0 => NormalizationAction::StripDirectoryTrailingSlash,
+                1 => NormalizationAction::DropDotComponent {
+                    component_index: cursor.u32()?,
+                },
+                _ => {
+                    return Err(RecordError::new(
+                        RecordErrorKind::InvalidEnum,
+                        cursor.offset().saturating_sub(1),
+                        "normalization action tag is invalid",
+                    ));
+                }
+            });
+        }
+        let components = split_components(&canonical_path, cursor.offset())?;
+        members.push(IrMember {
+            raw_name_bytes,
+            decoded_name,
+            canonical_path,
+            components,
+            kind,
+            method,
+            flags,
+            declared_crc,
+            declared_comp_size,
+            declared_uncomp_size,
+            source_ranges: MemberSourceRanges {
+                local_header,
+                compressed_payload,
+                data_descriptor,
+                central_header,
+            },
+            extra_fields,
+            actual_uncomp_size: None,
+            actual_crc: None,
+            content_sha256: None,
+            verification: MemberVerification::Pending,
+            normalization_actions,
+        });
+    }
+    Ok(ArchiveIR::with_covering(
+        binding.profile,
+        SourceDigest::available(hex_32(&binding.source_sha256)),
+        covering,
+        members,
+    ))
+}
+
+fn split_components(path: &str, offset: usize) -> Result<Vec<String>, RecordError> {
+    let count = path.split('/').count();
+    if count > MAX_COMPONENTS {
+        return Err(RecordError::new(
+            RecordErrorKind::LimitExceeded,
+            offset,
+            "canonical path component count exceeds its bound",
+        ));
+    }
+    let mut components = Vec::new();
+    components.try_reserve_exact(count).map_err(|_| {
+        RecordError::new(
+            RecordErrorKind::AllocationFailed,
+            offset,
+            "bounded path-component allocation failed",
+        )
+    })?;
+    for part in path.split('/') {
+        let mut component = String::new();
+        component.try_reserve_exact(part.len()).map_err(|_| {
+            RecordError::new(
+                RecordErrorKind::AllocationFailed,
+                offset,
+                "bounded path-component string allocation failed",
+            )
+        })?;
+        component.push_str(part);
+        components.push(component);
+    }
+    Ok(components)
+}
+
+fn validate_pending_ir(ir: &ArchiveIR, binding: &InvocationBinding) -> Result<(), RecordError> {
+    if ir.schema() != crate::ir::ARCHIVE_IR_SCHEMA
+        || ir.profile() != binding.profile.id()
+        || ir.profile_digest() != binding.profile.digest()
+        || ir.source_digest().sha256() != Some(hex_32(&binding.source_sha256).as_str())
+    {
+        return Err(RecordError::new(
+            RecordErrorKind::BindingMismatch,
+            0,
+            "IR identity does not match the invocation binding",
+        ));
+    }
+    if ir.members.len() > MAX_MEMBERS || ir.members.len() as u64 > binding.budget.max_files {
+        return Err(RecordError::new(
+            RecordErrorKind::LimitExceeded,
+            0,
+            "IR member count exceeds its bound",
+        ));
+    }
+    if !covering_is_exact(ir.covering(), binding.source_len)? {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "planning IR covering is not an exact structural partition",
+        ));
+    }
+    if planning_metadata_bytes(ir)? > binding.budget.max_metadata_bytes {
+        return Err(RecordError::new(
+            RecordErrorKind::LimitExceeded,
+            0,
+            "IR metadata exceeds the invocation budget",
+        ));
+    }
+
+    let mut destination_seen: BTreeMap<String, bool> = BTreeMap::new();
+    let mut folded_seen: BTreeMap<String, bool> = BTreeMap::new();
+    let mut declared_total = 0_u64;
+    let mut local_intervals = Vec::new();
+    local_intervals
+        .try_reserve_exact(ir.members.len())
+        .map_err(|_| {
+            RecordError::new(
+                RecordErrorKind::AllocationFailed,
+                0,
+                "bounded local-range allocation failed",
+            )
+        })?;
+    let mut expected_central = ir.covering.central_directory.offset;
+
+    for member in &ir.members {
+        validate_pending_member(member, binding)?;
+        let is_dir = matches!(member.kind, MemberKind::Directory);
+        if destination_seen.contains_key(&member.canonical_path) {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "IR contains a duplicate canonical path",
+            ));
+        }
+        let folded = member.canonical_path.to_ascii_lowercase();
+        if folded_seen.contains_key(&folded) {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "IR contains a case-fold collision",
+            ));
+        }
+        if path_conflict(&destination_seen, &member.canonical_path, is_dir).is_some()
+            || path_conflict(&folded_seen, &folded, is_dir).is_some()
+        {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "IR contains a file-directory topology conflict",
+            ));
+        }
+        destination_seen.insert(member.canonical_path.clone(), is_dir);
+        folded_seen.insert(folded, is_dir);
+
+        if member.declared_uncomp_size > binding.budget.max_member_bytes {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "IR member exceeds the bound declared-size budget",
+            ));
+        }
+        if binding.budget.max_ratio.is_some_and(|ratio| {
+            ratio_exceeds(
+                member.declared_uncomp_size,
+                member.declared_comp_size,
+                ratio,
+            )
+        }) {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "IR member exceeds the bound declared-ratio budget",
+            ));
+        }
+        declared_total = declared_total
+            .checked_add(member.declared_uncomp_size)
+            .ok_or_else(|| {
+                RecordError::new(
+                    RecordErrorKind::IntegerOverflow,
+                    0,
+                    "IR declared-size aggregate overflowed",
+                )
+            })?;
+        if declared_total > binding.budget.max_total_bytes {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "IR exceeds the bound aggregate declared-size budget",
+            ));
+        }
+
+        let local_end = member_record_end(&member.source_ranges)?;
+        local_intervals.push((member.source_ranges.local_header.offset, local_end));
+        if member.source_ranges.central_header.offset != expected_central {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "central headers do not preserve exact source order",
+            ));
+        }
+        expected_central = checked_end(member.source_ranges.central_header)?;
+    }
+
+    if expected_central != checked_end(ir.covering.central_directory)? {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "central headers do not exactly cover the central directory",
+        ));
+    }
+    local_intervals.sort_unstable();
+    let mut expected_local = ir.covering.local_records.offset;
+    for (start, end) in local_intervals {
+        if start != expected_local || end < start {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "local records do not form an exact non-overlapping partition",
+            ));
+        }
+        expected_local = end;
+    }
+    if expected_local != checked_end(ir.covering.local_records)? {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "local records do not exactly cover the local-record region",
+        ));
+    }
+    Ok(())
+}
+
+fn planning_metadata_bytes(ir: &ArchiveIR) -> Result<u64, RecordError> {
+    let mut metadata_bytes = ir
+        .covering
+        .comment
+        .len
+        .checked_add(ir.covering.central_directory.len)
+        .ok_or_else(|| {
+            RecordError::new(
+                RecordErrorKind::IntegerOverflow,
+                0,
+                "planning metadata aggregate overflowed u64",
+            )
+        })?;
+    for member in &ir.members {
+        // The parser charges the complete variable-width local-header region:
+        // the encoded name plus every local extra-field byte. Derive that value
+        // from source geometry so a hostile record cannot understate the budget
+        // by omitting semantic ExtraFieldRecord entries.
+        let local_metadata_bytes = member
+            .source_ranges
+            .local_header
+            .len
+            .checked_sub(30)
+            .ok_or_else(|| {
+                RecordError::new(
+                    RecordErrorKind::InvalidSemanticState,
+                    0,
+                    "member local header is shorter than its ZIP32 fixed header",
+                )
+            })?;
+        metadata_bytes = metadata_bytes
+            .checked_add(local_metadata_bytes)
+            .ok_or_else(|| {
+                RecordError::new(
+                    RecordErrorKind::IntegerOverflow,
+                    0,
+                    "planning metadata aggregate overflowed u64",
+                )
+            })?;
+    }
+    Ok(metadata_bytes)
+}
+
+fn validate_pending_member(
+    member: &IrMember,
+    binding: &InvocationBinding,
+) -> Result<(), RecordError> {
+    if !matches!(member.verification, MemberVerification::Pending)
+        || member.actual_uncomp_size.is_some()
+        || member.actual_crc.is_some()
+        || member.content_sha256.is_some()
+    {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "planning IR contains measured or non-pending member state",
+        ));
+    }
+    if member.raw_name_bytes.len() > MAX_NAME_BYTES
+        || member.decoded_name.len() > MAX_NAME_BYTES
+        || member.canonical_path.len() > MAX_NAME_BYTES
+        || member.raw_name_bytes != member.decoded_name.as_bytes()
+    {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidString,
+            0,
+            "member raw and decoded names are not the same bounded UTF-8 bytes",
+        ));
+    }
+    let is_dir = matches!(member.kind, MemberKind::Directory);
+    let jailed_input = if is_dir {
+        member.decoded_name.strip_suffix('/').ok_or_else(|| {
+            RecordError::new(
+                RecordErrorKind::InvalidString,
+                0,
+                "directory member name lacks its trailing slash",
+            )
+        })?
+    } else {
+        if member.decoded_name.ends_with('/') {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidString,
+                0,
+                "file member name has a directory trailing slash",
+            ));
+        }
+        member.decoded_name.as_str()
+    };
+    let jailed = jail_name(jailed_input, binding.budget.max_path_depth).map_err(|_| {
+        RecordError::new(
+            RecordErrorKind::InvalidString,
+            0,
+            "member name does not satisfy the bound path grammar",
+        )
+    })?;
+    if jailed.components.len() > MAX_COMPONENTS
+        || jailed.components != member.components
+        || jailed.components.join("/") != member.canonical_path
+    {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidString,
+            0,
+            "member components do not match canonical path derivation",
+        ));
+    }
+    let mut expected_actions = Vec::new();
+    if is_dir {
+        expected_actions.push(NormalizationAction::StripDirectoryTrailingSlash);
+    }
+    expected_actions.extend(jailed.actions);
+    if expected_actions != member.normalization_actions
+        || expected_actions.len() > MAX_NORMALIZATIONS_PER_MEMBER
+    {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "member normalization actions do not match path derivation",
+        ));
+    }
+    if member.method != 0 && member.method != 8 {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "admitted IR uses an unsupported compression method",
+        ));
+    }
+    if (member.flags & ((1 << 0) | (1 << 6) | (1 << 13))) != 0 {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "admitted IR carries encryption-related flags",
+        ));
+    }
+    if binding.profile == ZipInterpretationProfile::StrictAsciiV2 && (member.flags & !0x0008) != 0 {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "strict v2 IR carries a denied flag bit",
+        ));
+    }
+    if is_dir
+        && (member.method != 0
+            || member.declared_comp_size != 0
+            || member.declared_uncomp_size != 0
+            || member.declared_crc != 0)
+    {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "directory member has nonempty content metadata",
+        ));
+    }
+    validate_member_ranges(member, binding.source_len)?;
+    validate_extra_fields(member, binding.profile)?;
+    Ok(())
+}
+
+fn validate_member_ranges(member: &IrMember, source_len: u64) -> Result<(), RecordError> {
+    let ranges = &member.source_ranges;
+    for range in [
+        ranges.local_header,
+        ranges.compressed_payload,
+        ranges.central_header,
+    ] {
+        if checked_end(range)? > source_len {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "member range exceeds the source length",
+            ));
+        }
+    }
+    let minimum_local_header_len = 30_u64
+        .checked_add(u64::try_from(member.raw_name_bytes.len()).map_err(|_| {
+            RecordError::new(
+                RecordErrorKind::IntegerOverflow,
+                0,
+                "raw member-name length cannot be represented as u64",
+            )
+        })?)
+        .ok_or_else(|| {
+            RecordError::new(
+                RecordErrorKind::IntegerOverflow,
+                0,
+                "local-header minimum length overflowed",
+            )
+        })?;
+    if ranges.local_header.len < minimum_local_header_len || ranges.central_header.len < 46 {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "member header range is shorter than its fixed fields and encoded name",
+        ));
+    }
+    if checked_end(ranges.local_header)? != ranges.compressed_payload.offset
+        || ranges.compressed_payload.len != member.declared_comp_size
+    {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "member payload does not exactly follow its local header",
+        ));
+    }
+    let payload_end = checked_end(ranges.compressed_payload)?;
+    match ranges.data_descriptor {
+        None if (member.flags & 0x0008) == 0 => {}
+        Some(descriptor)
+            if (member.flags & 0x0008) != 0
+                && descriptor.offset == payload_end
+                && matches!(descriptor.len, 12 | 16)
+                && checked_end(descriptor)? <= source_len => {}
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "data-descriptor range is incoherent with the member flags",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn validate_extra_fields(
+    member: &IrMember,
+    profile: ZipInterpretationProfile,
+) -> Result<(), RecordError> {
+    if member.extra_fields.len() > MAX_EXTRA_FIELDS_PER_MEMBER {
+        return Err(RecordError::new(
+            RecordErrorKind::LimitExceeded,
+            0,
+            "member extra-field count exceeds its bound",
+        ));
+    }
+    if profile == ZipInterpretationProfile::StrictAsciiV2 && !member.extra_fields.is_empty() {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "strict v2 IR contains a denied extra field",
+        ));
+    }
+    let mut central_ids = BTreeMap::new();
+    let mut local_ids = BTreeMap::new();
+    let mut site = ExtraSite::Central;
+    let mut previous_end = None;
+    let mut last_local_end = None;
+    let mut central_extra_bytes = 0_u64;
+    let mut local_extra_bytes = 0_u64;
+    for extra in &member.extra_fields {
+        if site == ExtraSite::Local && extra.site == ExtraSite::Central {
+            return Err(RecordError::new(
+                RecordErrorKind::NonCanonicalOrder,
+                0,
+                "central extra field follows a local extra field",
+            ));
+        }
+        if extra.site == ExtraSite::Local && site == ExtraSite::Central {
+            site = ExtraSite::Local;
+            previous_end = None;
+        }
+        let ids = match extra.site {
+            ExtraSite::Central => &mut central_ids,
+            ExtraSite::Local => &mut local_ids,
+        };
+        if ids.insert(extra.id, ()).is_some() {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "member repeats an extra-field ID within one header",
+            ));
+        }
+        if extra.header_range.len != 4
+            || extra.data_range.len > u64::from(u16::MAX)
+            || checked_end(extra.header_range)? != extra.data_range.offset
+        {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "extra-field header and data ranges are incoherent",
+            ));
+        }
+        if previous_end.is_some_and(|end| end != extra.header_range.offset) {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "extra fields do not form an exact on-wire sequence",
+            ));
+        }
+        let owner = match extra.site {
+            ExtraSite::Central => member.source_ranges.central_header,
+            ExtraSite::Local => member.source_ranges.local_header,
+        };
+        let fixed_header_bytes = match extra.site {
+            ExtraSite::Central => 46_u64,
+            ExtraSite::Local => 30_u64,
+        };
+        let expected_first = owner
+            .offset
+            .checked_add(fixed_header_bytes)
+            .and_then(|offset| offset.checked_add(member.raw_name_bytes.len() as u64))
+            .ok_or_else(|| {
+                RecordError::new(
+                    RecordErrorKind::IntegerOverflow,
+                    0,
+                    "extra-field start calculation overflowed",
+                )
+            })?;
+        if previous_end.is_none() && extra.header_range.offset != expected_first {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "first extra field does not follow the encoded member name",
+            ));
+        }
+        if extra.header_range.offset < owner.offset
+            || checked_end(extra.data_range)? > checked_end(owner)?
+        {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "extra field escapes its owning ZIP header",
+            ));
+        }
+        let encoded_len = 4_u64.checked_add(extra.data_range.len).ok_or_else(|| {
+            RecordError::new(
+                RecordErrorKind::IntegerOverflow,
+                0,
+                "extra-field aggregate overflowed",
+            )
+        })?;
+        let aggregate = match extra.site {
+            ExtraSite::Central => &mut central_extra_bytes,
+            ExtraSite::Local => &mut local_extra_bytes,
+        };
+        *aggregate = aggregate.checked_add(encoded_len).ok_or_else(|| {
+            RecordError::new(
+                RecordErrorKind::IntegerOverflow,
+                0,
+                "extra-field aggregate overflowed",
+            )
+        })?;
+        if *aggregate > u64::from(u16::MAX) {
+            return Err(RecordError::new(
+                RecordErrorKind::LimitExceeded,
+                0,
+                "extra-field aggregate exceeds the ZIP16 length limit",
+            ));
+        }
+        if profile == ZipInterpretationProfile::StrictAsciiV1
+            && (!matches!(extra.disposition, ExtraDisposition::Ignored)
+                || matches!(extra.id, 0x0001 | 0x7075))
+        {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "v1 admitted IR carries an invalid extra-field disposition",
+            ));
+        }
+        previous_end = Some(checked_end(extra.data_range)?);
+        if extra.site == ExtraSite::Local {
+            last_local_end = previous_end;
+        }
+    }
+    let local_extra_start = member
+        .source_ranges
+        .local_header
+        .offset
+        .checked_add(30)
+        .and_then(|offset| offset.checked_add(member.raw_name_bytes.len() as u64))
+        .ok_or_else(|| {
+            RecordError::new(
+                RecordErrorKind::IntegerOverflow,
+                0,
+                "local extra-field start calculation overflowed",
+            )
+        })?;
+    if last_local_end.unwrap_or(local_extra_start)
+        != checked_end(member.source_ranges.local_header)?
+    {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "local extra fields do not exactly cover the encoded local extra region",
+        ));
+    }
+    Ok(())
+}
+
+fn covering_is_exact(covering: &ArchiveCovering, source_len: u64) -> Result<bool, RecordError> {
+    for range in [
+        covering.local_records,
+        covering.central_directory,
+        covering.eocd,
+        covering.comment,
+    ] {
+        if checked_end(range)? > source_len {
+            return Ok(false);
+        }
+    }
+    Ok(covering.local_records.offset == 0
+        && checked_end(covering.local_records)? == covering.central_directory.offset
+        && checked_end(covering.central_directory)? == covering.eocd.offset
+        && covering.eocd.len == 22
+        && checked_end(covering.eocd)? == covering.comment.offset
+        && checked_end(covering.comment)? == source_len)
+}
+
+fn checked_end(range: ByteRange) -> Result<u64, RecordError> {
+    range.offset.checked_add(range.len).ok_or_else(|| {
+        RecordError::new(
+            RecordErrorKind::IntegerOverflow,
+            0,
+            "hostile range end overflowed u64",
+        )
+    })
+}
+
+fn member_record_end(ranges: &MemberSourceRanges) -> Result<u64, RecordError> {
+    match ranges.data_descriptor {
+        Some(range) => checked_end(range),
+        None => checked_end(ranges.compressed_payload),
+    }
+}
+
+fn path_conflict(seen: &BTreeMap<String, bool>, path: &str, is_dir: bool) -> Option<String> {
+    for (index, _) in path.match_indices('/') {
+        let ancestor = &path[..index];
+        if matches!(seen.get(ancestor), Some(false)) {
+            return Some(ancestor.to_owned());
+        }
+    }
+    if !is_dir {
+        let prefix = format!("{path}/");
+        if let Some((candidate, _)) = seen.range(prefix.clone()..).next() {
+            if candidate.starts_with(&prefix) {
+                return Some(candidate.clone());
+            }
+        }
+    }
+    None
+}
+
+fn encode_planning(record: &PlanningRecord) -> Result<Vec<u8>, RecordError> {
+    validate_planning(record)?;
+    let mut encoder = Encoder::new(KIND_PLANNING);
+    encode_binding(&mut encoder, &record.binding)?;
+    encode_findings(&mut encoder, &record.findings)?;
+    match &record.disposition {
+        PlanningDisposition::ReadyForVerification => encoder.u8(0),
+        PlanningDisposition::Terminal(axes) => {
+            encoder.u8(1);
+            encode_interpretation(&mut encoder, &axes.interpretation);
+            encode_admission(&mut encoder, &axes.admission);
+            encoder.u8(0); // Planning terminal verification is always StructureOnly.
+            let (phase, _) = partial_parts(&axes.view_completeness)?;
+            encode_stopping_phase(&mut encoder, phase);
+            encoder.u32(
+                u32::try_from(first_error_index(&record.findings)?).map_err(|_| {
+                    RecordError::new(
+                        RecordErrorKind::IntegerOverflow,
+                        encoder.bytes.len(),
+                        "planning cause index cannot be represented",
+                    )
+                })?,
+            );
+        }
+    }
+    match &record.ir {
+        None => encoder.u8(0),
+        Some(ir) => {
+            encoder.u8(1);
+            encode_ir(&mut encoder, ir)?;
+        }
+    }
+    encoder.finish()
+}
+
+fn decode_planning(
+    input: &[u8],
+    expected: &InvocationBinding,
+    snapshot: &SourceSnapshot<'_>,
+) -> Result<ValidatedPlanningRecord, RecordError> {
+    validate_binding(expected)?;
+    validate_snapshot_binding(snapshot, expected)?;
+    let mut cursor = Cursor::frame(input, KIND_PLANNING)?;
+    let binding = decode_binding(&mut cursor)?;
+    if &binding != expected {
+        return Err(RecordError::new(
+            RecordErrorKind::BindingMismatch,
+            HEADER_BYTES,
+            "planning record does not match the expected invocation",
+        ));
+    }
+    let findings = decode_findings(&mut cursor)?;
+    let disposition = match cursor.u8()? {
+        0 => PlanningDisposition::ReadyForVerification,
+        1 => {
+            let interpretation = decode_interpretation(&mut cursor)?;
+            let admission = decode_admission(&mut cursor)?;
+            if cursor.u8()? != 0 {
+                return Err(RecordError::new(
+                    RecordErrorKind::InvalidEnum,
+                    cursor.offset().saturating_sub(1),
+                    "planning terminal verification tag is invalid",
+                ));
+            }
+            let phase = decode_stopping_phase(&mut cursor)?;
+            let cause_index = cursor.u32()? as usize;
+            let first_error = first_error_index(&findings)?;
+            if cause_index != first_error {
+                return Err(RecordError::new(
+                    RecordErrorKind::InvalidSemanticState,
+                    cursor.offset().saturating_sub(4),
+                    "planning cause does not name the first error finding",
+                ));
+            }
+            PlanningDisposition::Terminal(TerminalPlanningAxes {
+                interpretation,
+                admission,
+                verification: VerificationStatus::StructureOnly,
+                view_completeness: ViewCompleteness::Partial {
+                    phase,
+                    cause: findings[cause_index].code.as_str().to_owned(),
+                },
+            })
+        }
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidEnum,
+                cursor.offset().saturating_sub(1),
+                "planning disposition tag is invalid",
+            ));
+        }
+    };
+    let ir = match cursor.u8()? {
+        0 => None,
+        1 => Some(decode_ir(&mut cursor, &binding)?),
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidEnum,
+                cursor.offset().saturating_sub(1),
+                "planning IR presence tag is invalid",
+            ));
+        }
+    };
+    cursor.finish()?;
+    let record = PlanningRecord {
+        binding,
+        disposition,
+        ir,
+        findings,
+    };
+    validate_planning(&record)?;
+    validate_planning_against_snapshot(&record, snapshot)?;
+    let canonical = encode_planning(&record)?;
+    if canonical != input {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "decoded planning record did not re-encode identically",
+        ));
+    }
+    Ok(ValidatedPlanningRecord {
+        request_id: request_id(&record.binding)?,
+        plan_id: plan_id(input),
+        record,
+    })
+}
+
+fn validate_snapshot_binding(
+    snapshot: &SourceSnapshot<'_>,
+    binding: &InvocationBinding,
+) -> Result<(), RecordError> {
+    if snapshot.len() != binding.source_len
+        || snapshot.digest().sha256() != Some(hex_32(&binding.source_sha256).as_str())
+    {
+        return Err(RecordError::new(
+            RecordErrorKind::BindingMismatch,
+            0,
+            "supervisor snapshot does not match the invocation binding",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_planning_against_snapshot(
+    record: &PlanningRecord,
+    snapshot: &SourceSnapshot<'_>,
+) -> Result<(), RecordError> {
+    match (&record.disposition, &record.ir) {
+        (PlanningDisposition::ReadyForVerification, Some(ir)) => {
+            audit_covering(snapshot, ir).map_err(|_| {
+                RecordError::new(
+                    RecordErrorKind::InvalidSemanticState,
+                    0,
+                    "ready planning IR does not reproduce the supervisor snapshot covering",
+                )
+            })?;
+            validate_ready_ir_source_fields(snapshot, ir)?;
+        }
+        (PlanningDisposition::Terminal(_), Some(ir)) => {
+            let reproduced = match audit_covering(snapshot, ir) {
+                Ok(()) => {
+                    return Err(RecordError::new(
+                        RecordErrorKind::InvalidSemanticState,
+                        0,
+                        "covering terminal does not reproduce a supervisor-observed failure",
+                    ));
+                }
+                Err(finding) => finding,
+            };
+            let cause = &record.findings[first_error_index(&record.findings)?];
+            if &reproduced != cause {
+                return Err(RecordError::new(
+                    RecordErrorKind::InvalidSemanticState,
+                    0,
+                    "covering terminal cause does not match supervisor reproduction",
+                ));
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
+fn validate_ready_ir_source_fields(
+    snapshot: &SourceSnapshot<'_>,
+    ir: &ArchiveIR,
+) -> Result<(), RecordError> {
+    for member in &ir.members {
+        let mut local_fixed = [0_u8; 30];
+        read_snapshot_exact(
+            snapshot,
+            member.source_ranges.local_header.offset,
+            &mut local_fixed,
+            "cannot read the claimed local header from the supervisor snapshot",
+        )?;
+        let local_name_len = u64::from(u16::from_le_bytes([local_fixed[26], local_fixed[27]]));
+        let local_extra_len = u64::from(u16::from_le_bytes([local_fixed[28], local_fixed[29]]));
+        let expected_local_len = 30_u64
+            .checked_add(local_name_len)
+            .and_then(|value| value.checked_add(local_extra_len))
+            .ok_or_else(|| {
+                RecordError::new(
+                    RecordErrorKind::IntegerOverflow,
+                    0,
+                    "source local-header length calculation overflowed",
+                )
+            })?;
+        if member.source_ranges.local_header.len != expected_local_len
+            || local_name_len != member.raw_name_bytes.len() as u64
+        {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "planning local-header geometry does not match the supervisor snapshot",
+            ));
+        }
+        let local_name_offset = member
+            .source_ranges
+            .local_header
+            .offset
+            .checked_add(30)
+            .ok_or_else(|| {
+                RecordError::new(
+                    RecordErrorKind::IntegerOverflow,
+                    0,
+                    "source local-name offset calculation overflowed",
+                )
+            })?;
+        validate_source_name(snapshot, local_name_offset, &member.raw_name_bytes)?;
+        let local_extra_offset =
+            local_name_offset
+                .checked_add(local_name_len)
+                .ok_or_else(|| {
+                    RecordError::new(
+                        RecordErrorKind::IntegerOverflow,
+                        0,
+                        "source local-extra offset calculation overflowed",
+                    )
+                })?;
+        validate_source_extra_fields(
+            snapshot,
+            member,
+            ExtraSite::Local,
+            local_extra_offset,
+            local_extra_len,
+        )?;
+
+        let mut central_fixed = [0_u8; 46];
+        read_snapshot_exact(
+            snapshot,
+            member.source_ranges.central_header.offset,
+            &mut central_fixed,
+            "cannot read the claimed central header from the supervisor snapshot",
+        )?;
+        let central_name_len =
+            u64::from(u16::from_le_bytes([central_fixed[28], central_fixed[29]]));
+        let central_extra_len =
+            u64::from(u16::from_le_bytes([central_fixed[30], central_fixed[31]]));
+        let central_comment_len =
+            u64::from(u16::from_le_bytes([central_fixed[32], central_fixed[33]]));
+        let expected_central_len = 46_u64
+            .checked_add(central_name_len)
+            .and_then(|value| value.checked_add(central_extra_len))
+            .and_then(|value| value.checked_add(central_comment_len))
+            .ok_or_else(|| {
+                RecordError::new(
+                    RecordErrorKind::IntegerOverflow,
+                    0,
+                    "source central-header length calculation overflowed",
+                )
+            })?;
+        if member.source_ranges.central_header.len != expected_central_len
+            || central_name_len != member.raw_name_bytes.len() as u64
+        {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "planning central-header geometry does not match the supervisor snapshot",
+            ));
+        }
+        let central_name_offset = member
+            .source_ranges
+            .central_header
+            .offset
+            .checked_add(46)
+            .ok_or_else(|| {
+                RecordError::new(
+                    RecordErrorKind::IntegerOverflow,
+                    0,
+                    "source central-name offset calculation overflowed",
+                )
+            })?;
+        validate_source_name(snapshot, central_name_offset, &member.raw_name_bytes)?;
+        let central_extra_offset = central_name_offset
+            .checked_add(central_name_len)
+            .ok_or_else(|| {
+                RecordError::new(
+                    RecordErrorKind::IntegerOverflow,
+                    0,
+                    "source central-extra offset calculation overflowed",
+                )
+            })?;
+        validate_source_extra_fields(
+            snapshot,
+            member,
+            ExtraSite::Central,
+            central_extra_offset,
+            central_extra_len,
+        )?;
+    }
+    Ok(())
+}
+
+fn validate_source_name(
+    snapshot: &SourceSnapshot<'_>,
+    mut offset: u64,
+    expected: &[u8],
+) -> Result<(), RecordError> {
+    let mut buffer = [0_u8; 1_024];
+    for chunk in expected.chunks(buffer.len()) {
+        read_snapshot_exact(
+            snapshot,
+            offset,
+            &mut buffer[..chunk.len()],
+            "cannot read a claimed member name from the supervisor snapshot",
+        )?;
+        if &buffer[..chunk.len()] != chunk {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "planning member name does not match the supervisor snapshot",
+            ));
+        }
+        offset = offset.checked_add(chunk.len() as u64).ok_or_else(|| {
+            RecordError::new(
+                RecordErrorKind::IntegerOverflow,
+                0,
+                "source member-name offset calculation overflowed",
+            )
+        })?;
+    }
+    Ok(())
+}
+
+fn validate_source_extra_fields(
+    snapshot: &SourceSnapshot<'_>,
+    member: &IrMember,
+    site: ExtraSite,
+    start: u64,
+    len: u64,
+) -> Result<(), RecordError> {
+    let expected_end = start.checked_add(len).ok_or_else(|| {
+        RecordError::new(
+            RecordErrorKind::IntegerOverflow,
+            0,
+            "source extra-field boundary calculation overflowed",
+        )
+    })?;
+    let mut expected_offset = start;
+    for extra in member
+        .extra_fields
+        .iter()
+        .filter(|extra| extra.site == site)
+    {
+        if extra.header_range.offset != expected_offset {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "planning extra fields do not cover the supervisor snapshot sequence",
+            ));
+        }
+        let mut header = [0_u8; 4];
+        read_snapshot_exact(
+            snapshot,
+            expected_offset,
+            &mut header,
+            "cannot read a claimed extra-field header from the supervisor snapshot",
+        )?;
+        let source_id = u16::from_le_bytes([header[0], header[1]]);
+        let source_len = u64::from(u16::from_le_bytes([header[2], header[3]]));
+        if source_id != extra.id || source_len != extra.data_range.len {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "planning extra-field header does not match the supervisor snapshot",
+            ));
+        }
+        expected_offset = checked_end(extra.data_range)?;
+    }
+    if expected_offset != expected_end {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "planning extra fields do not exactly cover the supervisor snapshot sequence",
+        ));
+    }
+    Ok(())
+}
+
+fn read_snapshot_exact(
+    snapshot: &SourceSnapshot<'_>,
+    offset: u64,
+    output: &mut [u8],
+    detail: &'static str,
+) -> Result<(), RecordError> {
+    snapshot
+        .read_exact_at(offset, output)
+        .map_err(|_| RecordError::new(RecordErrorKind::InvalidSemanticState, 0, detail))
+}
+
+fn validate_planning(record: &PlanningRecord) -> Result<(), RecordError> {
+    validate_binding(&record.binding)?;
+    validate_findings(&record.findings)?;
+    if record.findings.iter().any(|finding| {
+        matches!(
+            finding.code,
+            FindingCode::PolicyUnsupported
+                | FindingCode::MaterializeExists
+                | FindingCode::MaterializeIo
+                | FindingCode::MaterializeCommit
+                | FindingCode::MaterializeUnsafeParent
+                | FindingCode::MaterializeUnsafeComponent
+                | FindingCode::MaterializeCleanup
+                | FindingCode::MaterializeUnsupported
+                | FindingCode::MaterializeUnsupportedFilesystem
+                | FindingCode::MaterializeUnsafeStage
+                | FindingCode::MaterializeAudit
+        )
+    }) {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "planning findings claim supervisor-owned policy or effect state",
+        ));
+    }
+    match (&record.disposition, &record.ir) {
+        (PlanningDisposition::ReadyForVerification, Some(ir)) => {
+            if record
+                .findings
+                .iter()
+                .any(|finding| finding.severity == Severity::Error)
+            {
+                return Err(RecordError::new(
+                    RecordErrorKind::InvalidSemanticState,
+                    0,
+                    "ready planning record contains an error finding",
+                ));
+            }
+            validate_pending_ir(ir, &record.binding)?;
+        }
+        (PlanningDisposition::ReadyForVerification, None) => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "ready planning record lacks its complete pending IR",
+            ));
+        }
+        (PlanningDisposition::Terminal(axes), ir) => {
+            let cause_index = first_error_index(&record.findings)?;
+            let cause = &record.findings[cause_index];
+            validate_terminal_axes(axes, cause)?;
+            match ir {
+                None => {
+                    if cause.code == FindingCode::CoveringInconsistent {
+                        return Err(RecordError::new(
+                            RecordErrorKind::InvalidSemanticState,
+                            0,
+                            "covering-inconsistent terminal lacks its retained IR",
+                        ));
+                    }
+                }
+                Some(ir) => {
+                    if cause.code != FindingCode::CoveringInconsistent
+                        || axes.interpretation != InterpretationStatus::Malformed
+                        || axes.admission != AdmissionStatus::Denied
+                        || !matches!(
+                            axes.view_completeness,
+                            ViewCompleteness::Partial {
+                                phase: StoppingPhase::Structure,
+                                ..
+                            }
+                        )
+                    {
+                        return Err(RecordError::new(
+                            RecordErrorKind::InvalidSemanticState,
+                            0,
+                            "only reproduced covering inconsistency may retain terminal IR",
+                        ));
+                    }
+                    validate_pending_ir(ir, &record.binding)?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn validate_terminal_axes(axes: &TerminalPlanningAxes, cause: &Finding) -> Result<(), RecordError> {
+    if !matches!(axes.verification, VerificationStatus::StructureOnly) {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "planning terminal verification is not StructureOnly",
+        ));
+    }
+    let (phase, encoded_cause) = partial_parts(&axes.view_completeness)?;
+    if encoded_cause != cause.code.as_str() {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "planning terminal cause does not match the first error finding",
+        ));
+    }
+    let expected = match phase {
+        StoppingPhase::Admission
+            if !matches!(
+                cause.code,
+                FindingCode::SourceIo
+                    | FindingCode::PolicyUnsupported
+                    | FindingCode::MaterializeExists
+                    | FindingCode::MaterializeIo
+                    | FindingCode::MaterializeCommit
+                    | FindingCode::MaterializeUnsafeParent
+                    | FindingCode::MaterializeUnsafeComponent
+                    | FindingCode::MaterializeCleanup
+                    | FindingCode::MaterializeUnsupported
+                    | FindingCode::MaterializeUnsupportedFilesystem
+                    | FindingCode::MaterializeUnsafeStage
+                    | FindingCode::MaterializeAudit
+            ) =>
+        {
+            (InterpretationStatus::Interpreted, AdmissionStatus::Denied)
+        }
+        StoppingPhase::Structure => match cause.code {
+            FindingCode::SourceIo => (
+                InterpretationStatus::Indeterminate,
+                AdmissionStatus::NotEvaluated,
+            ),
+            FindingCode::FormatUnsupported => {
+                if axes.admission == AdmissionStatus::Denied {
+                    (InterpretationStatus::Unsupported, AdmissionStatus::Denied)
+                } else {
+                    (
+                        InterpretationStatus::Unsupported,
+                        AdmissionStatus::NotEvaluated,
+                    )
+                }
+            }
+            FindingCode::FormatMagic
+            | FindingCode::ZipDiffC5Zip64
+            | FindingCode::ZipEncoding
+            | FindingCode::ZipEncrypted
+            | FindingCode::MethodUnsupported => (
+                InterpretationStatus::Unsupported,
+                AdmissionStatus::NotEvaluated,
+            ),
+            FindingCode::QuotaFiles | FindingCode::QuotaMetadata | FindingCode::QuotaOverflow => {
+                (InterpretationStatus::Interpreted, AdmissionStatus::Denied)
+            }
+            FindingCode::CoveringInconsistent => {
+                (InterpretationStatus::Malformed, AdmissionStatus::Denied)
+            }
+            _ => (
+                InterpretationStatus::Malformed,
+                AdmissionStatus::NotEvaluated,
+            ),
+        },
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "planning terminal phase is supervisor-owned or incoherent",
+            ));
+        }
+    };
+    if axes.interpretation != expected.0 || axes.admission != expected.1 {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "planning terminal axes are incoherent",
+        ));
+    }
+    Ok(())
+}
+
+fn encode_completion(
+    record: &CompletionRecord,
+    planning: &ValidatedPlanningRecord,
+) -> Result<Vec<u8>, RecordError> {
+    validate_completion(record, planning)?;
+    let mut encoder = Encoder::new(KIND_COMPLETION);
+    encoder.fixed(&record.operation_id);
+    encoder.fixed(&record.request_id);
+    encoder.fixed(&record.plan_id);
+    encode_findings(&mut encoder, &record.findings)?;
+    match record.disposition {
+        CompletionDisposition::Complete => encoder.u8(0),
+        CompletionDisposition::Stopped {
+            verified_members,
+            pending_members,
+        } => {
+            encoder.u8(1);
+            encoder.u64(verified_members);
+            encoder.u64(pending_members);
+        }
+    }
+    encoder.u32(u32::try_from(record.members.len()).map_err(|_| {
+        RecordError::new(
+            RecordErrorKind::LimitExceeded,
+            encoder.bytes.len(),
+            "completion member-state count exceeds the record integer limit",
+        )
+    })?);
+    for member in &record.members {
+        match member {
+            MemberCompletion::Pending => encoder.u8(0),
+            MemberCompletion::Verified {
+                actual_uncomp_size,
+                actual_crc,
+                content_sha256,
+            } => {
+                encoder.u8(1);
+                encoder.u64(*actual_uncomp_size);
+                encoder.u32(*actual_crc);
+                encoder.fixed(content_sha256);
+            }
+            MemberCompletion::Failed { cause } => {
+                encoder.u8(2);
+                encoder.u16(finding_code_tag(*cause));
+            }
+        }
+    }
+    encoder.finish()
+}
+
+fn decode_completion(
+    input: &[u8],
+    planning: &ValidatedPlanningRecord,
+) -> Result<ValidatedCompletionRecord, RecordError> {
+    let mut cursor = Cursor::frame(input, KIND_COMPLETION)?;
+    let operation_id = cursor.fixed()?;
+    let request_id_value = cursor.fixed()?;
+    let plan_id_value = cursor.fixed()?;
+    if operation_id != planning.record.binding.operation_id
+        || request_id_value != planning.request_id
+        || plan_id_value != planning.plan_id
+    {
+        return Err(RecordError::new(
+            RecordErrorKind::BindingMismatch,
+            HEADER_BYTES,
+            "completion correlation does not match the accepted plan",
+        ));
+    }
+    let findings = decode_findings(&mut cursor)?;
+    let disposition = match cursor.u8()? {
+        0 => CompletionDisposition::Complete,
+        1 => CompletionDisposition::Stopped {
+            verified_members: cursor.u64()?,
+            pending_members: cursor.u64()?,
+        },
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidEnum,
+                cursor.offset().saturating_sub(1),
+                "completion disposition tag is invalid",
+            ));
+        }
+    };
+    let expected_members = planning
+        .record
+        .ir
+        .as_ref()
+        .map(|ir| ir.members.len())
+        .ok_or_else(|| {
+            RecordError::new(
+                RecordErrorKind::PhaseMismatch,
+                0,
+                "terminal planning record cannot accept completion",
+            )
+        })?;
+    let count = cursor.count(
+        expected_members,
+        1,
+        "completion member-state count exceeds plan or remaining bytes",
+    )?;
+    if count != expected_members {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            cursor.offset().saturating_sub(4),
+            "completion member-state vector length differs from the plan",
+        ));
+    }
+    let mut members = Vec::new();
+    members.try_reserve_exact(count).map_err(|_| {
+        RecordError::new(
+            RecordErrorKind::AllocationFailed,
+            cursor.offset(),
+            "bounded completion member-state allocation failed",
+        )
+    })?;
+    for _ in 0..count {
+        members.push(match cursor.u8()? {
+            0 => MemberCompletion::Pending,
+            1 => MemberCompletion::Verified {
+                actual_uncomp_size: cursor.u64()?,
+                actual_crc: cursor.u32()?,
+                content_sha256: cursor.fixed()?,
+            },
+            2 => MemberCompletion::Failed {
+                cause: finding_code_from_tag(cursor.u16()?, cursor.offset().saturating_sub(2))?,
+            },
+            _ => {
+                return Err(RecordError::new(
+                    RecordErrorKind::InvalidEnum,
+                    cursor.offset().saturating_sub(1),
+                    "completion member-state tag is invalid",
+                ));
+            }
+        });
+    }
+    cursor.finish()?;
+    let record = CompletionRecord {
+        operation_id,
+        request_id: request_id_value,
+        plan_id: plan_id_value,
+        disposition,
+        members,
+        findings,
+    };
+    let validated = validate_completion(&record, planning)?;
+    let canonical = encode_completion(&record, planning)?;
+    if canonical != input {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "decoded completion record did not re-encode identically",
+        ));
+    }
+    Ok(validated)
+}
+
+fn validate_completion(
+    record: &CompletionRecord,
+    planning: &ValidatedPlanningRecord,
+) -> Result<ValidatedCompletionRecord, RecordError> {
+    if !matches!(
+        planning.record.disposition,
+        PlanningDisposition::ReadyForVerification
+    ) {
+        return Err(RecordError::new(
+            RecordErrorKind::PhaseMismatch,
+            0,
+            "terminal planning record cannot accept completion",
+        ));
+    }
+    if record.operation_id != planning.record.binding.operation_id
+        || record.request_id != planning.request_id
+        || record.plan_id != planning.plan_id
+    {
+        return Err(RecordError::new(
+            RecordErrorKind::BindingMismatch,
+            0,
+            "completion correlation does not match the accepted plan",
+        ));
+    }
+    validate_findings(&record.findings)?;
+    for finding in &record.findings {
+        if matches!(
+            finding.code,
+            FindingCode::PolicyUnsupported
+                | FindingCode::MaterializeExists
+                | FindingCode::MaterializeCommit
+                | FindingCode::MaterializeUnsafeParent
+                | FindingCode::MaterializeCleanup
+                | FindingCode::MaterializeUnsupported
+                | FindingCode::MaterializeUnsupportedFilesystem
+                | FindingCode::MaterializeUnsafeStage
+                | FindingCode::MaterializeAudit
+        ) {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "completion findings claim supervisor-owned lifecycle state",
+            ));
+        }
+        if matches!(
+            finding.code,
+            FindingCode::MaterializeIo | FindingCode::MaterializeUnsafeComponent
+        ) && planning.record.binding.requested_effect != RequestedEffect::Materialize
+        {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "materialization-only finding appears in inspect completion",
+            ));
+        }
+    }
+    let mut ir = planning.record.ir.clone().ok_or_else(|| {
+        RecordError::new(
+            RecordErrorKind::PhaseMismatch,
+            0,
+            "ready planning record lacks an IR",
+        )
+    })?;
+    if record.members.len() != ir.members.len() {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "completion member-state vector length differs from the plan",
+        ));
+    }
+    let mut verified_prefix = 0_usize;
+    let mut failed_index = None;
+    let mut pending_started = false;
+    let mut actual_total = 0_u64;
+    for (index, state) in record.members.iter().enumerate() {
+        match state {
+            MemberCompletion::Verified {
+                actual_uncomp_size,
+                actual_crc,
+                content_sha256,
+            } => {
+                if failed_index.is_some() || pending_started {
+                    return Err(RecordError::new(
+                        RecordErrorKind::InvalidSemanticState,
+                        0,
+                        "verified member follows the failure frontier",
+                    ));
+                }
+                let planned = &ir.members[index];
+                if *actual_uncomp_size != planned.declared_uncomp_size
+                    || *actual_crc != planned.declared_crc
+                {
+                    return Err(RecordError::new(
+                        RecordErrorKind::InvalidSemanticState,
+                        0,
+                        "verified measurements disagree with declared member metadata",
+                    ));
+                }
+                let empty_sha256: [u8; 32] = Sha256::digest([]).into();
+                if matches!(planned.kind, MemberKind::Directory)
+                    && (*actual_uncomp_size != 0
+                        || *actual_crc != 0
+                        || *content_sha256 != empty_sha256)
+                {
+                    return Err(RecordError::new(
+                        RecordErrorKind::InvalidSemanticState,
+                        0,
+                        "verified directory does not have canonical empty content",
+                    ));
+                }
+                actual_total = actual_total
+                    .checked_add(*actual_uncomp_size)
+                    .ok_or_else(|| {
+                        RecordError::new(
+                            RecordErrorKind::IntegerOverflow,
+                            0,
+                            "completion actual-size aggregate overflowed",
+                        )
+                    })?;
+                if actual_total > planning.record.binding.budget.max_total_bytes {
+                    return Err(RecordError::new(
+                        RecordErrorKind::InvalidSemanticState,
+                        0,
+                        "completion exceeds the aggregate actual-size budget",
+                    ));
+                }
+                ir.members[index].mark_file_verified(
+                    *actual_uncomp_size,
+                    *actual_crc,
+                    hex_32(content_sha256),
+                );
+                verified_prefix += 1;
+            }
+            MemberCompletion::Failed { cause } => {
+                if failed_index.is_some() || pending_started {
+                    return Err(RecordError::new(
+                        RecordErrorKind::InvalidSemanticState,
+                        0,
+                        "completion has more than one failure frontier",
+                    ));
+                }
+                failed_index = Some((index, *cause));
+                ir.members[index].mark_failed(cause.as_str());
+            }
+            MemberCompletion::Pending => pending_started = true,
+        }
+    }
+
+    let (interpretation, admission, verification, view_completeness) = match record.disposition {
+        CompletionDisposition::Complete => {
+            if verified_prefix != ir.members.len()
+                || failed_index.is_some()
+                || record
+                    .findings
+                    .iter()
+                    .any(|finding| finding.severity == Severity::Error)
+            {
+                return Err(RecordError::new(
+                    RecordErrorKind::InvalidSemanticState,
+                    0,
+                    "complete record is not completely verified and error-free",
+                ));
+            }
+            (
+                InterpretationStatus::Interpreted,
+                AdmissionStatus::Admitted,
+                VerificationStatus::Complete,
+                ViewCompleteness::Complete,
+            )
+        }
+        CompletionDisposition::Stopped {
+            verified_members,
+            pending_members,
+        } => {
+            let (_, failed_cause) = failed_index.ok_or_else(|| {
+                RecordError::new(
+                    RecordErrorKind::InvalidSemanticState,
+                    0,
+                    "stopped completion lacks exactly one failed frontier member",
+                )
+            })?;
+            let first_error = &record.findings[first_error_index(&record.findings)?];
+            if first_error.code != failed_cause {
+                return Err(RecordError::new(
+                    RecordErrorKind::InvalidSemanticState,
+                    0,
+                    "failed member cause differs from the first error finding",
+                ));
+            }
+            let expected_verified = verified_prefix as u64;
+            let expected_pending = (ir.members.len() - verified_prefix) as u64;
+            if verified_members != expected_verified || pending_members != expected_pending {
+                return Err(RecordError::new(
+                    RecordErrorKind::InvalidSemanticState,
+                    0,
+                    "partial verification counts disagree with the frontier",
+                ));
+            }
+            let axes = SemanticAxes::admitted_verification_stop(
+                verified_members,
+                pending_members,
+                first_error,
+                false,
+            );
+            (
+                axes.interpretation,
+                axes.admission,
+                axes.verification,
+                axes.view_completeness,
+            )
+        }
+    };
+    Ok(ValidatedCompletionRecord {
+        interpretation,
+        admission,
+        verification,
+        view_completeness,
+        ir,
+        findings: record.findings.clone(),
+    })
+}
+
+fn encode_findings(encoder: &mut Encoder, findings: &[Finding]) -> Result<(), RecordError> {
+    validate_findings(findings)?;
+    encoder.u32(u32::try_from(findings.len()).map_err(|_| {
+        RecordError::new(
+            RecordErrorKind::LimitExceeded,
+            encoder.bytes.len(),
+            "finding count exceeds the record integer limit",
+        )
+    })?);
+    for finding in findings {
+        encode_finding(encoder, finding)?;
+    }
+    Ok(())
+}
+
+fn decode_findings(cursor: &mut Cursor<'_>) -> Result<Vec<Finding>, RecordError> {
+    let count = cursor.count(
+        MAX_FINDINGS,
+        MIN_FINDING_BYTES,
+        "finding count exceeds its bound or remaining bytes",
+    )?;
+    let mut findings = Vec::new();
+    findings.try_reserve_exact(count).map_err(|_| {
+        RecordError::new(
+            RecordErrorKind::AllocationFailed,
+            cursor.offset(),
+            "bounded finding allocation failed",
+        )
+    })?;
+    for _ in 0..count {
+        findings.push(decode_finding(cursor)?);
+    }
+    Ok(findings)
+}
+
+fn validate_findings(findings: &[Finding]) -> Result<(), RecordError> {
+    if findings.len() > MAX_FINDINGS {
+        return Err(RecordError::new(
+            RecordErrorKind::LimitExceeded,
+            0,
+            "finding count exceeds its bound",
+        ));
+    }
+    for finding in findings {
+        validate_finding(finding)?;
+    }
+    Ok(())
+}
+
+fn first_error_index(findings: &[Finding]) -> Result<usize, RecordError> {
+    findings
+        .iter()
+        .position(|finding| finding.severity == Severity::Error)
+        .ok_or_else(|| {
+            RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "terminal record lacks an error finding",
+            )
+        })
+}
+
+fn partial_parts(completeness: &ViewCompleteness) -> Result<(&StoppingPhase, &str), RecordError> {
+    match completeness {
+        ViewCompleteness::Partial { phase, cause } => Ok((phase, cause)),
+        ViewCompleteness::Complete => Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "terminal planning record claims a complete view",
+        )),
+    }
+}
+
+fn encode_interpretation(encoder: &mut Encoder, value: &InterpretationStatus) {
+    encoder.u8(match value {
+        InterpretationStatus::Interpreted => 0,
+        InterpretationStatus::Malformed => 1,
+        InterpretationStatus::Unsupported => 2,
+        InterpretationStatus::Indeterminate => 3,
+    });
+}
+
+fn decode_interpretation(cursor: &mut Cursor<'_>) -> Result<InterpretationStatus, RecordError> {
+    match cursor.u8()? {
+        0 => Ok(InterpretationStatus::Interpreted),
+        1 => Ok(InterpretationStatus::Malformed),
+        2 => Ok(InterpretationStatus::Unsupported),
+        3 => Ok(InterpretationStatus::Indeterminate),
+        _ => Err(RecordError::new(
+            RecordErrorKind::InvalidEnum,
+            cursor.offset().saturating_sub(1),
+            "interpretation status tag is invalid",
+        )),
+    }
+}
+
+fn encode_admission(encoder: &mut Encoder, value: &AdmissionStatus) {
+    encoder.u8(match value {
+        AdmissionStatus::Admitted => 0,
+        AdmissionStatus::Denied => 1,
+        AdmissionStatus::NotEvaluated => 2,
+    });
+}
+
+fn decode_admission(cursor: &mut Cursor<'_>) -> Result<AdmissionStatus, RecordError> {
+    match cursor.u8()? {
+        0 => Ok(AdmissionStatus::Admitted),
+        1 => Ok(AdmissionStatus::Denied),
+        2 => Ok(AdmissionStatus::NotEvaluated),
+        _ => Err(RecordError::new(
+            RecordErrorKind::InvalidEnum,
+            cursor.offset().saturating_sub(1),
+            "admission status tag is invalid",
+        )),
+    }
+}
+
+fn encode_stopping_phase(encoder: &mut Encoder, value: &StoppingPhase) {
+    encoder.u8(match value {
+        StoppingPhase::Source => 0,
+        StoppingPhase::Structure => 1,
+        StoppingPhase::Admission => 2,
+        StoppingPhase::Verification => 3,
+        StoppingPhase::Effect => 4,
+    });
+}
+
+fn decode_stopping_phase(cursor: &mut Cursor<'_>) -> Result<StoppingPhase, RecordError> {
+    match cursor.u8()? {
+        0 => Ok(StoppingPhase::Source),
+        1 => Ok(StoppingPhase::Structure),
+        2 => Ok(StoppingPhase::Admission),
+        3 => Ok(StoppingPhase::Verification),
+        4 => Ok(StoppingPhase::Effect),
+        _ => Err(RecordError::new(
+            RecordErrorKind::InvalidEnum,
+            cursor.offset().saturating_sub(1),
+            "stopping phase tag is invalid",
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{Cursor as IoCursor, Write};
+
+    use ::zip::write::SimpleFileOptions;
+    use ::zip::{CompressionMethod, ZipWriter};
+
+    use super::*;
+    use crate::apply::{apply_with_options, ApplyOptions, Request, Source};
+    use crate::policy::Policy;
+
+    fn make_zip(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        let mut writer = ZipWriter::new(IoCursor::new(Vec::new()));
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        for (name, bytes) in entries {
+            if name.ends_with('/') {
+                writer.add_directory(*name, options).unwrap();
+            } else {
+                writer.start_file(*name, options).unwrap();
+                writer.write_all(bytes).unwrap();
+            }
+        }
+        writer.finish().unwrap().into_inner()
+    }
+
+    fn signature_offset(bytes: &[u8], signature: [u8; 4]) -> usize {
+        let offsets: Vec<_> = bytes
+            .windows(signature.len())
+            .enumerate()
+            .filter_map(|(index, window)| (window == signature).then_some(index))
+            .collect();
+        assert_eq!(offsets.len(), 1);
+        offsets[0]
+    }
+
+    fn u16_at(bytes: &[u8], offset: usize) -> u16 {
+        u16::from_le_bytes(bytes[offset..offset + 2].try_into().unwrap())
+    }
+
+    fn u32_at(bytes: &[u8], offset: usize) -> u32 {
+        u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+    }
+
+    fn put_u16(bytes: &mut [u8], offset: usize, value: u16) {
+        bytes[offset..offset + 2].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn put_u32(bytes: &mut [u8], offset: usize, value: u32) {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn add_matching_extra_fields(bytes: &mut Vec<u8>, extra: &[u8]) {
+        let local = signature_offset(bytes, [0x50, 0x4b, 0x03, 0x04]);
+        let central = signature_offset(bytes, [0x50, 0x4b, 0x01, 0x02]);
+        let eocd = signature_offset(bytes, [0x50, 0x4b, 0x05, 0x06]);
+        let central_directory_size = u32_at(bytes, eocd + 12);
+
+        let local_name_len = usize::from(u16_at(bytes, local + 26));
+        let local_extra_len = usize::from(u16_at(bytes, local + 28));
+        let local_insert = local + 30 + local_name_len + local_extra_len;
+        bytes.splice(local_insert..local_insert, extra.iter().copied());
+        put_u16(
+            bytes,
+            local + 28,
+            u16::try_from(local_extra_len + extra.len()).unwrap(),
+        );
+
+        let central = central + extra.len();
+        let central_name_len = usize::from(u16_at(bytes, central + 28));
+        let central_extra_len = usize::from(u16_at(bytes, central + 30));
+        let central_insert = central + 46 + central_name_len + central_extra_len;
+        bytes.splice(central_insert..central_insert, extra.iter().copied());
+        put_u16(
+            bytes,
+            central + 30,
+            u16::try_from(central_extra_len + extra.len()).unwrap(),
+        );
+
+        let eocd = eocd + extra.len() * 2;
+        put_u32(
+            bytes,
+            eocd + 12,
+            central_directory_size + u32::try_from(extra.len()).unwrap(),
+        );
+        put_u32(bytes, eocd + 16, u32::try_from(central).unwrap());
+    }
+
+    fn encode_ready_planning_unchecked(record: &PlanningRecord) -> Vec<u8> {
+        assert!(matches!(
+            record.disposition,
+            PlanningDisposition::ReadyForVerification
+        ));
+        let mut encoder = Encoder::new(KIND_PLANNING);
+        encode_binding(&mut encoder, &record.binding).unwrap();
+        encode_findings(&mut encoder, &record.findings).unwrap();
+        encoder.u8(0);
+        encoder.u8(1);
+        encode_ir(&mut encoder, record.ir.as_ref().unwrap()).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    fn reference(
+        bytes: &[u8],
+        profile: ZipInterpretationProfile,
+    ) -> (InvocationBinding, ArchiveIR, ArchiveIR) {
+        let policy = Policy::default_v1();
+        let controls = policy.compile().unwrap();
+        let options = ApplyOptions::new().with_interpretation_profile(profile);
+        let outcome = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("semantic-record.zip"),
+                    data: bytes,
+                },
+                policy: &policy,
+                dest: None,
+            },
+            &options,
+        );
+        assert_eq!(outcome.admission, AdmissionStatus::Admitted);
+        assert_eq!(outcome.verification, VerificationStatus::Complete);
+        let completed = outcome.archive_ir().unwrap().clone();
+        let mut pending = completed.clone();
+        for member in &mut pending.members {
+            member.actual_uncomp_size = None;
+            member.actual_crc = None;
+            member.content_sha256 = None;
+            member.verification = MemberVerification::Pending;
+        }
+        let source_sha256: [u8; 32] = Sha256::digest(bytes).into();
+        let binding = InvocationBinding {
+            operation_id: [0x41; 16],
+            source_len: bytes.len() as u64,
+            source_sha256,
+            profile,
+            profile_sha256: parse_hex_32(&profile.digest()).unwrap(),
+            policy_id: policy.id.clone(),
+            policy_sha256: parse_hex_32(&policy.digest_hex()).unwrap(),
+            budget: controls.budget,
+            target: controls.target,
+            consumer: controls.consumer,
+            requested_effect: RequestedEffect::Inspect,
+            target_sha256: None,
+            member_sync: controls.effect.member_sync,
+            retention: RetentionBinding::None,
+        };
+        (binding, pending, completed)
+    }
+
+    fn ready_plan(binding: InvocationBinding, ir: ArchiveIR) -> PlanningRecord {
+        PlanningRecord {
+            binding,
+            disposition: PlanningDisposition::ReadyForVerification,
+            ir: Some(ir),
+            findings: Vec::new(),
+        }
+    }
+
+    fn decode_plan(
+        input: &[u8],
+        expected: &InvocationBinding,
+        source: &[u8],
+    ) -> Result<ValidatedPlanningRecord, RecordError> {
+        let snapshot = SourceSnapshot::borrowed(None, source);
+        decode_planning(input, expected, &snapshot)
+    }
+
+    fn encoded_max_metadata_offset(binding: &InvocationBinding) -> usize {
+        HEADER_BYTES
+            + 16
+            + 8
+            + 32
+            + 1
+            + 32
+            + 4
+            + binding.policy_id.len()
+            + 32
+            + 1
+            + 8 * 4
+            + 1
+            + 8
+            + 4
+    }
+
+    fn complete_states(ir: &ArchiveIR) -> Vec<MemberCompletion> {
+        ir.members
+            .iter()
+            .map(|member| MemberCompletion::Verified {
+                actual_uncomp_size: member.actual_uncomp_size.unwrap(),
+                actual_crc: member.actual_crc.unwrap(),
+                content_sha256: parse_hex_32(member.content_sha256.as_deref().unwrap()).unwrap(),
+            })
+            .collect()
+    }
+
+    fn assert_ir_eq(left: &ArchiveIR, right: &ArchiveIR) {
+        assert_eq!(
+            serde_json::to_vec(left).unwrap(),
+            serde_json::to_vec(right).unwrap()
+        );
+    }
+
+    #[test]
+    fn ready_plan_round_trips_complete_pending_ir_in_source_order() {
+        let bytes = make_zip(&[("z.txt", b"z"), ("a.txt", b"a")]);
+        let (binding, pending, _) = reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+        assert_eq!(pending.members[0].canonical_path, "z.txt");
+        assert_eq!(pending.members[1].canonical_path, "a.txt");
+        let encoded = encode_planning(&ready_plan(binding.clone(), pending.clone())).unwrap();
+        let decoded = decode_plan(&encoded, &binding, &bytes).unwrap();
+        assert_eq!(decoded.request_id, request_id(&binding).unwrap());
+        assert_eq!(decoded.plan_id, plan_id(&encoded));
+        assert_ir_eq(decoded.record.ir.as_ref().unwrap(), &pending);
+        assert_eq!(
+            decoded.record.ir.as_ref().unwrap().members[0].canonical_path,
+            "z.txt"
+        );
+    }
+
+    #[test]
+    fn record_vector_digests_are_stable() {
+        let bytes = make_zip(&[]);
+        let (binding, pending, completed) =
+            reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending)).unwrap();
+        let plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+        let completion = CompletionRecord {
+            operation_id: binding.operation_id,
+            request_id: plan.request_id,
+            plan_id: plan.plan_id,
+            disposition: CompletionDisposition::Complete,
+            members: complete_states(&completed),
+            findings: Vec::new(),
+        };
+        let completion_bytes = encode_completion(&completion, &plan).unwrap();
+        let completion_digest: [u8; 32] = Sha256::digest(completion_bytes).into();
+        assert_eq!(
+            hex_32(&plan.plan_id),
+            "7f4c9126813bbb6e89350e455081bf8a118ec2915163f661a5ed498bfabd9c3f"
+        );
+        assert_eq!(
+            hex_32(&completion_digest),
+            "7ff94f472a8e9355b2a13a3ab6e0cd428adec5391a81fb7ee9e538f4f6d5a59a"
+        );
+    }
+
+    #[test]
+    fn complete_record_reconstructs_exact_verified_ir_without_effect_authority() {
+        let bytes = make_zip(&[("dir/", b""), ("dir/z.txt", b"z"), ("a.txt", b"a")]);
+        let (binding, pending, completed) =
+            reference(&bytes, ZipInterpretationProfile::StrictAsciiV2);
+        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending)).unwrap();
+        let plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+        let completion = CompletionRecord {
+            operation_id: binding.operation_id,
+            request_id: plan.request_id,
+            plan_id: plan.plan_id,
+            disposition: CompletionDisposition::Complete,
+            members: complete_states(&completed),
+            findings: Vec::new(),
+        };
+        let encoded = encode_completion(&completion, &plan).unwrap();
+        let decoded = decode_completion(&encoded, &plan).unwrap();
+        assert_eq!(decoded.interpretation, InterpretationStatus::Interpreted);
+        assert_eq!(decoded.admission, AdmissionStatus::Admitted);
+        assert_eq!(decoded.verification, VerificationStatus::Complete);
+        assert_eq!(decoded.view_completeness, ViewCompleteness::Complete);
+        assert_ir_eq(&decoded.ir, &completed);
+    }
+
+    #[test]
+    fn stopped_record_preserves_verified_prefix_and_hostile_finding_label() {
+        let bytes = make_zip(&[("z.txt", b"z"), ("a.txt", b"a"), ("m.txt", b"m")]);
+        let (binding, pending, completed) =
+            reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending)).unwrap();
+        let plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+        let first = &completed.members[0];
+        let completion = CompletionRecord {
+            operation_id: binding.operation_id,
+            request_id: plan.request_id,
+            plan_id: plan.plan_id,
+            disposition: CompletionDisposition::Stopped {
+                verified_members: 1,
+                pending_members: 2,
+            },
+            members: vec![
+                MemberCompletion::Verified {
+                    actual_uncomp_size: first.actual_uncomp_size.unwrap(),
+                    actual_crc: first.actual_crc.unwrap(),
+                    content_sha256: parse_hex_32(first.content_sha256.as_deref().unwrap()).unwrap(),
+                },
+                MemberCompletion::Failed {
+                    cause: FindingCode::CrcMismatch,
+                },
+                MemberCompletion::Pending,
+            ],
+            findings: vec![
+                Finding {
+                    code: FindingCode::PathUnicode,
+                    severity: Severity::Warn,
+                    member: Some("../outside.txt".into()),
+                    detail: "diagnostic only".into(),
+                },
+                Finding::error(FindingCode::CrcMismatch, "mismatch").on("safe.txt:hidden"),
+            ],
+        };
+        let encoded = encode_completion(&completion, &plan).unwrap();
+        let decoded = decode_completion(&encoded, &plan).unwrap();
+        assert_eq!(
+            decoded.verification,
+            VerificationStatus::Partial {
+                verified_members: 1,
+                pending_members: 2,
+            }
+        );
+        assert_eq!(
+            decoded.findings[0].member.as_deref(),
+            Some("../outside.txt")
+        );
+        assert_eq!(
+            decoded.findings[1].member.as_deref(),
+            Some("safe.txt:hidden")
+        );
+        assert!(matches!(
+            decoded.ir.members[0].verification,
+            MemberVerification::Verified
+        ));
+        assert!(matches!(
+            decoded.ir.members[1].verification,
+            MemberVerification::Failed { .. }
+        ));
+        assert!(matches!(
+            decoded.ir.members[2].verification,
+            MemberVerification::Pending
+        ));
+    }
+
+    #[test]
+    fn supervisor_setup_failure_merge_matches_current_axes() {
+        let bytes = make_zip(&[("a.txt", b"a")]);
+        let (binding, pending, _) = reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+        let encoded = encode_planning(&ready_plan(binding.clone(), pending)).unwrap();
+        let plan = decode_plan(&encoded, &binding, &bytes).unwrap();
+        let finding = Finding::error(FindingCode::MaterializeUnsafeParent, "setup failed");
+        assert_eq!(
+            plan.setup_failure_axes(&finding).unwrap(),
+            SemanticAxes::admitted_setup_failed(&finding)
+        );
+    }
+
+    #[test]
+    fn terminal_records_preserve_no_ir_and_covering_ir_states() {
+        let bytes = make_zip(&[("a.txt", b"a")]);
+        let (binding, mut pending, _) = reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+        let admission_finding =
+            Finding::error(FindingCode::PathDotDot, "parent path").on("../outside.txt");
+        let terminal = PlanningRecord {
+            binding: binding.clone(),
+            disposition: PlanningDisposition::Terminal(TerminalPlanningAxes {
+                interpretation: InterpretationStatus::Interpreted,
+                admission: AdmissionStatus::Denied,
+                verification: VerificationStatus::StructureOnly,
+                view_completeness: ViewCompleteness::Partial {
+                    phase: StoppingPhase::Admission,
+                    cause: FindingCode::PathDotDot.as_str().into(),
+                },
+            }),
+            ir: None,
+            findings: vec![admission_finding],
+        };
+        let encoded = encode_planning(&terminal).unwrap();
+        let decoded = decode_plan(&encoded, &binding, &bytes).unwrap();
+        assert!(decoded.record.ir.is_none());
+        assert_eq!(
+            decoded.record.findings[0].member.as_deref(),
+            Some("../outside.txt")
+        );
+
+        let mut inconsistent_bytes = bytes.clone();
+        let eocd_offset = usize::try_from(pending.covering.eocd.offset).unwrap();
+        inconsistent_bytes[eocd_offset] ^= 0xff;
+        let source_sha256: [u8; 32] = Sha256::digest(&inconsistent_bytes).into();
+        let mut covering_binding = binding.clone();
+        covering_binding.source_sha256 = source_sha256;
+        pending.source_digest = SourceDigest::available(hex_32(&source_sha256));
+        let ready_bytes =
+            encode_planning(&ready_plan(covering_binding.clone(), pending.clone())).unwrap();
+        assert_eq!(
+            decode_plan(&ready_bytes, &covering_binding, &inconsistent_bytes)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::InvalidSemanticState
+        );
+        let snapshot = SourceSnapshot::borrowed(None, &inconsistent_bytes);
+        let covering_finding = audit_covering(&snapshot, &pending).unwrap_err();
+        let covering_terminal = PlanningRecord {
+            binding: covering_binding.clone(),
+            disposition: PlanningDisposition::Terminal(TerminalPlanningAxes {
+                interpretation: InterpretationStatus::Malformed,
+                admission: AdmissionStatus::Denied,
+                verification: VerificationStatus::StructureOnly,
+                view_completeness: ViewCompleteness::Partial {
+                    phase: StoppingPhase::Structure,
+                    cause: FindingCode::CoveringInconsistent.as_str().into(),
+                },
+            }),
+            ir: Some(pending),
+            findings: vec![covering_finding],
+        };
+        let encoded = encode_planning(&covering_terminal).unwrap();
+        let decoded = decode_plan(&encoded, &covering_binding, &inconsistent_bytes).unwrap();
+        assert!(decoded.record.ir.is_some());
+    }
+
+    #[test]
+    fn every_truncation_trailing_byte_and_cross_phase_decode_fails() {
+        let bytes = make_zip(&[("a.txt", b"a")]);
+        let (binding, pending, completed) =
+            reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending)).unwrap();
+        for cutoff in 0..plan_bytes.len() {
+            assert!(decode_plan(&plan_bytes[..cutoff], &binding, &bytes).is_err());
+        }
+        let mut trailing_plan = plan_bytes.clone();
+        trailing_plan.push(0);
+        assert_eq!(
+            decode_plan(&trailing_plan, &binding, &bytes)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::TrailingBytes
+        );
+        let plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+        let completion = CompletionRecord {
+            operation_id: binding.operation_id,
+            request_id: plan.request_id,
+            plan_id: plan.plan_id,
+            disposition: CompletionDisposition::Complete,
+            members: complete_states(&completed),
+            findings: Vec::new(),
+        };
+        let completion_bytes = encode_completion(&completion, &plan).unwrap();
+        for cutoff in 0..completion_bytes.len() {
+            assert!(decode_completion(&completion_bytes[..cutoff], &plan).is_err());
+        }
+        let mut trailing_completion = completion_bytes.clone();
+        trailing_completion.push(0);
+        assert_eq!(
+            decode_completion(&trailing_completion, &plan)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::TrailingBytes
+        );
+        assert_eq!(
+            decode_plan(&completion_bytes, &binding, &bytes)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::UnexpectedKind
+        );
+        assert_eq!(
+            decode_completion(&plan_bytes, &plan).unwrap_err().kind,
+            RecordErrorKind::UnexpectedKind
+        );
+    }
+
+    #[test]
+    fn header_and_structured_binding_mutations_fail_closed() {
+        let bytes = make_zip(&[("a.txt", b"a")]);
+        let (binding, pending, _) = reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+        let original = ready_plan(binding.clone(), pending.clone());
+        let encoded = encode_planning(&original).unwrap();
+        for (offset, expected_kind) in [
+            (0, RecordErrorKind::InvalidMagic),
+            (8, RecordErrorKind::UnsupportedVersion),
+            (10, RecordErrorKind::UnexpectedKind),
+            (11, RecordErrorKind::ReservedNonZero),
+        ] {
+            let mut mutated = encoded.clone();
+            mutated[offset] ^= 0x7f;
+            assert_eq!(
+                decode_plan(&mutated, &binding, &bytes).unwrap_err().kind,
+                expected_kind
+            );
+        }
+
+        let mut variants = Vec::new();
+        let mut operation = original.clone();
+        operation.binding.operation_id[0] ^= 1;
+        variants.push(operation);
+        let mut policy = original.clone();
+        policy.binding.policy_sha256[0] ^= 1;
+        variants.push(policy);
+        let mut policy_id = original.clone();
+        policy_id.binding.policy_id.push_str("-alternate");
+        variants.push(policy_id);
+        let mut budget = original.clone();
+        budget.binding.budget.max_files += 1;
+        variants.push(budget);
+        let mut archive_budget = original.clone();
+        archive_budget.binding.budget.max_archive_bytes += 1;
+        variants.push(archive_budget);
+        let mut member_budget = original.clone();
+        member_budget.binding.budget.max_member_bytes += 1;
+        variants.push(member_budget);
+        let mut total_budget = original.clone();
+        total_budget.binding.budget.max_total_bytes += 1;
+        variants.push(total_budget);
+        let mut ratio_budget = original.clone();
+        ratio_budget.binding.budget.max_ratio = Some(
+            ratio_budget
+                .binding
+                .budget
+                .max_ratio
+                .unwrap_or_default()
+                .saturating_add(1),
+        );
+        variants.push(ratio_budget);
+        let mut depth_budget = original.clone();
+        depth_budget.binding.budget.max_path_depth += 1;
+        variants.push(depth_budget);
+        let mut metadata_budget = original.clone();
+        metadata_budget.binding.budget.max_metadata_bytes += 1;
+        variants.push(metadata_budget);
+        let mut target = original.clone();
+        target.binding.requested_effect = RequestedEffect::Materialize;
+        target.binding.target_sha256 = Some([0x55; 32]);
+        variants.push(target);
+        let mut sync = original.clone();
+        sync.binding.member_sync = !sync.binding.member_sync;
+        variants.push(sync);
+        let mut retention = original;
+        retention.binding.retention = RetentionBinding::Plan {
+            paths: Vec::new(),
+            max_member_bytes: 0,
+            max_total_bytes: 0,
+        };
+        variants.push(retention);
+        for variant in variants {
+            let mutated = encode_planning(&variant).unwrap();
+            assert_eq!(
+                decode_plan(&mutated, &binding, &bytes).unwrap_err().kind,
+                RecordErrorKind::BindingMismatch
+            );
+        }
+
+        let alternate_bytes = make_zip(&[("a.txt", b"alternate")]);
+        let (alternate_binding, alternate_pending, _) =
+            reference(&alternate_bytes, ZipInterpretationProfile::StrictAsciiV1);
+        let alternate_source =
+            encode_planning(&ready_plan(alternate_binding, alternate_pending)).unwrap();
+        assert_eq!(
+            decode_plan(&alternate_source, &binding, &bytes)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::BindingMismatch
+        );
+
+        let (v2_binding, v2_pending, _) =
+            reference(&bytes, ZipInterpretationProfile::StrictAsciiV2);
+        let alternate_profile = encode_planning(&ready_plan(v2_binding, v2_pending)).unwrap();
+        assert_eq!(
+            decode_plan(&alternate_profile, &binding, &bytes)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::BindingMismatch
+        );
+    }
+
+    #[test]
+    fn stale_completion_correlation_and_impossible_frontiers_fail() {
+        let bytes = make_zip(&[("a.txt", b"a"), ("b.txt", b"b")]);
+        let (binding, pending, completed) =
+            reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending)).unwrap();
+        let plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
+        let valid = CompletionRecord {
+            operation_id: binding.operation_id,
+            request_id: plan.request_id,
+            plan_id: plan.plan_id,
+            disposition: CompletionDisposition::Complete,
+            members: complete_states(&completed),
+            findings: Vec::new(),
+        };
+        let mut stale_bytes = encode_completion(&valid, &plan).unwrap();
+        stale_bytes[HEADER_BYTES + 16 + 32] ^= 1;
+        assert_eq!(
+            decode_completion(&stale_bytes, &plan).unwrap_err().kind,
+            RecordErrorKind::BindingMismatch
+        );
+
+        let impossible = CompletionRecord {
+            operation_id: binding.operation_id,
+            request_id: plan.request_id,
+            plan_id: plan.plan_id,
+            disposition: CompletionDisposition::Stopped {
+                verified_members: 0,
+                pending_members: 2,
+            },
+            members: vec![
+                MemberCompletion::Pending,
+                MemberCompletion::Failed {
+                    cause: FindingCode::CrcMismatch,
+                },
+            ],
+            findings: vec![Finding::error(FindingCode::CrcMismatch, "mismatch")],
+        };
+        assert_eq!(
+            encode_completion(&impossible, &plan).unwrap_err().kind,
+            RecordErrorKind::InvalidSemanticState
+        );
+
+        let supervisor_owned = CompletionRecord {
+            operation_id: binding.operation_id,
+            request_id: plan.request_id,
+            plan_id: plan.plan_id,
+            disposition: CompletionDisposition::Stopped {
+                verified_members: 0,
+                pending_members: 2,
+            },
+            members: vec![
+                MemberCompletion::Failed {
+                    cause: FindingCode::MaterializeAudit,
+                },
+                MemberCompletion::Pending,
+            ],
+            findings: vec![Finding::error(
+                FindingCode::MaterializeAudit,
+                "worker cannot claim audit",
+            )],
+        };
+        assert_eq!(
+            encode_completion(&supervisor_owned, &plan)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::InvalidSemanticState
+        );
+    }
+
+    #[test]
+    fn structural_ir_mutation_and_range_overflow_fail_before_encoding() {
+        let bytes = make_zip(&[("z.txt", b"z"), ("a.txt", b"a")]);
+        let (binding, pending, _) = reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+
+        let mut reordered = pending.clone();
+        reordered.members.swap(0, 1);
+        assert_eq!(
+            encode_planning(&ready_plan(binding.clone(), reordered))
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::InvalidSemanticState
+        );
+
+        let mut overflow = pending;
+        overflow.members[0].source_ranges.local_header.offset = u64::MAX;
+        assert_eq!(
+            encode_planning(&ready_plan(binding, overflow))
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::IntegerOverflow
+        );
+    }
+
+    #[test]
+    fn planning_metadata_budget_matches_the_parser_aggregate() {
+        let mut bytes = make_zip(&[("a.txt", b"a")]);
+        add_matching_extra_fields(&mut bytes, &[0x55, 0x78, 0x00, 0x00]);
+        let (binding, pending, _) = reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+        let required = planning_metadata_bytes(&pending).unwrap();
+        let parsed = crate::zip::parse_zip(&bytes, u64::MAX, u64::MAX).unwrap();
+        assert_eq!(required, parsed.metadata_bytes);
+        assert!(pending.members[0]
+            .extra_fields
+            .iter()
+            .any(|extra| extra.site == ExtraSite::Local));
+
+        let mut omitted = pending.clone();
+        omitted.members[0]
+            .extra_fields
+            .retain(|extra| extra.site != ExtraSite::Local);
+        assert_eq!(
+            encode_planning(&ready_plan(binding.clone(), omitted))
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::InvalidSemanticState
+        );
+
+        let mut fabricated = pending.clone();
+        let member = &mut fabricated.members[0];
+        member
+            .extra_fields
+            .retain(|extra| extra.site != ExtraSite::Local);
+        member.source_ranges.local_header.len -= 4;
+        member.source_ranges.compressed_payload.offset -= 4;
+        member.source_ranges.compressed_payload.len += 4;
+        member.declared_comp_size += 4;
+        let understated = planning_metadata_bytes(&fabricated).unwrap();
+        assert_eq!(understated + 4, required);
+        let mut fabricated_binding = binding.clone();
+        fabricated_binding.budget.max_metadata_bytes = understated;
+        let fabricated_record = ready_plan(fabricated_binding.clone(), fabricated);
+        let fabricated_bytes = encode_ready_planning_unchecked(&fabricated_record);
+        assert_eq!(
+            decode_plan(&fabricated_bytes, &fabricated_binding, &bytes)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::InvalidSemanticState
+        );
+
+        let mut relabeled = pending.clone();
+        relabeled.members[0]
+            .extra_fields
+            .iter_mut()
+            .find(|extra| extra.site == ExtraSite::Local)
+            .unwrap()
+            .id ^= 1;
+        let relabeled_bytes = encode_planning(&ready_plan(binding.clone(), relabeled)).unwrap();
+        assert_eq!(
+            decode_plan(&relabeled_bytes, &binding, &bytes)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::InvalidSemanticState
+        );
+
+        let mut exact_binding = binding;
+        exact_binding.budget.max_metadata_bytes = required;
+        let encoded = encode_planning(&ready_plan(exact_binding.clone(), pending.clone())).unwrap();
+        assert!(decode_plan(&encoded, &exact_binding, &bytes).is_ok());
+
+        let mut under_binding = exact_binding.clone();
+        under_binding.budget.max_metadata_bytes = required - 1;
+        assert_eq!(
+            encode_planning(&ready_plan(under_binding.clone(), pending))
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::LimitExceeded
+        );
+
+        let offset = encoded_max_metadata_offset(&exact_binding);
+        assert_eq!(
+            &encoded[offset..offset + 8],
+            required.to_le_bytes().as_slice()
+        );
+        let mut hostile = encoded;
+        hostile[offset..offset + 8].copy_from_slice(&(required - 1).to_le_bytes());
+        assert_eq!(
+            decode_plan(&hostile, &under_binding, &bytes)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::LimitExceeded
+        );
+    }
+
+    #[test]
+    fn absent_and_present_empty_retention_are_distinct_bindings() {
+        let bytes = make_zip(&[("a.txt", b"a")]);
+        let (binding, pending, _) = reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+        let absent = encode_planning(&ready_plan(binding.clone(), pending.clone())).unwrap();
+        let mut present_binding = binding;
+        present_binding.retention = RetentionBinding::from_plan(Some(&RetentionPlan::new(0, 0)));
+        let present = encode_planning(&ready_plan(present_binding.clone(), pending)).unwrap();
+        assert_ne!(absent, present);
+        assert_eq!(
+            decode_plan(&absent, &present_binding, &bytes)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::BindingMismatch
+        );
+        assert!(decode_plan(&present, &present_binding, &bytes).is_ok());
+    }
+}

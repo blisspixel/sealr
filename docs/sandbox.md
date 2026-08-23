@@ -6,6 +6,8 @@ Reduced authority follows the semantic-identity work in Roadmap Step 4. Any publ
 
 The [near-term plan](near-term.md) made the private file-backed `SourceSnapshot` a prerequisite, and that capability has landed. [Worker protocol v1](worker-protocol.md) now defines bounded control and reduced result frames. The first Alpha.6 executable slice is a separate nonsemantic authority bootstrap: pair source and optional stage roles with out-of-band descriptors, validate and close authority, install restrictions before source access, report readiness, then exit and reap without interpreting an archive. This measures the process boundary without forcing v1 into the public semantic API.
 
+The next executable representation slice has also landed as a dormant [private semantic record](semantic-record.md). It binds planning IR and completion verification state without starting a worker or receiving a descriptor. Transporting that record across this sandbox boundary remains future work and requires immutable sealed-blob evidence, clean worker exit and reap, and the same fail-closed distinction between lifecycle failure and archive semantics.
+
 Correctness cannot depend on a kernel sandbox. Path, structure, quota, codec, content, and publication invariants remain mandatory. Process confinement reduces the authority available if that logic is compromised.
 
 ## Current bootstrap evidence

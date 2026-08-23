@@ -216,7 +216,7 @@ let metadata = archive.read_member("package.dist-info/METADATA", 256 * 1024)?;
 
 This path does not reopen the caller path or parse ZIP structure again. Without an explicit retention request, the current implementation opens a range-limited reader over the recorded payload, re-inflates a selected Deflate member, and revalidates it for each call. A path outcome reads from its retained private file; a byte outcome reads from the process-owned copy created when the capability outlives the caller borrow. The next section describes the opt-in path that avoids this repeated work for a small, known member set.
 
-Any future worker integration must preserve these observable contracts; the [Alpha.6 semantic-ownership decision](decisions/0001-alpha6-semantic-ownership.md) records the private experiment and unresolved gates. No public worker option exists yet.
+Any future worker integration must preserve these observable contracts. The first [private semantic-record experiment](semantic-record.md) now exercises pending-IR, completion-frontier, and setup-failure evidence without constructing `VerifiedArchive` or changing a public symbol. Retained-content and isolated later-read parity remain unresolved gates. No public worker option exists yet.
 
 ### Bounded one-pass retention
 
@@ -280,7 +280,7 @@ verified.materialize(destination)?;
 verified.write_evidence(output)?;
 ```
 
-`SourceSnapshot` and `ArchiveIR` landed in Alpha.3 as the ingest object and the inspect/materialize member plan. Alpha.4 added `VerifiedArchive` as the first concrete verified type-state result. Alpha.5 moves path input to a private file-backed snapshot while preserving `apply()` as the compatibility facade. The worker protocol is internal preparation and adds no public caller surface. `AdmittedArchive` and the earlier transition methods remain design notation. Their required property is that every operation consumes one immutable interpretation and no operation reparses the original archive through another parser.
+`SourceSnapshot` and `ArchiveIR` landed in Alpha.3 as the ingest object and the inspect/materialize member plan. Alpha.4 added `VerifiedArchive` as the first concrete verified type-state result. Alpha.5 moves path input to a private file-backed snapshot while preserving `apply()` as the compatibility facade. Worker protocol v1 and the dormant split-phase semantic record are internal preparation and add no public caller surface. `AdmittedArchive` and the earlier transition methods remain design notation. Their required property is that every operation consumes one immutable interpretation and no operation reparses the original archive through another parser.
 
 ### Rust compatibility
 
