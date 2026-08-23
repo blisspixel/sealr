@@ -1,0 +1,148 @@
+use std::ffi::OsStr;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ChildMode {
+    Normal,
+    InsufficientLandlockAbi,
+    RestrictionProbeFailure,
+    ExitAt(FaultPoint),
+}
+
+impl ChildMode {
+    pub(crate) fn argument(self) -> &'static str {
+        match self {
+            Self::Normal => "normal",
+            Self::InsufficientLandlockAbi => "insufficient-landlock-abi",
+            Self::RestrictionProbeFailure => "restriction-probe-failure",
+            Self::ExitAt(point) => point.argument(),
+        }
+    }
+
+    pub(crate) fn parse(argument: &OsStr) -> Option<Self> {
+        let argument = argument.to_str()?;
+        match argument {
+            "normal" => Some(Self::Normal),
+            "insufficient-landlock-abi" => Some(Self::InsufficientLandlockAbi),
+            "restriction-probe-failure" => Some(Self::RestrictionProbeFailure),
+            _ => FaultPoint::parse(argument).map(Self::ExitAt),
+        }
+    }
+
+    pub(crate) fn exit_at(self, point: FaultPoint) {
+        if self == Self::ExitAt(point) {
+            // SAFETY: this is a deliberate conformance-only abrupt exit. It
+            // bypasses destructors so the supervisor must prove process reap
+            // before authorizing fixture cleanup.
+            unsafe { libc::_exit(point.exit_code()) }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[repr(i32)]
+pub(crate) enum FaultPoint {
+    ExecEntry = 1,
+    PeerValidation = 2,
+    InheritedClosure = 3,
+    BootstrapReceive = 4,
+    StageValidation = 5,
+    NoNewPrivs = 6,
+    Landlock = 7,
+    Ready = 8,
+    SourceReceive = 9,
+    SourceValidation = 10,
+    Accepted = 11,
+    Proceed = 12,
+    SourceProbe = 13,
+    OutsideDenial = 14,
+    StageCreate = 15,
+    Result = 16,
+    ExitAck = 17,
+}
+
+impl FaultPoint {
+    pub(crate) const ALL: [Self; 17] = [
+        Self::ExecEntry,
+        Self::PeerValidation,
+        Self::InheritedClosure,
+        Self::BootstrapReceive,
+        Self::StageValidation,
+        Self::NoNewPrivs,
+        Self::Landlock,
+        Self::Ready,
+        Self::SourceReceive,
+        Self::SourceValidation,
+        Self::Accepted,
+        Self::Proceed,
+        Self::SourceProbe,
+        Self::OutsideDenial,
+        Self::StageCreate,
+        Self::Result,
+        Self::ExitAck,
+    ];
+
+    pub(crate) fn argument(self) -> &'static str {
+        match self {
+            Self::ExecEntry => "exit-after-exec-entry",
+            Self::PeerValidation => "exit-after-peer-validation",
+            Self::InheritedClosure => "exit-after-inherited-closure",
+            Self::BootstrapReceive => "exit-after-bootstrap-receive",
+            Self::StageValidation => "exit-after-stage-validation",
+            Self::NoNewPrivs => "exit-after-no-new-privs",
+            Self::Landlock => "exit-after-landlock",
+            Self::Ready => "exit-after-ready",
+            Self::SourceReceive => "exit-after-source-receive",
+            Self::SourceValidation => "exit-after-source-validation",
+            Self::Accepted => "exit-after-accepted",
+            Self::Proceed => "exit-after-proceed",
+            Self::SourceProbe => "exit-after-source-probe",
+            Self::OutsideDenial => "exit-after-outside-denial",
+            Self::StageCreate => "exit-after-stage-create",
+            Self::Result => "exit-after-result",
+            Self::ExitAck => "exit-after-exit-ack",
+        }
+    }
+
+    fn parse(argument: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|point| point.argument() == argument)
+    }
+
+    pub(crate) const fn exit_code(self) -> i32 {
+        100 + self as i32
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::BTreeSet;
+
+    #[test]
+    fn every_child_mode_argument_is_canonical() {
+        for mode in [
+            ChildMode::Normal,
+            ChildMode::InsufficientLandlockAbi,
+            ChildMode::RestrictionProbeFailure,
+        ] {
+            assert_eq!(ChildMode::parse(OsStr::new(mode.argument())), Some(mode));
+        }
+        for point in FaultPoint::ALL {
+            let mode = ChildMode::ExitAt(point);
+            assert_eq!(ChildMode::parse(OsStr::new(mode.argument())), Some(mode));
+        }
+        assert_eq!(ChildMode::parse(OsStr::new("")), None);
+        assert_eq!(ChildMode::parse(OsStr::new("exit-after-unknown")), None);
+    }
+
+    #[test]
+    fn fault_exit_codes_are_nonzero_and_unique() {
+        let codes = FaultPoint::ALL
+            .into_iter()
+            .map(FaultPoint::exit_code)
+            .collect::<BTreeSet<_>>();
+        assert_eq!(codes.len(), FaultPoint::ALL.len());
+        assert!(codes.iter().all(|code| *code > 0 && *code <= 255));
+    }
+}

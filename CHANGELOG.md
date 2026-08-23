@@ -10,16 +10,20 @@ The project is in initial development. Compatibility may change between preview 
 
 - Added protocol v1 result validation against the accepted start request. The validator binds the operation and returned interpretation profile, then enforces the requested member-count, per-member-byte, total-byte, and canonical-path-depth limits with checked aggregate arithmetic.
 - Added deterministic request-drift, aggregate-overflow, and manifest-topology regressions, and routed the request-bound decoder through the pinned fuzz target.
-- Added a repository-only Linux authority-bootstrap conformance tool. Its same-binary child removes inherited authority before and after exec with `close_range`, receives optional stage authority over `SCM_RIGHTS`, hard-requires a fixed Landlock ABI 3 filesystem policy with `no_new_privs`, and receives the read-only source descriptor only after restriction readiness. Native cases cover enforced inspect and stage probes, descriptor and identity rejection, protocol correlation, outside-path denial, exact parent-observed descriptor roles, bounded pidfd termination and reap, and checked post-reap fixture cleanup.
+- Added a repository-only Linux authority-bootstrap conformance tool. Its same-binary child marks inherited authority close-on-exec before exec and closes remaining descriptors with `close_range` at child entry, receives optional stage authority over `SCM_RIGHTS`, hard-requires a fixed Landlock ABI 3 filesystem policy with `no_new_privs`, and receives the read-only source descriptor only after restriction readiness. Native cases cover enforced inspect and stage probes, descriptor and identity rejection, protocol correlation, outside-path denial, exact parent-observed descriptor roles, bounded pidfd termination and reap, and checked post-reap fixture cleanup.
+- Added a direct Landlock ABI-floor query, deterministic injected insufficient-ABI and ABI-probe-failure cases, exact short-data, `MSG_TRUNC`, and `MSG_CTRUNC` source-phase evidence, and 17 point-specific abrupt-exit barriers across the bootstrap lifecycle. A post-exec descriptor probe independently exercises child-entry `close_range`.
+- Added the Alpha.6 semantic-ownership decision. It accepts a private split-phase semantic-record experiment while separating retained-content transfer, isolated non-retained reads, effect ownership, writer lifetime, and helper packaging from any future public activation.
 
 ### Changed
 
 - Split Alpha.6 planning into a nonsemantic Linux authority bootstrap, a consumer-preserving semantic-ownership decision, and supervised execution. The plan now requires writer quiescence before stage audit and keeps protocol v1 byte-compatible and non-runtime.
 - Kept the bootstrap lab outside the library, CLI, operation protocol, receipt schemas, and release archives. It establishes repository conformance evidence, not a claim that archive parsing is confined.
+- Made every post-spawn supervisor exit converge on bounded termination and reap. Cleanup becomes authorized only after reap, executes as a checked operation, and verifies that the fixture root is absent.
 
 ### Fixed
 
 - Protocol manifests now reject a file that is an ancestor of another claimed object, including cases where another lexicographic entry separates the ancestor and descendant.
+- Removed unbounded child waits from pidfd-bind and descriptor-restore failure handling in the authority-bootstrap lab.
 
 ## [0.1.0-alpha.5] - 2026-08-22
 

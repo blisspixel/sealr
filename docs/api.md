@@ -216,6 +216,8 @@ let metadata = archive.read_member("package.dist-info/METADATA", 256 * 1024)?;
 
 This path does not reopen the caller path or parse ZIP structure again. Without an explicit retention request, the current implementation opens a range-limited reader over the recorded payload, re-inflates a selected Deflate member, and revalidates it for each call. A path outcome reads from its retained private file; a byte outcome reads from the process-owned copy created when the capability outlives the caller borrow. The next section describes the opt-in path that avoids this repeated work for a small, known member set.
 
+Any future worker integration must preserve these observable contracts; the [Alpha.6 semantic-ownership decision](decisions/0001-alpha6-semantic-ownership.md) records the private experiment and unresolved gates. No public worker option exists yet.
+
 ### Bounded one-pass retention
 
 Callers that know the small semantic members they will need can request them before verification:
