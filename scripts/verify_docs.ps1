@@ -176,4 +176,28 @@ if (-not $releaseNotes.StartsWith("# sealr $version`n", [StringComparison]::Ordi
     throw "Release notes heading does not match v$version"
 }
 
+$ciWorkflow = Get-Content -Raw -LiteralPath (Join-Path $workspace '.github/workflows/ci.yml')
+$qualityStart = $ciWorkflow.IndexOf("  quality:`n", [StringComparison]::Ordinal)
+$platformStart = $ciWorkflow.IndexOf("  platform:`n", [StringComparison]::Ordinal)
+$zipDiffStart = $ciWorkflow.IndexOf("  zipdiff:`n", [StringComparison]::Ordinal)
+if ($qualityStart -lt 0 -or $platformStart -le $qualityStart -or $zipDiffStart -le $platformStart) {
+    throw 'Could not locate the required quality and platform CI jobs'
+}
+$qualityJob = $ciWorkflow.Substring($qualityStart, $platformStart - $qualityStart)
+$platformJob = $ciWorkflow.Substring($platformStart, $zipDiffStart - $platformStart)
+$semanticPeakCommand = @'
+cargo test --locked --release -p sealr --lib semantic_record::peak_live::completion_reconstruction_peak_live_is_bounded -- --ignored --exact --nocapture --test-threads=1
+'@.Trim()
+foreach ($job in @(
+    @{ Name = 'quality'; Text = $qualityJob; Runner = 'runs-on: ubuntu-latest' }
+    @{ Name = 'platform'; Text = $platformJob; Runner = 'os: [macos-latest, windows-latest]' }
+)) {
+    $normalizedJob = [regex]::Replace($job.Text, '\s+', ' ').Trim()
+    if (-not $job.Text.Contains($job.Runner, [StringComparison]::Ordinal) -or
+        ([regex]::Matches($job.Text, '(?m)^\s*- name: Measure near-limit semantic completion heap\s*$')).Count -ne 1 -or
+        ([regex]::Matches($normalizedJob, [regex]::Escape($semanticPeakCommand))).Count -ne 1) {
+        throw "The $($job.Name) CI job does not contain the exact required semantic peak-live probe"
+    }
+}
+
 Write-Host "Documentation verification passed: $($markdownFiles.Count) Markdown files, $($findingCodes.Count) finding codes."
