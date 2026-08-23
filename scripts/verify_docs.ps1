@@ -200,4 +200,88 @@ foreach ($job in @(
     }
 }
 
+$semanticRecordDoc = Get-Content -Raw -LiteralPath (Join-Path $workspace 'docs/semantic-record.md')
+$shadowV1Path = Join-Path $workspace 'crates/sealr/tests/conformance/semantic-shadow-v1.json'
+$shadowV2Path = Join-Path $workspace 'crates/sealr/tests/conformance/semantic-shadow-v2.json'
+$shadowV1Sha256 = 'b064c6945ca31603914d45a3d18775750bf30ddb667c356eb6d331673a9feb59'
+$shadowV2Sha256 = '9243570b35667aaf9142483d823cb676391e8ba4a90b3594928533a0139b1967'
+foreach ($artifact in @(
+    @{ Name = 'semantic-shadow-v1'; Path = $shadowV1Path; Bytes = 17119; Sha256 = $shadowV1Sha256 }
+    @{ Name = 'semantic-shadow-v2'; Path = $shadowV2Path; Bytes = 19769; Sha256 = $shadowV2Sha256 }
+)) {
+    if (-not [IO.File]::Exists($artifact.Path) -or
+        (Get-Item -LiteralPath $artifact.Path).Length -ne $artifact.Bytes -or
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $artifact.Path).Hash.ToLowerInvariant() -ne $artifact.Sha256) {
+        throw "$($artifact.Name) raw bytes do not match the frozen conformance artifact"
+    }
+}
+
+$shadowV1 = Get-Content -Raw -LiteralPath $shadowV1Path | ConvertFrom-Json
+$shadowV1Cases = @(
+    'store-complete'
+    'deflate-complete'
+    'descriptor-complete'
+    'unknown-magic-terminal'
+    'name-mismatch-terminal'
+    'member-quota-terminal'
+    'crc-mismatch-stopped'
+    'declared-lie-stopped'
+    'invalid-deflate-stopped'
+    'trailing-deflate-stopped'
+    'source-io-stopped'
+    'setup-failure'
+)
+if ($shadowV1.schema -ne 'sealr.semantic-shadow.v1' -or
+    @(Compare-Object $shadowV1Cases @($shadowV1.cases.name) -SyncWindow 0).Count -ne 0) {
+    throw 'semantic-shadow-v1 schema or ordered cases drifted'
+}
+
+$shadowV2 = Get-Content -Raw -LiteralPath $shadowV2Path | ConvertFrom-Json
+$shadowV2Cases = @(
+    'strict-v2-mixed-memory-complete'
+    'strict-v2-mixed-private-file-complete'
+    'same-extra-strict-v1-complete'
+    'same-extra-strict-v2-terminal'
+    'dotdot-terminal'
+    'interleaved-exact-topology-terminal'
+    'interleaved-folded-topology-terminal'
+    'total-quota-exact-complete'
+    'total-quota-one-under-terminal'
+    'ratio-quota-exact-complete'
+    'ratio-quota-one-under-terminal'
+    'covering-inconsistent-terminal'
+)
+if ($shadowV2.schema -ne 'sealr.semantic-shadow.v2' -or
+    $shadowV2.predecessor.schema -ne 'sealr.semantic-shadow.v1' -or
+    $shadowV2.predecessor.path -ne 'crates/sealr/tests/conformance/semantic-shadow-v1.json' -or
+    $shadowV2.predecessor.bytes -ne 17119 -or
+    $shadowV2.predecessor.sha256 -ne $shadowV1Sha256 -or
+    @(Compare-Object @('41414141414141414141414141414141') @($shadowV2.operation_ids) -SyncWindow 0).Count -ne 0 -or
+    @(Compare-Object $shadowV2Cases @($shadowV2.cases.evidence.name) -SyncWindow 0).Count -ne 0) {
+    throw 'semantic-shadow-v2 predecessor, schema, or ordered additions drifted'
+}
+$backendTwins = @($shadowV2.cases | Where-Object { $_.parity_group -eq 'strict-v2-mixed-backends' })
+if ($backendTwins.Count -ne 2 -or
+    @(Compare-Object @('memory-borrowed', 'private-file') @($backendTwins.backend) -SyncWindow 0).Count -ne 0) {
+    throw 'semantic-shadow-v2 must contain exactly one ordered memory/private backend pair'
+}
+foreach ($field in @(
+    'profile_id', 'policy_id', 'policy_sha256', 'requested_effect', 'retention',
+    'finding_code', 'interpretation', 'admission', 'verification', 'effect', 'phase',
+    'cause', 'verified_members', 'pending_members', 'source_sha256', 'request_id', 'plan_id',
+    'pending_ir_sha256', 'final_ir_sha256', 'frontier', 'findings', 'findings_sha256',
+    'planning_frame_sha256', 'completion_frame_sha256'
+)) {
+    $left = ConvertTo-Json -InputObject $backendTwins[0].evidence.$field -Depth 20 -Compress
+    $right = ConvertTo-Json -InputObject $backendTwins[1].evidence.$field -Depth 20 -Compress
+    if ($left -cne $right) {
+        throw "semantic-shadow-v2 backend evidence differs at $field"
+    }
+}
+if (-not $semanticRecordDoc.Contains($shadowV1Sha256, [StringComparison]::Ordinal) -or
+    -not $semanticRecordDoc.Contains($shadowV2Sha256, [StringComparison]::Ordinal) -or
+    -not $semanticRecordDoc.Contains('19,769 bytes', [StringComparison]::Ordinal)) {
+    throw 'docs/semantic-record.md does not pin both shadow artifacts and the v2 byte length'
+}
+
 Write-Host "Documentation verification passed: $($markdownFiles.Count) Markdown files, $($findingCodes.Count) finding codes."

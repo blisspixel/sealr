@@ -98,18 +98,45 @@ Focused deterministic tests cover:
 - pinned plan and completion vector digests;
 - executor rejection of wrong snapshots, terminal plans, materialization, present-empty retention, and injected allocation failure before any parser or payload-verifier call;
 - zero parser calls during execution, successful execution while EOCD reads are poisoned, and one verifier call per planned file rather than per directory;
-- exact executor parity for the 12 manifest cases, plus an overstated end-of-stream size lie and source I/O after a verified prefix;
-- strict-v2 directory and file reconstruction, and byte-identical memory versus private-file completion after the caller source path is removed;
+- exact executor parity for the 12 v1 manifest cases, plus an overstated end-of-stream size lie and source I/O after a verified prefix;
+- a mixed strict-v2 directory, Store file, and Deflate file with the only allowed nonzero flag on a matching data descriptor;
+- byte-identical memory versus private-file planning and completion frames after the caller source path is removed;
+- same-byte strict-v1 admission and strict-v2 extra-field rejection, including cross-profile planning and completion rejection;
 - a middle-member CRC failure with a real trailing Pending member, an unread later payload, and the exact verified and pending counts;
 - exact-cap execution plus one-under planning-terminal controls for member, total, and ratio budgets;
 - ignored-extra payload geometry and destination-setup precedence over an independently CRC-bad payload;
 - rejection of forged member, total, ratio, and overflow quota stops, failed directories, and Deflate-specific failures on Store members.
 
-The committed [`semantic-shadow-v1` manifest](../crates/sealr/tests/conformance/semantic-shadow-v1.json) pins 12 ordered `StrictAsciiV1`, memory-backed cases. Each entry exposes the profile, policy identity and digest, requested effect, and retention state instead of relying only on transitive request correlation. The harness captures the production pending IR after covering and before setup or verification. For executable plans, the source-owning executor now generates the completion frame; terminal and setup cases remain supervisor-owned. The harness compares decoded planning and completion evidence with exact pending and final IR where present, semantic axes, phase and cause, verification counts and frontier, ordered record-owned findings, and source, request, plan, and frame identities. The cases cover Store and Deflate completion, a matching descriptor, unsupported magic, LFH/CDH name disagreement, member quota denial, CRC after a verified prefix, declared-size lie, invalid and trailing Deflate streams, post-planning source I/O, and an existing destination. The setup case pins its deterministic finding signature rather than its path-bearing detail. Unknown manifest fields fail closed. Executor activation did not change the canonical evidence; the manifest SHA-256 remains `b064c6945ca31603914d45a3d18775750bf30ddb667c356eb6d331673a9feb59`.
+### Differential shadow artifacts
+
+The committed [`semantic-shadow-v1` manifest](../crates/sealr/tests/conformance/semantic-shadow-v1.json) pins 12 ordered `StrictAsciiV1`, memory-backed cases. Each entry exposes the profile, policy identity and digest, requested effect, and retention state instead of relying only on transitive request correlation. The harness captures the production pending IR after covering and before setup or verification. For executable plans, the source-owning executor generates the completion frame; terminal and setup cases remain supervisor-owned. The harness compares decoded planning and completion evidence with exact pending and final IR where present, semantic axes, phase and cause, verification counts and frontier, ordered record-owned findings, and source, request, plan, and frame identities. The cases cover Store and Deflate completion, a matching descriptor, unsupported magic, LFH/CDH name disagreement, member quota denial, CRC after a verified prefix, declared-size lie, invalid and trailing Deflate streams, post-planning source I/O, and an existing destination. The setup case pins its deterministic finding signature rather than its path-bearing detail. The file is frozen at 17,119 bytes with SHA-256 `b064c6945ca31603914d45a3d18775750bf30ddb667c356eb6d331673a9feb59`.
+
+The additive [`semantic-shadow-v2` manifest](../crates/sealr/tests/conformance/semantic-shadow-v2.json) names v1 as its predecessor and embeds that exact path, byte length, and digest. The v2 file is 19,769 bytes with SHA-256 `9243570b35667aaf9142483d823cb676391e8ba4a90b3594928533a0139b1967`. Its operation registry contains only the inspect ID exercised by the additions; the predecessor retains its separate materialize setup case. Both files require UTF-8 without a byte-order mark, LF line endings, deterministic two-space JSON, one trailing newline, closed object shapes, exact case order, and raw-byte identity. The v2 name versions only this evidence manifest. Private `SEALRSEM` planning and completion frames remain wire version 1.
+
+V2 contributes these 12 ordered additions:
+
+1. `strict-v2-mixed-memory-complete`
+2. `strict-v2-mixed-private-file-complete`
+3. `same-extra-strict-v1-complete`
+4. `same-extra-strict-v2-terminal`
+5. `dotdot-terminal`
+6. `interleaved-exact-topology-terminal`
+7. `interleaved-folded-topology-terminal`
+8. `total-quota-exact-complete`
+9. `total-quota-one-under-terminal`
+10. `ratio-quota-exact-complete`
+11. `ratio-quota-one-under-terminal`
+12. `covering-inconsistent-terminal`
+
+Every addition declares one or more closed oracle labels. `apply-outcome-parity` compares record-owned fields with the ordinary public `apply()` result. Ready cases additionally compare the pending IR captured at the current post-covering test seam and, when executable, the plan-native completion. Terminal cases construct and decode the corresponding private terminal record from the public outcome. This is not yet a shared production plan seam. The strict-v2 backend pair also declares `backend-semantic-parity`: production byte and path requests confirm their actual memory-borrowed and private-file receipt backends; a separately bound private snapshot outlives removal of the caller path; all evidence fields except the case name match; and the canonical planning and completion frame bytes are identical. Public receipt bytes are not claimed identical because source path, snapshot kind, and dependent view data may differ.
+
+The same extra-field bytes are admitted and executed under strict-v1, where both local and central records remain explicitly Ignored, and rejected under strict-v2 with `zip.extra`. Their profile, request, and plan identities differ. A v1 plan is rejected against the v2 binding, and the v1 completion is rejected against the v2 terminal plan. The topology cases separately pin exact `path.conflict` and ASCII-folded `path.case_fold` when an unrelated sibling separates a file ancestor from its descendant. Total and ratio pairs pin successful exact boundaries as well as planning-terminal one-under denials, without implying runtime quota stops after an accepted Ready plan.
+
+`supervisor-reproduced-terminal` is deliberately separate. The covering case starts from valid strict-v2 IR, changes the supervisor snapshot, proves the same IR cannot decode as Ready, independently reproduces the first `covering.inconsistent` audit finding, and only then accepts an IR-bearing terminal plan. It is not an ordinary reachable `apply()` parity claim. The `pending_ir_sha256` and `final_ir_sha256` fields in both manifests hash the test's Rust JSON serialization for exact differential comparison. They are not the preview layout or content roots and are not public lock identities.
 
 A separate `semantic_records` libFuzzer target uses a hidden, nondefault fuzz-only feature to reach this private boundary. It decodes arbitrary planning and completion bytes, applies up to 128 input-directed mutations per canonical Ready, terminal-admission, Complete, and Stopped frame, requires stable success or error class and error offset on repeated decode, checks exact Ready-plan IR equality with the production pending IR, rejects stale completion correlation, and exercises every valid record kind. A committed dictionary and four seed cases have their paths, lengths, and SHA-256 digests checked by required CI. The verifier binds the complete Cargo manifest, parsed exact bin, hidden driver source, lock checksum, and registry-rooted crates.io libFuzzer package while refusing Cargo configuration, then compares the complete scheduled workflow with a manifest-derived contract covering its weekly trigger, permissions, concurrency, setup, shell programs, resource bounds, dictionaries, and failure artifacts. Executable negative fixtures reject inert TOML remapping, local, patched, or vendored fuzz-engine substitution, manual-only drift, direct weakening, inactive or appended commands, inert artifact evidence, and raw or quoted duplicate last-wins arguments. The target compiles under the pinned fuzz workspace. Clean exact-main on-demand evidence is recorded in the [assurance report](assurance.md#current-evidence); the first scheduled-event run and accumulated scheduled history remain pending.
 
-The manifest establishes zero-difference executor parity only for its executable memory-backed strict-v1 cases. Focused regressions add one strict-v2 mixed directory and file case plus private-file backend parity, but do not establish corpus-wide semantic equivalence, broad strict-v2 or backend parity, an independent implementation, full `VerifiedArchive` equivalence, transport safety, isolation, or runtime-worker parity.
+Together the manifests establish exact equality only for their named fixtures and owned oracle fields. They do not establish corpus-wide semantic equivalence, broad strict-v2 or backend parity, an independent archive interpretation, full `VerifiedArchive` equivalence, worker-computed content authority, transport safety, isolation, or runtime-worker parity.
 
 ### Near-limit completion heap evidence
 
@@ -131,17 +158,16 @@ This is a requested Rust-heap measurement of `decode_completion` against accepte
 
 ## Remaining gates
 
-Before any runtime or public activation, Alpha.6 still requires:
+The first bounded matrix expansion is complete. Continued parity growth beyond these named fixtures remains assurance work, not an activation blocker by itself. Runtime activation still requires:
 
-1. expansion of the pinned matrix across strict-v2, memory and private-file backends, ignored extras, IR-bearing covering terminals, path and topology stops, and size, ratio, and total-budget stops, preserving every discrepancy as a deterministic regression;
-2. closure of the pre-parser authority gate: no process or thread creation, no descendant or stage-permission mutation, per-epoch stalls, raw unknown-ancillary rejection, and repeated native stress;
-3. one real crate-private plan-only seam shared by in-process `apply` and a repository lab, rather than using the test-only planning capture and repeating completed verification;
-4. sealed immutable plan and completion blobs with exact seals, length, digest, expected invocation binding, clean exit, and reap, followed by isolated consumption of the validated plan without structural reparse;
-5. independent content authority that verifies exact file bytes and their source relationship before any worker proposal shapes public semantic state, plus immutable retained-content transfer and original-pass retention semantics;
-6. isolated, caller-bounded non-retained reads with clone, cancellation, crash, and last-owner behavior;
-7. writer quiescence, stage audit, and supervisor-owned publication;
-8. a helper packaging and discovery model that works for both library and CLI consumers;
-9. the first scheduled-event campaign and accumulated clean scheduled history, with every reproducible failure promoted to a deterministic regression.
+1. closure of the pre-parser authority gate: no process or thread creation, no descendant or stage-permission mutation, per-epoch stalls, raw unknown-ancillary rejection, and repeated native stress;
+2. one real crate-private plan-only seam shared by in-process `apply` and a repository lab, rather than using the test-only planning capture and repeating completed verification;
+3. sealed immutable plan and completion blobs with exact seals, length, digest, expected invocation binding, clean exit, and reap, followed by isolated consumption of the validated plan without structural reparse;
+4. independent content authority that verifies exact file bytes and their source relationship before any worker proposal shapes public semantic state, plus immutable retained-content transfer and original-pass retention semantics;
+5. isolated, caller-bounded non-retained reads with clone, cancellation, crash, and last-owner behavior;
+6. writer quiescence, stage audit, and supervisor-owned publication;
+7. a helper packaging and discovery model that works for both library and CLI consumers;
+8. the first scheduled-event campaign and accumulated clean scheduled history, with every reproducible failure promoted to a deterministic regression.
 
 The first honest isolated bridge is Linux-only, repository-only, inspect-only, and without retention or a destination. The supervisor retains the snapshot, expected invocation, accepted plan, replay state, deadlines, lifecycle, and all public semantic merging. After restriction readiness, the worker receives the read-only snapshot and a sealed plan blob. Record validation may read represented structural ranges without invoking the ZIP parser; after plan acceptance, the executor reads only recorded Store or Deflate payload ranges. The worker returns a sealed completion blob, exits cleanly, and is reaped. The supervisor then checks blob seals and length, independently recomputes the digest from the exact kernel-sealed bytes, and treats any worker-reported digest as untrusted metadata before decoding the record against its retained plan. Only after clean exit, reap, and binding-validated, bounded semantic decode may the supervisor retain the result as an untrusted, plan-bound proposal. Correlation, seals, and canonical decoding do not prove that payload processing ran: a file proposal can echo declared size and CRC while supplying an arbitrary content SHA-256. The lab must not translate that proposal into public interpretation, admission, verification, `ArchiveIR`, or `VerifiedArchive` state. This lab may prove isolated plan consumption, but it cannot activate a public worker, construct `VerifiedArchive`, claim complete parser confinement, or close content-authority, retained-content, later-read, materialization, stage-audit, publication, helper-packaging, receipt, macOS, or Windows gates.
 

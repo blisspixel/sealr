@@ -4511,12 +4511,20 @@ mod tests {
     }
 
     fn make_zip_with_method(entries: &[(&str, &[u8])], method: CompressionMethod) -> Vec<u8> {
+        let entries: Vec<_> = entries
+            .iter()
+            .map(|(name, bytes)| (*name, *bytes, method))
+            .collect();
+        make_zip_with_methods(&entries)
+    }
+
+    fn make_zip_with_methods(entries: &[(&str, &[u8], CompressionMethod)]) -> Vec<u8> {
         let mut writer = ZipWriter::new(IoCursor::new(Vec::new()));
-        let options = SimpleFileOptions::default()
-            .compression_method(method)
-            .last_modified_time(DateTime::default())
-            .system(System::Dos);
-        for (name, bytes) in entries {
+        for (name, bytes, method) in entries {
+            let options = SimpleFileOptions::default()
+                .compression_method(*method)
+                .last_modified_time(DateTime::default())
+                .system(System::Dos);
             if name.ends_with('/') {
                 writer.add_directory(*name, options).unwrap();
             } else {
@@ -4620,8 +4628,17 @@ mod tests {
     }
 
     fn add_matching_data_descriptor(bytes: &mut Vec<u8>) {
-        let local = signature_offset(bytes, [0x50, 0x4b, 0x03, 0x04]);
-        let central = signature_offset(bytes, [0x50, 0x4b, 0x01, 0x02]);
+        add_matching_final_data_descriptor_at(bytes, 0);
+    }
+
+    fn add_matching_final_data_descriptor_at(bytes: &mut Vec<u8>, index: usize) {
+        let locals = signature_offsets(bytes, [0x50, 0x4b, 0x03, 0x04]);
+        let centrals = signature_offsets(bytes, [0x50, 0x4b, 0x01, 0x02]);
+        assert_eq!(locals.len(), centrals.len());
+        assert_eq!(index + 1, locals.len());
+        let local = locals[index];
+        let central = centrals[index];
+        let central_start = centrals[0];
         let crc = u32_at(bytes, central + 16);
         let comp = u32_at(bytes, central + 20);
         let uncomp = u32_at(bytes, central + 24);
@@ -4630,7 +4647,7 @@ mod tests {
         descriptor.extend_from_slice(&crc.to_le_bytes());
         descriptor.extend_from_slice(&comp.to_le_bytes());
         descriptor.extend_from_slice(&uncomp.to_le_bytes());
-        bytes.splice(central..central, descriptor);
+        bytes.splice(central_start..central_start, descriptor);
 
         let shifted_central = central + 16;
         let eocd = signature_offset(bytes, [0x50, 0x4b, 0x05, 0x06]);
@@ -4638,7 +4655,7 @@ mod tests {
         let central_flags = u16_at(bytes, shifted_central + 8) | 0x0008;
         put_u16(bytes, local + 6, local_flags);
         put_u16(bytes, shifted_central + 8, central_flags);
-        put_u32(bytes, eocd + 16, u32::try_from(shifted_central).unwrap());
+        put_u32(bytes, eocd + 16, u32::try_from(central_start + 16).unwrap());
     }
 
     fn replace_declared_deflate_payload(bytes: &mut Vec<u8>, replacement: &[u8]) {
@@ -4946,6 +4963,48 @@ mod tests {
         cases: Vec<ShadowEvidence>,
     }
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+    #[serde(rename_all = "kebab-case")]
+    enum ShadowOracle {
+        ApplyOutcomeParity,
+        BackendSemanticParity,
+        SupervisorReproducedTerminal,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+    #[serde(rename_all = "kebab-case")]
+    enum ShadowBackend {
+        MemoryBorrowed,
+        PrivateFile,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+    #[serde(deny_unknown_fields)]
+    struct ShadowPredecessor {
+        schema: String,
+        path: String,
+        bytes: u64,
+        sha256: String,
+    }
+
+    #[derive(Clone, Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+    #[serde(deny_unknown_fields)]
+    struct ShadowCaseV2 {
+        oracles: Vec<ShadowOracle>,
+        backend: ShadowBackend,
+        parity_group: Option<String>,
+        evidence: ShadowEvidence,
+    }
+
+    #[derive(Debug, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+    #[serde(deny_unknown_fields)]
+    struct ShadowManifestV2 {
+        schema: String,
+        predecessor: ShadowPredecessor,
+        operation_ids: Vec<String>,
+        cases: Vec<ShadowCaseV2>,
+    }
+
     struct CompletionArtifact {
         plan: ValidatedPlanningRecord,
         bytes: Vec<u8>,
@@ -5062,19 +5121,91 @@ mod tests {
         expected_completeness: ViewCompleteness,
         finding_code: Option<FindingCode>,
     ) -> (ShadowEvidence, CompletionArtifact) {
-        let profile = ZipInterpretationProfile::StrictAsciiV1;
+        run_completion_shadow_for_backend(
+            name,
+            bytes,
+            ZipInterpretationProfile::StrictAsciiV1,
+            policy,
+            ShadowBackend::MemoryBorrowed,
+            expected_interpretation,
+            expected_admission,
+            expected_verification,
+            expected_effect,
+            expected_completeness,
+            finding_code,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_terminal_shadow(
+        name: &str,
+        bytes: &[u8],
+        policy: &Policy,
+        interpretation: InterpretationStatus,
+        admission: AdmissionStatus,
+        phase: StoppingPhase,
+        finding_code: FindingCode,
+    ) -> ShadowEvidence {
+        run_terminal_shadow_for_profile(
+            name,
+            bytes,
+            ZipInterpretationProfile::StrictAsciiV1,
+            policy,
+            interpretation,
+            admission,
+            phase,
+            finding_code,
+        )
+        .0
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_completion_shadow_for_backend(
+        name: &str,
+        bytes: &[u8],
+        profile: ZipInterpretationProfile,
+        policy: &Policy,
+        backend: ShadowBackend,
+        expected_interpretation: InterpretationStatus,
+        expected_admission: AdmissionStatus,
+        expected_verification: VerificationStatus,
+        expected_effect: EffectStatus,
+        expected_completeness: ViewCompleteness,
+        finding_code: Option<FindingCode>,
+    ) -> (ShadowEvidence, CompletionArtifact) {
         let binding = binding_for(bytes, profile, policy, RequestedEffect::Inspect);
+        let mut source_file = (backend == ShadowBackend::PrivateFile)
+            .then(|| TempShadowFile::new(&format!("{name}-source.zip"), bytes));
+
         let capture = capture_next_planning_boundary();
-        let outcome = apply_with_options(
-            Request {
-                source: Source::Bytes {
-                    path: Some("semantic-shadow.zip"),
-                    data: bytes,
+        let outcome = match backend {
+            ShadowBackend::MemoryBorrowed => apply_with_options(
+                Request {
+                    source: Source::Bytes {
+                        path: Some("semantic-shadow-v2.zip"),
+                        data: bytes,
+                    },
+                    policy,
+                    dest: None,
                 },
-                policy,
-                dest: None,
+                &ApplyOptions::new().with_interpretation_profile(profile),
+            ),
+            ShadowBackend::PrivateFile => apply_with_options(
+                Request {
+                    source: Source::Path(source_file.as_ref().unwrap().path()),
+                    policy,
+                    dest: None,
+                },
+                &ApplyOptions::new().with_interpretation_profile(profile),
+            ),
+        };
+        assert_eq!(
+            outcome.receipt.source_snapshot,
+            match backend {
+                ShadowBackend::MemoryBorrowed => crate::snapshot::SnapshotKind::MemoryBorrowed,
+                ShadowBackend::PrivateFile => crate::snapshot::SnapshotKind::PrivateFile,
             },
-            &ApplyOptions::new().with_interpretation_profile(profile),
+            "{name}"
         );
         let pending = capture.take().expect("case reached the planning boundary");
         assert_outcome(
@@ -5082,13 +5213,26 @@ mod tests {
             &outcome,
             expected_interpretation,
             expected_admission,
-            expected_verification.clone(),
+            expected_verification,
             expected_effect,
             expected_completeness,
             finding_code,
         );
+
         let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending.clone())).unwrap();
-        let plan = decode_plan(&plan_bytes, &binding, bytes).unwrap();
+        let execution_snapshot = match backend {
+            ShadowBackend::MemoryBorrowed => SourceSnapshot::borrowed(None, bytes),
+            ShadowBackend::PrivateFile => SourceSnapshot::private_file_from_path(
+                source_file.as_ref().unwrap().path(),
+                None,
+                binding.budget.max_archive_bytes,
+            )
+            .unwrap(),
+        };
+        if let Some(file) = &mut source_file {
+            file.remove();
+        }
+        let plan = decode_planning(&plan_bytes, &binding, &execution_snapshot).unwrap();
         let correlation_plan = decode_plan(&plan_bytes, &binding, bytes).unwrap();
         assert_eq!(encode_planning(&plan.record).unwrap(), plan_bytes, "{name}");
         assert_eq!(plan.record.binding, binding, "{name}");
@@ -5098,7 +5242,6 @@ mod tests {
         assert_eq!(plan.plan_id, plan_id(&plan_bytes), "{name}");
 
         let final_ir = outcome.archive_ir().expect("completion outcome retains IR");
-        let execution_snapshot = SourceSnapshot::borrowed(None, bytes);
         crate::zip::reset_parse_calls();
         let executed = plan
             .bind_inspect_execution(execution_snapshot)
@@ -5139,22 +5282,22 @@ mod tests {
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn run_terminal_shadow(
+    fn run_terminal_shadow_for_profile(
         name: &str,
         bytes: &[u8],
+        profile: ZipInterpretationProfile,
         policy: &Policy,
         interpretation: InterpretationStatus,
         admission: AdmissionStatus,
         phase: StoppingPhase,
         finding_code: FindingCode,
-    ) -> ShadowEvidence {
-        let profile = ZipInterpretationProfile::StrictAsciiV1;
+    ) -> (ShadowEvidence, ValidatedPlanningRecord) {
         let binding = binding_for(bytes, profile, policy, RequestedEffect::Inspect);
         let capture = capture_next_planning_boundary();
         let outcome = apply_with_options(
             Request {
                 source: Source::Bytes {
-                    path: Some("semantic-shadow-terminal.bin"),
+                    path: Some("semantic-shadow-v2-terminal.bin"),
                     data: bytes,
                 },
                 policy,
@@ -5189,29 +5332,153 @@ mod tests {
             ir: None,
             findings: outcome.view.findings.clone(),
         };
-        let bytes_record = encode_planning(&record).unwrap();
-        let plan = decode_plan(&bytes_record, &binding, bytes).unwrap();
+        let record_bytes = encode_planning(&record).unwrap();
+        let plan = decode_plan(&record_bytes, &binding, bytes).unwrap();
         assert_eq!(
             encode_planning(&plan.record).unwrap(),
-            bytes_record,
+            record_bytes,
             "{name}"
         );
         assert_eq!(plan.record.disposition, record.disposition, "{name}");
         assert_eq!(plan.record.findings, outcome.view.findings, "{name}");
         assert!(plan.record.ir.is_none(), "{name}");
-        assert_eq!(plan.request_id, request_id(&binding).unwrap(), "{name}");
-        assert_eq!(plan.plan_id, plan_id(&bytes_record), "{name}");
-        evidence(
-            name,
-            bytes,
-            &outcome,
-            Some(finding_code),
-            &plan,
-            None,
-            &bytes_record,
-            None,
-            true,
+        (
+            evidence(
+                name,
+                bytes,
+                &outcome,
+                Some(finding_code),
+                &plan,
+                None,
+                &record_bytes,
+                None,
+                true,
+            ),
+            plan,
         )
+    }
+
+    fn run_covering_terminal_shadow_v2(name: &str, policy: &Policy) -> ShadowEvidence {
+        let profile = ZipInterpretationProfile::StrictAsciiV2;
+        let valid_bytes = make_zip(&[("covering.txt", b"covering")]);
+        let (_, mut retained_ir, _) = reference_with_policy(&valid_bytes, profile, policy);
+        let mut bytes = valid_bytes;
+        let eocd_offset = usize::try_from(retained_ir.covering.eocd.offset).unwrap();
+        bytes[eocd_offset] ^= 0xff;
+
+        let binding = binding_for(&bytes, profile, policy, RequestedEffect::Inspect);
+        retained_ir.source_digest = SourceDigest::available(hex_32(&binding.source_sha256));
+        let ready_bytes =
+            encode_planning(&ready_plan(binding.clone(), retained_ir.clone())).unwrap();
+        assert_eq!(
+            decode_plan(&ready_bytes, &binding, &bytes)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::InvalidSemanticState,
+            "{name}"
+        );
+
+        let snapshot = SourceSnapshot::borrowed(None, &bytes);
+        let finding = audit_covering(&snapshot, &retained_ir).unwrap_err();
+        assert_eq!(finding.code, FindingCode::CoveringInconsistent, "{name}");
+        let record = PlanningRecord {
+            binding: binding.clone(),
+            disposition: PlanningDisposition::Terminal(TerminalPlanningAxes {
+                interpretation: InterpretationStatus::Malformed,
+                admission: AdmissionStatus::Denied,
+                verification: VerificationStatus::StructureOnly,
+                view_completeness: ViewCompleteness::Partial {
+                    phase: StoppingPhase::Structure,
+                    cause: FindingCode::CoveringInconsistent.as_str().to_owned(),
+                },
+            }),
+            ir: Some(retained_ir.clone()),
+            findings: vec![finding],
+        };
+        let record_bytes = encode_planning(&record).unwrap();
+        let plan = decode_planning(&record_bytes, &binding, &snapshot).unwrap();
+        assert_eq!(
+            encode_planning(&plan.record).unwrap(),
+            record_bytes,
+            "{name}"
+        );
+        assert_eq!(plan.record.disposition, record.disposition, "{name}");
+        assert_eq!(plan.record.findings, record.findings, "{name}");
+        assert_ir_eq(plan.record.ir.as_ref().unwrap(), &retained_ir);
+
+        ShadowEvidence {
+            name: name.to_owned(),
+            profile_id: binding.profile.id().to_owned(),
+            policy_id: binding.policy_id.clone(),
+            policy_sha256: hex_32(&binding.policy_sha256),
+            requested_effect: "inspect".to_owned(),
+            retention: "none".to_owned(),
+            finding_code: Some(FindingCode::CoveringInconsistent.as_str().to_owned()),
+            interpretation: "malformed".to_owned(),
+            admission: "denied".to_owned(),
+            verification: "structure-only".to_owned(),
+            effect: "not-requested".to_owned(),
+            phase: Some("structure".to_owned()),
+            cause: Some(FindingCode::CoveringInconsistent.as_str().to_owned()),
+            verified_members: None,
+            pending_members: None,
+            source_sha256: hex_32(&binding.source_sha256),
+            request_id: hex_32(&plan.request_id),
+            plan_id: hex_32(&plan.plan_id),
+            pending_ir_sha256: Some(ir_digest(&retained_ir)),
+            final_ir_sha256: None,
+            frontier: frontier(&retained_ir),
+            findings: plan
+                .record
+                .findings
+                .iter()
+                .map(|finding| FindingSignature {
+                    severity: enum_name(&finding.severity),
+                    code: finding.code.as_str().to_owned(),
+                    member: finding.member.clone(),
+                })
+                .collect(),
+            findings_sha256: Some(bytes_digest(
+                &serde_json::to_vec(&plan.record.findings).unwrap(),
+            )),
+            planning_frame_sha256: bytes_digest(&record_bytes),
+            completion_frame_sha256: None,
+        }
+    }
+
+    struct TempShadowFile {
+        path: PathBuf,
+        present: bool,
+    }
+
+    impl TempShadowFile {
+        fn new(label: &str, bytes: &[u8]) -> Self {
+            let path = temp_shadow_dest(label);
+            fs::write(&path, bytes).unwrap();
+            Self {
+                path,
+                present: true,
+            }
+        }
+
+        fn path(&self) -> &std::path::Path {
+            &self.path
+        }
+
+        fn remove(&mut self) {
+            if self.present {
+                fs::remove_file(&self.path).unwrap();
+                self.present = false;
+            }
+        }
+    }
+
+    impl Drop for TempShadowFile {
+        fn drop(&mut self) {
+            if self.present {
+                let _ = fs::remove_file(&self.path);
+            }
+        }
     }
 
     fn temp_shadow_dest(label: &str) -> PathBuf {
@@ -5549,6 +5816,11 @@ mod tests {
         );
 
         let manifest_json = include_str!("../tests/conformance/semantic-shadow-v1.json");
+        assert_eq!(manifest_json.len(), 17_119);
+        assert_eq!(
+            bytes_digest(manifest_json.as_bytes()),
+            "b064c6945ca31603914d45a3d18775750bf30ddb667c356eb6d331673a9feb59"
+        );
         let manifest: ShadowManifest = serde_json::from_str(manifest_json).unwrap();
         let unknown_field =
             manifest_json.replacen("\"schema\":", "\"unexpected\": true,\n  \"schema\":", 1);
@@ -5559,6 +5831,421 @@ mod tests {
             vec![hex_bytes(&[0x41; 16]), hex_bytes(&[0x52; 16])]
         );
         assert_eq!(manifest.cases, cases);
+    }
+
+    #[test]
+    fn semantic_shadow_v2_additions_match_owned_oracles() {
+        let default_policy = Policy::default_v1();
+        let mut cases = Vec::new();
+        let case = |evidence: ShadowEvidence,
+                    oracles: Vec<ShadowOracle>,
+                    backend: ShadowBackend,
+                    parity_group: Option<&str>| ShadowCaseV2 {
+            oracles,
+            backend,
+            parity_group: parity_group.map(str::to_owned),
+            evidence,
+        };
+
+        let mut mixed = make_zip_with_methods(&[
+            ("mixed/", b"", CompressionMethod::Stored),
+            ("mixed/stored.txt", b"stored", CompressionMethod::Stored),
+            (
+                "mixed/deflated.txt",
+                b"deflated payload",
+                CompressionMethod::Deflated,
+            ),
+        ]);
+        add_matching_final_data_descriptor_at(&mut mixed, 2);
+        let (mixed_memory, mixed_memory_artifact) = run_completion_shadow_for_backend(
+            "strict-v2-mixed-memory-complete",
+            &mixed,
+            ZipInterpretationProfile::StrictAsciiV2,
+            &default_policy,
+            ShadowBackend::MemoryBorrowed,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Admitted,
+            VerificationStatus::Complete,
+            EffectStatus::NotRequested,
+            ViewCompleteness::Complete,
+            None,
+        );
+        let (mixed_private, mixed_private_artifact) = run_completion_shadow_for_backend(
+            "strict-v2-mixed-private-file-complete",
+            &mixed,
+            ZipInterpretationProfile::StrictAsciiV2,
+            &default_policy,
+            ShadowBackend::PrivateFile,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Admitted,
+            VerificationStatus::Complete,
+            EffectStatus::NotRequested,
+            ViewCompleteness::Complete,
+            None,
+        );
+        let pending = mixed_memory_artifact.plan.record.ir.as_ref().unwrap();
+        assert_eq!(
+            pending
+                .members
+                .iter()
+                .map(|member| member.kind)
+                .collect::<Vec<_>>(),
+            vec![MemberKind::Directory, MemberKind::File, MemberKind::File]
+        );
+        assert_eq!(
+            pending
+                .members
+                .iter()
+                .map(|member| member.method)
+                .collect::<Vec<_>>(),
+            vec![0, 0, 8]
+        );
+        assert_eq!(
+            pending
+                .members
+                .iter()
+                .map(|member| member.flags)
+                .collect::<Vec<_>>(),
+            vec![0, 0, 0x0008]
+        );
+        let mut normalized_private = mixed_private.clone();
+        normalized_private.name = mixed_memory.name.clone();
+        assert_eq!(mixed_memory, normalized_private);
+        assert_eq!(
+            encode_planning(&mixed_memory_artifact.plan.record).unwrap(),
+            encode_planning(&mixed_private_artifact.plan.record).unwrap()
+        );
+        assert_eq!(mixed_memory_artifact.bytes, mixed_private_artifact.bytes);
+        cases.push(case(
+            mixed_memory,
+            vec![
+                ShadowOracle::ApplyOutcomeParity,
+                ShadowOracle::BackendSemanticParity,
+            ],
+            ShadowBackend::MemoryBorrowed,
+            Some("strict-v2-mixed-backends"),
+        ));
+        cases.push(case(
+            mixed_private,
+            vec![
+                ShadowOracle::ApplyOutcomeParity,
+                ShadowOracle::BackendSemanticParity,
+            ],
+            ShadowBackend::PrivateFile,
+            Some("strict-v2-mixed-backends"),
+        ));
+
+        let mut extra = make_zip(&[("extra.txt", b"content")]);
+        add_matching_extra_fields(&mut extra, &[0x55, 0x78, 0x00, 0x00]);
+        let (extra_v1, extra_v1_artifact) = run_completion_shadow_for_backend(
+            "same-extra-strict-v1-complete",
+            &extra,
+            ZipInterpretationProfile::StrictAsciiV1,
+            &default_policy,
+            ShadowBackend::MemoryBorrowed,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Admitted,
+            VerificationStatus::Complete,
+            EffectStatus::NotRequested,
+            ViewCompleteness::Complete,
+            None,
+        );
+        let extra_ir = extra_v1_artifact.plan.record.ir.as_ref().unwrap();
+        assert_eq!(extra_ir.members[0].extra_fields.len(), 2);
+        assert!(extra_ir.members[0]
+            .extra_fields
+            .iter()
+            .all(|extra| extra.disposition == ExtraDisposition::Ignored));
+        assert!(extra_ir.members[0]
+            .extra_fields
+            .iter()
+            .any(|extra| extra.site == ExtraSite::Local));
+        assert!(extra_ir.members[0]
+            .extra_fields
+            .iter()
+            .any(|extra| extra.site == ExtraSite::Central));
+        let (extra_v2, extra_v2_plan) = run_terminal_shadow_for_profile(
+            "same-extra-strict-v2-terminal",
+            &extra,
+            ZipInterpretationProfile::StrictAsciiV2,
+            &default_policy,
+            InterpretationStatus::Malformed,
+            AdmissionStatus::NotEvaluated,
+            StoppingPhase::Structure,
+            FindingCode::ZipExtra,
+        );
+        assert_eq!(extra_v1.source_sha256, extra_v2.source_sha256);
+        assert_ne!(extra_v1.profile_id, extra_v2.profile_id);
+        assert_ne!(extra_v1.request_id, extra_v2.request_id);
+        assert_ne!(extra_v1.plan_id, extra_v2.plan_id);
+        let v1_plan_bytes = encode_planning(&extra_v1_artifact.plan.record).unwrap();
+        let v2_binding = binding_for(
+            &extra,
+            ZipInterpretationProfile::StrictAsciiV2,
+            &default_policy,
+            RequestedEffect::Inspect,
+        );
+        assert_eq!(
+            decode_plan(&v1_plan_bytes, &v2_binding, &extra)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::BindingMismatch
+        );
+        assert_eq!(
+            decode_completion(&extra_v1_artifact.bytes, &extra_v2_plan)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::BindingMismatch
+        );
+        cases.push(case(
+            extra_v1,
+            vec![ShadowOracle::ApplyOutcomeParity],
+            ShadowBackend::MemoryBorrowed,
+            Some("same-extra-profile-differential"),
+        ));
+        cases.push(case(
+            extra_v2,
+            vec![ShadowOracle::ApplyOutcomeParity],
+            ShadowBackend::MemoryBorrowed,
+            Some("same-extra-profile-differential"),
+        ));
+
+        let (dotdot, _) = run_terminal_shadow_for_profile(
+            "dotdot-terminal",
+            &make_zip(&[("../outside.txt", b"nope")]),
+            ZipInterpretationProfile::StrictAsciiV2,
+            &default_policy,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Denied,
+            StoppingPhase::Admission,
+            FindingCode::PathDotDot,
+        );
+        cases.push(case(
+            dotdot,
+            vec![ShadowOracle::ApplyOutcomeParity],
+            ShadowBackend::MemoryBorrowed,
+            None,
+        ));
+
+        let (exact_topology, _) = run_terminal_shadow_for_profile(
+            "interleaved-exact-topology-terminal",
+            &make_zip(&[("a", b"file"), ("a-foo", b"sibling"), ("a/child", b"child")]),
+            ZipInterpretationProfile::StrictAsciiV2,
+            &default_policy,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Denied,
+            StoppingPhase::Admission,
+            FindingCode::PathConflict,
+        );
+        cases.push(case(
+            exact_topology,
+            vec![ShadowOracle::ApplyOutcomeParity],
+            ShadowBackend::MemoryBorrowed,
+            None,
+        ));
+
+        let (folded_topology, _) = run_terminal_shadow_for_profile(
+            "interleaved-folded-topology-terminal",
+            &make_zip(&[("A", b"file"), ("a-foo", b"sibling"), ("a/child", b"child")]),
+            ZipInterpretationProfile::StrictAsciiV2,
+            &default_policy,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Denied,
+            StoppingPhase::Admission,
+            FindingCode::PathCaseFold,
+        );
+        cases.push(case(
+            folded_topology,
+            vec![ShadowOracle::ApplyOutcomeParity],
+            ShadowBackend::MemoryBorrowed,
+            None,
+        ));
+
+        let total_bytes = make_zip(&[("five.bin", b"12345"), ("six.bin", b"123456")]);
+        let mut total_exact_policy = default_policy.clone();
+        total_exact_policy.max_total_bytes = 11;
+        total_exact_policy.max_ratio = None;
+        let (total_exact, _) = run_completion_shadow_for_backend(
+            "total-quota-exact-complete",
+            &total_bytes,
+            ZipInterpretationProfile::StrictAsciiV2,
+            &total_exact_policy,
+            ShadowBackend::MemoryBorrowed,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Admitted,
+            VerificationStatus::Complete,
+            EffectStatus::NotRequested,
+            ViewCompleteness::Complete,
+            None,
+        );
+        let mut total_under_policy = total_exact_policy.clone();
+        total_under_policy.max_total_bytes = 10;
+        let (total_under, _) = run_terminal_shadow_for_profile(
+            "total-quota-one-under-terminal",
+            &total_bytes,
+            ZipInterpretationProfile::StrictAsciiV2,
+            &total_under_policy,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Denied,
+            StoppingPhase::Admission,
+            FindingCode::QuotaTotal,
+        );
+        cases.push(case(
+            total_exact,
+            vec![ShadowOracle::ApplyOutcomeParity],
+            ShadowBackend::MemoryBorrowed,
+            Some("total-quota-boundary"),
+        ));
+        cases.push(case(
+            total_under,
+            vec![ShadowOracle::ApplyOutcomeParity],
+            ShadowBackend::MemoryBorrowed,
+            Some("total-quota-boundary"),
+        ));
+
+        let ratio_payload = vec![b'x'; 4096];
+        let ratio_bytes = make_zip_with_method(
+            &[("ratio.bin", ratio_payload.as_slice())],
+            CompressionMethod::Deflated,
+        );
+        let central = signature_offset(&ratio_bytes, [0x50, 0x4b, 0x01, 0x02]);
+        let declared_compressed = u64::from(u32_at(&ratio_bytes, central + 20));
+        let declared_uncompressed = u64::from(u32_at(&ratio_bytes, central + 24));
+        let exact_ratio = declared_uncompressed.div_ceil(declared_compressed);
+        assert!(exact_ratio > 0);
+        let mut ratio_exact_policy = default_policy.clone();
+        ratio_exact_policy.max_ratio = Some(exact_ratio);
+        let (ratio_exact, _) = run_completion_shadow_for_backend(
+            "ratio-quota-exact-complete",
+            &ratio_bytes,
+            ZipInterpretationProfile::StrictAsciiV2,
+            &ratio_exact_policy,
+            ShadowBackend::MemoryBorrowed,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Admitted,
+            VerificationStatus::Complete,
+            EffectStatus::NotRequested,
+            ViewCompleteness::Complete,
+            None,
+        );
+        let mut ratio_under_policy = ratio_exact_policy.clone();
+        ratio_under_policy.max_ratio = Some(exact_ratio - 1);
+        let (ratio_under, _) = run_terminal_shadow_for_profile(
+            "ratio-quota-one-under-terminal",
+            &ratio_bytes,
+            ZipInterpretationProfile::StrictAsciiV2,
+            &ratio_under_policy,
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Denied,
+            StoppingPhase::Admission,
+            FindingCode::QuotaRatio,
+        );
+        cases.push(case(
+            ratio_exact,
+            vec![ShadowOracle::ApplyOutcomeParity],
+            ShadowBackend::MemoryBorrowed,
+            Some("ratio-quota-boundary"),
+        ));
+        cases.push(case(
+            ratio_under,
+            vec![ShadowOracle::ApplyOutcomeParity],
+            ShadowBackend::MemoryBorrowed,
+            Some("ratio-quota-boundary"),
+        ));
+
+        cases.push(case(
+            run_covering_terminal_shadow_v2("covering-inconsistent-terminal", &default_policy),
+            vec![ShadowOracle::SupervisorReproducedTerminal],
+            ShadowBackend::MemoryBorrowed,
+            None,
+        ));
+
+        let expected_names = [
+            "strict-v2-mixed-memory-complete",
+            "strict-v2-mixed-private-file-complete",
+            "same-extra-strict-v1-complete",
+            "same-extra-strict-v2-terminal",
+            "dotdot-terminal",
+            "interleaved-exact-topology-terminal",
+            "interleaved-folded-topology-terminal",
+            "total-quota-exact-complete",
+            "total-quota-one-under-terminal",
+            "ratio-quota-exact-complete",
+            "ratio-quota-one-under-terminal",
+            "covering-inconsistent-terminal",
+        ];
+        assert_eq!(cases.len(), expected_names.len());
+        assert_eq!(
+            cases
+                .iter()
+                .map(|case| case.evidence.name.as_str())
+                .collect::<Vec<_>>(),
+            expected_names
+        );
+        let mut unique_names = std::collections::HashSet::new();
+        assert!(cases
+            .iter()
+            .all(|case| unique_names.insert(case.evidence.name.as_str())));
+        let backend_twins: Vec<_> = cases
+            .iter()
+            .filter(|case| case.parity_group.as_deref() == Some("strict-v2-mixed-backends"))
+            .collect();
+        assert_eq!(backend_twins.len(), 2);
+        assert_ne!(backend_twins[0].backend, backend_twins[1].backend);
+
+        let v1_bytes = include_bytes!("../tests/conformance/semantic-shadow-v1.json");
+        let expected = ShadowManifestV2 {
+            schema: "sealr.semantic-shadow.v2".to_owned(),
+            predecessor: ShadowPredecessor {
+                schema: "sealr.semantic-shadow.v1".to_owned(),
+                path: "crates/sealr/tests/conformance/semantic-shadow-v1.json".to_owned(),
+                bytes: u64::try_from(v1_bytes.len()).unwrap(),
+                sha256: bytes_digest(v1_bytes),
+            },
+            operation_ids: vec![hex_bytes(&[0x41; 16])],
+            cases,
+        };
+        let manifest_json = include_str!("../tests/conformance/semantic-shadow-v2.json");
+        assert_eq!(manifest_json.len(), 19_769);
+        assert_eq!(
+            bytes_digest(manifest_json.as_bytes()),
+            "9243570b35667aaf9142483d823cb676391e8ba4a90b3594928533a0139b1967"
+        );
+        let manifest: ShadowManifestV2 = serde_json::from_str(manifest_json).unwrap();
+        if manifest != expected {
+            panic!(
+                "semantic-shadow-v2.json differs from generated evidence:\n{}",
+                serde_json::to_string_pretty(&expected).unwrap()
+            );
+        }
+        assert_eq!(
+            manifest_json,
+            format!("{}\n", serde_json::to_string_pretty(&manifest).unwrap())
+        );
+        assert!(!manifest_json.starts_with('\u{feff}'));
+        assert!(!manifest_json.contains('\r'));
+        assert!(!manifest_json.ends_with("\n\n"));
+
+        for unknown in [
+            manifest_json.replacen("\"schema\":", "\"unexpected\": true,\n  \"schema\":", 1),
+            manifest_json.replacen(
+                "\"predecessor\": {",
+                "\"predecessor\": {\n    \"unexpected\": true,",
+                1,
+            ),
+            manifest_json.replacen(
+                "\"oracles\": [",
+                "\"unexpected\": true,\n      \"oracles\": [",
+                1,
+            ),
+            manifest_json.replacen(
+                "\"evidence\": {",
+                "\"evidence\": {\n        \"unexpected\": true,",
+                1,
+            ),
+        ] {
+            assert!(serde_json::from_str::<ShadowManifestV2>(&unknown).is_err());
+        }
     }
 
     #[test]
