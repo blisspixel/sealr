@@ -60,6 +60,8 @@ The bounded source is a named `SourceSnapshot`: path inputs become Sealr-owned p
 
 Current main also implements the non-published [worker protocol v1](worker-protocol.md) codec. Its start frame binds one operation to a source digest, selected profile, policy, resource limits, and out-of-band capability slots. Its reduced result is correlated and canonical, and the request-bound validator enforces the returned profile, member count, file sizes, aggregate size, and path depth against the accepted start request. The result does not echo the source or policy digest and cannot reconstruct `ArchiveIR` or `VerifiedArchive`, so it is not complete invocation or public-capability binding. No process boundary calls it yet, and it does not alter the current in-process trust boundary.
 
+Current main also contains a separate repository-only Linux authority-bootstrap lab. It proves a private same-binary process boundary with `SOCK_SEQPACKET`, `SCM_RIGHTS`, inherited-descriptor closure, fixed Landlock ABI 3 enforcement before source transfer, procfs descriptor observation, and pidfd-backed reap. It has no archive-parser dependency, does not use operation protocol v1, is absent from release archives, and does not alter the in-process product trust boundary.
+
 ## Target semantic pipeline
 
 The next architecture is centered on one canonical intermediate representation:

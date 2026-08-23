@@ -1,12 +1,26 @@
 # Reduced-authority execution
 
-> Target design. The current repository has a bounded worker-protocol codec but no process sandbox, worker process, mount command, or projected filesystem. Current receipts report `kernel_jail: unavailable`. The parser, verifier, and materializer still run in the caller's process.
+> Target design with one repository-only executable conformance slice. The shipped library and CLI still have no process sandbox, worker execution path, mount command, or projected filesystem. Current receipts report `kernel_jail: unavailable`, and the parser, verifier, and materializer still run in the caller's process.
 
 Reduced authority follows the semantic-identity work in Roadmap Step 4. Any public worker path must preserve the canonical `ArchiveIR`, the retained snapshot relationship, and the bounded `VerifiedArchive` capability; it must not create a CLI-only second meaning. Protocol v1 does not yet carry enough information to do that.
 
 The [near-term plan](near-term.md) made the private file-backed `SourceSnapshot` a prerequisite, and that capability has landed. [Worker protocol v1](worker-protocol.md) now defines bounded control and reduced result frames. The first Alpha.6 executable slice is a separate nonsemantic authority bootstrap: pair source and optional stage roles with out-of-band descriptors, validate and close authority, install restrictions before source access, report readiness, then exit and reap without interpreting an archive. This measures the process boundary without forcing v1 into the public semantic API.
 
 Correctness cannot depend on a kernel sandbox. Path, structure, quota, codec, content, and publication invariants remain mandatory. Process confinement reduces the authority available if that logic is compromised.
+
+## Current bootstrap evidence
+
+`sealr-worker-bootstrap-lab` is a non-published workspace tool and is absent from native release archives. It uses a private 96-byte protocol over `SOCK_SEQPACKET`, passes descriptors with `SCM_RIGHTS`, rejects truncated data or ancillary control, and receives them close-on-exec. A minimal pre-exec hook marks unrelated descriptors close-on-exec. The child is bound to its expected parent, verifies the Unix sequenced-packet control peer and credential settings, repeats closure above the standard streams with `close_range(CLOSE_RANGE_UNSHARE)`, retains standard input as the control channel, and keeps standard output and error attached to inert `/dev/null` objects so capabilities cannot reuse those conventional descriptor numbers.
+
+The optional synthetic stage arrives first. After validating its identity, owner, mode, and type, the child sets `no_new_privs`, handles every filesystem right in a fixed Landlock ABI 3 policy, and grants only `WRITE_FILE`, `MAKE_DIR`, and `MAKE_REG` beneath that stage. It then reports correlated readiness. The synthetic read-only source is transferred only after the supervisor observes readiness, so the child cannot read source content before restriction because it does not possess the source capability. The supervisor also observes the exact child descriptor set through procfs while the child is paused.
+
+The conformance command exercises source-only and staged success, outside and sibling denial, stage-local creation, writable and nonregular sources, wrong lengths and identities, missing or injected authority, operation mismatch, extra source descriptors, and a deadline that kills and reaps through pidfd before checked cleanup. The parent observes source and stage descriptor identity and access state while the child is paused. Required Linux CI runs this command in the existing `CI` workflow:
+
+```text
+cargo run --locked --release -p sealr-worker-bootstrap-lab -- conformance
+```
+
+This evidence is not an archive receipt and does not show that parsing ran confined. The lab has no archive-parser dependency, changes no public API or CLI command, and does not use operation protocol v1. It does not prevent child process creation, permission or ACL mutation, networking, IPC, CPU or memory exhaustion, or same-user interference. Those controls, deterministic setup-failure seams, complete semantic ownership, writer quiescence, stage audit, and supervisor-owned publication remain required before the shipped product can claim reduced-authority execution.
 
 ## Target supervisor and worker
 

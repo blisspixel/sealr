@@ -1,0 +1,23 @@
+[package]
+name = "sealr-worker-bootstrap-lab"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Repository-only Linux authority-bootstrap conformance lab"
+publish = false
+
+[[bin]]
+name = "sealr-worker-bootstrap-lab"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+getrandom.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+landlock = "0.4.7"
+libc.workspace = true
+rustix = { version = "1.1.4", features = ["fs", "net", "process", "thread"] }
