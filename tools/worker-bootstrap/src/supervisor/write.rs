@@ -3,7 +3,7 @@ use super::{
     observe_completed_child, observe_plan_accepted_child, observe_restricted_child,
     random_operation_id, require_no_supervisor_children, source_bytes, source_identity,
     spawn_child, supervisor_descriptor_count, transport_until, AuthorityEpoch, ChildBoundary,
-    EpochDeadline, Fixture, SOURCE_MEMBER_COUNT,
+    EpochDeadline, Fixture, SOURCE_MEMBER_COUNT, SOURCE_RETAINED_BYTES,
 };
 use crate::fault::{ChildMode, FaultPoint, StallPoint};
 use crate::frame::{Frame, Kind};
@@ -26,6 +26,9 @@ struct ReapedWriter {
     planning: Vec<u8>,
     completion: OwnedFd,
     completion_len: u64,
+    retained: OwnedFd,
+    retained_len: u64,
+    retention: sealr::__worker_lab::InspectRetentionRequest,
 }
 
 struct AuthorizedWriter {
@@ -74,14 +77,21 @@ impl ReapedWriter {
     ) -> Result<AuthorizedWriter, Box<dyn std::error::Error>> {
         let completion =
             sealed::validate(&self.completion, BlobRole::Completion, self.completion_len)?;
-        let manifest = sealr::__worker_lab::authorize_materialize_execution(
-            source.try_clone()?,
-            source_len,
-            operation_id,
-            &self.planning,
-            completion.bytes(),
-        )
-        .map_err(|error| io::Error::other(format!("authorizing materialized stage: {error}")))?;
+        let retained =
+            sealed::validate(&self.retained, BlobRole::RetainedContent, self.retained_len)?;
+        let (manifest, retention_evidence) =
+            sealr::__worker_lab::authorize_materialize_retained_execution(
+                source.try_clone()?,
+                source_len,
+                operation_id,
+                &self.planning,
+                completion.bytes(),
+                retained.bytes(),
+                &self.retention,
+            )
+            .map_err(|error| {
+                io::Error::other(format!("authorizing materialized stage: {error}"))
+            })?;
         let evidence = manifest.evidence();
         if !evidence.complete
             || evidence.member_count != SOURCE_MEMBER_COUNT
@@ -89,6 +99,15 @@ impl ReapedWriter {
         {
             return Err(io::Error::other(format!(
                 "materialization completion evidence is incomplete: {evidence:?}"
+            ))
+            .into());
+        }
+        if retention_evidence.requested_paths != 2
+            || retention_evidence.retained_members != 2
+            || retention_evidence.retained_bytes != SOURCE_RETAINED_BYTES
+        {
+            return Err(io::Error::other(format!(
+                "materialization retention evidence is incomplete: {retention_evidence:?}"
             ))
             .into());
         }
@@ -242,8 +261,11 @@ fn run_case(
         .map_err(|error| io::Error::other(format!("cloning writer stage: {error}")))?;
     let stage_values = descriptor_identity(&stage_descriptor)?;
     let source_values = source_identity(&fixture.source)?;
-    let planning = sealr::__worker_lab::plan_materialize(source_bytes(), operation_id)
-        .map_err(|error| io::Error::other(format!("planning materialization: {error}")))?;
+    let retention = crate::semantic_retention_request()
+        .map_err(|error| io::Error::other(format!("building writer retention plan: {error}")))?;
+    let planning =
+        sealr::__worker_lab::plan_materialize_retaining(source_bytes(), operation_id, &retention)
+            .map_err(|error| io::Error::other(format!("planning materialization: {error}")))?;
     let plan_descriptor = sealed::create(BlobRole::Planning, &planning)?;
     let plan_total_len = sealed::total_len(planning.len())
         .ok_or("materialization planning record is outside the sealed-blob bound")?;
@@ -490,9 +512,11 @@ fn run_case(
         planning,
         completion: completion_descriptor,
         completion_len: result.values[0],
+        retained: retained_descriptor,
+        retained_len: result.values[1],
+        retention,
     };
     drop(active);
-    drop(retained_descriptor);
 
     if case == WriterCase::CleanupFailure {
         let _guard = sealr::__worker_lab::inject_worker_lab_cleanup_failures(1);

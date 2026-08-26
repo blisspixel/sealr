@@ -82,22 +82,7 @@ impl ValidatedPlanningRecord {
                 "materialization planning cannot enter inspect execution",
             ));
         }
-        if let RetentionBinding::Plan {
-            max_member_bytes,
-            max_total_bytes,
-            ..
-        } = &self.record.binding.retention
-        {
-            if *max_member_bytes > retained_content::MAX_TRANSFER_CONTENT_BYTES as u64
-                || *max_total_bytes > retained_content::MAX_TRANSFER_CONTENT_BYTES as u64
-            {
-                return Err(RecordError::new(
-                    RecordErrorKind::LimitExceeded,
-                    0,
-                    "retention plan exceeds the isolated transfer content bound",
-                ));
-            }
-        }
+        self.validate_retention_transfer_bound()?;
         validate_snapshot_binding(&snapshot, &self.record.binding)?;
         Ok(ValidatedInspectPlan {
             planning: self,
@@ -143,21 +128,41 @@ impl ValidatedPlanningRecord {
                 "inspect planning cannot enter materialize execution",
             ));
         }
-        if self.record.binding.target_sha256.is_none()
-            || !matches!(self.record.binding.retention, RetentionBinding::None)
-        {
+        if self.record.binding.target_sha256.is_none() {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidSemanticState,
                 0,
-                "materialize execution requires a target binding and no retention transfer",
+                "materialize execution requires a target binding",
             ));
         }
+        self.validate_retention_transfer_bound()?;
         validate_snapshot_binding(&snapshot, &self.record.binding)?;
         Ok(ValidatedMaterializePlan {
             planning: self,
             snapshot,
             stage,
         })
+    }
+
+    fn validate_retention_transfer_bound(&self) -> Result<(), RecordError> {
+        let RetentionBinding::Plan {
+            max_member_bytes,
+            max_total_bytes,
+            ..
+        } = &self.record.binding.retention
+        else {
+            return Ok(());
+        };
+        if *max_member_bytes > retained_content::MAX_TRANSFER_CONTENT_BYTES as u64
+            || *max_total_bytes > retained_content::MAX_TRANSFER_CONTENT_BYTES as u64
+        {
+            return Err(RecordError::new(
+                RecordErrorKind::LimitExceeded,
+                0,
+                "retention plan exceeds the isolated transfer content bound",
+            ));
+        }
+        Ok(())
     }
 }
 

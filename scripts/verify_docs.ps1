@@ -247,6 +247,15 @@ foreach ($fragment in @(
 }
 
 $semanticRecordDoc = Get-Content -Raw -LiteralPath (Join-Path $workspace 'docs/semantic-record.md')
+foreach ($term in @(
+    'same verifier calls that write the corresponding stage files',
+    'byte-for-byte canonical equality for both outputs',
+    'public outcome and hidden `VerifiedArchive` backend integration'
+)) {
+    if (-not $semanticRecordDoc.Contains($term, [StringComparison]::Ordinal)) {
+        throw "docs/semantic-record.md is missing materialization retention parity: $term"
+    }
+}
 $shadowV1Path = Join-Path $workspace 'crates/sealr/tests/conformance/semantic-shadow-v1.json'
 $shadowV2Path = Join-Path $workspace 'crates/sealr/tests/conformance/semantic-shadow-v2.json'
 $shadowV1Sha256 = 'b064c6945ca31603914d45a3d18775750bf30ddb667c356eb6d331673a9feb59'
