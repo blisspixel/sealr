@@ -1,4 +1,4 @@
-use std::fs::{self, File as StdFile};
+use std::fs;
 use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 
@@ -12,6 +12,8 @@ use sha2::{Digest, Sha256};
 use std::cell::Cell;
 #[cfg(test)]
 use std::cell::RefCell;
+#[cfg(feature = "__internal-worker-lab")]
+use std::fs::File as StdFile;
 
 use crate::findings::{Finding, FindingCode};
 use crate::policy::ResourceBudget;
