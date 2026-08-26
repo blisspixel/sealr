@@ -27,6 +27,7 @@ $ExpectedCiJobs = @(
     'Test on macos-latest'
     'ZipDiff 14-class gate'
     'Supply chain'
+    'Real-kernel Landlock ABI 2 floor'
 )
 $ExpectedChecks = @('Required CI')
 $ExpectedReleaseJobs = @(

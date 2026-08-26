@@ -1,0 +1,37 @@
+#!/bin/busybox sh
+
+fail() {
+    echo "SEALR_KERNEL_FLOOR_FAIL: $1"
+    /bin/busybox sync
+    /bin/busybox reboot -f
+    while true; do /bin/busybox sleep 1; done
+}
+
+export PATH=/bin
+/bin/busybox mount -t proc proc /proc || fail "could not mount procfs"
+/bin/busybox mount -t sysfs sysfs /sys || fail "could not mount sysfs"
+/bin/busybox mount -t devtmpfs devtmpfs /dev || fail "could not mount devtmpfs"
+/bin/busybox mkdir -p /tmp
+/bin/busybox chmod 1777 /tmp
+
+worker_bytes=""
+worker_sha256=""
+for argument in $(/bin/busybox cat /proc/cmdline); do
+    case "$argument" in
+        sealr.worker_bytes=*) worker_bytes="${argument#sealr.worker_bytes=}" ;;
+        sealr.worker_sha256=*) worker_sha256="${argument#sealr.worker_sha256=}" ;;
+    esac
+done
+
+[ -n "$worker_bytes" ] || fail "worker length is absent from the kernel command line"
+[ -n "$worker_sha256" ] || fail "worker digest is absent from the kernel command line"
+
+/bin/sealr-worker-bootstrap-lab kernel-floor \
+    --worker /bin/sealr-worker \
+    --bytes "$worker_bytes" \
+    --sha256 "$worker_sha256" || fail "public fail-closed probe rejected its evidence"
+
+echo "SEALR_KERNEL_FLOOR_PASS"
+/bin/busybox sync
+/bin/busybox reboot -f
+while true; do /bin/busybox sleep 1; done
