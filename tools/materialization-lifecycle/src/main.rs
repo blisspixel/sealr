@@ -3,6 +3,7 @@ use std::fs;
 use std::io::{self, Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
+use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -217,48 +218,28 @@ fn run_destination_race(
     destination: &Path,
     schedule: u64,
 ) -> io::Result<()> {
-    let watcher_parent = parent.to_owned();
-    let watcher_destination = destination.to_owned();
-    let watcher = thread::spawn(move || -> io::Result<()> {
-        let spin = usize::try_from(schedule & 0x3f).expect("six schedule bits fit usize");
-        let deadline = Instant::now() + Duration::from_secs(10);
-        while Instant::now() < deadline {
-            let mut stage_exists = false;
-            for entry in fs::read_dir(&watcher_parent)? {
-                if entry?
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with(STAGE_PREFIX)
-                {
-                    stage_exists = true;
-                    break;
-                }
-            }
-            if stage_exists {
-                for _ in 0..spin {
-                    std::hint::spin_loop();
-                }
-                fs::create_dir(&watcher_destination)?;
-                fs::write(watcher_destination.join("sentinel"), b"raced")?;
-                return Ok(());
-            }
-            if watcher_destination.exists() {
-                return Err(io::Error::other(
-                    "publication completed before the watcher observed its stage",
-                ));
-            }
-            thread::yield_now();
-        }
-        Err(io::Error::new(
-            io::ErrorKind::TimedOut,
-            "stage watcher exceeded its ten-second deadline",
-        ))
-    });
-
-    let outcome = apply(request(policy, source, destination));
-    watcher
-        .join()
-        .map_err(|_| io::Error::other("destination-race watcher panicked"))??;
+    let outcome = thread::scope(|scope| -> io::Result<_> {
+        let (start_sender, start_receiver) = mpsc::sync_channel(0);
+        let application = scope.spawn(move || -> io::Result<_> {
+            start_receiver.recv().map_err(|_| {
+                io::Error::other("destination-race observer did not arm the application")
+            })?;
+            // Keep the caller thread scheduled long enough to enter its
+            // observation loop. The race itself is still planted only after
+            // that loop observes the real private stage.
+            thread::sleep(Duration::from_millis(1));
+            Ok(apply(request(policy, source, destination)))
+        });
+        start_sender
+            .send(())
+            .map_err(|_| io::Error::other("destination-race application did not start"))?;
+        let observation = plant_destination_after_stage(parent, destination, schedule);
+        let outcome = application
+            .join()
+            .map_err(|_| io::Error::other("destination-race application panicked"))??;
+        observation?;
+        Ok(outcome)
+    })?;
     require_axes(
         &outcome,
         AdmissionStatus::Admitted,
@@ -276,6 +257,46 @@ fn run_destination_race(
         ));
     }
     fs::remove_dir_all(destination)
+}
+
+fn plant_destination_after_stage(
+    parent: &Path,
+    destination: &Path,
+    schedule: u64,
+) -> io::Result<()> {
+    let spin = usize::try_from(schedule & 0x3f).expect("six schedule bits fit usize");
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while Instant::now() < deadline {
+        let mut stage_exists = false;
+        for entry in fs::read_dir(parent)? {
+            if entry?
+                .file_name()
+                .to_string_lossy()
+                .starts_with(STAGE_PREFIX)
+            {
+                stage_exists = true;
+                break;
+            }
+        }
+        if stage_exists {
+            for _ in 0..spin {
+                std::hint::spin_loop();
+            }
+            fs::create_dir(destination)?;
+            fs::write(destination.join("sentinel"), b"raced")?;
+            return Ok(());
+        }
+        if destination.exists() {
+            return Err(io::Error::other(
+                "publication completed before the observer saw its stage",
+            ));
+        }
+        thread::yield_now();
+    }
+    Err(io::Error::new(
+        io::ErrorKind::TimedOut,
+        "stage observer exceeded its ten-second deadline",
+    ))
 }
 
 fn request<'a>(policy: &'a Policy, source: &'a [u8], destination: &'a Path) -> Request<'a> {
