@@ -50,6 +50,8 @@ const PLAN_DOMAIN: &[u8] = b"sealr.semantic-plan.experimental.v1\0";
 mod executor;
 #[cfg(test)]
 mod peak_live;
+#[cfg(feature = "__internal-worker-lab")]
+pub mod worker_lab;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RequestedEffect {
