@@ -171,7 +171,7 @@ This is a requested Rust-heap measurement of `decode_completion` against accepte
 The first bounded matrix expansion and shared owning planning seam are complete. Continued parity growth beyond these named fixtures remains assurance work, not an activation blocker by itself. Runtime activation still requires:
 
 1. closure of the pre-parser authority gate: no process or thread creation, no descendant or stage-permission mutation, per-epoch stalls, raw unknown-ancillary rejection, and repeated native stress;
-2. sealed immutable plan and completion blobs with exact seals, length, digest, expected invocation binding, clean exit, and reap, followed by isolated consumption of the validated plan without structural reparse;
+2. replace the landed kernel-sealed synthetic handoffs with immutable semantic plan and completion blobs using the same required seals, length, digest, expected invocation binding, clean exit, and reap evidence, followed by isolated consumption of the validated plan without structural reparse;
 3. independent content authority that verifies exact file bytes and their source relationship before any worker proposal shapes public semantic state, plus immutable retained-content transfer and original-pass retention semantics;
 4. isolated, caller-bounded non-retained reads with clone, cancellation, crash, and last-owner behavior;
 5. writer quiescence, stage audit, and supervisor-owned publication;

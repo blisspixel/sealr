@@ -5,6 +5,7 @@ use crate::linux::{
     ERROR_AUTHORITY_CLOSE, ERROR_DESCRIPTOR, ERROR_PROBE, ERROR_PROTOCOL, ERROR_RESTRICTION,
     FLAG_STAGE, READY_FLAGS,
 };
+use crate::sealed::{self, BlobRole};
 use crate::seccomp;
 use landlock::{
     make_bitflags, Access, AccessFs, CompatLevel, Compatible, LandlockStatus, PathBeneath, Ruleset,
@@ -23,6 +24,7 @@ const PHASE_RESTRICTION: u64 = 3;
 const PHASE_SOURCE: u64 = 4;
 const PHASE_PROBE: u64 = 5;
 const PHASE_EXIT: u64 = 6;
+const PHASE_PLAN: u64 = 7;
 
 pub(crate) fn entry(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>> {
     if args.len() != 3 {
@@ -220,6 +222,44 @@ fn run(
         .map_err(|error| protocol(PHASE_SOURCE, format!("sending acceptance failed: {error}")))?;
     await_observation_checkpoint(control, mode, FaultPoint::Accepted, operation_id)?;
 
+    mode.stall_at(StallPoint::PlanReceive);
+    let (plan_frame, mut plan_descriptors) = receive_packet(control, Some(1))
+        .map_err(|error| protocol(PHASE_PLAN, format!("receiving sealed plan failed: {error}")))?;
+    mode.exit_at(FaultPoint::PlanReceive);
+    require_kind_and_operation(&plan_frame, Kind::Plan, operation_id, PHASE_PLAN)?;
+    if plan_frame.flags != 0 || plan_frame.values[0] == 0 || plan_frame.values[1..] != [0; 3] {
+        return Err(protocol(PHASE_PLAN, "sealed plan frame fields are invalid"));
+    }
+    let plan_descriptor = plan_descriptors
+        .pop()
+        .expect("plan descriptor count was validated by the transport");
+    let plan = sealed::validate(&plan_descriptor, BlobRole::Planning, plan_frame.values[0])
+        .map_err(|error| {
+            protocol(
+                PHASE_PLAN,
+                format!("validating sealed plan failed: {error}"),
+            )
+        })?;
+    sealed::validate_planning_payload(plan.bytes(), operation_id, source_frame.values)
+        .map_err(|error| protocol(PHASE_PLAN, format!("binding sealed plan failed: {error}")))?;
+    mode.exit_at(FaultPoint::PlanValidation);
+    mode.stall_at(StallPoint::PlanAcceptance);
+
+    let mut plan_accepted = Frame::new(Kind::PlanAccepted, operation_id);
+    plan_accepted.values = [
+        plan_frame.values[0],
+        plan_descriptor.as_raw_fd() as u64,
+        0,
+        0,
+    ];
+    send_packet(control, plan_accepted, &[]).map_err(|error| {
+        protocol(
+            PHASE_PLAN,
+            format!("sending plan acceptance failed: {error}"),
+        )
+    })?;
+    await_observation_checkpoint(control, mode, FaultPoint::PlanAccepted, operation_id)?;
+
     mode.stall_at(StallPoint::ProceedReceive);
     let (proceed, descriptors) = receive_packet(control, Some(0))
         .map_err(|error| protocol(PHASE_PROBE, format!("receiving proceed failed: {error}")))?;
@@ -242,10 +282,52 @@ fn run(
     };
     mode.stall_at(StallPoint::ProbeExecution);
 
+    let completion_values = [u64::from(source_byte), outside_errno, stage_created, 0];
+    let completion_payload =
+        sealed::completion_payload(operation_id, plan.sha256(), completion_values);
+    let completion_descriptor =
+        sealed::create(BlobRole::Completion, &completion_payload).map_err(|error| {
+            protocol(
+                PHASE_PROBE,
+                format!("sealing completion payload failed: {error}"),
+            )
+        })?;
+    let completion_total_len = sealed::total_len(completion_payload.len())
+        .ok_or_else(|| protocol(PHASE_PROBE, "completion payload length is invalid"))?;
+    let validated_completion = sealed::validate(
+        &completion_descriptor,
+        BlobRole::Completion,
+        completion_total_len,
+    )
+    .map_err(|error| {
+        protocol(
+            PHASE_PROBE,
+            format!("revalidating sealed completion failed: {error}"),
+        )
+    })?;
+    sealed::validate_completion_payload(
+        validated_completion.bytes(),
+        operation_id,
+        plan.sha256(),
+        completion_values,
+    )
+    .map_err(|error| {
+        protocol(
+            PHASE_PROBE,
+            format!("binding sealed completion failed: {error}"),
+        )
+    })?;
+    mode.exit_at(FaultPoint::CompletionSeal);
+
     let mut result = Frame::new(Kind::Result, operation_id);
     result.flags = bootstrap.flags & FLAG_STAGE;
-    result.values = [u64::from(source_byte), outside_errno, stage_created, 0];
-    send_packet(control, result, &[])
+    result.values = [
+        completion_total_len,
+        u64::from(source_byte),
+        outside_errno,
+        completion_descriptor.as_raw_fd() as u64,
+    ];
+    send_packet(control, result, &[completion_descriptor.as_fd()])
         .map_err(|error| protocol(PHASE_PROBE, format!("sending result failed: {error}")))?;
     await_observation_checkpoint(control, mode, FaultPoint::Result, operation_id)?;
 

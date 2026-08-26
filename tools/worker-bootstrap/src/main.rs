@@ -6,6 +6,8 @@ mod fault;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
+mod sealed;
+#[cfg(target_os = "linux")]
 mod seccomp;
 #[cfg(target_os = "linux")]
 mod supervisor;

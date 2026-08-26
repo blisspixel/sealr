@@ -5,6 +5,7 @@ use crate::linux::{
     DETAIL_ANCILLARY_UNKNOWN, DETAIL_CONTROL_TRUNCATED, DETAIL_DATA_TRUNCATED, DETAIL_SHORT_FRAME,
     ERROR_DESCRIPTOR, ERROR_PROTOCOL, ERROR_RESTRICTION, FLAG_STAGE, READY_FLAGS,
 };
+use crate::sealed::{self, BlobRole};
 use crate::CHILD_MARKER;
 use landlock::{make_bitflags, Access, AccessFs, ABI};
 use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
@@ -23,7 +24,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const SOURCE_BYTES: &[u8] = b"sealr authority bootstrap probe";
-const STRESS_CASES: usize = 36;
+const STRESS_CASES: usize = 44;
 const STRESS_ITERATIONS: usize = 500;
 const AUTHORITY_EPOCH_TIMEOUT: Duration = Duration::from_secs(1);
 const CHILD_EXIT_TIMEOUT: Duration = Duration::from_secs(1);
@@ -43,7 +44,10 @@ impl AuthorityEpoch {
             StallPoint::BootstrapReceive
             | StallPoint::RestrictionSetup
             | StallPoint::RestrictedReady => Self::BootstrapRestriction,
-            StallPoint::SourceReceive | StallPoint::SourceAcceptance => Self::SourceTransfer,
+            StallPoint::SourceReceive
+            | StallPoint::SourceAcceptance
+            | StallPoint::PlanReceive
+            | StallPoint::PlanAcceptance => Self::SourceTransfer,
             StallPoint::ProceedReceive | StallPoint::ProbeExecution => Self::ProbeExecution,
             StallPoint::ExitAckReceive | StallPoint::ExitCompletion => Self::WorkerExit,
         }
@@ -113,6 +117,10 @@ pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
         ChildMode::UnknownAncillary,
         DETAIL_ANCILLARY_UNKNOWN,
     )?;
+    run_plan_rejection(CaseMutation::UnsealedPlan)?;
+    run_plan_rejection(CaseMutation::WrongPlanLength)?;
+    run_plan_rejection(CaseMutation::WrongPlanBinding)?;
+    run_plan_rejection(CaseMutation::WrongPlanRole)?;
     for point in FaultPoint::ALL {
         run_crash_barrier(point)?;
     }
@@ -122,7 +130,7 @@ pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
     run_timeout_reap()?;
     run_repeated_stress()?;
     println!(
-        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 18 crash barriers, 9 authority-epoch stalls, 500 bounded stress iterations, and bounded reap passed"
+        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 22 crash barriers, 11 authority-epoch stalls, 500 bounded stress iterations, and bounded reap passed"
     );
     Ok(())
 }
@@ -295,7 +303,10 @@ fn run_crash_barrier(point: FaultPoint) -> Result<(), Box<dyn std::error::Error>
         Ok(ExchangeOutcome::Crashed(actual)) if actual == point => fixture
             .verify_authority_state(matches!(
                 point,
-                FaultPoint::StageCreate | FaultPoint::Result | FaultPoint::ExitAck
+                FaultPoint::StageCreate
+                    | FaultPoint::CompletionSeal
+                    | FaultPoint::Result
+                    | FaultPoint::ExitAck
             ))
             .map_err(Into::into),
         Ok(ExchangeOutcome::Crashed(actual)) => {
@@ -305,6 +316,20 @@ fn run_crash_barrier(point: FaultPoint) -> Result<(), Box<dyn std::error::Error>
             "worker completed past injected crash barrier {point:?}"
         ))
         .into()),
+        Err(error) => Err(error),
+    };
+    finish_fixture(&fixture, result)
+}
+
+fn run_plan_rejection(mutation: CaseMutation) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::new(false, false, false)?;
+    let result = match exchange(&fixture, mutation, ChildMode::Normal) {
+        Ok(ExchangeOutcome::Rejected {
+            code: ERROR_PROTOCOL,
+            phase: 7,
+            detail: 0,
+        }) => Ok(()),
+        Ok(_) => Err(io::Error::other("invalid sealed plan was not rejected").into()),
         Err(error) => Err(error),
     };
     finish_fixture(&fixture, result)
@@ -386,6 +411,12 @@ fn run_stress_case(case: usize) -> Result<(), Box<dyn std::error::Error>> {
         ChildMode::RestrictionProbeFailure,
         ChildMode::SeccompInstallationFailure,
     ];
+    const PLAN_CASES: [CaseMutation; 4] = [
+        CaseMutation::UnsealedPlan,
+        CaseMutation::WrongPlanLength,
+        CaseMutation::WrongPlanBinding,
+        CaseMutation::WrongPlanRole,
+    ];
 
     match case {
         0 => run_success(false),
@@ -407,7 +438,8 @@ fn run_stress_case(case: usize) -> Result<(), Box<dyn std::error::Error>> {
             ChildMode::UnknownAncillary,
             DETAIL_ANCILLARY_UNKNOWN,
         ),
-        18..=35 => run_crash_barrier(FaultPoint::ALL[case - 18]),
+        18..=21 => run_plan_rejection(PLAN_CASES[case - 18]),
+        22..=43 => run_crash_barrier(FaultPoint::ALL[case - 22]),
         _ => Err(io::Error::other("worker stress case is outside its closed domain").into()),
     }
 }
@@ -804,14 +836,97 @@ fn exchange_active(
         return finish_observed_crash(control, child, operation_id, FaultPoint::Accepted);
     }
 
+    let expected_planning_payload = sealed::planning_payload(operation_id, source_values);
+    let sent_planning_payload = if mutation == CaseMutation::WrongPlanBinding {
+        sealed::planning_payload(changed_operation_id(operation_id), source_values)
+    } else {
+        expected_planning_payload
+    };
+    let plan_role = if mutation == CaseMutation::WrongPlanRole {
+        BlobRole::Completion
+    } else {
+        BlobRole::Planning
+    };
+    let plan_descriptor = if mutation == CaseMutation::UnsealedPlan {
+        sealed::create_unsealed_for_conformance(plan_role, &sent_planning_payload)?
+    } else {
+        sealed::create(plan_role, &sent_planning_payload)?
+    };
+    let plan_total_len = sealed::total_len(sent_planning_payload.len())
+        .ok_or("planning payload length is outside the sealed-blob bound")?;
+    let invalid_plan = matches!(
+        mutation,
+        CaseMutation::UnsealedPlan
+            | CaseMutation::WrongPlanLength
+            | CaseMutation::WrongPlanBinding
+            | CaseMutation::WrongPlanRole
+    );
+    let validated_plan = if invalid_plan {
+        None
+    } else {
+        let validated = sealed::validate(&plan_descriptor, BlobRole::Planning, plan_total_len)?;
+        sealed::validate_planning_payload(validated.bytes(), operation_id, source_values)?;
+        Some(validated)
+    };
+    let mut plan_frame = Frame::new(Kind::Plan, operation_id);
+    plan_frame.values[0] = if mutation == CaseMutation::WrongPlanLength {
+        plan_total_len + 1
+    } else {
+        plan_total_len
+    };
+    expect_crash_transport(
+        transport_until(control, child, source_deadline, libc::POLLOUT, || {
+            send_packet(control, plan_frame, &[plan_descriptor.as_fd()])
+        }),
+        mode,
+        &[],
+        child,
+    )?;
+    let (plan_accepted, descriptors) = expect_crash_transport(
+        transport_until(control, child, source_deadline, libc::POLLIN, || {
+            receive_packet(control, Some(0))
+        }),
+        mode,
+        &[FaultPoint::PlanReceive, FaultPoint::PlanValidation],
+        child,
+    )?;
+    if !descriptors.is_empty() {
+        return Err(io::Error::other("worker returned a plan capability").into());
+    }
+    if plan_accepted.kind == Kind::Error {
+        return finish_rejection(child, plan_accepted, operation_id);
+    }
+    if plan_accepted.kind != Kind::PlanAccepted
+        || plan_accepted.operation_id != operation_id
+        || plan_accepted.flags != 0
+        || plan_accepted.values[0] != plan_total_len
+        || plan_accepted.values[1] > i32::MAX as u64
+        || plan_accepted.values[2..] != [0; 2]
+    {
+        return Err(io::Error::other("worker plan acceptance is inconsistent").into());
+    }
+    observe_plan_accepted_child(
+        child.pid(),
+        &first_response,
+        &second_response,
+        &plan_accepted,
+        fixture.stage.as_ref(),
+        source_descriptor,
+        &plan_descriptor,
+        &fixture.outside_sentinel,
+    )?;
+    if mode == ChildMode::ExitAt(FaultPoint::PlanAccepted) {
+        return finish_observed_crash(control, child, operation_id, FaultPoint::PlanAccepted);
+    }
+
     let probe_deadline = EpochDeadline::start(AuthorityEpoch::ProbeExecution);
     let proceed = Frame::new(Kind::Proceed, operation_id);
     transport_until(control, child, probe_deadline, libc::POLLOUT, || {
         send_packet(control, proceed, &[])
     })?;
-    let (result, descriptors) = expect_crash_transport(
+    let (mut result, mut descriptors) = expect_crash_transport(
         transport_until(control, child, probe_deadline, libc::POLLIN, || {
-            receive_packet(control, Some(0))
+            receive_packet(control, Some(1))
         }),
         mode,
         &[
@@ -819,16 +934,54 @@ fn exchange_active(
             FaultPoint::SourceProbe,
             FaultPoint::OutsideDenial,
             FaultPoint::StageCreate,
+            FaultPoint::CompletionSeal,
         ],
         child,
     )?;
-    if !descriptors.is_empty()
-        || result.kind != Kind::Result
+    if result.kind != Kind::Result
         || result.operation_id != operation_id
         || result.flags != bootstrap.flags
+        || result.values[0] == 0
+        || result.values[3] > i32::MAX as u64
     {
         return Err(io::Error::other("worker result is inconsistent").into());
     }
+    let completion_descriptor = descriptors
+        .pop()
+        .expect("completion descriptor count was validated by the transport");
+    let completion = sealed::validate(
+        &completion_descriptor,
+        BlobRole::Completion,
+        result.values[0],
+    )?;
+    let completion_values = [
+        result.values[1],
+        result.values[2],
+        u64::from(fixture.stage.is_some()),
+        0,
+    ];
+    sealed::validate_completion_payload(
+        completion.bytes(),
+        operation_id,
+        validated_plan
+            .as_ref()
+            .expect("accepted plan was validated by the supervisor")
+            .sha256(),
+        completion_values,
+    )?;
+    observe_completed_child(
+        child.pid(),
+        &first_response,
+        &second_response,
+        &plan_accepted,
+        &result,
+        fixture.stage.as_ref(),
+        source_descriptor,
+        &plan_descriptor,
+        &completion_descriptor,
+        &fixture.outside_sentinel,
+    )?;
+    result.values = completion_values;
     if mode == ChildMode::ExitAt(FaultPoint::Result) {
         return finish_observed_crash(control, child, operation_id, FaultPoint::Result);
     }
@@ -877,7 +1030,8 @@ fn finish_observed_crash(
 ) -> Result<ExchangeOutcome, Box<dyn std::error::Error>> {
     let epoch = match point {
         FaultPoint::Ready => AuthorityEpoch::SourceTransfer,
-        FaultPoint::Accepted => AuthorityEpoch::ProbeExecution,
+        FaultPoint::Accepted => AuthorityEpoch::SourceTransfer,
+        FaultPoint::PlanAccepted => AuthorityEpoch::ProbeExecution,
         FaultPoint::Result => AuthorityEpoch::WorkerExit,
         _ => {
             return Err(io::Error::other(
@@ -1030,6 +1184,92 @@ fn observe_accepted_child(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn observe_plan_accepted_child(
+    pid: u32,
+    ready: &Frame,
+    source_accepted: &Frame,
+    plan_accepted: &Frame,
+    stage: Option<&File>,
+    source: &File,
+    plan: &OwnedFd,
+    inherited_sentinel: &File,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let proc_root = PathBuf::from(format!("/proc/{pid}"));
+    let source_fd = i32::try_from(source_accepted.values[3])?;
+    let plan_fd = i32::try_from(plan_accepted.values[1])?;
+    let mut expected = vec![0, 1, 2, source_fd, plan_fd];
+    if ready.values[3] != u64::MAX {
+        expected.push(i32::try_from(ready.values[3])?);
+    }
+    expected.sort_unstable();
+    let mut descriptors = proc_descriptors(&proc_root)?;
+    descriptors.sort_unstable();
+    if descriptors != expected {
+        return Err(io::Error::other(format!(
+            "plan-ready worker descriptor set is {descriptors:?}; expected {expected:?}"
+        ))
+        .into());
+    }
+    verify_sentinel_absent(&proc_root, &descriptors, inherited_sentinel)?;
+    verify_same_object(&proc_root, source_fd, source)?;
+    verify_same_object(&proc_root, plan_fd, plan)?;
+    verify_access_mode(&proc_root, source_fd, source)?;
+    verify_access_mode(&proc_root, plan_fd, plan)?;
+    verify_cloexec(&proc_root, source_fd)?;
+    verify_cloexec(&proc_root, plan_fd)?;
+    if let (Some(stage), stage_fd) = (stage, ready.values[3]) {
+        verify_same_object(&proc_root, i32::try_from(stage_fd)?, stage)?;
+    }
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn observe_completed_child(
+    pid: u32,
+    ready: &Frame,
+    source_accepted: &Frame,
+    plan_accepted: &Frame,
+    result: &Frame,
+    stage: Option<&File>,
+    source: &File,
+    plan: &OwnedFd,
+    completion: &OwnedFd,
+    inherited_sentinel: &File,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let proc_root = PathBuf::from(format!("/proc/{pid}"));
+    let source_fd = i32::try_from(source_accepted.values[3])?;
+    let plan_fd = i32::try_from(plan_accepted.values[1])?;
+    let completion_fd = i32::try_from(result.values[3])?;
+    let mut expected = vec![0, 1, 2, source_fd, plan_fd, completion_fd];
+    if ready.values[3] != u64::MAX {
+        expected.push(i32::try_from(ready.values[3])?);
+    }
+    expected.sort_unstable();
+    let mut descriptors = proc_descriptors(&proc_root)?;
+    descriptors.sort_unstable();
+    if descriptors != expected {
+        return Err(io::Error::other(format!(
+            "completed worker descriptor set is {descriptors:?}; expected {expected:?}"
+        ))
+        .into());
+    }
+    verify_sentinel_absent(&proc_root, &descriptors, inherited_sentinel)?;
+    for (descriptor, retained) in [
+        (source_fd, source.as_fd()),
+        (plan_fd, plan.as_fd()),
+        (completion_fd, completion.as_fd()),
+    ] {
+        verify_same_object(&proc_root, descriptor, retained)?;
+        verify_access_mode(&proc_root, descriptor, retained)?;
+        verify_cloexec(&proc_root, descriptor)?;
+    }
+    if let (Some(stage), stage_fd) = (stage, ready.values[3]) {
+        verify_same_object(&proc_root, i32::try_from(stage_fd)?, stage)?;
+    }
+    Ok(())
+}
+
 fn proc_descriptors(proc_root: &Path) -> Result<Vec<i32>, Box<dyn std::error::Error>> {
     let mut descriptors = Vec::new();
     for entry in fs::read_dir(proc_root.join("fd"))? {
@@ -1071,7 +1311,7 @@ fn verify_null_stdio(proc_root: &Path) -> Result<(), Box<dyn std::error::Error>>
 fn verify_same_object(
     proc_root: &Path,
     descriptor: i32,
-    retained: &File,
+    retained: impl AsFd,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let observed = File::open(proc_root.join(format!("fd/{descriptor}")))?;
     let observed_stat = rustix::fs::fstat(&observed)?;
@@ -1086,7 +1326,7 @@ fn verify_same_object(
 fn verify_access_mode(
     proc_root: &Path,
     descriptor: i32,
-    retained: &File,
+    retained: impl AsFd,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let flags = fdinfo_flags(proc_root, descriptor)?;
     let retained_flags = rustix::fs::fcntl_getfl(retained)?.bits() as u64;
@@ -1196,6 +1436,10 @@ enum CaseMutation {
     ShortSource,
     LongSource,
     TruncatedSourceControl,
+    UnsealedPlan,
+    WrongPlanLength,
+    WrongPlanBinding,
+    WrongPlanRole,
 }
 
 enum ExchangeOutcome {
@@ -1694,7 +1938,7 @@ mod tests {
             .into_iter()
             .filter(|point| AuthorityEpoch::for_stall(*point) == AuthorityEpoch::WorkerExit)
             .count();
-        assert_eq!([bootstrap, source, probe, exit], [3, 2, 2, 2]);
+        assert_eq!([bootstrap, source, probe, exit], [3, 4, 2, 2]);
     }
 
     #[test]
@@ -1719,7 +1963,7 @@ mod tests {
         }
 
         assert_eq!(counts.iter().sum::<usize>(), STRESS_ITERATIONS);
-        assert_eq!(counts.iter().copied().min(), Some(13));
-        assert_eq!(counts.iter().copied().max(), Some(14));
+        assert_eq!(counts.iter().copied().min(), Some(11));
+        assert_eq!(counts.iter().copied().max(), Some(12));
     }
 }
