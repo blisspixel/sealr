@@ -16,6 +16,9 @@ mod policy;
 mod quota;
 mod snapshot;
 mod verification;
+#[cfg(any(feature = "__internal-worker-lab", test))]
+#[allow(dead_code)]
+mod worker_protocol;
 // Dormant Alpha.6 experiment. It is compiled and tested, but no shipped path
 // can invoke it until the remaining authority and packaging gates close.
 #[allow(dead_code)]
@@ -44,6 +47,34 @@ pub use semantic_record::worker_lab as __worker_lab;
 #[cfg(feature = "__internal-worker-lab")]
 #[doc(hidden)]
 pub use semantic_record::worker_runtime as __worker_runtime;
+
+/// Repository-only bridge for the authenticated Linux worker protocol.
+///
+/// The public supervisor and packaged helper share this implementation so the
+/// frame, descriptor, sealed-blob, and helper-authentication invariants cannot
+/// drift between their two crates.
+#[cfg(feature = "__internal-worker-lab")]
+#[doc(hidden)]
+pub mod __worker_protocol {
+    pub mod frame {
+        pub use crate::worker_protocol::frame::*;
+    }
+
+    #[cfg(target_os = "linux")]
+    pub mod helper {
+        pub use crate::worker_protocol::helper::*;
+    }
+
+    #[cfg(target_os = "linux")]
+    pub mod linux {
+        pub use crate::worker_protocol::linux::*;
+    }
+
+    #[cfg(target_os = "linux")]
+    pub mod sealed {
+        pub use crate::worker_protocol::sealed::*;
+    }
+}
 
 /// Repository-only bridge used by the native materialization lifecycle lab.
 ///
