@@ -7,14 +7,25 @@ license.workspace = true
 repository.workspace = true
 description = "Repository-only Linux authority-bootstrap conformance lab"
 publish = false
+default-run = "sealr-worker-bootstrap-lab"
+
+[features]
+default = ["lab"]
+lab = ["dep:getrandom", "dep:zip"]
 
 [[bin]]
 name = "sealr-worker-bootstrap-lab"
 path = "src/main.rs"
+required-features = ["lab"]
+doc = false
+
+[[bin]]
+name = "sealr-worker"
+path = "src/bin/sealr-worker.rs"
 doc = false
 
 [dependencies]
-getrandom.workspace = true
+getrandom = { workspace = true, optional = true }
 sha2.workspace = true
 thiserror.workspace = true
 
@@ -23,4 +34,4 @@ landlock = "0.4.7"
 libc.workspace = true
 rustix = { version = "1.1.4", features = ["fs", "net", "pipe", "process", "thread"] }
 sealr = { version = "=0.1.0-alpha.5", path = "../../crates/sealr", features = ["__internal-worker-lab"] }
-zip.workspace = true
+zip = { workspace = true, optional = true }

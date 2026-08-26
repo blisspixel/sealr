@@ -539,8 +539,8 @@ fn run_worker(
             ));
         }
     };
-    let mut child =
-        ChildBoundary::bind(child).map_err(|error| failure(ReadFailureKind::Spawn, error))?;
+    let mut child = ChildBoundary::bind_authenticated(child, &control, mode)
+        .map_err(|error| failure(ReadFailureKind::Spawn, error))?;
     authority.spawned.fetch_add(1, Ordering::AcqRel);
 
     let result = run_worker_active(

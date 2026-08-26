@@ -1,12 +1,13 @@
 use crate::fault::{ChildMode, FaultPoint, StallPoint};
 use crate::frame::{Frame, Kind};
+use crate::helper::{parse_digest, HelperArtifact};
 use crate::linux::{
     configure_timeout, receive_packet, send_packet, send_raw_conformance_packet, TransportError,
     DETAIL_ANCILLARY_UNKNOWN, DETAIL_CONTROL_TRUNCATED, DETAIL_DATA_TRUNCATED, DETAIL_SHORT_FRAME,
     ERROR_DESCRIPTOR, ERROR_PROTOCOL, ERROR_RESTRICTION, FLAG_STAGE, READY_FLAGS,
 };
 use crate::sealed::{self, BlobRole};
-use crate::CHILD_MARKER;
+use crate::{CHILD_MARKER, HELPER_BOOTSTRAP_ABI, HELPER_FEATURE_ID};
 use landlock::{make_bitflags, Access, AccessFs, ABI};
 use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use rustix::fs::OFlags;
@@ -36,6 +37,13 @@ const STRESS_ITERATIONS: usize = 500;
 const AUTHORITY_EPOCH_TIMEOUT: Duration = Duration::from_secs(1);
 const CHILD_EXIT_TIMEOUT: Duration = Duration::from_secs(1);
 const KILL_REAP_TIMEOUT: Duration = Duration::from_secs(1);
+
+static CHILD_PROGRAMS: OnceLock<ChildPrograms> = OnceLock::new();
+
+struct ChildPrograms {
+    production: HelperArtifact,
+    fault_lab: PathBuf,
+}
 
 fn source_bytes() -> &'static [u8] {
     static SOURCE: OnceLock<Vec<u8>> = OnceLock::new();
@@ -70,6 +78,7 @@ fn source_bytes() -> &'static [u8] {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AuthorityEpoch {
+    HelperAuthentication,
     BootstrapRestriction,
     SourceTransfer,
     ProbeExecution,
@@ -129,7 +138,39 @@ struct EpochTimeout {
     signal: libc::c_int,
 }
 
-pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn dispatch(args: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error>> {
+    let usage = "usage: sealr-worker-bootstrap-lab conformance --worker <absolute-path> --bytes <length> --sha256 <digest>";
+    if args.len() != 7
+        || args[0] != "conformance"
+        || args[1] != "--worker"
+        || args[3] != "--bytes"
+        || args[5] != "--sha256"
+    {
+        return Err(usage.into());
+    }
+    let worker_path = PathBuf::from(&args[2]);
+    let expected_len = args[4]
+        .to_str()
+        .ok_or("worker byte length is not valid UTF-8")?
+        .parse::<u64>()?;
+    let digest = args[6]
+        .to_str()
+        .ok_or("worker SHA-256 is not valid UTF-8")?;
+    let production = HelperArtifact::load(&worker_path, expected_len, parse_digest(digest)?)?;
+    let fault_lab = std::env::current_exe()?;
+    if production.source_matches(&fault_lab)? {
+        return Err("production helper and conformance lab identify the same file".into());
+    }
+    CHILD_PROGRAMS
+        .set(ChildPrograms {
+            production,
+            fault_lab,
+        })
+        .map_err(|_| "worker child programs were already initialized")?;
+    run_conformance()
+}
+
+fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
     run_success(false)?;
     run_success(true)?;
     run_rejection(CaseMutation::WritableSource, 4)?;
@@ -169,8 +210,14 @@ pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
     read::run_conformance()?;
     write::run_conformance()?;
     run_repeated_stress()?;
+    let helper = &CHILD_PROGRAMS
+        .get()
+        .expect("child programs remain initialized during conformance")
+        .production;
     println!(
-        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 1 supervisor content replay, 1 immutable original-pass retention transfer, 1 isolated one-shot Store-and-Deflate read boundary, 1 reaped and audited Store-and-Deflate writer publication, 1 post-reap writer audit-mutation rejection, 1 writer destination-race rejection, 1 distinct writer cleanup failure, 4 writer crash barriers, 2 writer authority-epoch stalls, 22 bootstrap crash barriers, 11 bootstrap authority-epoch stalls, 500 bounded bootstrap stress iterations, 500 bounded writer lifecycle iterations, and bounded reap passed"
+        "sealr.worker-bootstrap-evidence.v1: authenticated helper sha256={} bytes={}, 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 1 supervisor content replay, 1 immutable original-pass retention transfer, 1 isolated one-shot Store-and-Deflate read boundary, 1 reaped and audited Store-and-Deflate writer publication, 1 post-reap writer audit-mutation rejection, 1 writer destination-race rejection, 1 distinct writer cleanup failure, 4 writer crash barriers, 2 writer authority-epoch stalls, 22 bootstrap crash barriers, 11 bootstrap authority-epoch stalls, 500 bounded bootstrap stress iterations, 500 bounded writer lifecycle iterations, and bounded reap passed",
+        helper.digest_hex(),
+        helper.len()
     );
     Ok(())
 }
@@ -537,7 +584,11 @@ fn run_timeout_reap() -> Result<(), Box<dyn std::error::Error>> {
         None,
     )?;
     configure_timeout(&control)?;
-    let mut child = ChildBoundary::bind(spawn_child(child_socket, ChildMode::Normal)?)?;
+    let mut child = ChildBoundary::bind_authenticated(
+        spawn_child(child_socket, ChildMode::Normal)?,
+        &control,
+        ChildMode::Normal,
+    )?;
     let error = child
         .wait_bounded()
         .expect_err("a worker awaiting bootstrap must exceed the supervisor deadline");
@@ -596,7 +647,7 @@ fn exchange(
             };
         }
     };
-    let mut child = match ChildBoundary::bind(child) {
+    let mut child = match ChildBoundary::bind_authenticated(child, &control, mode) {
         Ok(child) => child,
         Err(bind) => {
             if bind.reaped {
@@ -1455,11 +1506,21 @@ fn fdinfo_flags(proc_root: &Path, descriptor: i32) -> Result<u64, Box<dyn std::e
 }
 
 fn spawn_child(child_socket: OwnedFd, mode: ChildMode) -> io::Result<Child> {
-    let mut command = Command::new(std::env::current_exe()?);
+    let programs = CHILD_PROGRAMS
+        .get()
+        .ok_or_else(|| io::Error::other("worker child programs are not initialized"))?;
+    let production = mode == ChildMode::Normal;
+    let mut command = if production {
+        Command::new(programs.production.execution_path())
+    } else {
+        let mut command = Command::new(&programs.fault_lab);
+        command
+            .arg(CHILD_MARKER)
+            .arg(std::process::id().to_string())
+            .arg(mode.argument());
+        command
+    };
     command
-        .arg(CHILD_MARKER)
-        .arg(std::process::id().to_string())
-        .arg(mode.argument())
         .env_clear()
         .stdin(Stdio::from(child_socket))
         .stdout(Stdio::null())
@@ -1771,6 +1832,20 @@ struct BoundaryBindError {
 }
 
 impl ChildBoundary {
+    fn bind_authenticated(
+        child: Child,
+        control: &OwnedFd,
+        mode: ChildMode,
+    ) -> Result<Self, BoundaryBindError> {
+        let mut boundary = Self::bind(child)?;
+        if mode == ChildMode::Normal {
+            if let Err(error) = boundary.authenticate_production(control) {
+                return Err(boundary.reject_authentication(error));
+            }
+        }
+        Ok(boundary)
+    }
+
     fn bind(mut child: Child) -> Result<Self, BoundaryBindError> {
         let pid = rustix::process::Pid::from_child(&child);
         match rustix::process::pidfd_open(pid, PidfdFlags::empty()) {
@@ -1793,6 +1868,64 @@ impl ChildBoundary {
                     ),
                     reaped: false,
                 }),
+            },
+        }
+    }
+
+    fn authenticate_production(
+        &mut self,
+        control: &OwnedFd,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let operation_id = random_operation_id()?;
+        let mut challenge = Frame::new(Kind::HelperChallenge, operation_id);
+        challenge.values = [HELPER_BOOTSTRAP_ABI, HELPER_FEATURE_ID, 0, 0];
+        let deadline = EpochDeadline::start(AuthorityEpoch::HelperAuthentication);
+        self.wait_for_control(control, deadline, libc::POLLOUT)?;
+        send_packet(control, challenge, &[])?;
+
+        self.wait_for_control(control, deadline, libc::POLLIN)?;
+        let (hello, descriptors) = receive_packet(control, Some(0))?;
+        if !descriptors.is_empty()
+            || hello.kind != Kind::HelperHello
+            || hello.flags != 0
+            || hello.operation_id != operation_id
+            || hello.values != [HELPER_BOOTSTRAP_ABI, HELPER_FEATURE_ID, 0, 0]
+        {
+            return Err(io::Error::other("worker authentication hello is invalid").into());
+        }
+        CHILD_PROGRAMS
+            .get()
+            .ok_or("worker child programs are not initialized")?
+            .production
+            .verify_process_executable(self.pid())?;
+        Ok(())
+    }
+
+    fn reject_authentication(mut self, error: Box<dyn std::error::Error>) -> BoundaryBindError {
+        if self.reaped {
+            return BoundaryBindError {
+                message: format!(
+                    "authenticating worker failed: {error}; worker was already reaped as {}",
+                    self.status
+                        .as_ref()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| "unknown status".to_owned())
+                ),
+                reaped: true,
+            };
+        }
+        match self.terminate_and_reap_bounded() {
+            Ok(status) => BoundaryBindError {
+                message: format!(
+                    "authenticating worker failed: {error}; bounded termination reaped it as {status}"
+                ),
+                reaped: true,
+            },
+            Err(termination) => BoundaryBindError {
+                message: format!(
+                    "authenticating worker failed: {error}; bounded termination also failed: {termination}"
+                ),
+                reaped: false,
             },
         }
     }

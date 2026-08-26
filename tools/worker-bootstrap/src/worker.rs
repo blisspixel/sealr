@@ -7,6 +7,7 @@ use crate::linux::{
 };
 use crate::sealed::{self, BlobRole};
 use crate::seccomp;
+use crate::{HELPER_BOOTSTRAP_ABI, HELPER_FEATURE_ID};
 use landlock::{
     make_bitflags, Access, AccessFs, CompatLevel, Compatible, LandlockStatus, PathBeneath, Ruleset,
     RulesetAttr, RulesetCreatedAttr, RulesetStatus, ABI,
@@ -97,7 +98,33 @@ impl ExecutedOperation {
     }
 }
 
-pub(crate) fn entry(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>> {
+pub(crate) fn production_entry(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>> {
+    if !args.is_empty() {
+        return Err("production worker accepts no command-line arguments".into());
+    }
+    let expected_parent = rustix::process::getppid().ok_or("worker parent PID is zero")?;
+
+    rustix::process::set_parent_process_death_signal(Some(Signal::KILL))?;
+    if rustix::process::getppid() != Some(expected_parent) {
+        return Err(io::Error::other("worker parent changed before bootstrap entry").into());
+    }
+
+    let stdin = std::io::stdin();
+    let control = stdin.as_fd();
+    rustix::io::fcntl_setfd(control, FdFlags::CLOEXEC)?;
+    close_inherited_authority(control).map_err(|error| {
+        io::Error::other(format!(
+            "authority closure failed with code {ERROR_AUTHORITY_CLOSE}: {error}"
+        ))
+    })?;
+    validate_control(control, expected_parent)?;
+    configure_timeout(control)?;
+    production_handshake(control)?;
+    receive_and_run(control, ChildMode::Normal)
+}
+
+#[cfg(feature = "lab")]
+pub(crate) fn lab_entry(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>> {
     if args.len() != 3 {
         return Err("internal child entry requires exactly three arguments".into());
     }
@@ -142,6 +169,42 @@ pub(crate) fn entry(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>>
     mode.exit_at(FaultPoint::InheritedClosure);
     configure_timeout(control)?;
 
+    receive_and_run(control, mode)
+}
+
+fn validate_control(
+    control: rustix::fd::BorrowedFd<'_>,
+    expected_parent: Pid,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let socket_type = rustix::net::sockopt::socket_type(control).map_err(|error| {
+        io::Error::other(format!(
+            "worker stdin is not a sequenced-packet socket: {error}"
+        ))
+    })?;
+    if socket_type != rustix::net::SocketType::SEQPACKET {
+        return Err(io::Error::other("worker stdin is not a sequenced-packet socket").into());
+    }
+    let socket_domain = rustix::net::sockopt::socket_domain(control).map_err(|error| {
+        io::Error::other(format!("worker control socket is not Unix-domain: {error}"))
+    })?;
+    if socket_domain != rustix::net::AddressFamily::UNIX {
+        return Err(io::Error::other("worker control socket is not Unix-domain").into());
+    }
+    if rustix::net::sockopt::socket_passcred(control)? {
+        return Err(
+            io::Error::other("worker control socket unexpectedly enables credentials").into(),
+        );
+    }
+    if rustix::net::sockopt::socket_peercred(control)?.pid != expected_parent {
+        return Err(io::Error::other("worker control peer is not the expected parent").into());
+    }
+    Ok(())
+}
+
+fn receive_and_run(
+    control: rustix::fd::BorrowedFd<'_>,
+    mode: ChildMode,
+) -> Result<(), Box<dyn std::error::Error>> {
     mode.stall_at(StallPoint::BootstrapReceive);
     let (bootstrap, descriptors) = receive_packet(control, None)?;
     mode.exit_at(FaultPoint::BootstrapReceive);
@@ -155,6 +218,23 @@ pub(crate) fn entry(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>>
             Err(io::Error::other(failure.message).into())
         }
     }
+}
+
+fn production_handshake(
+    control: rustix::fd::BorrowedFd<'_>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (challenge, descriptors) = receive_packet(control, Some(0))?;
+    if !descriptors.is_empty()
+        || challenge.kind != Kind::HelperChallenge
+        || challenge.flags != 0
+        || challenge.values != [HELPER_BOOTSTRAP_ABI, HELPER_FEATURE_ID, 0, 0]
+    {
+        return Err(io::Error::other("worker authentication challenge is invalid").into());
+    }
+    let mut hello = Frame::new(Kind::HelperHello, challenge.operation_id);
+    hello.values = [HELPER_BOOTSTRAP_ABI, HELPER_FEATURE_ID, 0, 0];
+    send_packet(control, hello, &[])?;
+    Ok(())
 }
 
 fn run(

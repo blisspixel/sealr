@@ -1,5 +1,7 @@
+#[cfg(feature = "lab")]
 use std::ffi::OsStr;
 
+#[cfg_attr(not(feature = "lab"), allow(dead_code))]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum ChildMode {
     Normal,
@@ -12,6 +14,7 @@ pub(crate) enum ChildMode {
 }
 
 impl ChildMode {
+    #[cfg(feature = "lab")]
     pub(crate) fn argument(self) -> &'static str {
         match self {
             Self::Normal => "normal",
@@ -24,6 +27,7 @@ impl ChildMode {
         }
     }
 
+    #[cfg(feature = "lab")]
     pub(crate) fn parse(argument: &OsStr) -> Option<Self> {
         let argument = argument.to_str()?;
         match argument {
@@ -38,6 +42,7 @@ impl ChildMode {
         }
     }
 
+    #[cfg(feature = "lab")]
     pub(crate) fn exit_at(self, point: FaultPoint) {
         if self == Self::ExitAt(point) {
             // SAFETY: this is a deliberate conformance-only abrupt exit. It
@@ -47,6 +52,10 @@ impl ChildMode {
         }
     }
 
+    #[cfg(not(feature = "lab"))]
+    pub(crate) fn exit_at(self, _point: FaultPoint) {}
+
+    #[cfg(feature = "lab")]
     pub(crate) fn stall_at(self, point: StallPoint) {
         if self == Self::StallAt(point) {
             loop {
@@ -57,6 +66,9 @@ impl ChildMode {
             }
         }
     }
+
+    #[cfg(not(feature = "lab"))]
+    pub(crate) fn stall_at(self, _point: StallPoint) {}
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -75,6 +87,7 @@ pub(crate) enum StallPoint {
 }
 
 impl StallPoint {
+    #[cfg(feature = "lab")]
     pub(crate) const ALL: [Self; 11] = [
         Self::BootstrapReceive,
         Self::RestrictionSetup,
@@ -89,6 +102,7 @@ impl StallPoint {
         Self::ExitCompletion,
     ];
 
+    #[cfg(feature = "lab")]
     pub(crate) const fn argument(self) -> &'static str {
         match self {
             Self::BootstrapReceive => "stall-before-bootstrap-receive",
@@ -105,6 +119,7 @@ impl StallPoint {
         }
     }
 
+    #[cfg(feature = "lab")]
     fn parse(argument: &str) -> Option<Self> {
         Self::ALL
             .into_iter()
@@ -114,6 +129,7 @@ impl StallPoint {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(i32)]
+#[cfg_attr(not(feature = "lab"), allow(dead_code))]
 pub(crate) enum FaultPoint {
     ExecEntry = 1,
     PeerValidation = 2,
@@ -140,6 +156,7 @@ pub(crate) enum FaultPoint {
 }
 
 impl FaultPoint {
+    #[cfg(feature = "lab")]
     pub(crate) const ALL: [Self; 22] = [
         Self::ExecEntry,
         Self::PeerValidation,
@@ -165,6 +182,7 @@ impl FaultPoint {
         Self::CompletionSeal,
     ];
 
+    #[cfg(feature = "lab")]
     pub(crate) fn argument(self) -> &'static str {
         match self {
             Self::ExecEntry => "exit-after-exec-entry",
@@ -192,12 +210,14 @@ impl FaultPoint {
         }
     }
 
+    #[cfg(feature = "lab")]
     fn parse(argument: &str) -> Option<Self> {
         Self::ALL
             .into_iter()
             .find(|point| point.argument() == argument)
     }
 
+    #[cfg(feature = "lab")]
     pub(crate) const fn exit_code(self) -> i32 {
         100 + self as i32
     }
