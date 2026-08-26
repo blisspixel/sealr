@@ -6,6 +6,7 @@ pub(crate) enum ChildMode {
     InsufficientLandlockAbi,
     RestrictionProbeFailure,
     SeccompInstallationFailure,
+    UnknownAncillary,
     ExitAt(FaultPoint),
 }
 
@@ -16,6 +17,7 @@ impl ChildMode {
             Self::InsufficientLandlockAbi => "insufficient-landlock-abi",
             Self::RestrictionProbeFailure => "restriction-probe-failure",
             Self::SeccompInstallationFailure => "seccomp-installation-failure",
+            Self::UnknownAncillary => "unknown-ancillary",
             Self::ExitAt(point) => point.argument(),
         }
     }
@@ -27,6 +29,7 @@ impl ChildMode {
             "insufficient-landlock-abi" => Some(Self::InsufficientLandlockAbi),
             "restriction-probe-failure" => Some(Self::RestrictionProbeFailure),
             "seccomp-installation-failure" => Some(Self::SeccompInstallationFailure),
+            "unknown-ancillary" => Some(Self::UnknownAncillary),
             _ => FaultPoint::parse(argument).map(Self::ExitAt),
         }
     }
@@ -132,6 +135,7 @@ mod tests {
             ChildMode::InsufficientLandlockAbi,
             ChildMode::RestrictionProbeFailure,
             ChildMode::SeccompInstallationFailure,
+            ChildMode::UnknownAncillary,
         ] {
             assert_eq!(ChildMode::parse(OsStr::new(mode.argument())), Some(mode));
         }
