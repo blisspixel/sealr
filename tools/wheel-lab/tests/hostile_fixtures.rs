@@ -8,7 +8,7 @@ use sealr_wheel_lab::{evaluate_wheel, WheelEvaluation, WheelLimits};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, ZipWriter};
+use zip::{CompressionMethod, DateTime, System, ZipWriter};
 
 const CORPUS: &str = "../../tests/corpus/wheels/hostile";
 
@@ -329,7 +329,9 @@ fn build_wheel(fixture: &Fixture) -> Vec<u8> {
                 0o644
             };
             let options = SimpleFileOptions::default()
-                .compression_method(CompressionMethod::Deflated)
+                .compression_method(CompressionMethod::Stored)
+                .last_modified_time(DateTime::DEFAULT)
+                .system(System::Unix)
                 .unix_permissions(permissions);
             writer.start_file(path, options).unwrap();
             writer.write_all(&bytes).unwrap();
