@@ -1,6 +1,7 @@
-use std::fs::File;
+use std::fs::{self, File};
 use std::io;
 use std::os::unix::process::CommandExt;
+use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
@@ -307,6 +308,7 @@ fn execute_initial_active(
             "worker restriction-ready evidence is inconsistent",
         ));
     }
+    observe_restricted_child(child.child.id())?;
 
     let source_file = clone_source(snapshot)?;
     let source_values = source_identity(&source_file)?;
@@ -640,6 +642,7 @@ fn execute_member_read_active(
             "member-read restriction-ready evidence is inconsistent",
         ));
     }
+    observe_restricted_child(child.child.id())?;
 
     let source = clone_source(&authority.snapshot)?;
     let source_values = source_identity(&source)?;
@@ -919,6 +922,80 @@ fn configure_supervisor_control(control: &OwnedFd) -> Result<(), SupervisionErro
         .map_err(|error| fail(SupervisionErrorKind::Protocol, error))?;
     rustix::fs::fcntl_setfl(control, flags | OFlags::NONBLOCK)
         .map_err(|error| fail(SupervisionErrorKind::Protocol, error))
+}
+
+fn observe_restricted_child(pid: u32) -> Result<(), SupervisionError> {
+    let proc_root = PathBuf::from(format!("/proc/{pid}"));
+    let status = fs::read_to_string(proc_root.join("status"))
+        .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?;
+    let seccomp_filters = status
+        .lines()
+        .find_map(|line| line.strip_prefix("Seccomp_filters:\t"))
+        .map(str::parse::<u64>)
+        .transpose()
+        .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?;
+    if !status.lines().any(|line| line == "NoNewPrivs:\t1")
+        || !status.lines().any(|line| line == "Threads:\t1")
+        || !status.lines().any(|line| line == "Seccomp:\t2")
+        || seccomp_filters.is_none_or(|count| count == 0)
+    {
+        return Err(fail(
+            SupervisionErrorKind::RestrictionUnavailable,
+            "worker is not single-threaded with no_new_privs and an active seccomp filter",
+        ));
+    }
+    let children = fs::read_to_string(proc_root.join(format!("task/{pid}/children")))
+        .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?;
+    if !children.trim().is_empty() {
+        return Err(fail(
+            SupervisionErrorKind::RestrictionUnavailable,
+            format!("restricted worker retained descendant PIDs {children:?}"),
+        ));
+    }
+    let mut descriptors = fs::read_dir(proc_root.join("fd"))
+        .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?
+        .map(|entry| {
+            let entry =
+                entry.map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?;
+            entry
+                .file_name()
+                .to_str()
+                .and_then(|name| name.parse::<i32>().ok())
+                .ok_or_else(|| {
+                    fail(
+                        SupervisionErrorKind::RestrictionUnavailable,
+                        "worker descriptor entry is not numeric",
+                    )
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    descriptors.sort_unstable();
+    if descriptors != [0, 1, 2] {
+        return Err(fail(
+            SupervisionErrorKind::RestrictionUnavailable,
+            format!("restricted worker descriptor set is {descriptors:?}; expected [0, 1, 2]"),
+        ));
+    }
+    let stdin_info = fs::read_to_string(proc_root.join("fdinfo/0"))
+        .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?;
+    let flags = stdin_info
+        .lines()
+        .find_map(|line| line.strip_prefix("flags:\t"))
+        .ok_or_else(|| {
+            fail(
+                SupervisionErrorKind::RestrictionUnavailable,
+                "worker control descriptor has no procfs flags",
+            )
+        })?;
+    let flags = u64::from_str_radix(flags, 8)
+        .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?;
+    if flags & libc::O_CLOEXEC as u64 == 0 {
+        return Err(fail(
+            SupervisionErrorKind::RestrictionUnavailable,
+            "worker control descriptor lacks close-on-exec",
+        ));
+    }
+    Ok(())
 }
 
 fn transport_until<T>(
