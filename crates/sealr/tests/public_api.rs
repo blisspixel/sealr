@@ -3,11 +3,13 @@
 use std::io::{Cursor, Write};
 
 use sealr::{
-    apply, apply_with_options, ApplyOptions, EnvMeta, LinuxWorker, MaterializationMeta,
-    MemberReadErrorKind, Outcome, OutcomeIdentities, Policy, PolicyMeta, Receipt, Request,
-    RetentionPlan, RetentionStatus, SnapshotKind, Source, SourceMeta, SupervisionErrorKind,
-    ToolMeta, VerifiedArchive, View, ZipInterpretationProfile, ZIP_STRICT_ASCII_V2,
+    apply, apply_with_options, ApplyOptions, EnvMeta, MaterializationMeta, MemberReadErrorKind,
+    Outcome, OutcomeIdentities, Policy, PolicyMeta, Receipt, Request, RetentionPlan,
+    RetentionStatus, SnapshotKind, Source, SourceMeta, ToolMeta, VerifiedArchive, View,
+    ZipInterpretationProfile, ZIP_STRICT_ASCII_V2,
 };
+#[cfg(not(target_os = "linux"))]
+use sealr::{LinuxWorker, SupervisionErrorKind};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
