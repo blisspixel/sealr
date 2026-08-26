@@ -39,6 +39,12 @@ pub fn __fuzz_semantic_records(input: &[u8]) {
 #[doc(hidden)]
 pub use semantic_record::worker_lab as __worker_lab;
 
+/// Repository-only bridge from the authenticated helper binary to the generic
+/// semantic worker adapter. It is not a supported public API surface.
+#[cfg(feature = "__internal-worker-lab")]
+#[doc(hidden)]
+pub use semantic_record::worker_runtime as __worker_runtime;
+
 /// Repository-only bridge used by the native materialization lifecycle lab.
 ///
 /// This module is absent unless the private `__internal-lifecycle-lab`

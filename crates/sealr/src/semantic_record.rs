@@ -56,6 +56,8 @@ mod peak_live;
 mod retained_content;
 #[cfg(feature = "__internal-worker-lab")]
 pub mod worker_lab;
+#[cfg(any(target_os = "linux", feature = "__internal-worker-lab"))]
+pub mod worker_runtime;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum RequestedEffect {
@@ -2299,22 +2301,77 @@ fn encode_planning_validated(record: &PlanningRecord) -> Result<Vec<u8>, RecordE
     encoder.finish()
 }
 
+#[derive(Clone, Copy)]
+enum PlanningExpectation<'a> {
+    Exact(&'a InvocationBinding),
+    Worker {
+        operation_id: [u8; 16],
+        requested_effect: RequestedEffect,
+    },
+}
+
 fn decode_planning(
     input: &[u8],
     expected: &InvocationBinding,
     snapshot: &SourceSnapshot<'_>,
 ) -> Result<ValidatedPlanningRecord, RecordError> {
-    validate_binding(expected)?;
-    validate_snapshot_binding(snapshot, expected)?;
+    decode_planning_for(input, PlanningExpectation::Exact(expected), snapshot)
+}
+
+fn decode_planning_for_worker(
+    input: &[u8],
+    operation_id: [u8; 16],
+    requested_effect: RequestedEffect,
+    snapshot: &SourceSnapshot<'_>,
+) -> Result<ValidatedPlanningRecord, RecordError> {
+    decode_planning_for(
+        input,
+        PlanningExpectation::Worker {
+            operation_id,
+            requested_effect,
+        },
+        snapshot,
+    )
+}
+
+fn decode_planning_binding(input: &[u8]) -> Result<InvocationBinding, RecordError> {
+    let mut cursor = Cursor::frame(input, KIND_PLANNING)?;
+    decode_binding(&mut cursor)
+}
+
+fn decode_planning_for(
+    input: &[u8],
+    expectation: PlanningExpectation<'_>,
+    snapshot: &SourceSnapshot<'_>,
+) -> Result<ValidatedPlanningRecord, RecordError> {
+    if let PlanningExpectation::Exact(expected) = expectation {
+        validate_binding(expected)?;
+    }
     let mut cursor = Cursor::frame(input, KIND_PLANNING)?;
     let binding = decode_binding(&mut cursor)?;
-    if &binding != expected {
-        return Err(RecordError::new(
-            RecordErrorKind::BindingMismatch,
-            HEADER_BYTES,
-            "planning record does not match the expected invocation",
-        ));
+    match expectation {
+        PlanningExpectation::Exact(expected) if &binding != expected => {
+            return Err(RecordError::new(
+                RecordErrorKind::BindingMismatch,
+                HEADER_BYTES,
+                "planning record does not match the expected invocation",
+            ));
+        }
+        PlanningExpectation::Worker {
+            operation_id,
+            requested_effect,
+        } if binding.operation_id != operation_id
+            || binding.requested_effect != requested_effect =>
+        {
+            return Err(RecordError::new(
+                RecordErrorKind::BindingMismatch,
+                HEADER_BYTES,
+                "planning record does not match the worker operation",
+            ));
+        }
+        PlanningExpectation::Exact(_) | PlanningExpectation::Worker { .. } => {}
     }
+    validate_snapshot_binding(snapshot, &binding)?;
     let findings = decode_findings(&mut cursor)?;
     let disposition = match cursor.u8()? {
         0 => PlanningDisposition::ReadyForVerification,

@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use std::cell::Cell;
 #[cfg(test)]
 use std::cell::RefCell;
-#[cfg(feature = "__internal-worker-lab")]
+#[cfg(any(target_os = "linux", feature = "__internal-worker-lab"))]
 use std::fs::File as StdFile;
 
 use crate::findings::{Finding, FindingCode};
@@ -483,7 +483,7 @@ impl StageWriteRoot {
         })
     }
 
-    #[cfg(feature = "__internal-worker-lab")]
+    #[cfg(any(target_os = "linux", feature = "__internal-worker-lab"))]
     pub(crate) fn from_worker_file(file: StdFile) -> Result<Self, Finding> {
         let root = CapDir::from_std_file(file);
         ensure_stage_namespace_safe(&root)?;

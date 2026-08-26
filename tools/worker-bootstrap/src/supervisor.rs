@@ -1125,20 +1125,21 @@ fn exchange_active(
     if !status.success() {
         return Err(io::Error::other(format!("worker exited unsuccessfully: {status}")).into());
     }
-    let (semantic_evidence, retention_evidence) =
-        sealr::__worker_lab::authorize_inspect_retained_execution(
-            source_descriptor.try_clone()?,
-            source_values[0],
-            operation_id,
-            validated_plan
-                .as_ref()
-                .expect("accepted plan was validated by the supervisor")
-                .bytes(),
-            completion.bytes(),
-            retained.bytes(),
-            &retention,
-        )
-        .map_err(|error| io::Error::other(format!("authorizing semantic execution: {error}")))?;
+    let authorized = sealr::__worker_runtime::authorize_execution(
+        source_descriptor.try_clone()?,
+        source_values[0],
+        operation_id,
+        validated_plan
+            .as_ref()
+            .expect("accepted plan was validated by the supervisor")
+            .bytes(),
+        completion.bytes(),
+        retained.bytes(),
+        sealr::__worker_runtime::OperationKind::Inspect,
+    )
+    .map_err(|error| io::Error::other(format!("authorizing semantic execution: {error}")))?;
+    let semantic_evidence = authorized.completion_evidence();
+    let retention_evidence = authorized.retention_evidence();
     if !semantic_evidence.complete
         || semantic_evidence.member_count != SOURCE_MEMBER_COUNT
         || semantic_evidence.verified_members != SOURCE_MEMBER_COUNT

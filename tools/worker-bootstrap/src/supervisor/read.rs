@@ -102,12 +102,10 @@ struct IsolatedReadCapability {
 
 struct ReadAuthority {
     source: File,
-    source_bytes: Arc<[u8]>,
     outside_sentinel: File,
     operation_id: [u8; 16],
     planning: Arc<[u8]>,
     completion: Arc<[u8]>,
-    retention: sealr::__worker_lab::InspectRetentionRequest,
     coordinator: ReadCoordinator,
     spawned: AtomicUsize,
 }
@@ -185,31 +183,32 @@ impl IsolatedReadCapability {
         let planning =
             sealr::__worker_lab::plan_inspect_retaining(source_bytes(), operation_id, &retention)
                 .map_err(|error| io::Error::other(format!("planning read authority: {error}")))?;
-        let executed = sealr::__worker_lab::validate_inspect_retaining(
+        let executed = sealr::__worker_runtime::validate_operation(
             fixture.source.try_clone()?,
             source_bytes().len() as u64,
             operation_id,
             &planning,
-            &retention,
+            sealr::__worker_runtime::OperationKind::Inspect,
         )
         .map_err(|error| io::Error::other(format!("validating read authority: {error}")))?
-        .execute()
+        .execute(None)
         .map_err(|error| io::Error::other(format!("executing read authority: {error}")))?;
         let completion = executed.completion().to_vec();
         let retained = executed.retained_content().to_vec();
-        let (completion_evidence, retention_evidence) =
-            sealr::__worker_lab::authorize_inspect_retained_execution(
-                fixture.source.try_clone()?,
-                source_bytes().len() as u64,
-                operation_id,
-                &planning,
-                &completion,
-                &retained,
-                &retention,
-            )
-            .map_err(|error| {
-                io::Error::other(format!("authorizing isolated read capability: {error}"))
-            })?;
+        let authorized = sealr::__worker_runtime::authorize_execution(
+            fixture.source.try_clone()?,
+            source_bytes().len() as u64,
+            operation_id,
+            &planning,
+            &completion,
+            &retained,
+            sealr::__worker_runtime::OperationKind::Inspect,
+        )
+        .map_err(|error| {
+            io::Error::other(format!("authorizing isolated read capability: {error}"))
+        })?;
+        let completion_evidence = authorized.completion_evidence();
+        let retention_evidence = authorized.retention_evidence();
         if !completion_evidence.complete
             || completion_evidence.member_count != SOURCE_MEMBER_COUNT
             || retention_evidence.requested_paths != 0
@@ -224,12 +223,10 @@ impl IsolatedReadCapability {
         Ok(Self {
             inner: Arc::new(ReadAuthority {
                 source: fixture.source.try_clone()?,
-                source_bytes: Arc::from(source_bytes()),
                 outside_sentinel: fixture.outside_sentinel.try_clone()?,
                 operation_id,
                 planning: Arc::from(planning),
                 completion: Arc::from(completion),
-                retention,
                 coordinator: ReadCoordinator {
                     active: Mutex::new(false),
                     changed: Condvar::new(),
@@ -254,22 +251,29 @@ impl IsolatedReadCapability {
         let deadline = started + READ_DEADLINE;
         let read_operation_id =
             random_operation_id().map_err(|error| failure(ReadFailureKind::Preflight, error))?;
-        let authority = sealr::__worker_lab::InspectMemberReadAuthority::new(
+        let authority = sealr::__worker_runtime::MemberReadAuthority::new(
             self.inner.operation_id,
             &self.inner.planning,
             &self.inner.completion,
-            &self.inner.retention,
         );
-        let request = sealr::__worker_lab::create_inspect_member_read_request(
-            &self.inner.source_bytes,
+        let request = sealr::__worker_runtime::create_member_read_request(
+            self.inner
+                .source
+                .try_clone()
+                .map_err(|error| failure(ReadFailureKind::Preflight, error))?,
+            source_bytes().len() as u64,
             authority,
             read_operation_id,
             path,
             max_bytes,
         )
         .map_err(|error| failure(ReadFailureKind::Preflight, error))?;
-        let expected = sealr::__worker_lab::validate_inspect_member_read_request(
-            &self.inner.source_bytes,
+        let expected = sealr::__worker_runtime::validate_member_read_request(
+            self.inner
+                .source
+                .try_clone()
+                .map_err(|error| failure(ReadFailureKind::Preflight, error))?,
+            source_bytes().len() as u64,
             authority,
             &request,
             read_operation_id,
@@ -483,7 +487,7 @@ fn run_worker(
     authority: &ReadAuthority,
     read_operation_id: [u8; 16],
     request: &[u8],
-    expected: sealr::__worker_lab::InspectMemberReadEvidence,
+    expected: sealr::__worker_runtime::MemberReadEvidence,
     cancellation: &ReadCancellation,
     deadline: Instant,
     mode: ChildMode,
@@ -572,7 +576,7 @@ fn run_worker_active(
     authority: &ReadAuthority,
     read_operation_id: [u8; 16],
     request: &[u8],
-    expected: sealr::__worker_lab::InspectMemberReadEvidence,
+    expected: sealr::__worker_runtime::MemberReadEvidence,
     cancellation: &ReadCancellation,
     deadline: Instant,
     mode: ChildMode,
@@ -764,7 +768,7 @@ fn drain_and_finalize(
     authority: &ReadAuthority,
     read_operation_id: [u8; 16],
     request: &[u8],
-    expected: sealr::__worker_lab::InspectMemberReadEvidence,
+    expected: sealr::__worker_runtime::MemberReadEvidence,
     cancellation: &ReadCancellation,
     deadline: Instant,
     mode: ChildMode,
@@ -942,14 +946,17 @@ fn drain_and_finalize(
             "member read was cancelled before success linearization",
         ));
     }
-    let read_authority = sealr::__worker_lab::InspectMemberReadAuthority::new(
+    let read_authority = sealr::__worker_runtime::MemberReadAuthority::new(
         authority.operation_id,
         &authority.planning,
         &authority.completion,
-        &authority.retention,
     );
-    sealr::__worker_lab::validate_inspect_member_read_result(
-        &authority.source_bytes,
+    sealr::__worker_runtime::validate_member_read_result(
+        authority
+            .source
+            .try_clone()
+            .map_err(|error| failure(ReadFailureKind::Integrity, error))?,
+        source_bytes().len() as u64,
         read_authority,
         request,
         read_operation_id,

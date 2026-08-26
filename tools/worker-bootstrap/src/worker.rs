@@ -16,6 +16,7 @@ use rustix::fd::{AsFd, AsRawFd, OwnedFd};
 use rustix::fs::{FileType, Mode, OFlags};
 use rustix::io::FdFlags;
 use rustix::process::{Pid, Signal};
+use sealr::__worker_runtime::OperationKind;
 use std::ffi::OsString;
 use std::fs::File;
 use std::io;
@@ -28,75 +29,6 @@ const PHASE_PROBE: u64 = 5;
 const PHASE_EXIT: u64 = 6;
 const PHASE_PLAN: u64 = 7;
 const PHASE_MEMBER_READ: u64 = 8;
-const SOURCE_RETAINED_BYTES: u64 = 30;
-
-enum ValidatedOperation {
-    Inspect(sealr::__worker_lab::ValidatedInspectOperation),
-    Materialize(sealr::__worker_lab::ValidatedMaterializeOperation),
-}
-
-enum ExecutedOperation {
-    Inspect(sealr::__worker_lab::ExecutedInspectOperation),
-    Materialize(sealr::__worker_lab::ExecutedMaterializeOperation),
-}
-
-impl ValidatedOperation {
-    fn source_probe(&self) -> Result<u8, String> {
-        match self {
-            Self::Inspect(operation) => operation.source_probe(),
-            Self::Materialize(operation) => operation.source_probe(),
-        }
-    }
-
-    fn execute(self, stage: Option<OwnedFd>) -> Result<ExecutedOperation, String> {
-        match self {
-            Self::Inspect(operation) => {
-                drop(stage);
-                operation.execute().map(ExecutedOperation::Inspect)
-            }
-            Self::Materialize(operation) => {
-                let stage = stage.ok_or_else(|| {
-                    "validated materialization operation lost its stage authority".to_owned()
-                })?;
-                operation
-                    .execute_into(File::from(stage))
-                    .map(ExecutedOperation::Materialize)
-            }
-        }
-    }
-}
-
-impl ExecutedOperation {
-    fn completion(&self) -> &[u8] {
-        match self {
-            Self::Inspect(operation) => operation.completion(),
-            Self::Materialize(operation) => operation.completion(),
-        }
-    }
-
-    fn retained_content(&self) -> &[u8] {
-        match self {
-            Self::Inspect(operation) => operation.retained_content(),
-            Self::Materialize(operation) => operation.retained_content(),
-        }
-    }
-
-    fn evidence(&self) -> Result<sealr::__worker_lab::InspectCompletionEvidence, String> {
-        match self {
-            Self::Inspect(operation) => operation.evidence(),
-            Self::Materialize(operation) => operation.evidence(),
-        }
-    }
-
-    fn retention_evidence(
-        &self,
-    ) -> Result<Option<sealr::__worker_lab::InspectRetentionEvidence>, String> {
-        match self {
-            Self::Inspect(operation) => operation.retention_evidence().map(Some),
-            Self::Materialize(operation) => operation.retention_evidence().map(Some),
-        }
-    }
-}
 
 pub(crate) fn production_entry(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>> {
     if !args.is_empty() {
@@ -433,17 +365,6 @@ fn run(
                 format!("validating sealed plan failed: {error}"),
             )
         })?;
-    let retention = if member_read {
-        crate::semantic_read_retention_request()
-    } else {
-        crate::semantic_retention_request()
-    }
-    .map_err(|error| {
-        protocol(
-            PHASE_PLAN,
-            format!("constructing semantic retention request failed: {error}"),
-        )
-    })?;
     let mut source = Some(File::from(source));
     let validation_source = if member_read {
         source
@@ -461,25 +382,18 @@ fn run(
             .take()
             .expect("ordinary execution consumes its source")
     };
-    let validated_operation = if materialize {
-        sealr::__worker_lab::validate_materialize_retaining(
-            validation_source,
-            source_frame.values[0],
-            operation_id,
-            plan.bytes(),
-            &retention,
-        )
-        .map(ValidatedOperation::Materialize)
+    let operation_kind = if materialize {
+        OperationKind::Materialize
     } else {
-        sealr::__worker_lab::validate_inspect_retaining(
-            validation_source,
-            source_frame.values[0],
-            original_operation_id,
-            plan.bytes(),
-            &retention,
-        )
-        .map(ValidatedOperation::Inspect)
-    }
+        OperationKind::Inspect
+    };
+    let validated_operation = sealr::__worker_runtime::validate_operation(
+        validation_source,
+        source_frame.values[0],
+        original_operation_id,
+        plan.bytes(),
+        operation_kind,
+    )
     .map_err(|error| {
         protocol(
             PHASE_PLAN,
@@ -523,7 +437,6 @@ fn run(
             source.take().expect("member-read source is retained"),
             source_frame.values[0],
             plan.bytes(),
-            &retention,
         );
     }
 
@@ -552,7 +465,7 @@ fn run(
 
     let execution_stage = if materialize { stage.take() } else { None };
     let executed_operation = validated_operation
-        .execute(execution_stage)
+        .execute(execution_stage.map(File::from))
         .map_err(|error| {
             protocol(
                 PHASE_PROBE,
@@ -562,41 +475,19 @@ fn run(
     if materialize {
         mode.exit_at(FaultPoint::StageCreate);
     }
-    let semantic_evidence = executed_operation.evidence().map_err(|error| {
+    let semantic_evidence = executed_operation.completion_evidence().map_err(|error| {
         protocol(
             PHASE_PROBE,
             format!("revalidating semantic completion failed: {error}"),
         )
     })?;
-    if !semantic_evidence.complete
-        || semantic_evidence.verified_members != semantic_evidence.member_count
-    {
-        return Err(protocol(
-            PHASE_PROBE,
-            format!("semantic completion is incomplete: {semantic_evidence:?}"),
-        ));
-    }
     let retention_evidence = executed_operation.retention_evidence().map_err(|error| {
         protocol(
             PHASE_PROBE,
             format!("revalidating retained content failed: {error}"),
         )
     })?;
-    let retention_evidence = retention_evidence.ok_or_else(|| {
-        protocol(
-            PHASE_PROBE,
-            "semantic execution did not produce retained-content evidence",
-        )
-    })?;
-    if retention_evidence.requested_paths != 2
-        || retention_evidence.retained_members != 2
-        || retention_evidence.retained_bytes != SOURCE_RETAINED_BYTES
-    {
-        return Err(protocol(
-            PHASE_PROBE,
-            format!("retained-content evidence is incomplete: {retention_evidence:?}"),
-        ));
-    }
+    let _ = (semantic_evidence, retention_evidence);
     let completion_payload = executed_operation.completion();
     let completion_descriptor =
         sealed::create(BlobRole::Completion, completion_payload).map_err(|error| {
@@ -697,7 +588,6 @@ fn run_member_read(
     source: File,
     source_len: u64,
     planning: &[u8],
-    retention: &sealr::__worker_lab::InspectRetentionRequest,
 ) -> Result<(), WorkerFailure> {
     let (read_frame, mut descriptors) = receive_packet(control, Some(2)).map_err(|error| {
         protocol(
@@ -749,13 +639,12 @@ fn run_member_read(
             format!("validating member-read request failed: {error}"),
         )
     })?;
-    let authority = sealr::__worker_lab::InspectMemberReadAuthority::new(
+    let authority = sealr::__worker_runtime::MemberReadAuthority::new(
         original_operation_id,
         planning,
         completion.bytes(),
-        retention,
     );
-    let read = sealr::__worker_lab::validate_inspect_member_read(
+    let read = sealr::__worker_runtime::validate_member_read(
         source,
         source_len,
         authority,
