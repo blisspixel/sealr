@@ -1,0 +1,165 @@
+name: Scheduled assurance discovery
+
+on:
+  schedule:
+    - cron: '29 9 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assurance-discovery-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: 1.98.0
+  KANI_VERSION: 0.67.0
+  CARGO_MUTANTS_VERSION: 27.1.0
+  CARGO_LLVM_COV_VERSION: 0.9.0
+
+jobs:
+  kani:
+    name: Bounded scalar model checking
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Kani
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install kani-verifier --version "${KANI_VERSION}" --locked
+          cargo kani setup
+          cargo kani --version | grep --fixed-strings "${KANI_VERSION}"
+
+      - name: Prove bounded scalar kernels
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/assurance-discovery
+          cargo kani --manifest-path verification/kani/Cargo.toml --package sealr --default-unwind 1 2>&1 |
+            tee target/assurance-discovery/kani.log
+
+      - name: Upload bounded model-checking report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kani-${{ github.sha }}
+          path: target/assurance-discovery/kani.log
+          if-no-files-found: error
+          retention-days: 30
+
+  mutation:
+    name: Targeted mutation discovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust
+        run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
+
+      - name: Select pinned Rust
+        run: rustup default ${{ env.RUST_VERSION }}
+
+      - name: Install pinned cargo-mutants
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install cargo-mutants --version "${CARGO_MUTANTS_VERSION}" --locked
+          cargo-mutants mutants --version | grep --fixed-strings "${CARGO_MUTANTS_VERSION}"
+
+      - name: Discover weak scalar assertions
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p target/assurance-discovery
+          set +e
+          cargo-mutants mutants \
+            --no-config \
+            --package sealr \
+            --file crates/sealr/src/interval.rs \
+            --file crates/sealr/src/quota.rs \
+            --file crates/sealr/src/ratio.rs \
+            --re 'CheckedInterval::from_offset_len|QuotaState::consume|ratio_exceeds' \
+            --exclude-re 'kani_proofs' \
+            --jobs 2 \
+            --timeout 120 \
+            --output target/assurance-discovery/mutation \
+            --no-times \
+            --colors never \
+            --annotations none \
+            --cargo-arg=--locked \
+            -- --lib
+          status=$?
+          set -e
+          printf '%s\n' "${status}" > target/assurance-discovery/mutation/exit-code.txt
+          test -f target/assurance-discovery/mutation/mutants.out/outcomes.json
+          case "${status}" in
+            0|2|3)
+              ;;
+            *)
+              echo "cargo-mutants infrastructure, usage, filter, or baseline failed with ${status}" >&2
+              exit "${status}"
+              ;;
+          esac
+
+      - name: Upload mutation discovery report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-discovery-${{ github.sha }}
+          path: target/assurance-discovery/mutation
+          if-no-files-found: error
+          retention-days: 30
+
+  coverage:
+    name: Source coverage discovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust
+        run: >-
+          rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
+          --component llvm-tools-preview
+
+      - name: Select pinned Rust
+        run: rustup default ${{ env.RUST_VERSION }}
+
+      - name: Install pinned cargo-llvm-cov
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install cargo-llvm-cov --version "${CARGO_LLVM_COV_VERSION}" --locked
+          cargo llvm-cov --version | grep --fixed-strings "${CARGO_LLVM_COV_VERSION}"
+
+      - name: Measure source coverage for discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/assurance-discovery
+          cargo llvm-cov \
+            --locked \
+            --package sealr \
+            --all-features \
+            --json \
+            --summary-only \
+            --output-path target/assurance-discovery/coverage.json
+          test -s target/assurance-discovery/coverage.json
+
+      - name: Upload source coverage discovery report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-discovery-${{ github.sha }}
+          path: target/assurance-discovery/coverage.json
+          if-no-files-found: error
+          retention-days: 30

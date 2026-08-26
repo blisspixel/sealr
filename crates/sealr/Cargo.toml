@@ -8,6 +8,12 @@ description.workspace = true
 repository.workspace = true
 publish = false
 
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
+[package.metadata.kani.flags]
+default-unwind = "1"
+
 [features]
 # Enables only the external cargo-fuzz entry point. This is not a shipped API.
 __internal-fuzzing = []

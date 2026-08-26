@@ -105,6 +105,27 @@ pub(crate) fn exact_partition(
     Ok(())
 }
 
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    #[kani::proof]
+    fn interval_offset_len_matches_wide_oracle() {
+        let offset: u64 = kani::any();
+        let len: u64 = kani::any();
+        let wide_end = u128::from(offset) + u128::from(len);
+        let actual = CheckedInterval::from_offset_len(offset, len);
+
+        if wide_end <= u128::from(u64::MAX) {
+            let interval = actual.expect("representable end must be accepted");
+            assert_eq!(interval.start(), offset);
+            assert_eq!(interval.end(), wide_end as u64);
+        } else {
+            assert_eq!(actual, Err(IntervalError::EndOverflow));
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
