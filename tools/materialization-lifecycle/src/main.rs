@@ -3,9 +3,6 @@ use std::fs;
 use std::io::{self, Cursor, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
-use std::sync::mpsc;
-use std::thread;
-use std::time::{Duration, Instant};
 
 use sealr::{
     apply, AdmissionStatus, EffectStatus, FindingCode, InterpretationStatus, Policy, Request,
@@ -15,9 +12,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 const ITERATIONS: usize = 500;
-const SEED: u64 = 0x6a09_e667_f3bc_c909;
 const PAYLOAD_BYTES: usize = 2 * 1024 * 1024;
-const STAGE_PREFIX: &str = ".sealr-stage-";
 
 #[derive(Clone, Copy, Debug)]
 enum LifecycleCase {
@@ -64,7 +59,7 @@ fn main() -> ExitCode {
     match run() {
         Ok(counts) => {
             println!(
-                "sealr.native-materialization-evidence.v1: seed {SEED:#018x}, {ITERATIONS} iterations, {} publications, {} setup collisions, {} verification aborts, {} destination races, exact lifecycle oracle agreement, and no leaked stages passed",
+                "sealr.native-materialization-evidence.v1: {ITERATIONS} iterations, {} publications, {} setup collisions, {} verification aborts, {} destination races, exact lifecycle oracle agreement, and no leaked stages passed",
                 counts.publish,
                 counts.setup_collision,
                 counts.verification_abort,
@@ -84,7 +79,6 @@ fn run() -> Result<Counts, Box<dyn std::error::Error>> {
     let valid = make_source(false)?;
     let invalid = make_source(true)?;
     let policy = Policy::default_v1();
-    let mut state = SEED;
     let mut counts = Counts::default();
 
     for iteration in 0..ITERATIONS {
@@ -95,7 +89,6 @@ fn run() -> Result<Counts, Box<dyn std::error::Error>> {
             3 => LifecycleCase::DestinationRace,
             _ => unreachable!("lifecycle modulus is closed"),
         };
-        state = xorshift64(state);
         let case_root = root.path.join(format!("case-{iteration:03}"));
         fs::create_dir(&case_root)?;
         let destination = case_root.join("output");
@@ -115,7 +108,7 @@ fn run() -> Result<Counts, Box<dyn std::error::Error>> {
             }
             LifecycleCase::DestinationRace => {
                 counts.destination_race += 1;
-                run_destination_race(&policy, &valid, &case_root, &destination, state)
+                run_destination_race(&policy, &valid, &destination)
             }
         };
         result.map_err(|error| {
@@ -211,35 +204,10 @@ fn run_verification_abort(policy: &Policy, source: &[u8], destination: &Path) ->
     Ok(())
 }
 
-fn run_destination_race(
-    policy: &Policy,
-    source: &[u8],
-    parent: &Path,
-    destination: &Path,
-    schedule: u64,
-) -> io::Result<()> {
-    let outcome = thread::scope(|scope| -> io::Result<_> {
-        let (start_sender, start_receiver) = mpsc::sync_channel(0);
-        let application = scope.spawn(move || -> io::Result<_> {
-            start_receiver.recv().map_err(|_| {
-                io::Error::other("destination-race observer did not arm the application")
-            })?;
-            // Keep the caller thread scheduled long enough to enter its
-            // observation loop. The race itself is still planted only after
-            // that loop observes the real private stage.
-            thread::sleep(Duration::from_millis(1));
-            Ok(apply(request(policy, source, destination)))
-        });
-        start_sender
-            .send(())
-            .map_err(|_| io::Error::other("destination-race application did not start"))?;
-        let observation = plant_destination_after_stage(parent, destination, schedule);
-        let outcome = application
-            .join()
-            .map_err(|_| io::Error::other("destination-race application panicked"))??;
-        observation?;
-        Ok(outcome)
-    })?;
+fn run_destination_race(policy: &Policy, source: &[u8], destination: &Path) -> io::Result<()> {
+    let _guard = sealr::__materialization_lifecycle_lab::
+        plant_destination_before_publication_for_current_thread();
+    let outcome = apply(request(policy, source, destination));
     require_axes(
         &outcome,
         AdmissionStatus::Admitted,
@@ -257,46 +225,6 @@ fn run_destination_race(
         ));
     }
     fs::remove_dir_all(destination)
-}
-
-fn plant_destination_after_stage(
-    parent: &Path,
-    destination: &Path,
-    schedule: u64,
-) -> io::Result<()> {
-    let spin = usize::try_from(schedule & 0x3f).expect("six schedule bits fit usize");
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while Instant::now() < deadline {
-        let mut stage_exists = false;
-        for entry in fs::read_dir(parent)? {
-            if entry?
-                .file_name()
-                .to_string_lossy()
-                .starts_with(STAGE_PREFIX)
-            {
-                stage_exists = true;
-                break;
-            }
-        }
-        if stage_exists {
-            for _ in 0..spin {
-                std::hint::spin_loop();
-            }
-            fs::create_dir(destination)?;
-            fs::write(destination.join("sentinel"), b"raced")?;
-            return Ok(());
-        }
-        if destination.exists() {
-            return Err(io::Error::other(
-                "publication completed before the observer saw its stage",
-            ));
-        }
-        thread::yield_now();
-    }
-    Err(io::Error::new(
-        io::ErrorKind::TimedOut,
-        "stage observer exceeded its ten-second deadline",
-    ))
 }
 
 fn request<'a>(policy: &'a Policy, source: &'a [u8], destination: &'a Path) -> Request<'a> {
