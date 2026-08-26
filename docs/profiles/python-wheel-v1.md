@@ -1,6 +1,6 @@
 # Python wheel consumer profile draft
 
-> Status: design plus initial container-compatibility evidence. Alpha.5 does not recognize wheels as a consumer type, parse wheel metadata, validate `RECORD`, or produce an installation plan. It has a generic opaque verified-member capability and a small non-shipping wheel pilot, but no wheel-specific rule or identity on this page is a shipped contract.
+> Status: design plus initial container-compatibility evidence. Alpha.6 does not recognize wheels as a consumer type, parse wheel metadata, validate `RECORD`, or produce an installation plan. It has a generic opaque verified-member capability, an explicit Linux supervised backend, and a small non-shipping wheel pilot, but no wheel-specific rule or identity on this page is a shipped contract.
 
 The first consumer should force Sealr to prove its category: another tool receives one admitted representation and does not open the ZIP again. Python wheels are a strong target because wheel installation has archive semantics, package metadata, an internal content manifest, relocations, and target-dependent transformations.
 

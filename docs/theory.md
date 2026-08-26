@@ -1,6 +1,6 @@
 # Interpretation theory
 
-> Status: research notes. This page names the mathematical object Sealr is aiming at. It is not a proof, not a qualification claim, and not a description of capabilities that Alpha.5 already has. Implemented predicates and the ideal function are distinguished throughout. The current executable contract is the [README](../README.md), [invariants](invariants.md), and [semantic model](semantic-model.md).
+> Status: research notes. This page names the mathematical object Sealr is aiming at. It is not a proof, not a qualification claim, and not a description of capabilities that Alpha.6 already has. Implemented predicates and the ideal function are distinguished throughout. The current executable contract is the [README](../README.md), [invariants](invariants.md), and [semantic model](semantic-model.md).
 
 Sealr is trying to give untrusted archive bytes a denotation: **at most one canonical IR per versioned profile, or no IR.** Git, Nix, and in-toto already know how to hash a tree you have. ZipDiff showed that ZIP, as deployed, does not uniquely produce one. The work is the missing compiler in the middle.
 
@@ -86,7 +86,7 @@ Defined only when the covering exists, CDH/LFH/descriptor agreement holds, names
 - `Unsupported`: ZIP64, encryption, methods other than Store/Deflate, spanned, non-ASCII names;
 - `Indeterminate`: bytes never held, I/O, cancellation.
 
-Ideal \(I_\pi\) depends only on \((b,\pi)\). Alpha.5 still folds resource budget into `parse_zip` (`max_files`, `max_metadata_bytes`). That interference is named below.
+Ideal \(I_\pi\) depends only on \((b,\pi)\). Alpha.6 still folds resource budget into `parse_zip` (`max_files`, `max_metadata_bytes`). That interference is named below.
 
 `ArchiveIR` is an effect-independent term: profile id and digest, source digest, members with raw names, canonical paths, kinds, flags, methods, declared sizes, source ranges, extra dispositions, normalization actions, and after verification, actual sizes and content SHA-256. Inspect and materialize walk that object. They do not search for a second EOCD.
 
@@ -118,11 +118,11 @@ E : \mathsf{IR} \times \text{target} \times \text{effect policy}
     \longrightarrow \{\mathsf{NotRequested},\;\mathsf{Committed},\;\mathsf{Failed}\}
 \]
 
-A failed rename is `Interpreted + Admitted + Complete + Failed`, not a different tree. Alpha.5 axes represent this. The compatibility `Verdict` still maps it to `rejected`.
+A failed rename is `Interpreted + Admitted + Complete + Failed`, not a different tree. Alpha.6 axes represent this. The compatibility `Verdict` still maps it to `rejected`.
 
 ## Implemented versus ideal
 
-| Object | Ideal | Alpha.5 |
+| Object | Ideal | Alpha.6 |
 |---|---|---|
 | \(I_\pi\) | Partial function of \((b,\pi)\) only | Parser also sees budget; Unicode absent |
 | Unique covering | At most one admitted partition of \([0,n)\) | Local-prefix partition + CD land + last exact-suffix EOCD |
@@ -130,7 +130,8 @@ A failed rename is `Interpreted + Admitted + Complete + Failed`, not a different
 | EOCD | Unique covering certificate | Unique *selected* EOCD under exact-suffix scan |
 | Extras | Every ID semantic or denied | ZIP64 and Unicode Path denied; others ignored occupancy |
 | Codec | Exact consumption as part of \(I_\pi\) | Deflate `total_in == payload.len()`; Store copies the slice |
-| Snapshot | Immutable for the job | Whole-buffer; no worker; no spool |
+| Snapshot | Immutable for the job | Path input is copied and hashed once into a private file-backed snapshot; caller bytes remain memory-backed |
+| Execution authority | Effects separated from interpretation | Default path runs in process; explicit x86_64 Linux worker confines payload verification, stage writes, and later non-retained reads while the supervisor retains planning and publication |
 | Tree roots | Frozen encoding + golden ZIP vectors | Preview `sealrTreeV1`; empty-tree and walkthrough vectors |
 | Covering certificate | Independently checkable interval list including EOCD | Top-level and per-member ranges on IR plus codec-free `audit_covering` |
 | Formal proofs | Lemmas below | None yet |

@@ -1,6 +1,6 @@
 # API contract
 
-This page distinguishes the implemented Alpha.5 contract from the target semantic API. Current callers must pin to the implemented section. The target is specified further in [semantic-model.md](semantic-model.md).
+This page distinguishes the implemented Alpha.6 contract from the target semantic API. Current callers must pin to the implemented section. The target is specified further in [semantic-model.md](semantic-model.md).
 
 ## Implemented surface
 
@@ -103,7 +103,7 @@ One document. The current CLI emits pretty JSON; JSONL is planned. The current d
 
 `verdict`: `allowed` or `rejected` compatibility adapter. `wrote` is Boolean. The axes are the precise record: an admitted archive whose destination fails is `admission: admitted`, `effect: failed`, and still `verdict: rejected`. A rejection before member processing has an empty member list. A later payload or materialization rejection retains every member completed before the failure. The finding that caused rejection is always present. Callers must use `view_completeness` plus the axes rather than assuming a rejected view is a complete member inventory.
 
-Projection and hydration on read are target surfaces. They are not part of Alpha.5.
+Projection and hydration on read are target surfaces. They are not part of Alpha.6.
 
 ---
 
@@ -134,7 +134,7 @@ The current receipt is versioned unsigned JSON (`signed: false`). DSSE and in-to
     "content": { "sealrTreeV1": "..." }
   },
   "view_digest": { "sha256": "..." },
-  "tool": { "name": "sealr", "version": "0.1.0-alpha.5" },
+  "tool": { "name": "sealr", "version": "0.1.0-alpha.6" },
   "environment": { "os": "windows", "arch": "x86_64", "kernel_jail": "unavailable" },
   "materialization": {
     "schema": "sealr.materialization.v2",

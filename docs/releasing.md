@@ -57,7 +57,7 @@ This tool is used only to build release notices. It is not a sealr runtime depen
 
 ## Stage the draft
 
-Create an annotated tag at the verified commit and push only that tag. For `0.1.0-alpha.5`, the tag is `v0.1.0-alpha.5`.
+Create an annotated tag at the verified commit and push only that tag. For `0.1.0-alpha.6`, the tag is `v0.1.0-alpha.6`.
 
 The tag workflow:
 

@@ -1,6 +1,6 @@
 # Reusable admitted trees
 
-> Target research direction. Alpha.5 does not implement projection, mounting, content-addressed reuse, overlays, or lazy verification. The [active execution queue](../ROADMAP.md#active-execution-queue) puts semantic identity and reduced authority before this work.
+> Target research direction. Alpha.6 does not implement projection, mounting, content-addressed reuse, overlays, or lazy verification. The [active execution queue](../ROADMAP.md#active-execution-queue) puts canonical names and a non-reparsing consumer before this work.
 
 The larger opportunity is not faster extraction. It is letting multiple consumers use the exact admitted tree without assigning the archive another meaning.
 

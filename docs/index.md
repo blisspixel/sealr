@@ -1,6 +1,6 @@
 # Documentation
 
-Start with the [README](../README.md) for the published Alpha.5 boundary and a short walkthrough. This index separates current contracts from plans and research notes.
+Start with the [README](../README.md) for the published Alpha.6 boundary and a short walkthrough. This index separates current contracts from plans and research notes.
 
 ## Start and integrate
 
@@ -8,7 +8,7 @@ Start with the [README](../README.md) for the published Alpha.5 boundary and a s
 |---|---|
 | [Usage](usage.md) | Current CLI behavior and examples |
 | [API contract](api.md) | Current Rust and JSON surface, plus clearly marked target notation |
-| [Current release notes](releases/v0.1.0-alpha.5.md) | Alpha.5 contents and limitations |
+| [Current release notes](releases/v0.1.0-alpha.6.md) | Alpha.6 contents and limitations |
 | [Release verification](release-verification.md) | Verify checksums, provenance, tag, and immutable release state |
 
 ## Trust boundary

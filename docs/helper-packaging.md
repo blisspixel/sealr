@@ -27,7 +27,7 @@ The CLI and helper have mode `0755`. Documentation, licenses, and the manifest h
 ```json
 {
   "schema": "sealr.worker-artifact.v1",
-  "release_version": "0.1.0-alpha.5",
+  "release_version": "0.1.0-alpha.6",
   "target": "x86_64-unknown-linux-musl",
   "bootstrap_abi": 1,
   "byte_len": 0,
@@ -55,7 +55,7 @@ Linux additionally requires:
 - an authenticated extracted-helper hello, executable-identity proof, restricted inspect completion, clean exit, and exact reap through the repository lab;
 - supervised completion through the packaged CLI, wheel laboratory, and a binary built against the extracted crate, all using the exact extracted manifest and helper with no fallback.
 
-The release workflow calls the same package and verification scripts before uploading any archive. The external Alpha.5 release remains historical and does not contain this helper; the contract applies to the next release candidate cut from a commit that includes it.
+The release workflow calls the same package and verification scripts before uploading any archive. Historical releases through Alpha.5 do not contain this helper; Alpha.6 is the first release whose Linux archive carries the contract.
 
 ## Nonclaims
 
