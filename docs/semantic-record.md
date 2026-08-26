@@ -178,7 +178,7 @@ Together the manifests establish exact equality only for their named fixtures an
 
 ### Near-limit completion heap evidence
 
-A required, explicitly invoked regression measures completion decode and reconstruction in four isolated child processes. Its deterministic strict-v2 Store fixture has 349 one-byte files with unique 64,000-byte single-component names. The source is 44,698,895 bytes. Its canonical planning frame is 67,041,104 bytes with SHA-256 `e697bec9023d83f1983c90ee35d9e09f8edf94f6053404d517755d9351773c72`, leaving 67,760 bytes below the private 64 MiB frame limit.
+A required, explicitly invoked regression measures completion decode and reconstruction in four isolated child processes. Its deterministic strict-v2 Store fixture has 349 one-byte files with unique 64,000-byte single-component names. The source is 44,698,895 bytes. Its canonical planning frame is 67,042,849 bytes with SHA-256 `acdcfb9a5282f559716f2673f1cc8a8e682488a9e5a8ae7a34d318332ed2e3ec`, leaving 66,015 bytes below the private 64 MiB frame limit.
 
 The accepted Complete control first warms the decoder and uses the existing allocation budget to derive an 89,486,520-byte logical reconstruction size. After the source, encoded plan, completed reference IR, and warm result are dropped, a test-only system-allocator wrapper samples requested live Rust heap while retaining the decoded result. The local Windows sample added 89,503,272 peak bytes, only 16,752 bytes above the logical reconstruction, and retained exactly 89,486,520 bytes at the sample point. It materialized IR once.
 
