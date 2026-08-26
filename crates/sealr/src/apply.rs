@@ -15,7 +15,7 @@ use crate::outcome::{
     AdmissionStatus, DigestHex, EffectStatus, InterpretationStatus, SemanticAxes, SourceDigest,
     VerificationStatus, ViewCompleteness,
 };
-use crate::policy::{hex_sha256, ratio_exceeds, Policy, ResourceBudget};
+use crate::policy::{hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget};
 use crate::quota::{QuotaError, QuotaState};
 use crate::snapshot::{SnapshotKind, SourceSnapshot};
 use crate::verification::{digest_hex, verify_payload, PayloadSpec};
@@ -247,21 +247,22 @@ pub fn apply(req: Request<'_>) -> Outcome {
 /// interpretation profile changes the accepted ZIP language and the recorded
 /// interpretation identity; retention alone does not change admission.
 pub fn apply_with_options(req: Request<'_>, options: &ApplyOptions) -> Outcome {
-    let compiled = match req.policy.compile() {
-        Ok(compiled) => compiled,
-        Err(finding) => {
-            return reject_only(
-                (None, SourceDigest::unavailable(), req.policy.clone()),
-                vec![finding.clone()],
-                None,
-                MaterializationMeta::not_started(req.dest.is_some(), req.policy.atomic),
-                SemanticAxes::policy_compile_failed(&finding),
-                SnapshotKind::Unavailable,
-                OutcomeIdentities::without_source_for(options.interpretation_profile),
-            );
-        }
-    };
-    match apply_inner(&req, compiled.budget, options) {
+    let planning_context =
+        match PlanningContext::compile(req.policy, options.interpretation_profile) {
+            Ok(context) => context,
+            Err(finding) => {
+                return reject_only(
+                    (None, SourceDigest::unavailable(), req.policy.clone()),
+                    vec![finding.clone()],
+                    None,
+                    MaterializationMeta::not_started(req.dest.is_some(), req.policy.atomic),
+                    SemanticAxes::policy_compile_failed(&finding),
+                    SnapshotKind::Unavailable,
+                    OutcomeIdentities::without_source_for(options.interpretation_profile),
+                );
+            }
+        };
+    match apply_inner(&req, planning_context, options) {
         Ok(o) => o,
         Err(failure) => {
             let admission = if failure.finding.code == FindingCode::QuotaArchive {
@@ -283,7 +284,8 @@ pub fn apply_with_options(req: Request<'_>, options: &ApplyOptions) -> Outcome {
     }
 }
 
-struct SourceFailure {
+#[derive(Debug)]
+pub(crate) struct SourceFailure {
     path: Option<String>,
     digest: SourceDigest,
     finding: Finding,
@@ -291,7 +293,7 @@ struct SourceFailure {
 }
 
 fn read_source<'a>(
-    src: &'a Source<'a>,
+    src: &Source<'a>,
     budget: ResourceBudget,
 ) -> Result<SourceSnapshot<'a>, SourceFailure> {
     match src {
@@ -328,127 +330,192 @@ fn read_source<'a>(
     }
 }
 
-fn apply_inner(
-    req: &Request<'_>,
-    budget: ResourceBudget,
-    options: &ApplyOptions,
-) -> Result<Outcome, SourceFailure> {
-    let policy = req.policy;
-    let initial_materialization =
-        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
-    let snapshot = read_source(&req.source, budget)?;
-    let interpretation_profile = options.interpretation_profile;
-    let identities_base =
-        OutcomeIdentities::unavailable_for(snapshot.digest().clone(), interpretation_profile);
-    let source_digest = snapshot.digest().clone();
-    let source_meta = (snapshot.path_owned(), source_digest.clone(), policy.clone());
+#[derive(Debug)]
+pub(crate) struct PlanningContext {
+    policy_id: String,
+    policy_sha256: String,
+    profile: ZipInterpretationProfile,
+    controls: CompiledControls,
+}
+
+impl PlanningContext {
+    pub(crate) fn compile(
+        policy: &Policy,
+        profile: ZipInterpretationProfile,
+    ) -> Result<Self, Finding> {
+        let controls = policy.compile()?;
+        Ok(Self {
+            policy_id: policy.id.clone(),
+            policy_sha256: policy.digest_hex(),
+            profile,
+            controls,
+        })
+    }
+
+    pub(crate) fn policy_id(&self) -> &str {
+        &self.policy_id
+    }
+
+    pub(crate) fn policy_sha256(&self) -> &str {
+        &self.policy_sha256
+    }
+
+    pub(crate) fn profile(&self) -> ZipInterpretationProfile {
+        self.profile
+    }
+
+    pub(crate) fn controls(&self) -> CompiledControls {
+        self.controls
+    }
+
+    fn matches_policy(&self, policy: &Policy) -> bool {
+        self.policy_id() == policy.id && self.policy_sha256() == policy.digest_hex()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct ReadyPlan<'a> {
+    snapshot: SourceSnapshot<'a>,
+    ir: ArchiveIR,
+    findings: Vec<Finding>,
+    context: PlanningContext,
+}
+
+impl<'a> ReadyPlan<'a> {
+    pub(crate) fn into_parts(
+        self,
+    ) -> (SourceSnapshot<'a>, ArchiveIR, Vec<Finding>, PlanningContext) {
+        (self.snapshot, self.ir, self.findings, self.context)
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct TerminalPlan<'a> {
+    snapshot: SourceSnapshot<'a>,
+    magic: &'static str,
+    ir: Option<ArchiveIR>,
+    findings: Vec<Finding>,
+    axes: SemanticAxes,
+    context: PlanningContext,
+}
+
+impl<'a> TerminalPlan<'a> {
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        SourceSnapshot<'a>,
+        &'static str,
+        Option<ArchiveIR>,
+        Vec<Finding>,
+        SemanticAxes,
+        PlanningContext,
+    ) {
+        (
+            self.snapshot,
+            self.magic,
+            self.ir,
+            self.findings,
+            self.axes,
+            self.context,
+        )
+    }
+}
+
+#[derive(Debug)]
+pub(crate) enum PlanDecision<'a> {
+    Ready(ReadyPlan<'a>),
+    Terminal(TerminalPlan<'a>),
+}
+
+fn terminal_plan<'a>(
+    snapshot: SourceSnapshot<'a>,
+    context: PlanningContext,
+    magic: &'static str,
+    findings: Vec<Finding>,
+    ir: Option<ArchiveIR>,
+    axes: SemanticAxes,
+) -> PlanDecision<'a> {
+    PlanDecision::Terminal(TerminalPlan {
+        snapshot,
+        magic,
+        ir,
+        findings,
+        axes,
+        context,
+    })
+}
+
+/// Acquire, interpret, and admit one immutable source without verifying
+/// payloads or requesting effects. This is the single crate-private planning
+/// seam used by the public operation and repository semantic-record evidence.
+pub(crate) fn plan_source<'a>(
+    source: &Source<'a>,
+    context: PlanningContext,
+) -> Result<PlanDecision<'a>, SourceFailure> {
+    let snapshot = read_source(source, context.controls.budget)?;
+    Ok(plan_snapshot(snapshot, context))
+}
+
+fn plan_snapshot<'a>(snapshot: SourceSnapshot<'a>, context: PlanningContext) -> PlanDecision<'a> {
+    let interpretation_profile = context.profile;
+    let controls = context.controls;
+    let budget = controls.budget;
+
     let magic = match detect_magic(&snapshot) {
         Ok(magic) => magic,
         Err(finding) => {
-            return Ok(reject_only(
-                source_meta,
-                vec![finding.clone()],
-                Some("unknown"),
-                initial_materialization,
-                parse_failure_axes(&finding),
-                snapshot.kind(),
-                identities_base.clone(),
-            ));
+            let axes = parse_failure_axes(&finding);
+            return terminal_plan(snapshot, context, "unknown", vec![finding], None, axes);
         }
     };
     if magic != "zip" {
-        let f = Finding::error(FindingCode::FormatUnsupported, format!("magic {magic}"));
-        return Ok(reject_only(
-            source_meta,
-            vec![f.clone()],
-            Some(magic),
-            initial_materialization,
-            SemanticAxes::structure_stop(
-                InterpretationStatus::Unsupported,
-                AdmissionStatus::NotEvaluated,
-                &f,
-            ),
-            snapshot.kind(),
-            identities_base.clone(),
-        ));
+        let finding = Finding::error(FindingCode::FormatUnsupported, format!("magic {magic}"));
+        let axes = SemanticAxes::structure_stop(
+            InterpretationStatus::Unsupported,
+            AdmissionStatus::NotEvaluated,
+            &finding,
+        );
+        return terminal_plan(snapshot, context, magic, vec![finding], None, axes);
     }
-    if !policy.allows_format("zip") {
-        let f = Finding::error(FindingCode::FormatUnsupported, "zip not in policy.formats");
-        return Ok(reject_only(
-            source_meta,
-            vec![f.clone()],
-            Some("zip"),
-            initial_materialization,
-            SemanticAxes::structure_stop(
-                InterpretationStatus::Unsupported,
-                AdmissionStatus::Denied,
-                &f,
-            ),
-            snapshot.kind(),
-            identities_base.clone(),
-        ));
-    }
-
     let parsed = match zip::parse_zip_with_profile(
         &snapshot,
         budget.max_files,
         budget.max_metadata_bytes,
         interpretation_profile,
     ) {
-        Ok(z) => z,
-        Err(f) => {
-            return Ok(reject_only(
-                source_meta,
-                vec![f.clone()],
-                Some("zip"),
-                initial_materialization,
-                parse_failure_axes(&f),
-                snapshot.kind(),
-                identities_base.clone(),
-            ));
+        Ok(parsed) => parsed,
+        Err(finding) => {
+            let axes = parse_failure_axes(&finding);
+            return terminal_plan(snapshot, context, "zip", vec![finding], None, axes);
         }
     };
 
     if parsed.members.len() as u64 > budget.max_files {
-        let f = Finding::error(
+        let finding = Finding::error(
             FindingCode::QuotaFiles,
             format!("{} entries", parsed.members.len()),
         );
-        return Ok(reject_only(
-            source_meta,
-            vec![f.clone()],
-            Some("zip"),
-            initial_materialization,
-            SemanticAxes::structure_stop(
-                InterpretationStatus::Interpreted,
-                AdmissionStatus::Denied,
-                &f,
-            ),
-            snapshot.kind(),
-            identities_base.clone(),
-        ));
+        let axes = SemanticAxes::structure_stop(
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Denied,
+            &finding,
+        );
+        return terminal_plan(snapshot, context, "zip", vec![finding], None, axes);
     }
     if parsed.metadata_bytes > budget.max_metadata_bytes {
-        let f = Finding::error(
+        let finding = Finding::error(
             FindingCode::QuotaMetadata,
             format!(
                 "ZIP metadata is {} bytes; cap is {}",
                 parsed.metadata_bytes, budget.max_metadata_bytes
             ),
         );
-        return Ok(reject_only(
-            source_meta,
-            vec![f.clone()],
-            Some("zip"),
-            initial_materialization,
-            SemanticAxes::structure_stop(
-                InterpretationStatus::Interpreted,
-                AdmissionStatus::Denied,
-                &f,
-            ),
-            snapshot.kind(),
-            identities_base.clone(),
-        ));
+        let axes = SemanticAxes::structure_stop(
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Denied,
+            &finding,
+        );
+        return terminal_plan(snapshot, context, "zip", vec![finding], None, axes);
     }
 
     let covering = parsed.covering();
@@ -458,49 +525,53 @@ fn apply_inner(
     let mut fold_seen: BTreeMap<String, bool> = BTreeMap::new();
     let mut declared_total = QuotaState::new(budget.max_total_bytes);
 
-    for m in parsed.members {
-        if (m.flags & ZIP_ENCRYPTION_FLAGS) != 0 {
+    for member in parsed.members {
+        if (member.flags & ZIP_ENCRYPTION_FLAGS) != 0 {
             findings.push(
                 Finding::error(
                     FindingCode::ZipEncrypted,
-                    format!("encryption-related general-purpose flags 0x{:04x}", m.flags),
+                    format!(
+                        "encryption-related general-purpose flags 0x{:04x}",
+                        member.flags
+                    ),
                 )
-                .on(&m.name),
+                .on(&member.name),
             );
             continue;
         }
-        if m.method != 0 && m.method != 8 {
+        if member.method != 0 && member.method != 8 {
             findings.push(
                 Finding::error(
                     FindingCode::MethodUnsupported,
-                    format!("method {}", m.method),
+                    format!("method {}", member.method),
                 )
-                .on(&m.name),
+                .on(&member.name),
             );
             continue;
         }
-        if m.uncomp_size > budget.max_member_bytes {
+        if member.uncomp_size > budget.max_member_bytes {
             findings.push(
-                Finding::error(FindingCode::QuotaMember, "declared member too large").on(&m.name),
+                Finding::error(FindingCode::QuotaMember, "declared member too large")
+                    .on(&member.name),
             );
             continue;
         }
-        if let Some(max_r) = budget.max_ratio {
-            if ratio_exceeds(m.uncomp_size, m.comp_size, max_r) {
+        if let Some(max_ratio) = budget.max_ratio {
+            if ratio_exceeds(member.uncomp_size, member.comp_size, max_ratio) {
                 findings.push(
                     Finding::error(
                         FindingCode::QuotaRatio,
                         format!(
-                            "declared {}:{} exceeds {max_r}:1",
-                            m.uncomp_size, m.comp_size
+                            "declared {}:{} exceeds {max_ratio}:1",
+                            member.uncomp_size, member.comp_size
                         ),
                     )
-                    .on(&m.name),
+                    .on(&member.name),
                 );
                 continue;
             }
         }
-        match declared_total.consume(m.uncomp_size) {
+        match declared_total.consume(member.uncomp_size) {
             Ok(_) => {}
             Err(QuotaError::Overflow) => {
                 findings.push(Finding::error(
@@ -519,15 +590,14 @@ fn apply_inner(
         }
 
         let mut actions = Vec::new();
-        let jailed_name = if m.is_dir {
+        let jailed_name = if member.is_dir {
             actions.push(NormalizationAction::StripDirectoryTrailingSlash);
-            m.name.strip_suffix('/').unwrap_or(&m.name)
+            member.name.strip_suffix('/').unwrap_or(&member.name)
         } else {
-            &m.name
+            &member.name
         };
         match jail_name(jailed_name, budget.max_path_depth) {
             Ok(jailed) => {
-                let mut actions = actions;
                 actions.extend(jailed.actions);
                 let parts = jailed.components;
                 let joined = parts.join("/");
@@ -535,63 +605,57 @@ fn apply_inner(
                 if dest_seen.contains_key(&joined) {
                     findings.push(
                         Finding::error(FindingCode::ZipDiffB1Dup, "duplicate dest path")
-                            .on(&m.name),
+                            .on(&member.name),
                     );
                     continue;
                 }
                 if fold_seen.contains_key(&fold) {
                     findings.push(
                         Finding::error(FindingCode::PathCaseFold, "case-fold collision")
-                            .on(&m.name),
+                            .on(&member.name),
                     );
                     continue;
                 }
-                if let Some(conflict) = path_conflict(&dest_seen, &joined, m.is_dir) {
+                if let Some(conflict) = path_conflict(&dest_seen, &joined, member.is_dir) {
                     findings.push(
                         Finding::error(
                             FindingCode::PathConflict,
                             format!("file/directory conflict with {conflict}"),
                         )
-                        .on(&m.name),
+                        .on(&member.name),
                     );
                     continue;
                 }
-                if let Some(conflict) = path_conflict(&fold_seen, &fold, m.is_dir) {
+                if let Some(conflict) = path_conflict(&fold_seen, &fold, member.is_dir) {
                     findings.push(
                         Finding::error(
                             FindingCode::PathCaseFold,
                             format!("case-fold topology conflict with {conflict}"),
                         )
-                        .on(&m.name),
+                        .on(&member.name),
                     );
                     continue;
                 }
-                dest_seen.insert(joined, m.is_dir);
-                fold_seen.insert(fold, m.is_dir);
-                planned.push((m, parts, actions));
+                dest_seen.insert(joined, member.is_dir);
+                fold_seen.insert(fold, member.is_dir);
+                planned.push((member, parts, actions));
             }
-            Err(f) => findings.push(f),
+            Err(finding) => findings.push(finding),
         }
     }
 
-    let fatal = findings.iter().any(|f| f.severity == Severity::Error);
-    if fatal {
+    if findings
+        .iter()
+        .any(|finding| finding.severity == Severity::Error)
+    {
         let cause = first_error(&findings);
-        return Ok(finish(
-            (snapshot.path_owned(), source_digest, snapshot.kind()),
-            "zip",
-            policy,
-            findings,
-            Vec::new(),
-            initial_materialization,
-            SemanticAxes::denied_at_admission(&cause),
-            identities_base.clone(),
-        ));
+        let axes = SemanticAxes::denied_at_admission(&cause);
+        return terminal_plan(snapshot, context, "zip", findings, None, axes);
     }
 
-    let mut ir = ArchiveIR::with_covering(
+    let ir = ArchiveIR::with_covering(
         interpretation_profile,
-        source_digest.clone(),
+        snapshot.digest().clone(),
         covering,
         planned
             .into_iter()
@@ -601,26 +665,64 @@ fn apply_inner(
     if let Err(finding) = audit_covering(&snapshot, &ir) {
         findings.push(finding);
         let cause = first_error(&findings);
-        return Ok(with_ir(
-            finish(
+        let axes = SemanticAxes::structure_stop(
+            InterpretationStatus::Malformed,
+            AdmissionStatus::Denied,
+            &cause,
+        );
+        return terminal_plan(snapshot, context, "zip", findings, Some(ir), axes);
+    }
+
+    PlanDecision::Ready(ReadyPlan {
+        snapshot,
+        ir,
+        findings,
+        context,
+    })
+}
+
+fn apply_inner(
+    req: &Request<'_>,
+    planning_context: PlanningContext,
+    options: &ApplyOptions,
+) -> Result<Outcome, SourceFailure> {
+    let policy = req.policy;
+    let initial_materialization =
+        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
+    let planning = plan_source(&req.source, planning_context)?;
+    let ready = match planning {
+        PlanDecision::Ready(ready) => ready,
+        PlanDecision::Terminal(terminal) => {
+            let (snapshot, magic, ir, findings, axes, context) = terminal.into_parts();
+            debug_assert!(context.matches_policy(policy));
+            let source_digest = snapshot.digest().clone();
+            let identities_base =
+                OutcomeIdentities::unavailable_for(source_digest.clone(), context.profile());
+            let outcome = finish(
                 (snapshot.path_owned(), source_digest, snapshot.kind()),
-                "zip",
+                magic,
                 policy,
                 findings,
                 Vec::new(),
                 initial_materialization,
-                SemanticAxes::structure_stop(
-                    InterpretationStatus::Malformed,
-                    AdmissionStatus::Denied,
-                    &cause,
-                ),
-                identities_base.clone(),
-            ),
-            ir,
-        ));
-    }
-    #[cfg(test)]
-    capture_planning_boundary_ir(&ir);
+                axes,
+                identities_base,
+            );
+            return Ok(match ir {
+                Some(ir) => with_ir(outcome, ir),
+                None => outcome,
+            });
+        }
+    };
+    let (snapshot, mut ir, mut findings, context) = ready.into_parts();
+    debug_assert!(context.matches_policy(policy));
+    let controls = context.controls();
+    let budget = controls.budget;
+    let member_sync = controls.effect.member_sync;
+    let source_digest = snapshot.digest().clone();
+    let identities_base =
+        OutcomeIdentities::unavailable_for(source_digest.clone(), context.profile());
+
     #[cfg(test)]
     crate::snapshot::arm_test_read_failure();
     let mut retention = RetentionBuild::plan(options.retention_plan(), &ir);
@@ -738,7 +840,7 @@ fn apply_inner(
                         payload_spec,
                         budget,
                         remaining,
-                        policy.atomic,
+                        member_sync,
                         capture.as_mut(),
                         file,
                     )
@@ -995,79 +1097,6 @@ impl<W: Write> Write for RetainingWriter<'_, W> {
 
     fn flush(&mut self) -> io::Result<()> {
         self.primary.flush()
-    }
-}
-
-#[cfg(test)]
-thread_local! {
-    static PLANNING_BOUNDARY_CAPTURE: std::cell::RefCell<PlanningBoundaryCapture> =
-        const { std::cell::RefCell::new(PlanningBoundaryCapture::disabled()) };
-}
-
-#[cfg(test)]
-fn capture_planning_boundary_ir(ir: &ArchiveIR) {
-    PLANNING_BOUNDARY_CAPTURE.with(|capture| {
-        let mut capture = capture.borrow_mut();
-        if capture.armed {
-            capture.armed = false;
-            capture.ir = Some(ir.clone());
-        }
-    });
-}
-
-#[cfg(test)]
-struct PlanningBoundaryCapture {
-    armed: bool,
-    ir: Option<ArchiveIR>,
-}
-
-#[cfg(test)]
-impl PlanningBoundaryCapture {
-    const fn disabled() -> Self {
-        Self {
-            armed: false,
-            ir: None,
-        }
-    }
-}
-
-#[cfg(test)]
-#[must_use]
-pub(crate) struct PlanningBoundaryCaptureGuard {
-    previous: Option<PlanningBoundaryCapture>,
-}
-
-#[cfg(test)]
-impl PlanningBoundaryCaptureGuard {
-    pub(crate) fn take(&self) -> Option<ArchiveIR> {
-        PLANNING_BOUNDARY_CAPTURE.with(|capture| capture.borrow_mut().ir.take())
-    }
-}
-
-#[cfg(test)]
-impl Drop for PlanningBoundaryCaptureGuard {
-    fn drop(&mut self) {
-        let previous = self
-            .previous
-            .take()
-            .expect("planning-boundary capture guard drops once");
-        PLANNING_BOUNDARY_CAPTURE.with(|capture| *capture.borrow_mut() = previous);
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn capture_next_planning_boundary() -> PlanningBoundaryCaptureGuard {
-    let previous = PLANNING_BOUNDARY_CAPTURE.with(|capture| {
-        std::mem::replace(
-            &mut *capture.borrow_mut(),
-            PlanningBoundaryCapture {
-                armed: true,
-                ir: None,
-            },
-        )
-    });
-    PlanningBoundaryCaptureGuard {
-        previous: Some(previous),
     }
 }
 

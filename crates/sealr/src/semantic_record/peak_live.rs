@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 use super::*;
 use crate::apply::{
-    apply_with_options, capture_next_planning_boundary, ApplyOptions, Request, Source,
+    apply_with_options, plan_source, ApplyOptions, PlanDecision, PlanningContext, Request, Source,
 };
 use crate::policy::Policy;
 
@@ -241,13 +241,24 @@ fn prepare_case(mode: &str) -> PreparedCase {
     policy.max_metadata_bytes = MAX_RECORD_BYTES as u64;
     let controls = policy.compile().unwrap();
     let options = ApplyOptions::new().with_interpretation_profile(profile);
-    let capture = capture_next_planning_boundary();
+    let operation_source = Source::Bytes {
+        path: Some("semantic-peak-live.zip"),
+        data: &source,
+    };
+    let planning_context = PlanningContext::compile(&policy, profile).unwrap();
+    let ready = match plan_source(&operation_source, planning_context).unwrap() {
+        PlanDecision::Ready(ready) => ready,
+        PlanDecision::Terminal(terminal) => {
+            panic!("near-limit fixture reached terminal planning: {terminal:?}")
+        }
+    };
+    let (snapshot, pending, planning_findings, planning_context) = ready.into_parts();
+    assert!(planning_findings.is_empty());
+    assert_eq!(planning_context.controls(), controls);
+    assert_eq!(planning_context.profile(), profile);
     let outcome = apply_with_options(
         Request {
-            source: Source::Bytes {
-                path: Some("semantic-peak-live.zip"),
-                data: &source,
-            },
+            source: operation_source,
             policy: &policy,
             dest: None,
         },
@@ -266,25 +277,22 @@ fn prepare_case(mode: &str) -> PreparedCase {
             content_sha256: parse_hex_32(member.content_sha256.as_deref().unwrap()).unwrap(),
         })
         .collect();
-    let pending = capture.take().expect("apply reached the planning boundary");
     drop(outcome);
-    drop(capture);
 
-    let source_sha256: [u8; 32] = Sha256::digest(&source).into();
     let binding = InvocationBinding {
         operation_id: [0x41; 16],
-        source_len: source.len() as u64,
-        source_sha256,
-        profile,
-        profile_sha256: parse_hex_32(&profile.digest()).unwrap(),
-        policy_id: policy.id.clone(),
-        policy_sha256: parse_hex_32(&policy.digest_hex()).unwrap(),
-        budget: controls.budget,
-        target: controls.target,
-        consumer: controls.consumer,
+        source_len: snapshot.len(),
+        source_sha256: parse_hex_32(snapshot.digest().sha256().unwrap()).unwrap(),
+        profile: planning_context.profile(),
+        profile_sha256: parse_hex_32(&planning_context.profile().digest()).unwrap(),
+        policy_id: planning_context.policy_id().to_owned(),
+        policy_sha256: parse_hex_32(planning_context.policy_sha256()).unwrap(),
+        budget: planning_context.controls().budget,
+        target: planning_context.controls().target,
+        consumer: planning_context.controls().consumer,
         requested_effect: RequestedEffect::Inspect,
         target_sha256: None,
-        member_sync: controls.effect.member_sync,
+        member_sync: planning_context.controls().effect.member_sync,
         retention: RetentionBinding::None,
     };
     let plan = PlanningRecord {
@@ -304,7 +312,6 @@ fn prepare_case(mode: &str) -> PreparedCase {
     assert!(MAX_RECORD_BYTES - plan_bytes.len() < 128 * 1024);
     drop(plan);
 
-    let snapshot = SourceSnapshot::borrowed(None, &source);
     let planning = decode_planning(&plan_bytes, &binding, &snapshot).unwrap();
     let (disposition, findings) = match mode {
         "stopped" => {
