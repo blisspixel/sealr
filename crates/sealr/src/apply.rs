@@ -1307,7 +1307,7 @@ fn compat_exit_code(
     }
 }
 
-fn first_error(findings: &[Finding]) -> Finding {
+pub(crate) fn first_error(findings: &[Finding]) -> Finding {
     findings
         .iter()
         .find(|finding| finding.severity == Severity::Error)

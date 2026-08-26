@@ -216,13 +216,13 @@ let metadata = archive.read_member("package.dist-info/METADATA", 256 * 1024)?;
 
 This path does not reopen the caller path or parse ZIP structure again. Without an explicit retention request, the current implementation opens a range-limited reader over the recorded payload, re-inflates a selected Deflate member, and revalidates it for each call. A path outcome reads from its retained private file; a byte outcome reads from the process-owned copy created when the capability outlives the caller borrow. The next section describes the opt-in path that avoids this repeated work for a small, known member set.
 
-The first worker integration preserves these observable contracts through a separate explicit Linux-only entry point. `LinuxWorker::load` authenticates one exact helper artifact from an absolute path, length, and SHA-256. `inspect_supervised` uses the same planner, policy controls, outcome axes, retention plan, and `VerifiedArchive` surface as in-process inspect, while returning typed infrastructure errors when it cannot establish or complete isolation. It never falls back to in-process verification. The semantic worker consumes the actual plan profile, policy, budget, target, consumer, effect, and retention and does not structurally reparse the ZIP. The supervisor reconstructs complete or stopped outcome state only after worker exit, reap, and exact source-derived agreement. Supervised materialization and CLI activation remain open.
+The first worker integration preserves these observable contracts through explicit Linux-only entry points. `LinuxWorker::load` authenticates one exact helper artifact from an absolute path, length, and SHA-256. `apply_supervised` accepts the ordinary `Request` and supports both inspect and materialize; `inspect_supervised` is the inspect-only convenience. They use the same planner, policy controls, outcome axes, retention plan, materialization core, and `VerifiedArchive` surface as in-process execution while returning typed infrastructure errors when they cannot establish or complete isolation. They never fall back to in-process verification. The semantic worker consumes the actual plan profile, policy, budget, target, consumer, effect, target identity, and retention and does not structurally reparse the ZIP. The supervisor reconstructs complete or stopped outcome state only after worker exit, reap, and exact source-derived agreement. For materialization, it also retains the destination parent and final name, audits the exact stage after reap, and alone publishes with no replacement. CLI activation remains open.
 
-### Explicit supervised Linux inspect
+### Explicit supervised Linux execution
 
 ```rust,no_run
 use std::path::Path;
-use sealr::{inspect_supervised, ApplyOptions, LinuxWorker, Policy, Source};
+use sealr::{apply_supervised, ApplyOptions, LinuxWorker, Policy, Request, Source};
 
 let worker = LinuxWorker::load(
     Path::new("/opt/sealr/libexec/sealr/sealr-worker"),
@@ -230,20 +230,27 @@ let worker = LinuxWorker::load(
     "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 )?;
 let bytes = std::fs::read("input.zip")?;
-let outcome = inspect_supervised(
-    Source::Bytes { path: Some("input.zip"), data: &bytes },
-    &Policy::default_v1(),
+let policy = Policy::default_v1();
+let destination = Path::new("verified-tree");
+let outcome = apply_supervised(
+    Request {
+        source: Source::Bytes { path: Some("input.zip"), data: &bytes },
+        policy: &policy,
+        dest: Some(destination),
+    },
     &ApplyOptions::new(),
     &worker,
 )?;
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-The helper path is never discovered through `PATH`; packaged callers read its exact location and identity from the fixed Linux package contract. Successful worker execution records `kernel_jail: landlock-abi3+seccomp-v1`. Structural rejection before worker entry records `not-entered`. On non-Linux targets, worker loading and supervised inspection return `IsolationUnavailable`.
+The helper path is never discovered through `PATH`; packaged callers read its exact location and identity from the fixed Linux package contract. Successful worker execution records `kernel_jail: landlock-abi3+seccomp-v1`. Structural rejection or destination setup failure before worker entry records `not-entered`. On non-Linux targets, worker loading and supervised execution return `IsolationUnavailable`.
 
-Archive denial, malformed input, quota stops, and canonically stopped payload verification remain ordinary `Outcome` values. `SupervisionErrorKind` is reserved for helper identity, spawn, authentication, restriction, protocol, timeout, worker-exit, reap, source-authority, integrity-boundary, and internal failures. This separation prevents an isolation failure from being mistaken for an archive finding or compatibility verdict.
+Archive denial, malformed input, quota stops, destination setup or publication failure, and canonically stopped payload verification remain ordinary `Outcome` values. `SupervisionErrorKind` is reserved for helper identity, spawn, authentication, restriction, protocol, timeout, worker-exit, reap, final cleanup, source-authority, integrity-boundary, and internal failures. This separation prevents an isolation failure from being mistaken for an archive finding or compatibility verdict.
 
 A complete supervised outcome holds the exact private-file snapshot, accepted plan, authorized completion, and authenticated helper inside its opaque `VerifiedArchive`. Retained bytes are borrowed locally. A non-retained `read_member` call uses a new restricted process, returns no partial output, and succeeds only after exact output length, CRC and SHA-256 agreement, clean exit, reap, and source-derived validation. Clones share one serialized read authority, so dropping the original does not invalidate the clone.
+
+For a materialize request, planning completes before destination setup. A setup failure therefore returns an admitted, effect-failed outcome with pending `ArchiveIR`, no `VerifiedArchive`, and no worker entry. After setup, the worker receives a read-only descriptor for only the private stage root. It cannot name the destination parent or final component. A complete worker result is still insufficient to publish: the supervisor requires clean exit and reap, reproduces completion and retained content from its exact source, audits every staged object against the authorized IR, and performs native no-replace publication through its retained parent capability. Audit or publication failure preserves a complete `VerifiedArchive` while reporting a failed effect.
 
 ### Bounded one-pass retention
 
@@ -307,7 +314,7 @@ verified.materialize(destination)?;
 verified.write_evidence(output)?;
 ```
 
-`SourceSnapshot` and `ArchiveIR` landed in Alpha.3 as the ingest object and the inspect/materialize member plan. Alpha.4 added `VerifiedArchive` as the first concrete verified type-state result. Alpha.5 moves path input to a private file-backed snapshot while preserving `apply()` as the compatibility facade. Worker protocol v1, the dormant split-phase semantic record, and its in-process inspect executor are internal preparation and add no supported or default-feature caller surface. The record's hidden unsupported driver exists only under the nondefault fuzz feature. `AdmittedArchive` and the earlier transition methods remain design notation. Their required property is that every operation consumes one immutable interpretation and no operation reparses the original archive through another parser.
+`SourceSnapshot` and `ArchiveIR` landed in Alpha.3 as the ingest object and the inspect/materialize member plan. Alpha.4 added `VerifiedArchive` as the first concrete verified type-state result. Alpha.5 moves path input to a private file-backed snapshot while preserving `apply()` as the compatibility facade. The split-phase semantic record remains crate-private, but the supported Linux `apply_supervised` path now uses it to isolate inspect, materialize, and later non-retained reads. Worker protocol v1 remains a separate public codec contract, and the record's hidden unsupported fuzz driver exists only under the nondefault fuzz feature. `AdmittedArchive` and the earlier transition methods remain design notation. Their required property is that every operation consumes one immutable interpretation and no operation reparses the original archive through another parser.
 
 ### Rust compatibility
 

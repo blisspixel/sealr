@@ -16,7 +16,7 @@ use rustix::process::{PidfdFlags, Signal};
 use super::{LinuxWorker, SupervisionError, SupervisionErrorKind};
 use crate::apply::{
     finish_with_jail, member_view, plan_supervised_source, reject_only, with_ir,
-    with_verified_archive, ApplyOptions, PlanDecision, PlanningContext, Source,
+    with_verified_archive, ApplyOptions, PlanDecision, PlanningContext, Request, Source,
 };
 use crate::identity::OutcomeIdentities;
 use crate::materialize::MaterializationMeta;
@@ -32,11 +32,13 @@ use crate::worker_protocol::frame::{Frame, Kind};
 use crate::worker_protocol::helper::HelperArtifact;
 use crate::worker_protocol::linux::{
     configure_timeout, receive_packet, send_packet, TransportError, ERROR_RESTRICTION,
-    FLAG_MEMBER_READ, READY_FLAGS,
+    FLAG_MATERIALIZE, FLAG_MEMBER_READ, FLAG_STAGE, READY_FLAGS,
 };
 use crate::worker_protocol::sealed::{self, BlobRole};
 use crate::worker_protocol::{HELPER_BOOTSTRAP_ABI, HELPER_FEATURE_ID};
 use crate::Policy;
+
+mod materialize;
 
 const AUTHORITY_EPOCH_TIMEOUT: Duration = Duration::from_secs(5);
 const KILL_REAP_TIMEOUT: Duration = Duration::from_secs(1);
@@ -85,27 +87,55 @@ impl EpochDeadline {
     }
 }
 
-pub(super) fn inspect(
-    source: Source<'_>,
-    policy: &Policy,
+pub(super) fn apply(
+    request: Request<'_>,
     options: &ApplyOptions,
     worker: &LinuxWorker,
 ) -> Result<crate::Outcome, SupervisionError> {
+    let Request {
+        source,
+        policy,
+        dest,
+    } = request;
+    match dest {
+        Some(destination) => materialize::run(source, destination, policy, options, worker),
+        None => inspect(source, policy, options, worker),
+    }
+}
+
+struct ReadyOperation {
+    snapshot: SourceSnapshot<'static>,
+    ir: crate::ArchiveIR,
+    findings: Vec<crate::Finding>,
+    context: PlanningContext,
+}
+
+enum PreparedOperation {
+    Outcome(Box<crate::Outcome>),
+    Ready(Box<ReadyOperation>),
+}
+
+fn prepare_operation(
+    source: &Source<'_>,
+    policy: &Policy,
+    options: &ApplyOptions,
+    materialization_requested: bool,
+) -> PreparedOperation {
     let context = match PlanningContext::compile(policy, options.interpretation_profile()) {
         Ok(context) => context,
         Err(finding) => {
-            return Ok(reject_only(
+            return PreparedOperation::Outcome(Box::new(reject_only(
                 (None, SourceDigest::unavailable(), policy.clone()),
                 vec![finding.clone()],
                 None,
-                MaterializationMeta::not_started(false, policy.atomic),
+                MaterializationMeta::not_started(materialization_requested, policy.atomic),
                 SemanticAxes::policy_compile_failed(&finding),
                 SnapshotKind::Unavailable,
                 OutcomeIdentities::without_source_for(options.interpretation_profile()),
-            ));
+            )));
         }
     };
-    let planning = match plan_supervised_source(&source, context) {
+    let planning = match plan_supervised_source(source, context) {
         Ok(planning) => planning,
         Err(failure) => {
             let admission = if failure.finding.code == crate::FindingCode::QuotaArchive {
@@ -114,20 +144,28 @@ pub(super) fn inspect(
                 AdmissionStatus::NotEvaluated
             };
             let digest = failure.digest.clone();
-            return Ok(reject_only(
+            return PreparedOperation::Outcome(Box::new(reject_only(
                 (failure.path, failure.digest, policy.clone()),
                 vec![failure.finding.clone()],
                 None,
-                MaterializationMeta::not_started(false, policy.atomic),
+                MaterializationMeta::not_started(materialization_requested, policy.atomic),
                 SemanticAxes::source_failure(&failure.finding, admission),
                 failure.snapshot_kind,
                 OutcomeIdentities::unavailable_for(digest, options.interpretation_profile()),
-            ));
+            )));
         }
     };
 
-    let ready = match planning {
-        PlanDecision::Ready(ready) => ready,
+    match planning {
+        PlanDecision::Ready(ready) => {
+            let (snapshot, ir, findings, context) = ready.into_parts();
+            PreparedOperation::Ready(Box::new(ReadyOperation {
+                snapshot,
+                ir,
+                findings,
+                context,
+            }))
+        }
         PlanDecision::Terminal(terminal) => {
             let (snapshot, magic, ir, findings, axes, context) = terminal.into_parts();
             let source_digest = snapshot.digest().clone();
@@ -141,19 +179,36 @@ pub(super) fn inspect(
                 policy,
                 findings,
                 Vec::new(),
-                MaterializationMeta::not_started(false, policy.atomic),
+                MaterializationMeta::not_started(materialization_requested, policy.atomic),
                 axes,
                 OutcomeIdentities::unavailable_for(source_digest, context.profile()),
                 NOT_ENTERED_JAIL,
             );
-            return Ok(match ir {
+            PreparedOperation::Outcome(Box::new(match ir {
                 Some(ir) => with_ir(outcome, ir),
                 None => outcome,
-            });
+            }))
         }
+    }
+}
+
+fn inspect(
+    source: Source<'_>,
+    policy: &Policy,
+    options: &ApplyOptions,
+    worker: &LinuxWorker,
+) -> Result<crate::Outcome, SupervisionError> {
+    let ready = match prepare_operation(&source, policy, options, false) {
+        PreparedOperation::Outcome(outcome) => return Ok(*outcome),
+        PreparedOperation::Ready(ready) => *ready,
     };
 
-    let (snapshot, ir, findings, context) = ready.into_parts();
+    let ReadyOperation {
+        snapshot,
+        ir,
+        findings,
+        context,
+    } = ready;
     let operation_id = random_operation_id()?;
     let planning = worker_runtime::prepare_ready_plan(
         &snapshot,
@@ -167,7 +222,14 @@ pub(super) fn inspect(
     )
     .map_err(|detail| SupervisionError::new(SupervisionErrorKind::Internal, detail))?;
     let source_len = snapshot.len();
-    let result = execute_initial(worker, &snapshot, operation_id, &planning)?;
+    let result = execute_initial(
+        worker,
+        &snapshot,
+        operation_id,
+        &planning,
+        None,
+        OperationKind::Inspect,
+    )?;
     let authorized = worker_runtime::authorize_execution(
         clone_source(&snapshot)?,
         source_len,
@@ -241,6 +303,7 @@ pub(super) fn inspect(
             operation_id,
             planning,
             result.completion,
+            OperationKind::Inspect,
         );
         let archive = VerifiedArchive::new_supervised(
             authority,
@@ -264,7 +327,15 @@ fn execute_initial(
     snapshot: &SourceSnapshot<'_>,
     operation_id: [u8; 16],
     planning: &[u8],
+    stage: Option<&File>,
+    kind: OperationKind,
 ) -> Result<InitialResult, SupervisionError> {
+    if matches!(kind, OperationKind::Materialize) != stage.is_some() {
+        return Err(fail(
+            SupervisionErrorKind::Internal,
+            "materialization mode and stage authority disagree",
+        ));
+    }
     let (control, child_socket) = rustix::net::socketpair(
         AddressFamily::UNIX,
         SocketType::SEQPACKET,
@@ -275,7 +346,15 @@ fn execute_initial(
     configure_supervisor_control(&control)?;
     let child = spawn_child(&worker.artifact, child_socket)?;
     let mut child = ChildBoundary::bind_authenticated(child, &control, &worker.artifact)?;
-    let result = execute_initial_active(snapshot, operation_id, planning, &control, &mut child);
+    let result = execute_initial_active(
+        snapshot,
+        operation_id,
+        planning,
+        stage,
+        kind,
+        &control,
+        &mut child,
+    );
     finish_active_result(result, &mut child)
 }
 
@@ -283,32 +362,47 @@ fn execute_initial_active(
     snapshot: &SourceSnapshot<'_>,
     operation_id: [u8; 16],
     planning: &[u8],
+    stage: Option<&File>,
+    kind: OperationKind,
     control: &OwnedFd,
     child: &mut ChildBoundary,
 ) -> Result<InitialResult, SupervisionError> {
     let restriction = EpochDeadline::start(AuthorityEpoch::BootstrapRestriction);
-    transport_until(control, child, restriction, libc::POLLOUT, || {
-        send_packet(control, Frame::new(Kind::Bootstrap, operation_id), &[])
+    let mut bootstrap = Frame::new(Kind::Bootstrap, operation_id);
+    if let Some(stage) = stage {
+        bootstrap.flags = FLAG_STAGE | FLAG_MATERIALIZE;
+        bootstrap.values = stage_identity(stage)?;
+    }
+    transport_until(control, child, restriction, libc::POLLOUT, || match stage {
+        Some(stage) => send_packet(control, bootstrap, &[stage.as_fd()]),
+        None => send_packet(control, bootstrap, &[]),
     })?;
     let (ready, descriptors) = receive_until(control, child, restriction)?;
     require_no_descriptors(&descriptors, "restriction readiness")?;
     if ready.kind == Kind::Error {
         return Err(worker_error(ready));
     }
+    let expected_flags = READY_FLAGS
+        | if matches!(kind, OperationKind::Materialize) {
+            FLAG_STAGE | FLAG_MATERIALIZE
+        } else {
+            0
+        };
     if ready.kind != Kind::RestrictedReady
         || ready.operation_id != operation_id
-        || ready.flags != READY_FLAGS
+        || ready.flags != expected_flags
         || ready.values[0] < 3
         || ready.values[1] == 0
         || ready.values[2] == 0
         || ready.values[1] & ready.values[2] != ready.values[2]
-        || ready.values[3] != u64::MAX
+        || (stage.is_none() && ready.values[3] != u64::MAX)
+        || (stage.is_some() && ready.values[3] > i32::MAX as u64)
     {
         return Err(protocol(
             "worker restriction-ready evidence is inconsistent",
         ));
     }
-    observe_restricted_child(child.child.id())?;
+    observe_restricted_child(child.child.id(), &ready, stage)?;
 
     let source_file = clone_source(snapshot)?;
     let source_values = source_identity(&source_file)?;
@@ -367,7 +461,12 @@ fn execute_initial_active(
     }
     if result.kind != Kind::Result
         || result.operation_id != operation_id
-        || result.flags != 0
+        || result.flags
+            != if matches!(kind, OperationKind::Materialize) {
+                FLAG_STAGE | FLAG_MATERIALIZE
+            } else {
+                0
+            }
         || result.values[0] == 0
         || result.values[1] == 0
         || result.values[2] & 0xffff_ffff == 0
@@ -441,6 +540,7 @@ struct WorkerReadAuthorityInner {
     operation_id: [u8; 16],
     planning: Arc<[u8]>,
     completion: Arc<[u8]>,
+    kind: OperationKind,
     coordinator: ReadCoordinator,
 }
 
@@ -460,6 +560,7 @@ impl WorkerReadAuthority {
         operation_id: [u8; 16],
         planning: Vec<u8>,
         completion: Vec<u8>,
+        kind: OperationKind,
     ) -> Self {
         Self {
             inner: Arc::new(WorkerReadAuthorityInner {
@@ -468,6 +569,7 @@ impl WorkerReadAuthority {
                 operation_id,
                 planning: Arc::from(planning),
                 completion: Arc::from(completion),
+                kind,
                 coordinator: ReadCoordinator {
                     active: Mutex::new(false),
                     changed: Condvar::new(),
@@ -620,7 +722,12 @@ fn execute_member_read_active(
 ) -> Result<(), SupervisionError> {
     let epoch = EpochDeadline::ending_at(AuthorityEpoch::Execution, deadline);
     let mut bootstrap = Frame::new(Kind::Bootstrap, read_operation_id);
-    bootstrap.flags = FLAG_MEMBER_READ;
+    bootstrap.flags = FLAG_MEMBER_READ
+        | if matches!(authority.kind, OperationKind::Materialize) {
+            FLAG_MATERIALIZE
+        } else {
+            0
+        };
     transport_until(control, child, epoch, libc::POLLOUT, || {
         send_packet(control, bootstrap, &[])
     })?;
@@ -631,7 +738,7 @@ fn execute_member_read_active(
     }
     if ready.kind != Kind::RestrictedReady
         || ready.operation_id != read_operation_id
-        || ready.flags != READY_FLAGS | FLAG_MEMBER_READ
+        || ready.flags != READY_FLAGS | bootstrap.flags
         || ready.values[0] < 3
         || ready.values[1] == 0
         || ready.values[2] == 0
@@ -642,7 +749,7 @@ fn execute_member_read_active(
             "member-read restriction-ready evidence is inconsistent",
         ));
     }
-    observe_restricted_child(child.child.id())?;
+    observe_restricted_child(child.child.id(), &ready, None)?;
 
     let source = clone_source(&authority.snapshot)?;
     let source_values = source_identity(&source)?;
@@ -924,7 +1031,11 @@ fn configure_supervisor_control(control: &OwnedFd) -> Result<(), SupervisionErro
         .map_err(|error| fail(SupervisionErrorKind::Protocol, error))
 }
 
-fn observe_restricted_child(pid: u32) -> Result<(), SupervisionError> {
+fn observe_restricted_child(
+    pid: u32,
+    ready: &Frame,
+    stage: Option<&File>,
+) -> Result<(), SupervisionError> {
     let proc_root = PathBuf::from(format!("/proc/{pid}"));
     let status = fs::read_to_string(proc_root.join("status"))
         .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?;
@@ -970,32 +1081,81 @@ fn observe_restricted_child(pid: u32) -> Result<(), SupervisionError> {
         })
         .collect::<Result<Vec<_>, _>>()?;
     descriptors.sort_unstable();
-    if descriptors != [0, 1, 2] {
+    let mut expected = vec![0, 1, 2];
+    if stage.is_some() {
+        expected.push(
+            i32::try_from(ready.values[3])
+                .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?,
+        );
+        expected.sort_unstable();
+    }
+    if descriptors != expected {
         return Err(fail(
             SupervisionErrorKind::RestrictionUnavailable,
-            format!("restricted worker descriptor set is {descriptors:?}; expected [0, 1, 2]"),
+            format!("restricted worker descriptor set is {descriptors:?}; expected {expected:?}"),
         ));
     }
-    let stdin_info = fs::read_to_string(proc_root.join("fdinfo/0"))
-        .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?;
-    let flags = stdin_info
-        .lines()
-        .find_map(|line| line.strip_prefix("flags:\t"))
-        .ok_or_else(|| {
-            fail(
-                SupervisionErrorKind::RestrictionUnavailable,
-                "worker control descriptor has no procfs flags",
-            )
-        })?;
-    let flags = u64::from_str_radix(flags, 8)
-        .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?;
+    let flags = proc_descriptor_flags(&proc_root, 0)?;
     if flags & libc::O_CLOEXEC as u64 == 0 {
         return Err(fail(
             SupervisionErrorKind::RestrictionUnavailable,
             "worker control descriptor lacks close-on-exec",
         ));
     }
+    if let Some(stage) = stage {
+        let stage_fd = i32::try_from(ready.values[3])
+            .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?;
+        let observed = File::open(proc_root.join(format!("fd/{stage_fd}")))
+            .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?;
+        let observed_stat = rustix::fs::fstat(&observed)
+            .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?;
+        let retained_stat = rustix::fs::fstat(stage)
+            .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?;
+        if observed_stat.st_dev != retained_stat.st_dev
+            || observed_stat.st_ino != retained_stat.st_ino
+        {
+            return Err(fail(
+                SupervisionErrorKind::RestrictionUnavailable,
+                "restricted worker stage identity differs from the retained stage",
+            ));
+        }
+        let observed_flags = proc_descriptor_flags(&proc_root, stage_fd)?;
+        let retained_flags = rustix::fs::fcntl_getfl(stage)
+            .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?
+            .bits() as u64;
+        if observed_flags & libc::O_ACCMODE as u64 != retained_flags & libc::O_ACCMODE as u64 {
+            return Err(fail(
+                SupervisionErrorKind::RestrictionUnavailable,
+                "restricted worker stage access mode differs from the retained stage",
+            ));
+        }
+        if observed_flags & libc::O_CLOEXEC as u64 == 0 {
+            return Err(fail(
+                SupervisionErrorKind::RestrictionUnavailable,
+                "restricted worker stage descriptor lacks close-on-exec",
+            ));
+        }
+    }
     Ok(())
+}
+
+fn proc_descriptor_flags(
+    proc_root: &std::path::Path,
+    descriptor: i32,
+) -> Result<u64, SupervisionError> {
+    let info = fs::read_to_string(proc_root.join(format!("fdinfo/{descriptor}")))
+        .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))?;
+    let flags = info
+        .lines()
+        .find_map(|line| line.strip_prefix("flags:\t"))
+        .ok_or_else(|| {
+            fail(
+                SupervisionErrorKind::RestrictionUnavailable,
+                "worker descriptor has no procfs flags",
+            )
+        })?;
+    u64::from_str_radix(flags, 8)
+        .map_err(|error| fail(SupervisionErrorKind::RestrictionUnavailable, error))
 }
 
 fn transport_until<T>(
@@ -1061,6 +1221,17 @@ fn source_identity(source: &File) -> Result<[u64; 4], SupervisionError> {
         )
     })?;
     Ok([length, stat.st_dev, stat.st_ino, 0])
+}
+
+fn stage_identity(stage: &File) -> Result<[u64; 4], SupervisionError> {
+    let stat =
+        rustix::fs::fstat(stage).map_err(|error| fail(SupervisionErrorKind::Internal, error))?;
+    Ok([
+        stat.st_dev,
+        stat.st_ino,
+        u64::from(stat.st_mode),
+        u64::from(stat.st_uid),
+    ])
 }
 
 fn clone_source(snapshot: &SourceSnapshot<'_>) -> Result<File, SupervisionError> {

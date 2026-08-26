@@ -3,7 +3,7 @@
 use std::fmt;
 use std::path::Path;
 
-use crate::{ApplyOptions, Outcome, Policy, Source};
+use crate::{ApplyOptions, Outcome, Policy, Request, Source};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -28,6 +28,7 @@ pub enum SupervisionErrorKind {
     TimedOut,
     WorkerExit,
     Reap,
+    Cleanup,
     Source,
     IntegrityMismatch,
     Internal,
@@ -75,6 +76,7 @@ impl SupervisionError {
             | SupervisionErrorKind::Protocol
             | SupervisionErrorKind::WorkerExit
             | SupervisionErrorKind::Reap
+            | SupervisionErrorKind::Cleanup
             | SupervisionErrorKind::Internal => MemberReadErrorKind::WorkerFailed,
         };
         crate::MemberReadError::new(kind, path, self.detail)
@@ -100,9 +102,44 @@ fn kind_name(kind: SupervisionErrorKind) -> &'static str {
         SupervisionErrorKind::TimedOut => "worker timed out",
         SupervisionErrorKind::WorkerExit => "worker exited unsuccessfully",
         SupervisionErrorKind::Reap => "worker reap failed",
+        SupervisionErrorKind::Cleanup => "supervised cleanup failed",
         SupervisionErrorKind::Source => "worker source failed",
         SupervisionErrorKind::IntegrityMismatch => "worker integrity check failed",
         SupervisionErrorKind::Internal => "supervisor invariant failed",
+    }
+}
+
+/// Apply one archive request through an authenticated, reduced-authority Linux
+/// worker.
+///
+/// Planning and any destination setup remain in the supervisor. Payload
+/// verification runs only after the helper proves `no_new_privs`, Landlock ABI
+/// 3 enforcement, syscall filtering, and inherited-authority closure. A
+/// materializing worker receives only the exact source, sealed plan, and a
+/// cloned staging-directory capability. The supervisor alone audits and
+/// publishes that stage after clean worker exit and reap.
+///
+/// Archive rejection, including destination setup or publication failure,
+/// remains an ordinary [`Outcome`]. Failure to establish or complete the
+/// requested isolation boundary is returned as [`SupervisionError`]. There is
+/// no in-process fallback.
+pub fn apply_supervised(
+    request: Request<'_>,
+    options: &ApplyOptions,
+    worker: &LinuxWorker,
+) -> Result<Outcome, SupervisionError> {
+    #[cfg(target_os = "linux")]
+    {
+        linux::apply(request, options, worker)
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (request, options, worker);
+        Err(SupervisionError::new(
+            SupervisionErrorKind::IsolationUnavailable,
+            "supervised archive execution requires Linux",
+        ))
     }
 }
 
@@ -195,17 +232,13 @@ pub fn inspect_supervised(
     options: &ApplyOptions,
     worker: &LinuxWorker,
 ) -> Result<Outcome, SupervisionError> {
-    #[cfg(target_os = "linux")]
-    {
-        linux::inspect(source, policy, options, worker)
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    {
-        let _ = (source, policy, options, worker);
-        Err(SupervisionError::new(
-            SupervisionErrorKind::IsolationUnavailable,
-            "supervised archive inspection requires Linux",
-        ))
-    }
+    apply_supervised(
+        Request {
+            source,
+            policy,
+            dest: None,
+        },
+        options,
+        worker,
+    )
 }

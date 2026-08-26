@@ -20,15 +20,15 @@ mod verification;
 #[cfg(any(target_os = "linux", feature = "__internal-worker-lab", test))]
 #[allow(dead_code)]
 mod worker_protocol;
-// Dormant Alpha.6 experiment. It is compiled and tested, but no shipped path
-// can invoke it until the remaining authority and packaging gates close.
+// Private Alpha.6 semantic records back the supported Linux supervisor while
+// their codec and types remain outside the public API.
 #[allow(dead_code)]
 mod semantic_record;
 mod verified;
 mod zip;
 
-/// Exercises the dormant semantic-record decoders from the separate fuzz
-/// workspace without exposing their types or making them reachable by default.
+/// Exercises the private semantic-record decoders from the separate fuzz
+/// workspace without exposing their types through the supported API.
 #[cfg(feature = "__internal-fuzzing")]
 #[doc(hidden)]
 pub fn __fuzz_semantic_records(input: &[u8]) {
@@ -116,7 +116,9 @@ pub use outcome::{
 };
 pub use policy::{hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget};
 pub use snapshot::SnapshotKind;
-pub use supervised::{inspect_supervised, LinuxWorker, SupervisionError, SupervisionErrorKind};
+pub use supervised::{
+    apply_supervised, inspect_supervised, LinuxWorker, SupervisionError, SupervisionErrorKind,
+};
 pub use verified::{
     MemberReadError, MemberReadErrorKind, RetentionPlan, RetentionPlanError,
     RetentionPlanErrorKind, RetentionStatus, VerifiedArchive, MAX_RETENTION_PATHS,

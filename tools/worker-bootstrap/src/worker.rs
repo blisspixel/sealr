@@ -188,16 +188,10 @@ fn run(
     let has_stage = bootstrap.flags & FLAG_STAGE != 0;
     let member_read = bootstrap.flags & FLAG_MEMBER_READ != 0;
     let materialize = bootstrap.flags & FLAG_MATERIALIZE != 0;
-    if materialize && !has_stage {
+    if materialize && !has_stage && !member_read {
         return Err(protocol(
             PHASE_BOOTSTRAP,
-            "materialize worker requires stage authority",
-        ));
-    }
-    if materialize && member_read {
-        return Err(protocol(
-            PHASE_BOOTSTRAP,
-            "materialize and member-read modes are mutually exclusive",
+            "materialize execution requires stage authority",
         ));
     }
     let expected = usize::from(has_stage);

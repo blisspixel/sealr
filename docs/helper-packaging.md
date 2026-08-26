@@ -58,4 +58,4 @@ The release workflow calls the same package and verification scripts before uplo
 
 ## Nonclaims
 
-The package contract does not activate a worker implicitly. Current source requires callers to pass its exact path, length, and SHA-256 to `LinuxWorker::load`; successful `inspect_supervised` calls may then construct worker-backed `VerifiedArchive` state. Supervised materialization, CLI selection, real-kernel restriction-failure evidence, and macOS or Windows containment remain separate Alpha.6 gates.
+The package contract does not activate a worker implicitly. Current source requires callers to pass its exact path, length, and SHA-256 to `LinuxWorker::load`; successful `apply_supervised` or `inspect_supervised` calls may then construct worker-backed `VerifiedArchive` state. Request-level supervised execution covers inspect and materialize while keeping destination publication authority in the supervisor. CLI selection, real-kernel restriction-failure evidence, and macOS or Windows containment remain separate Alpha.6 gates.

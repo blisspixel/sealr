@@ -677,7 +677,36 @@ mod tests {
             Some(&retention),
         )
         .unwrap();
+        let materialize_planning = prepare_ready_plan(
+            &snapshot,
+            &ir,
+            &findings,
+            &context,
+            operation_id,
+            OperationKind::Materialize,
+            Some([0x54; 32]),
+            Some(&retention),
+        )
+        .unwrap();
         let temp = TempSource::create(&source);
+
+        let materialize_operation = validate_operation(
+            temp.open(),
+            source.len() as u64,
+            operation_id,
+            &materialize_planning,
+            OperationKind::Materialize,
+        )
+        .unwrap();
+        assert!(materialize_operation.execute(None).is_err());
+        assert!(validate_operation(
+            temp.open(),
+            source.len() as u64,
+            operation_id,
+            &materialize_planning,
+            OperationKind::Inspect,
+        )
+        .is_err());
 
         let operation = validate_operation(
             temp.open(),
