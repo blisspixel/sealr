@@ -82,6 +82,9 @@ jobs:
       - name: Run tests
         run: cargo test --locked --workspace --all-features
 
+      - name: Stress native materialization lifecycle
+        run: cargo run --locked --release -p sealr-materialization-lifecycle
+
       - name: Measure near-limit semantic completion heap
         run: >-
           cargo test --locked --release -p sealr --lib
@@ -154,6 +157,9 @@ jobs:
 
       - name: Run release tests
         run: cargo test --locked --release --workspace --all-features
+
+      - name: Stress native materialization lifecycle
+        run: cargo run --locked --release -p sealr-materialization-lifecycle
 
       - name: Measure near-limit semantic completion heap
         run: >-

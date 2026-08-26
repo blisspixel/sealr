@@ -5,6 +5,7 @@ members = [
     "crates/sealr-cli",
     "crates/sealr-protocol",
     "tools/identity-verifier",
+    "tools/materialization-lifecycle",
     "tools/worker-bootstrap",
     "tools/wheel-lab",
 ]

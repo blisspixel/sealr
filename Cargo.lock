@@ -511,6 +511,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sealr-materialization-lifecycle"
+version = "0.1.0-alpha.5"
+dependencies = [
+ "getrandom",
+ "sealr",
+ "zip",
+]
+
+[[package]]
 name = "sealr-wheel-lab"
 version = "0.1.0-alpha.5"
 dependencies = [
