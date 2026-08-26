@@ -303,6 +303,7 @@ fn inspect(
             operation_id,
             planning,
             result.completion,
+            OperationKind::Inspect,
         );
         let archive = VerifiedArchive::new_supervised(
             authority,
@@ -539,6 +540,7 @@ struct WorkerReadAuthorityInner {
     operation_id: [u8; 16],
     planning: Arc<[u8]>,
     completion: Arc<[u8]>,
+    kind: OperationKind,
     coordinator: ReadCoordinator,
 }
 
@@ -558,6 +560,7 @@ impl WorkerReadAuthority {
         operation_id: [u8; 16],
         planning: Vec<u8>,
         completion: Vec<u8>,
+        kind: OperationKind,
     ) -> Self {
         Self {
             inner: Arc::new(WorkerReadAuthorityInner {
@@ -566,6 +569,7 @@ impl WorkerReadAuthority {
                 operation_id,
                 planning: Arc::from(planning),
                 completion: Arc::from(completion),
+                kind,
                 coordinator: ReadCoordinator {
                     active: Mutex::new(false),
                     changed: Condvar::new(),
@@ -718,7 +722,12 @@ fn execute_member_read_active(
 ) -> Result<(), SupervisionError> {
     let epoch = EpochDeadline::ending_at(AuthorityEpoch::Execution, deadline);
     let mut bootstrap = Frame::new(Kind::Bootstrap, read_operation_id);
-    bootstrap.flags = FLAG_MEMBER_READ;
+    bootstrap.flags = FLAG_MEMBER_READ
+        | if matches!(authority.kind, OperationKind::Materialize) {
+            FLAG_MATERIALIZE
+        } else {
+            0
+        };
     transport_until(control, child, epoch, libc::POLLOUT, || {
         send_packet(control, bootstrap, &[])
     })?;
@@ -729,7 +738,7 @@ fn execute_member_read_active(
     }
     if ready.kind != Kind::RestrictedReady
         || ready.operation_id != read_operation_id
-        || ready.flags != READY_FLAGS | FLAG_MEMBER_READ
+        || ready.flags != READY_FLAGS | bootstrap.flags
         || ready.values[0] < 3
         || ready.values[1] == 0
         || ready.values[2] == 0

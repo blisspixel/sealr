@@ -252,7 +252,7 @@ foreach ($term in @(
     'byte-for-byte canonical equality for both outputs',
     'Self-bound generic worker adapter',
     'Shared authenticated worker protocol primitives',
-    'public outcome and hidden `VerifiedArchive` backend integration'
+    'constructs the hidden worker-backed `VerifiedArchive` backend for inspect and materialize'
 )) {
     if (-not $semanticRecordDoc.Contains($term, [StringComparison]::Ordinal)) {
         throw "docs/semantic-record.md is missing materialization retention parity: $term"

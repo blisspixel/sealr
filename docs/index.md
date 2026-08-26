@@ -28,7 +28,7 @@ Start with the [README](../README.md) for the published Alpha.5 boundary and a s
 | [Finding registry](findings.md) | Stable machine finding codes |
 | [Worker protocol v1](worker-protocol.md) | Bounded control frames, capability slots, decoder rules, and fuzz evidence |
 | [Alpha.6 semantic ownership](decisions/0001-alpha6-semantic-ownership.md) | Accepted private record experiment and provisional public capability gates |
-| [Private semantic record](semantic-record.md) | Dormant split-phase codec and inspect executor, hostile validation, current evidence, and activation gates |
+| [Private semantic record](semantic-record.md) | Crate-private split-phase codec and worker executor, hostile validation, current evidence, and remaining gates |
 | [Policy](policy.md) | Current policy schema, compilation, and defaults |
 
 Repository vulnerability reporting and supported-version policy are in [SECURITY.md](../SECURITY.md).

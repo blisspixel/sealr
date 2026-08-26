@@ -236,6 +236,7 @@ pub(super) fn run(
         operation_id,
         planning,
         result.completion,
+        OperationKind::Materialize,
     );
     let archive = VerifiedArchive::new_supervised(
         authority,
