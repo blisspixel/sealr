@@ -28,10 +28,10 @@ doc = false
 getrandom = { workspace = true, optional = true }
 sha2.workspace = true
 thiserror.workspace = true
+sealr = { version = "=0.1.0-alpha.5", path = "../../crates/sealr", features = ["__internal-worker-lab"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4.7"
 libc.workspace = true
 rustix = { version = "1.1.4", features = ["fs", "net", "pipe", "process", "thread"] }
-sealr = { version = "=0.1.0-alpha.5", path = "../../crates/sealr", features = ["__internal-worker-lab"] }
 zip = { workspace = true, optional = true }

@@ -251,6 +251,7 @@ foreach ($term in @(
     'same verifier calls that write the corresponding stage files',
     'byte-for-byte canonical equality for both outputs',
     'Self-bound generic worker adapter',
+    'Shared authenticated worker protocol primitives',
     'public outcome and hidden `VerifiedArchive` backend integration'
 )) {
     if (-not $semanticRecordDoc.Contains($term, [StringComparison]::Ordinal)) {
