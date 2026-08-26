@@ -12,6 +12,7 @@ use super::{
 };
 use crate::findings::{Finding, FindingCode};
 use crate::ir::{IrMember, MemberKind};
+use crate::materialize::{process_member_to_file, StageWriteRoot};
 use crate::quota::{QuotaError, QuotaState};
 use crate::snapshot::SourceSnapshot;
 use crate::verification::{verify_payload, PayloadSpec};
@@ -33,6 +34,22 @@ pub(super) struct ValidatedInspectPlan<'source> {
 pub(super) struct ExecutedInspectPlan<'source> {
     planning: ValidatedPlanningRecord,
     _snapshot: SourceSnapshot<'source>,
+    completion: Vec<u8>,
+    retained_content: Vec<u8>,
+}
+
+#[derive(Debug)]
+pub(super) struct ValidatedMaterializePlan<'source> {
+    planning: ValidatedPlanningRecord,
+    snapshot: SourceSnapshot<'source>,
+    stage: Option<StageWriteRoot>,
+}
+
+#[derive(Debug)]
+pub(super) struct ExecutedMaterializePlan<'source> {
+    planning: ValidatedPlanningRecord,
+    _snapshot: SourceSnapshot<'source>,
+    _stage: Option<StageWriteRoot>,
     completion: Vec<u8>,
     retained_content: Vec<u8>,
 }
@@ -87,11 +104,66 @@ impl ValidatedPlanningRecord {
             snapshot,
         })
     }
+
+    pub(super) fn bind_materialize_execution<'source>(
+        self,
+        snapshot: SourceSnapshot<'source>,
+        stage: StageWriteRoot,
+    ) -> Result<ValidatedMaterializePlan<'source>, RecordError> {
+        self.bind_materialize(snapshot, Some(stage))
+    }
+
+    pub(super) fn bind_materialize_replay<'source>(
+        self,
+        snapshot: SourceSnapshot<'source>,
+    ) -> Result<ValidatedMaterializePlan<'source>, RecordError> {
+        self.bind_materialize(snapshot, None)
+    }
+
+    fn bind_materialize<'source>(
+        self,
+        snapshot: SourceSnapshot<'source>,
+        stage: Option<StageWriteRoot>,
+    ) -> Result<ValidatedMaterializePlan<'source>, RecordError> {
+        if !matches!(
+            self.record.disposition,
+            PlanningDisposition::ReadyForVerification
+        ) || self.record.ir.is_none()
+        {
+            return Err(RecordError::new(
+                RecordErrorKind::PhaseMismatch,
+                0,
+                "only a ready plan with a pending IR can enter materialize execution",
+            ));
+        }
+        if self.record.binding.requested_effect != RequestedEffect::Materialize {
+            return Err(RecordError::new(
+                RecordErrorKind::PhaseMismatch,
+                0,
+                "inspect planning cannot enter materialize execution",
+            ));
+        }
+        if self.record.binding.target_sha256.is_none()
+            || !matches!(self.record.binding.retention, RetentionBinding::None)
+        {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "materialize execution requires a target binding and no retention transfer",
+            ));
+        }
+        validate_snapshot_binding(&snapshot, &self.record.binding)?;
+        Ok(ValidatedMaterializePlan {
+            planning: self,
+            snapshot,
+            stage,
+        })
+    }
 }
 
 impl<'source> ValidatedInspectPlan<'source> {
     pub(super) fn execute(self) -> Result<ExecutedInspectPlan<'source>, RecordError> {
-        let output = execute_completion(&self.planning, &self.snapshot)?;
+        let output = execute_completion(&self.planning, &self.snapshot, None)?;
         Ok(ExecutedInspectPlan {
             planning: self.planning,
             _snapshot: self.snapshot,
@@ -115,15 +187,43 @@ impl ExecutedInspectPlan<'_> {
     }
 }
 
+impl<'source> ValidatedMaterializePlan<'source> {
+    pub(super) fn execute(self) -> Result<ExecutedMaterializePlan<'source>, RecordError> {
+        let output = execute_completion(&self.planning, &self.snapshot, self.stage.as_ref())?;
+        Ok(ExecutedMaterializePlan {
+            planning: self.planning,
+            _snapshot: self.snapshot,
+            _stage: self.stage,
+            completion: output.completion,
+            retained_content: output.retained_content,
+        })
+    }
+}
+
+impl ExecutedMaterializePlan<'_> {
+    pub(super) fn planning(&self) -> &ValidatedPlanningRecord {
+        &self.planning
+    }
+
+    pub(super) fn completion(&self) -> &[u8] {
+        &self.completion
+    }
+
+    pub(super) fn retained_content(&self) -> &[u8] {
+        &self.retained_content
+    }
+}
+
 fn execute_completion(
     planning: &ValidatedPlanningRecord,
     snapshot: &SourceSnapshot<'_>,
+    stage: Option<&StageWriteRoot>,
 ) -> Result<ExecutionOutput, RecordError> {
     let ir = planning.record.ir.as_ref().ok_or_else(|| {
         RecordError::new(
             RecordErrorKind::PhaseMismatch,
             0,
-            "ready inspect plan lost its pending IR",
+            "ready execution plan lost its pending IR",
         )
     })?;
     let mut members = Vec::new();
@@ -137,6 +237,15 @@ fn execute_completion(
 
     for member in &ir.members {
         if matches!(member.kind, MemberKind::Directory) {
+            if let Some(stage) = stage {
+                if let Err(finding) =
+                    stage.create_directory(&member.components, &member.decoded_name)
+                {
+                    let completion =
+                        stopped_completion(planning, members, ir.members.len(), finding)?;
+                    return finish_execution(planning, completion, retention.into_entries());
+                }
+            }
             members.push(MemberCompletion::Verified {
                 actual_uncomp_size: 0,
                 actual_crc: 0,
@@ -154,30 +263,44 @@ fn execute_completion(
         };
         let payload = BufReader::with_capacity(64 * 1024, payload);
         let mut capture = retention.begin_capture(&member.canonical_path);
-        let verified = match capture.as_mut() {
-            Some(bytes) => verify_payload(
-                payload,
-                PayloadSpec::from_ir(member),
-                planning.record.binding.budget,
-                actual_total.remaining(),
-                bytes,
-            ),
-            None => {
-                let mut sink = io::sink();
-                verify_payload(
+        let verified = if let Some(stage) = stage {
+            stage.create_file(&member.components).and_then(|file| {
+                process_member_to_file(
                     payload,
                     PayloadSpec::from_ir(member),
                     planning.record.binding.budget,
                     actual_total.remaining(),
-                    &mut sink,
+                    planning.record.binding.member_sync,
+                    capture.as_mut(),
+                    file,
                 )
+            })
+        } else {
+            match capture.as_mut() {
+                Some(bytes) => verify_payload(
+                    payload,
+                    PayloadSpec::from_ir(member),
+                    planning.record.binding.budget,
+                    actual_total.remaining(),
+                    bytes,
+                ),
+                None => {
+                    let mut sink = io::sink();
+                    verify_payload(
+                        payload,
+                        PayloadSpec::from_ir(member),
+                        planning.record.binding.budget,
+                        actual_total.remaining(),
+                        &mut sink,
+                    )
+                }
             }
         };
         let (actual, crc, content_sha256) = match verified {
             Ok(verified) => verified,
             Err(finding) => {
                 let finding = finding.on(&member.decoded_name);
-                if !inspect_failure_reachable(member, finding.code) {
+                if !execution_failure_reachable(planning, member, finding.code) {
                     return Err(unreachable_execution_failure(finding.code));
                 }
                 let completion = stopped_completion(planning, members, ir.members.len(), finding)?;
@@ -264,6 +387,19 @@ fn stopped_completion(
         },
         planning,
     )
+}
+
+fn execution_failure_reachable(
+    planning: &ValidatedPlanningRecord,
+    member: &IrMember,
+    code: FindingCode,
+) -> bool {
+    (planning.record.binding.requested_effect == RequestedEffect::Materialize
+        && matches!(
+            code,
+            FindingCode::MaterializeIo | FindingCode::MaterializeUnsafeComponent
+        ))
+        || inspect_failure_reachable(member, code)
 }
 
 pub(super) fn inspect_failure_reachable(member: &IrMember, code: FindingCode) -> bool {

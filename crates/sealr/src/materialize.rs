@@ -1,5 +1,5 @@
-use std::fs;
-use std::io;
+use std::fs::{self, File as StdFile};
+use std::io::{self, BufRead, Write};
 use std::path::{Component, Path, PathBuf};
 
 use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
@@ -8,10 +8,14 @@ use cap_std::fs::{Dir as CapDir, File as CapFile, OpenOptions as CapOpenOptions}
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+#[cfg(any(test, feature = "__internal-worker-lab"))]
+use std::cell::Cell;
 #[cfg(test)]
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 
 use crate::findings::{Finding, FindingCode};
+use crate::policy::ResourceBudget;
+use crate::verification::{verify_payload, PayloadSpec};
 
 #[cfg(target_os = "macos")]
 mod apple;
@@ -30,32 +34,36 @@ enum InjectedStageMutation {
     ExtraFile { relative: String, bytes: Vec<u8> },
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "__internal-worker-lab"))]
 std::thread_local! {
     static INJECTED_CLEANUP_FAILURES: Cell<u32> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+std::thread_local! {
     static AFTER_DIR_COMPONENT: RefCell<Option<(String, PathBuf)>> = const { RefCell::new(None) };
     static STAGE_MUTATION: RefCell<Option<InjectedStageMutation>> = const { RefCell::new(None) };
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "__internal-worker-lab"))]
 pub(crate) struct CleanupFailureGuard {
     previous: u32,
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "__internal-worker-lab"))]
 impl Drop for CleanupFailureGuard {
     fn drop(&mut self) {
         INJECTED_CLEANUP_FAILURES.with(|remaining| remaining.set(self.previous));
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "__internal-worker-lab"))]
 pub(crate) fn inject_cleanup_failures_for_current_thread(count: u32) -> CleanupFailureGuard {
     let previous = INJECTED_CLEANUP_FAILURES.with(|remaining| remaining.replace(count));
     CleanupFailureGuard { previous }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "__internal-worker-lab"))]
 fn injected_cleanup_failure() -> Option<io::Error> {
     INJECTED_CLEANUP_FAILURES.with(|remaining| {
         let count = remaining.get();
@@ -68,7 +76,7 @@ fn injected_cleanup_failure() -> Option<io::Error> {
     })
 }
 
-#[cfg(not(test))]
+#[cfg(not(any(test, feature = "__internal-worker-lab")))]
 fn injected_cleanup_failure() -> Option<io::Error> {
     None
 }
@@ -395,6 +403,130 @@ pub(crate) struct CapabilityMaterializer {
     windows: Option<WindowsMaterializationEvidence>,
 }
 
+/// The only stage authority needed by a plan-native archive writer.
+///
+/// This deliberately carries neither the destination parent nor the final
+/// component name, so code using it cannot publish or remove the stage.
+#[derive(Debug)]
+pub(crate) struct StageWriteRoot {
+    root: CapDir,
+    #[cfg(test)]
+    root_path: Option<PathBuf>,
+}
+
+impl StageWriteRoot {
+    fn try_clone_from(root: &CapDir, _test_root_path: Option<PathBuf>) -> Result<Self, Finding> {
+        let root = root.try_clone().map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("clone staging capability: {error}"),
+            )
+        })?;
+        Ok(Self {
+            root,
+            #[cfg(test)]
+            root_path: _test_root_path,
+        })
+    }
+
+    #[cfg(feature = "__internal-worker-lab")]
+    pub(crate) fn from_worker_file(file: StdFile) -> Result<Self, Finding> {
+        let root = CapDir::from_std_file(file);
+        ensure_stage_namespace_safe(&root)?;
+        ensure_directory_handle_is_not_reparse(&root).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeUnsafeComponent,
+                format!("worker staging capability is a reparse point: {error}"),
+            )
+        })?;
+        Ok(Self {
+            root,
+            #[cfg(test)]
+            root_path: None,
+        })
+    }
+
+    pub(crate) fn create_directory(&self, parts: &[String], member: &str) -> Result<(), Finding> {
+        self.open_or_create_directories(parts)
+            .map(|_| ())
+            .map_err(|finding| finding.on(member))
+    }
+
+    pub(crate) fn create_file(&self, parts: &[String]) -> Result<CapFile, Finding> {
+        let (leaf, parents) = parts.split_last().ok_or_else(|| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                "canonical member has no path components",
+            )
+        })?;
+        validate_component(leaf)?;
+        let parent = self.open_or_create_directories(parents)?;
+        let mut options = CapOpenOptions::new();
+        options
+            .write(true)
+            .create_new(true)
+            .follow(FollowSymlinks::No);
+        let file = parent
+            .open_with(Path::new(leaf), &options)
+            .map_err(|error| {
+                Finding::error(
+                    FindingCode::MaterializeUnsafeComponent,
+                    format!("create member without following links: {error}"),
+                )
+            })?;
+        ensure_file_handle_is_not_reparse(&file).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeUnsafeComponent,
+                format!("created member is a reparse point: {error}"),
+            )
+        })?;
+        Ok(file)
+    }
+
+    fn open_or_create_directories(&self, parts: &[String]) -> Result<CapDir, Finding> {
+        let mut current = self.root.try_clone().map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("clone staging capability: {error}"),
+            )
+        })?;
+        #[cfg(test)]
+        let mut relative = PathBuf::new();
+        for part in parts {
+            validate_component(part)?;
+            let component = Path::new(part);
+            match current.create_dir(component) {
+                Ok(()) => {}
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(error) => {
+                    return Err(Finding::error(
+                        FindingCode::MaterializeIo,
+                        format!("create directory component {part:?}: {error}"),
+                    ));
+                }
+            }
+            #[cfg(test)]
+            if let Some(root_path) = &self.root_path {
+                relative.push(part);
+                injected_after_directory_component(&root_path.join(&relative));
+            }
+            current = current.open_dir_nofollow(component).map_err(|error| {
+                Finding::error(
+                    FindingCode::MaterializeUnsafeComponent,
+                    format!("open directory component {part:?} without following links: {error}"),
+                )
+            })?;
+            ensure_directory_handle_is_not_reparse(&current).map_err(|error| {
+                Finding::error(
+                    FindingCode::MaterializeUnsafeComponent,
+                    format!("directory component {part:?} is a reparse point: {error}"),
+                )
+            })?;
+        }
+        Ok(current)
+    }
+}
+
 #[derive(Debug)]
 struct StageCreateError {
     error: io::Error,
@@ -692,40 +824,34 @@ impl CapabilityMaterializer {
     }
 
     pub(crate) fn create_directory(&self, parts: &[String], member: &str) -> Result<(), Finding> {
-        self.open_or_create_directories(parts)
-            .map(|_| ())
-            .map_err(|finding| finding.on(member))
+        self.stage_writer()?.create_directory(parts, member)
     }
 
     pub(crate) fn create_file(&self, parts: &[String]) -> Result<CapFile, Finding> {
-        let (leaf, parents) = parts.split_last().ok_or_else(|| {
+        self.stage_writer()?.create_file(parts)
+    }
+
+    #[cfg(feature = "__internal-worker-lab")]
+    pub(crate) fn try_clone_worker_file(&self) -> Result<StdFile, Finding> {
+        #[cfg(target_os = "linux")]
+        let file = rustix::fs::openat(
+            self.root()?,
+            ".",
+            rustix::fs::OFlags::RDONLY
+                | rustix::fs::OFlags::DIRECTORY
+                | rustix::fs::OFlags::NOFOLLOW
+                | rustix::fs::OFlags::CLOEXEC,
+            rustix::fs::Mode::empty(),
+        )
+        .map(StdFile::from);
+        #[cfg(not(target_os = "linux"))]
+        let file = self.root()?.try_clone().map(CapDir::into_std_file);
+        file.map_err(|error| {
             Finding::error(
                 FindingCode::MaterializeIo,
-                "canonical member has no path components",
+                format!("clone worker staging capability: {error}"),
             )
-        })?;
-        validate_component(leaf)?;
-        let parent = self.open_or_create_directories(parents)?;
-        let mut options = CapOpenOptions::new();
-        options
-            .write(true)
-            .create_new(true)
-            .follow(FollowSymlinks::No);
-        let file = parent
-            .open_with(Path::new(leaf), &options)
-            .map_err(|error| {
-                Finding::error(
-                    FindingCode::MaterializeUnsafeComponent,
-                    format!("create member without following links: {error}"),
-                )
-            })?;
-        ensure_file_handle_is_not_reparse(&file).map_err(|error| {
-            Finding::error(
-                FindingCode::MaterializeUnsafeComponent,
-                format!("created member is a reparse point: {error}"),
-            )
-        })?;
-        Ok(file)
+        })
     }
 
     pub(crate) fn commit(&mut self) -> Result<(), Finding> {
@@ -733,6 +859,12 @@ impl CapabilityMaterializer {
             Finding::error(
                 FindingCode::MaterializeCommit,
                 "staging capability is unavailable during publication",
+            )
+        })?;
+        ensure_stage_name_matches_root(&self.parent, root, &self.stage_name).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeCommit,
+                format!("staging name no longer identifies the audited root: {error}"),
             )
         })?;
         if let Err(error) = rename_noreplace(&self.parent, root, &self.stage_name, &self.final_name)
@@ -813,47 +945,12 @@ impl CapabilityMaterializer {
         })
     }
 
-    fn open_or_create_directories(&self, parts: &[String]) -> Result<CapDir, Finding> {
-        let mut current = self.root()?.try_clone().map_err(|error| {
-            Finding::error(
-                FindingCode::MaterializeIo,
-                format!("clone staging capability: {error}"),
-            )
-        })?;
+    fn stage_writer(&self) -> Result<StageWriteRoot, Finding> {
         #[cfg(test)]
-        let mut relative = PathBuf::new();
-        for part in parts {
-            validate_component(part)?;
-            let component = Path::new(part);
-            match current.create_dir(component) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
-                Err(error) => {
-                    return Err(Finding::error(
-                        FindingCode::MaterializeIo,
-                        format!("create directory component {part:?}: {error}"),
-                    ));
-                }
-            }
-            #[cfg(test)]
-            {
-                relative.push(part);
-                injected_after_directory_component(&self.stage_path().join(&relative));
-            }
-            current = current.open_dir_nofollow(component).map_err(|error| {
-                Finding::error(
-                    FindingCode::MaterializeUnsafeComponent,
-                    format!("open directory component {part:?} without following links: {error}"),
-                )
-            })?;
-            ensure_directory_handle_is_not_reparse(&current).map_err(|error| {
-                Finding::error(
-                    FindingCode::MaterializeUnsafeComponent,
-                    format!("directory component {part:?} is a reparse point: {error}"),
-                )
-            })?;
-        }
-        Ok(current)
+        let test_root_path = Some(self.stage_path());
+        #[cfg(not(test))]
+        let test_root_path = None;
+        StageWriteRoot::try_clone_from(self.root()?, test_root_path)
     }
 
     fn open_existing_directories(&self, parts: &[String]) -> Result<CapDir, Finding> {
@@ -888,6 +985,24 @@ impl CapabilityMaterializer {
 
         #[cfg(test)]
         apply_injected_stage_mutation(&self.stage_path());
+
+        ensure_stage_namespace_safe(self.root()?).map_err(|finding| {
+            Finding::error(
+                FindingCode::MaterializeAudit,
+                format!(
+                    "staging root security drifted before audit: {}",
+                    finding.detail
+                ),
+            )
+        })?;
+        ensure_stage_name_matches_root(&self.parent, self.root()?, &self.stage_name).map_err(
+            |error| {
+                Finding::error(
+                    FindingCode::MaterializeAudit,
+                    format!("staging name does not identify the retained root: {error}"),
+                )
+            },
+        )?;
 
         let mut expected_dirs = BTreeSet::new();
         let mut expected_files = BTreeSet::new();
@@ -946,6 +1061,13 @@ impl CapabilityMaterializer {
                         )
                         .on(&member.decoded_name)
                     })?;
+                    ensure_single_link(&file).map_err(|error| {
+                        Finding::error(
+                            FindingCode::MaterializeAudit,
+                            format!("audited file link state is unsafe: {error}"),
+                        )
+                        .on(&member.decoded_name)
+                    })?;
                     let (actual_size, actual_sha) = hash_staged_file(&mut file, expected_size)
                         .map_err(|error| {
                             Finding::error(
@@ -992,6 +1114,112 @@ impl CapabilityMaterializer {
     #[cfg(test)]
     fn stage_path(&self) -> PathBuf {
         self.parent_path.join(&self.stage_name)
+    }
+}
+
+#[cfg(any(target_os = "android", target_os = "linux", target_os = "macos"))]
+fn ensure_single_link(file: &CapFile) -> io::Result<()> {
+    let metadata = rustix::fs::fstat(file)?;
+    if metadata.st_nlink == 1 {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("expected link count 1, observed {}", metadata.st_nlink),
+        ))
+    }
+}
+
+#[cfg(windows)]
+fn ensure_single_link(_file: &CapFile) -> io::Result<()> {
+    // The stable Rust Windows metadata surface does not expose link count.
+    // Existing no-reparse, exact-tree, size, and digest checks remain active;
+    // the Linux worker boundary adds the mandatory single-link check.
+    Ok(())
+}
+
+#[cfg(not(any(
+    target_os = "android",
+    target_os = "linux",
+    target_os = "macos",
+    windows
+)))]
+fn ensure_single_link(_file: &CapFile) -> io::Result<()> {
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "file link-count audit is unavailable on this platform",
+    ))
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn ensure_stage_name_matches_root(parent: &CapDir, root: &CapDir, name: &Path) -> io::Result<()> {
+    use cap_std::fs::MetadataExt;
+
+    let named = parent.open_dir_nofollow(name)?;
+    let named_metadata = named.dir_metadata()?;
+    let root_metadata = root.dir_metadata()?;
+    if named_metadata.dev() == root_metadata.dev() && named_metadata.ino() == root_metadata.ino() {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "stage device and inode identity changed",
+        ))
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn ensure_stage_name_matches_root(
+    _parent: &CapDir,
+    _root: &CapDir,
+    _name: &Path,
+) -> io::Result<()> {
+    Ok(())
+}
+
+pub(crate) fn process_member_to_file(
+    payload: impl BufRead,
+    member: PayloadSpec,
+    budget: ResourceBudget,
+    remaining_total: u64,
+    member_sync: bool,
+    capture: Option<&mut Vec<u8>>,
+    mut file: CapFile,
+) -> Result<(u64, u32, [u8; 32]), Finding> {
+    let result = {
+        let mut writer = RetainingWriter {
+            primary: &mut file,
+            capture,
+        };
+        verify_payload(payload, member, budget, remaining_total, &mut writer)?
+    };
+    file.flush().map_err(|error| {
+        Finding::error(FindingCode::MaterializeIo, format!("flush member: {error}"))
+    })?;
+    if member_sync {
+        file.sync_all().map_err(|error| {
+            Finding::error(FindingCode::MaterializeIo, format!("sync member: {error}"))
+        })?;
+    }
+    Ok(result)
+}
+
+struct RetainingWriter<'a, W> {
+    primary: &'a mut W,
+    capture: Option<&'a mut Vec<u8>>,
+}
+
+impl<W: Write> Write for RetainingWriter<'_, W> {
+    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
+        let written = self.primary.write(bytes)?;
+        if let Some(capture) = self.capture.as_deref_mut() {
+            capture.extend_from_slice(&bytes[..written]);
+        }
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.primary.flush()
     }
 }
 
@@ -1769,6 +1997,8 @@ mod tests {
         let dest = temp_dest("private-stage-dacl");
         let mut materializer = CapabilityMaterializer::create(&dest, true).unwrap();
         let directory = materializer
+            .stage_writer()
+            .unwrap()
             .open_or_create_directories(&["nested".to_owned()])
             .unwrap();
         let mut file = materializer
@@ -2344,7 +2574,7 @@ mod tests {
         let mut file = materializer.create_file(&["hello.txt".to_owned()]).unwrap();
         file.write_all(b"hello").unwrap();
         drop(file);
-        fs::write(materializer.stage_path().join("hello.txt"), b"mutated").unwrap();
+        fs::write(materializer.stage_path().join("hello.txt"), b"HELLO").unwrap();
 
         let ir = crate::ir::ArchiveIR::new(
             crate::outcome::SourceDigest::available("test"),
@@ -2353,6 +2583,89 @@ mod tests {
         let error = materializer.audit_against(&ir).unwrap_err();
         assert_eq!(error.code, FindingCode::MaterializeAudit);
         materializer.abort().unwrap();
+        assert!(!dest.exists());
+    }
+
+    #[test]
+    fn audit_rejects_a_missing_staged_file() {
+        let dest = temp_dest("audit-missing");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let mut file = materializer.create_file(&["hello.txt".to_owned()]).unwrap();
+        file.write_all(b"hello").unwrap();
+        drop(file);
+        fs::remove_file(materializer.stage_path().join("hello.txt")).unwrap();
+
+        let ir = crate::ir::ArchiveIR::new(
+            crate::outcome::SourceDigest::available("test"),
+            vec![verified_file("hello.txt", &["hello.txt"], b"hello")],
+        );
+        let error = materializer.audit_against(&ir).unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeAudit);
+        materializer.abort().unwrap();
+        assert!(!dest.exists());
+    }
+
+    #[test]
+    fn audit_rejects_a_directory_where_a_file_was_authorized() {
+        let dest = temp_dest("audit-wrong-kind");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        materializer
+            .create_directory(&["hello.txt".to_owned()], "hello.txt/")
+            .unwrap();
+
+        let ir = crate::ir::ArchiveIR::new(
+            crate::outcome::SourceDigest::available("test"),
+            vec![verified_file("hello.txt", &["hello.txt"], b"hello")],
+        );
+        let error = materializer.audit_against(&ir).unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeAudit);
+        materializer.abort().unwrap();
+        assert!(!dest.exists());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn audit_rejects_stage_root_permission_drift() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dest = temp_dest("audit-root-mode");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        fs::set_permissions(materializer.stage_path(), fs::Permissions::from_mode(0o755)).unwrap();
+        let ir =
+            crate::ir::ArchiveIR::new(crate::outcome::SourceDigest::available("test"), Vec::new());
+        let error = materializer.audit_against(&ir).unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeAudit);
+        fs::set_permissions(materializer.stage_path(), fs::Permissions::from_mode(0o700)).unwrap();
+        materializer.abort().unwrap();
+        assert!(!dest.exists());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn commit_rejects_stage_name_substitution_after_audit() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let dest = temp_dest("commit-stage-substitution");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let ir =
+            crate::ir::ArchiveIR::new(crate::outcome::SourceDigest::available("test"), Vec::new());
+        materializer.audit_against(&ir).unwrap();
+        let stage_path = materializer.stage_path();
+        let moved_path = stage_path.with_extension("moved");
+        fs::rename(&stage_path, &moved_path).unwrap();
+        fs::create_dir(&stage_path).unwrap();
+        fs::set_permissions(&stage_path, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let error = materializer.commit().unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeCommit);
+        assert!(error.detail.contains("audited root"));
+        let _ = materializer.abort();
+        if stage_path.exists() {
+            fs::remove_dir_all(&stage_path).unwrap();
+        }
+        if moved_path.exists() {
+            fs::remove_dir_all(&moved_path).unwrap();
+        }
         assert!(!dest.exists());
     }
 
@@ -2371,6 +2684,34 @@ mod tests {
         );
         let error = materializer.audit_against(&ir).unwrap_err();
         assert_eq!(error.code, FindingCode::MaterializeAudit);
+        materializer.abort().unwrap();
+        assert!(!dest.exists());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn audit_rejects_expected_paths_that_share_a_hardlinked_inode() {
+        let dest = temp_dest("audit-hardlink");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let mut file = materializer.create_file(&["hello.txt".to_owned()]).unwrap();
+        file.write_all(b"hello").unwrap();
+        drop(file);
+        fs::hard_link(
+            materializer.stage_path().join("hello.txt"),
+            materializer.stage_path().join("copy.txt"),
+        )
+        .unwrap();
+
+        let ir = crate::ir::ArchiveIR::new(
+            crate::outcome::SourceDigest::available("test"),
+            vec![
+                verified_file("hello.txt", &["hello.txt"], b"hello"),
+                verified_file("copy.txt", &["copy.txt"], b"hello"),
+            ],
+        );
+        let error = materializer.audit_against(&ir).unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeAudit);
+        assert!(error.detail.contains("link count 1"));
         materializer.abort().unwrap();
         assert!(!dest.exists());
     }

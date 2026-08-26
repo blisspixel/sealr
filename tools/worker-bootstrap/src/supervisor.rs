@@ -27,6 +27,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 mod read;
+mod write;
 
 const SOURCE_MEMBER_COUNT: u64 = 2;
 const SOURCE_RETAINED_BYTES: u64 = 30;
@@ -166,9 +167,10 @@ pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
     }
     run_timeout_reap()?;
     read::run_conformance()?;
+    write::run_conformance()?;
     run_repeated_stress()?;
     println!(
-        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 1 supervisor content replay, 1 immutable original-pass retention transfer, 1 isolated one-shot Store-and-Deflate read boundary, 22 crash barriers, 11 authority-epoch stalls, 500 bounded stress iterations, and bounded reap passed"
+        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 1 supervisor content replay, 1 immutable original-pass retention transfer, 1 isolated one-shot Store-and-Deflate read boundary, 1 reaped and audited Store-and-Deflate writer publication, 1 post-reap writer audit-mutation rejection, 1 writer destination-race rejection, 1 distinct writer cleanup failure, 4 writer crash barriers, 2 writer authority-epoch stalls, 22 bootstrap crash barriers, 11 bootstrap authority-epoch stalls, 500 bounded bootstrap stress iterations, 500 bounded writer lifecycle iterations, and bounded reap passed"
     );
     Ok(())
 }
@@ -1204,6 +1206,13 @@ fn observe_restricted_child(
         )
         .into());
     }
+    let children = fs::read_to_string(proc_root.join(format!("task/{pid}/children")))?;
+    if !children.trim().is_empty() {
+        return Err(io::Error::other(format!(
+            "restricted worker retained descendant PIDs {children:?}"
+        ))
+        .into());
+    }
 
     let mut descriptors = Vec::new();
     for entry in fs::read_dir(proc_root.join("fd"))? {
@@ -1217,7 +1226,7 @@ fn observe_restricted_child(
     }
     descriptors.sort_unstable();
     let mut expected = vec![0, 1, 2];
-    if ready.values[3] != u64::MAX {
+    if stage.is_some() {
         expected.push(i32::try_from(ready.values[3])?);
     }
     expected.sort_unstable();
@@ -1333,7 +1342,7 @@ fn observe_completed_child(
     let completion_fd = i32::try_from(result.values[2] & 0xffff_ffff)?;
     let retained_fd = i32::try_from(result.values[2] >> 32)?;
     let mut expected = vec![0, 1, 2, source_fd, plan_fd, completion_fd, retained_fd];
-    if ready.values[3] != u64::MAX {
+    if stage.is_some() {
         expected.push(i32::try_from(ready.values[3])?);
     }
     expected.sort_unstable();
