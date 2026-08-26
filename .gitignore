@@ -7,4 +7,5 @@
 *.profraw
 /fuzz/target
 /tests/packaged-consumer/target
+/verification/kani/target
 /.kani

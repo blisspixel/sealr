@@ -40,6 +40,46 @@ impl QuotaState {
     }
 }
 
+#[cfg(kani)]
+mod kani_proofs {
+    use super::*;
+
+    #[kani::proof]
+    fn quota_consume_matches_wide_oracle_and_is_atomic() {
+        let used: u64 = kani::any();
+        let limit: u64 = kani::any();
+        let amount: u64 = kani::any();
+        kani::assume(used <= limit);
+
+        let mut state = QuotaState { used, limit };
+        let before = state;
+        let actual = state.consume(amount);
+        let wide_next = u128::from(used) + u128::from(amount);
+        let expected = if wide_next > u128::from(u64::MAX) {
+            Err(QuotaError::Overflow)
+        } else {
+            let next = wide_next as u64;
+            if next > limit {
+                Err(QuotaError::Exceeded {
+                    attempted: next,
+                    limit,
+                })
+            } else {
+                Ok(next)
+            }
+        };
+
+        assert_eq!(actual, expected);
+        match expected {
+            Ok(next) => {
+                assert_eq!(state.used(), next);
+                assert_eq!(state.remaining(), limit - next);
+            }
+            Err(_) => assert_eq!(state, before),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

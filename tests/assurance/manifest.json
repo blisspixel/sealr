@@ -1,0 +1,81 @@
+{
+  "schema": "sealr.assurance-discovery.v1",
+  "workflow": ".github/workflows/assurance.yml",
+  "schedule": "29 9 * * 3",
+  "artifact_retention_days": 30,
+  "tools": {
+    "kani": "0.67.0",
+    "cargo_mutants": "27.1.0",
+    "cargo_llvm_cov": "0.9.0",
+    "rust": "1.98.0"
+  },
+  "kani_command": "cargo kani --manifest-path verification/kani/Cargo.toml --package sealr --default-unwind 1",
+  "kani_manifest": "verification/kani/Cargo.toml",
+  "kani_compiler_rust": "1.93.0-nightly (53732d5e0 2025-11-20)",
+  "kani_compatibility_assumption": "The proof-only manifest compiles the exact production interval, quota, and ratio source modules with the Kani compiler's Rust 1.93 declaration. Kani reports unsupported caller-location and foreign-function constructs elsewhere in those modules, but neither is reachable from the named harnesses; a future reachability change fails verification. Required CI separately compiles and tests the full production workspace manifest and lock with Rust 1.98.",
+  "kani_compatibility_nonclaim": "The proof-only manifest does not compile the parser, codecs, dependency graph, platform adapters, or worker, and establishes no property of code outside the three named scalar modules.",
+  "kani_harnesses": [
+    {
+      "id": "interval.offset-len.v1",
+      "symbol": "interval::kani_proofs::interval_offset_len_matches_wide_oracle",
+      "domain": [
+        "offset: every u64 value",
+        "length: every u64 value"
+      ],
+      "assumptions": [],
+      "unwind_bound": 1,
+      "solver": "cadical",
+      "property": "Checked offset plus length succeeds exactly when the mathematical u128 sum fits in u64, preserving both endpoints.",
+      "nonclaim": "This does not prove interval partitioning, ZIP covering, parser correctness, or behavior outside the checked scalar constructor."
+    },
+    {
+      "id": "ratio.checked-product.v1",
+      "symbol": "ratio::kani_proofs::ratio_exceeds_matches_checked_product_oracle",
+      "domain": [
+        "uncompressed size: every u64 value",
+        "compressed size: every u64 value",
+        "maximum ratio: every u64 value"
+      ],
+      "assumptions": [],
+      "unwind_bound": 1,
+      "solver": "kissat",
+      "property": "The widened u128 product comparison agrees with an independent checked-u64-product oracle across both representable and overflowing products, including zero compressed size.",
+      "nonclaim": "This does not prove codec output sizes, policy selection, archive admission, or that a configured ratio is appropriate."
+    },
+    {
+      "id": "quota.atomic-consume.v1",
+      "symbol": "quota::kani_proofs::quota_consume_matches_wide_oracle_and_is_atomic",
+      "domain": [
+        "used: every u64 value",
+        "limit: every u64 value",
+        "amount: every u64 value"
+      ],
+      "assumptions": [
+        "used is less than or equal to limit at entry"
+      ],
+      "unwind_bound": 1,
+      "solver": "cadical",
+      "property": "One quota transition agrees with u128 arithmetic and leaves the state unchanged on overflow or limit rejection.",
+      "nonclaim": "This does not prove caller sequencing, aggregate archive accounting, concurrent use, or any parser or filesystem behavior."
+    }
+  ],
+  "discovery_reports": [
+    {
+      "id": "mutation.scalar-kernels.v1",
+      "tool": "cargo-mutants",
+      "scope": "Mutations in CheckedInterval::from_offset_len, QuotaState::consume, and the production ratio_exceeds function across their three pure production modules, excluding proof harnesses and tested by the sealr library suite.",
+      "bounded_by": "20-minute job, two workers, 120-second command timeout per Cargo invocation, fixed files, a fixed function regex, and an explicit proof-harness exclusion.",
+      "result_policy": "Missed mutants and mutant timeouts are recorded as discovery findings. Baseline, usage, filter, and internal tool failures fail the job.",
+      "nonclaim": "A high caught-mutant fraction is not a correctness, completeness, release, or security score."
+    },
+    {
+      "id": "coverage.sealr-source.v1",
+      "tool": "cargo-llvm-cov",
+      "scope": "Source coverage observed while running the sealr package tests with all features.",
+      "bounded_by": "20-minute job and the ordinary non-ignored sealr package test suite.",
+      "result_policy": "The complete summary JSON is retained for branch and assertion discovery without a percentage threshold.",
+      "nonclaim": "Executed source regions do not establish assertion strength, path completeness, semantic correctness, or security."
+    }
+  ],
+  "promotion_ledger": "tests/assurance/promotion-ledger.json"
+}

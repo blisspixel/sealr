@@ -14,6 +14,7 @@ mod materialize;
 mod outcome;
 mod policy;
 mod quota;
+mod ratio;
 mod snapshot;
 mod supervised;
 mod verification;

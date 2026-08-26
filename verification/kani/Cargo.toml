@@ -1,0 +1,18 @@
+[workspace]
+
+[package]
+name = "sealr"
+version = "0.1.0-alpha.5"
+edition = "2021"
+rust-version = "1.93"
+license = "Apache-2.0"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
+
+[package.metadata.kani.flags]
+default-unwind = "1"

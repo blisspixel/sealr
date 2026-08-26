@@ -71,7 +71,7 @@ CURRENT_CHUNK      = 64 KiB
 
 Count **actual** uncompressed bytes, not just headers. Lying sizes are a known bomb (Pellegrino, Fifield). Abort the member if the stream exceeds `min(declared, MAX_MEMBER)`. Global counter aborts at `MAX_TOTAL`.
 
-Ratio 100 is stricter than DEFLATE’s theoretical max (~1032:1) and will reject some legitimate all-zero archives. That is szips. Size caps still stop Fifield bombs if someone raises ratio.
+Ratio 100 is stricter than DEFLATE’s theoretical max (~1032:1) and will reject some legitimate all-zero archives. That is strict by design. Size caps still stop Fifield bombs if someone raises the ratio.
 
 ## Integrity
 

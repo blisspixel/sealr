@@ -1,0 +1,108 @@
+{
+  "schema": "sealr.assurance-promotion-ledger.v1",
+  "required_workflow": ".github/workflows/ci.yml",
+  "minimum_consecutive_successful_main_runs": 10,
+  "failure_policy": "Any unsuccessful scheduled main run resets that check's committed consecutive-success sequence before promotion review.",
+  "checks": [
+    {
+      "id": "kani.scalar-kernels.v1",
+      "category": "bounded-model-checking",
+      "scheduled_workflow": ".github/workflows/assurance.yml",
+      "scheduled_job": "Bounded scalar model checking",
+      "domain": "Three named scalar harnesses over the exact domains and assumptions in tests/assurance/manifest.json.",
+      "nonclaim": "No harness proves ZIP parsing, codecs, filesystem effects, worker containment, cryptography, or behavior outside its stated scalar domain.",
+      "local_reproduction": [
+        "cargo kani --manifest-path verification/kani/Cargo.toml --package sealr --default-unwind 1"
+      ],
+      "timeout_minutes": 20,
+      "required_ci_marker": "cargo kani --manifest-path verification/kani/Cargo.toml",
+      "promotable": true,
+      "stable_main_runs": [],
+      "eligible": false,
+      "promoted": false
+    },
+    {
+      "id": "mutation.scalar-kernels.v1",
+      "category": "mutation-discovery",
+      "scheduled_workflow": ".github/workflows/assurance.yml",
+      "scheduled_job": "Targeted mutation discovery",
+      "domain": "Fixed mutations of three pure production scalar kernels under the ordinary sealr library tests.",
+      "nonclaim": "Mutation outcomes are review leads and never a correctness, completeness, security, or release score.",
+      "local_reproduction": [
+        "mkdir -p target/assurance-discovery",
+        "cargo-mutants mutants --no-config --package sealr --file crates/sealr/src/interval.rs --file crates/sealr/src/quota.rs --file crates/sealr/src/ratio.rs --re 'CheckedInterval::from_offset_len|QuotaState::consume|ratio_exceeds' --exclude-re 'kani_proofs' --jobs 2 --timeout 120 --output target/assurance-discovery/mutation --no-times --colors never --annotations none --cargo-arg=--locked -- --lib"
+      ],
+      "timeout_minutes": 20,
+      "required_ci_marker": "cargo-mutants mutants --no-config",
+      "promotable": false,
+      "stable_main_runs": [],
+      "eligible": false,
+      "promoted": false
+    },
+    {
+      "id": "coverage.sealr-source.v1",
+      "category": "coverage-discovery",
+      "scheduled_workflow": ".github/workflows/assurance.yml",
+      "scheduled_job": "Source coverage discovery",
+      "domain": "Source regions observed under the ordinary non-ignored sealr package tests with all features.",
+      "nonclaim": "Coverage is a discovery map, not evidence of assertion strength, semantic completeness, correctness, or security.",
+      "local_reproduction": [
+        "mkdir -p target/assurance-discovery",
+        "cargo llvm-cov --locked --package sealr --all-features --json --summary-only --output-path target/assurance-discovery/coverage.json"
+      ],
+      "timeout_minutes": 20,
+      "required_ci_marker": "cargo llvm-cov",
+      "promotable": false,
+      "stable_main_runs": [],
+      "eligible": false,
+      "promoted": false
+    },
+    {
+      "id": "fuzz.protocol-and-semantic.v1",
+      "category": "coverage-guided-fuzzing",
+      "scheduled_workflow": ".github/workflows/fuzz.yml",
+      "scheduled_job": "Bounded worker protocol fuzzing and Bounded semantic-record fuzzing",
+      "domain": "Digest-pinned protocol and semantic-record seeds plus arbitrary bytes and input-directed mutations under the workflow's exact bounds.",
+      "nonclaim": "Coverage-guided fuzzing is heuristic exploration, not exhaustive reachability or proof that the decoders are defect-free.",
+      "local_reproduction": [
+        "pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1",
+        "cargo fuzz run protocol_decoders -- -max_total_time=600 -rss_limit_mb=1024 -max_len=65536",
+        "cargo fuzz run semantic_records -- -max_total_time=600 -rss_limit_mb=1024 -max_len=65536"
+      ],
+      "timeout_minutes": 25,
+      "required_ci_marker": "cargo fuzz run",
+      "promotable": true,
+      "stable_main_runs": [
+        {
+          "sequence": 1,
+          "run_id": 32708222003,
+          "commit": "2bdecc97442e6c5fdc27fb08e7f80db706d74cf6",
+          "branch": "main",
+          "event": "schedule",
+          "conclusion": "success",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/32708222003",
+          "observed_at": "2026-08-24T08:49:04Z"
+        }
+      ],
+      "eligible": false,
+      "promoted": false
+    },
+    {
+      "id": "resource.multigigabyte-sparse.v1",
+      "category": "native-resource-evidence",
+      "scheduled_workflow": ".github/workflows/resource-evidence.yml",
+      "scheduled_job": "3 GiB sparse gate on each release platform",
+      "domain": "One exact physically sparse valid 3 GiB ZIP32 fixture on the scheduled Linux, macOS, and Windows runners.",
+      "nonclaim": "This bounds observed heap use for one fixture and runner generation, not every archive, allocation, filesystem, or platform.",
+      "local_reproduction": [
+        "cargo test --locked --release -p sealr --test bounded_path_memory multigigabyte_sparse_path_input_stays_within_the_heap_budget -- --ignored --exact --nocapture"
+      ],
+      "timeout_minutes": 30,
+      "required_ci_marker": "multigigabyte_sparse_path_input_stays_within_the_heap_budget",
+      "promotable": true,
+      "stable_main_runs": [],
+      "eligible": false,
+      "promoted": false
+    }
+  ]
+}

@@ -19,6 +19,7 @@ Start with the [README](../README.md) for the published Alpha.5 boundary and a s
 | [Threat model](threat-model.md) | Adversaries, exclusions, and parser-differential threats |
 | [Invariants](invariants.md) | Properties that implementation and evidence must preserve |
 | [Assurance](assurance.md) | Current evidence and the layered verification program |
+| [Assurance discovery and promotion](assurance-promotion.md) | Pinned Kani, mutation, coverage, report, and promotion contracts |
 | [Identity conformance](identity-conformance.md) | Current vectors, standalone verifier, exact root bytes, and bounded claims |
 | [Wheel compatibility pilot](wheel-compatibility-pilot.md) | Initial non-shipping corpus measurement and investigated denial evidence |
 | [Strict ASCII ZIP32 profile v2](profiles/zip-strict-ascii-v2.md) | Executable exhaustive flag and extra-field interpretation contract |
