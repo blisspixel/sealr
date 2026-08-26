@@ -2,7 +2,7 @@
 
 The native Linux release archive has one fixed production-helper boundary. The helper is present only in the `x86_64-unknown-linux-gnu` archive at `libexec/sealr/sealr-worker`. It is not a command, is never selected through `PATH`, and is absent from the macOS and Windows archives.
 
-This contract packages the authenticated helper foundation for later runtime activation. It does not itself make the public library or CLI use the worker.
+This contract packages the authenticated helper foundation consumed by the explicit Linux supervisor. Packaging alone does not select the worker for the default library or CLI path.
 
 ## Exact archive shape
 
@@ -58,4 +58,4 @@ The release workflow calls the same package and verification scripts before uplo
 
 ## Nonclaims
 
-Packaging does not activate a public worker backend, change `Outcome`, construct a worker-backed `VerifiedArchive`, prove real-kernel restriction failure behavior, or provide a macOS or Windows containment claim. Those remain separate Alpha.6 gates.
+The package contract does not activate a worker implicitly. Current source requires callers to pass its exact path, length, and SHA-256 to `LinuxWorker::load`; successful `inspect_supervised` calls may then construct worker-backed `VerifiedArchive` state. Supervised materialization, CLI selection, real-kernel restriction-failure evidence, and macOS or Windows containment remain separate Alpha.6 gates.

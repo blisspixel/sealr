@@ -216,7 +216,34 @@ let metadata = archive.read_member("package.dist-info/METADATA", 256 * 1024)?;
 
 This path does not reopen the caller path or parse ZIP structure again. Without an explicit retention request, the current implementation opens a range-limited reader over the recorded payload, re-inflates a selected Deflate member, and revalidates it for each call. A path outcome reads from its retained private file; a byte outcome reads from the process-owned copy created when the capability outlives the caller borrow. The next section describes the opt-in path that avoids this repeated work for a small, known member set.
 
-Any future worker integration must preserve these observable contracts. The [private semantic-record experiment](semantic-record.md) exercises pending IR, completion frontier, setup-failure evidence, inspect and materialize retained-content transfer, one-shot isolated later reads, authenticated transport, and reaped writer lifecycle without constructing `VerifiedArchive` or changing a supported or default-feature public symbol. Its source-owning inspect and materialize executors consume Ready plans without structural reparse through the repository-only Linux lab; one self-bound generic adapter uses the actual sealed-plan profile, policy, budget, target, consumer, effect, and retention, and supervisor replay reconstructs private complete or stopped outcome state only after exact source-derived agreement. The hidden unsupported driver under the nondefault fuzz feature reaches the codec, not a public execution path. The remaining gate is an explicit fail-closed public Linux supervisor entry point plus integration with the existing outcome axes and a hidden capability backend without silent fallback. No public worker option exists yet.
+The first worker integration preserves these observable contracts through a separate explicit Linux-only entry point. `LinuxWorker::load` authenticates one exact helper artifact from an absolute path, length, and SHA-256. `inspect_supervised` uses the same planner, policy controls, outcome axes, retention plan, and `VerifiedArchive` surface as in-process inspect, while returning typed infrastructure errors when it cannot establish or complete isolation. It never falls back to in-process verification. The semantic worker consumes the actual plan profile, policy, budget, target, consumer, effect, and retention and does not structurally reparse the ZIP. The supervisor reconstructs complete or stopped outcome state only after worker exit, reap, and exact source-derived agreement. Supervised materialization and CLI activation remain open.
+
+### Explicit supervised Linux inspect
+
+```rust,no_run
+use std::path::Path;
+use sealr::{inspect_supervised, ApplyOptions, LinuxWorker, Policy, Source};
+
+let worker = LinuxWorker::load(
+    Path::new("/opt/sealr/libexec/sealr/sealr-worker"),
+    1_234_567,
+    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+)?;
+let bytes = std::fs::read("input.zip")?;
+let outcome = inspect_supervised(
+    Source::Bytes { path: Some("input.zip"), data: &bytes },
+    &Policy::default_v1(),
+    &ApplyOptions::new(),
+    &worker,
+)?;
+# Ok::<(), Box<dyn std::error::Error>>(())
+```
+
+The helper path is never discovered through `PATH`; packaged callers read its exact location and identity from the fixed Linux package contract. Successful worker execution records `kernel_jail: landlock-abi3+seccomp-v1`. Structural rejection before worker entry records `not-entered`. On non-Linux targets, worker loading and supervised inspection return `IsolationUnavailable`.
+
+Archive denial, malformed input, quota stops, and canonically stopped payload verification remain ordinary `Outcome` values. `SupervisionErrorKind` is reserved for helper identity, spawn, authentication, restriction, protocol, timeout, worker-exit, reap, source-authority, integrity-boundary, and internal failures. This separation prevents an isolation failure from being mistaken for an archive finding or compatibility verdict.
+
+A complete supervised outcome holds the exact private-file snapshot, accepted plan, authorized completion, and authenticated helper inside its opaque `VerifiedArchive`. Retained bytes are borrowed locally. A non-retained `read_member` call uses a new restricted process, returns no partial output, and succeeds only after exact output length, CRC and SHA-256 agreement, clean exit, reap, and source-derived validation. Clones share one serialized read authority, so dropping the original does not invalidate the clone.
 
 ### Bounded one-pass retention
 
