@@ -276,6 +276,7 @@ struct WorkerManifest {
 }
 
 #[cfg(target_os = "linux")]
+#[derive(Debug)]
 struct WorkerIdentity {
     helper_path: std::path::PathBuf,
     byte_len: u64,
