@@ -2,8 +2,8 @@ use crate::fault::{ChildMode, FaultPoint};
 use crate::frame::{Frame, Kind};
 use crate::linux::{
     configure_timeout, receive_packet, send_packet, send_raw_conformance_packet, TransportError,
-    DETAIL_CONTROL_TRUNCATED, DETAIL_DATA_TRUNCATED, DETAIL_SHORT_FRAME, ERROR_DESCRIPTOR,
-    ERROR_PROTOCOL, ERROR_RESTRICTION, FLAG_STAGE, READY_FLAGS,
+    DETAIL_ANCILLARY_UNKNOWN, DETAIL_CONTROL_TRUNCATED, DETAIL_DATA_TRUNCATED, DETAIL_SHORT_FRAME,
+    ERROR_DESCRIPTOR, ERROR_PROTOCOL, ERROR_RESTRICTION, FLAG_STAGE, READY_FLAGS,
 };
 use crate::CHILD_MARKER;
 use landlock::{make_bitflags, Access, AccessFs, ABI};
@@ -46,12 +46,17 @@ pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
         CaseMutation::TruncatedSourceControl,
         DETAIL_CONTROL_TRUNCATED,
     )?;
+    run_transport_rejection_with_mode(
+        CaseMutation::None,
+        ChildMode::UnknownAncillary,
+        DETAIL_ANCILLARY_UNKNOWN,
+    )?;
     for point in FaultPoint::ALL {
         run_crash_barrier(point)?;
     }
     run_timeout_reap()?;
     println!(
-        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 18 crash barriers, and bounded reap passed"
+        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 18 crash barriers, and bounded reap passed"
     );
     Ok(())
 }
@@ -197,8 +202,16 @@ fn run_transport_rejection(
     mutation: CaseMutation,
     expected_detail: u64,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    run_transport_rejection_with_mode(mutation, ChildMode::Normal, expected_detail)
+}
+
+fn run_transport_rejection_with_mode(
+    mutation: CaseMutation,
+    mode: ChildMode,
+    expected_detail: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
     let fixture = Fixture::new(false, false, false)?;
-    let result = match exchange(&fixture, mutation, ChildMode::Normal) {
+    let result = match exchange(&fixture, mutation, mode) {
         Ok(ExchangeOutcome::Rejected {
             code: ERROR_PROTOCOL,
             phase: 4,
@@ -503,13 +516,7 @@ fn exchange_active(
         }
         CaseMutation::TruncatedSourceControl => {
             let encoded = source.encode();
-            let descriptors = [
-                source_descriptor.as_fd(),
-                fixture.outside_sentinel.as_fd(),
-                fixture.outside_sentinel.as_fd(),
-                fixture.outside_sentinel.as_fd(),
-                fixture.outside_sentinel.as_fd(),
-            ];
+            let descriptors = vec![fixture.outside_sentinel.as_fd(); 20];
             let written = send_raw_conformance_packet(control, &encoded, &descriptors)?;
             if written != encoded.len() {
                 return Err(io::Error::other(

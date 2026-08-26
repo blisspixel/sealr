@@ -184,6 +184,9 @@ fn run(
     send_packet(control, ready, &[])
         .map_err(|error| protocol(PHASE_RESTRICTION, format!("sending ready failed: {error}")))?;
     await_observation_checkpoint(control, mode, FaultPoint::Ready, operation_id)?;
+    if mode == ChildMode::UnknownAncillary {
+        enable_timestamp_ancillary(control)?;
+    }
 
     let (source_frame, mut source_descriptors) =
         receive_packet(control, Some(1)).map_err(|error| {
@@ -355,7 +358,10 @@ fn probe_landlock_abi(mode: ChildMode) -> Result<u64, WorkerFailure> {
                 "deterministic conformance injection rejected the Landlock ABI probe",
             ));
         }
-        ChildMode::Normal | ChildMode::SeccompInstallationFailure | ChildMode::ExitAt(_) => {
+        ChildMode::Normal
+        | ChildMode::SeccompInstallationFailure
+        | ChildMode::UnknownAncillary
+        | ChildMode::ExitAt(_) => {
             const LANDLOCK_CREATE_RULESET_VERSION: u32 = 1;
             // SAFETY: a null attribute pointer and zero size are the kernel's
             // documented Landlock ABI query. No userspace memory is read or
@@ -377,6 +383,33 @@ fn probe_landlock_abi(mode: ChildMode) -> Result<u64, WorkerFailure> {
         )));
     }
     u64::try_from(observed).map_err(|_| restriction("Landlock ABI query overflowed u64"))
+}
+
+fn enable_timestamp_ancillary(control: rustix::fd::BorrowedFd<'_>) -> Result<(), WorkerFailure> {
+    let enabled: libc::c_int = 1;
+    // SAFETY: the option value points to a live c_int of the supplied size.
+    // This conformance-only mode asks the kernel to attach SCM_TIMESTAMP to
+    // the next received source packet so the raw parser must reject it.
+    let result = unsafe {
+        libc::setsockopt(
+            control.as_raw_fd(),
+            libc::SOL_SOCKET,
+            libc::SO_TIMESTAMP,
+            std::ptr::from_ref(&enabled).cast(),
+            std::mem::size_of_val(&enabled) as libc::socklen_t,
+        )
+    };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(protocol(
+            PHASE_SOURCE,
+            format!(
+                "enabling conformance timestamp ancillary failed: {}",
+                io::Error::last_os_error()
+            ),
+        ))
+    }
 }
 
 fn verify_outside_denied(stage: Option<&OwnedFd>) -> Result<u64, WorkerFailure> {
