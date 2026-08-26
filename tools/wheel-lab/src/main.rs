@@ -9,16 +9,16 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use sealr::{
-    apply_with_options, zip_strict_ascii_v2_digest, AdmissionStatus, ApplyOptions,
-    ExtraDisposition, ExtraSite, MemberKind, NormalizationAction, Policy, Request, Severity,
-    Source, ZipInterpretationProfile, ZIP_STRICT_ASCII_V2,
+    apply_supervised, zip_strict_ascii_v2_digest, AdmissionStatus, ApplyOptions, ExtraDisposition,
+    ExtraSite, LinuxWorker, MemberKind, NormalizationAction, Policy, Request, Severity, Source,
+    ZipInterpretationProfile, ZIP_STRICT_ASCII_V2,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 const MANIFEST_SCHEMA: &str = "sealr.wheel-corpus.v1";
 const REPORT_SCHEMA: &str = "sealr.wheel-compatibility-report.v1";
-const ANALYZER_REVISION: &str = "sealr-wheel-lab.v2";
+const ANALYZER_REVISION: &str = "sealr-wheel-lab.v3";
 const MAX_ARTIFACTS: usize = 128;
 const MAX_ARTIFACT_BYTES: u64 = 512 * 1024 * 1024;
 const MAX_CORPUS_BYTES: u64 = 2 * 1024 * 1024 * 1024;
@@ -26,6 +26,32 @@ const MAX_MANIFEST_BYTES: u64 = 1024 * 1024;
 const MAX_REPORT_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_INVENTORIED_MEMBERS: u64 = 65_536;
 const MAX_FINDING_OCCURRENCES: u64 = 65_536;
+
+// Canonical ZIP32 with one stored `hello.txt` member containing `hello`.
+const SUPERVISED_SMOKE_ZIP: &[u8] = &[
+    0x50, 0x4b, 0x03, 0x04, // local-header signature
+    0x14, 0x00, 0x00, 0x00, // version and flags
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Store, time, and date
+    0x86, 0xa6, 0x10, 0x36, // CRC32
+    0x05, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, // sizes
+    0x09, 0x00, 0x00, 0x00, // name and extra lengths
+    b'h', b'e', b'l', b'l', b'o', b'.', b't', b'x', b't', b'h', b'e', b'l', b'l', b'o', 0x50, 0x4b,
+    0x01, 0x02, // central-header signature
+    0x14, 0x00, 0x14, 0x00, 0x00, 0x00, // versions and flags
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Store, time, and date
+    0x86, 0xa6, 0x10, 0x36, // CRC32
+    0x05, 0x00, 0x00, 0x00, 0x05, 0x00, 0x00, 0x00, // sizes
+    0x09, 0x00, 0x00, 0x00, 0x00, 0x00, // name, extra, and comment lengths
+    0x00, 0x00, 0x00, 0x00, // disk start and internal attributes
+    0x00, 0x00, 0x00, 0x00, // external attributes
+    0x00, 0x00, 0x00, 0x00, // local-header offset
+    b'h', b'e', b'l', b'l', b'o', b'.', b't', b'x', b't', 0x50, 0x4b, 0x05, 0x06, 0x00, 0x00, 0x00,
+    0x00, // disk numbers
+    0x01, 0x00, 0x01, 0x00, // entry counts
+    0x37, 0x00, 0x00, 0x00, // central-directory size
+    0x2c, 0x00, 0x00, 0x00, // central-directory offset
+    0x00, 0x00, // comment length
+];
 
 type AnyError = Box<dyn Error>;
 
@@ -154,8 +180,9 @@ fn run() -> Result<(), AnyError> {
             let cache_dir = required_path(&mut args, "cache directory")?;
             let json_path = required_path(&mut args, "JSON report")?;
             let markdown_path = required_path(&mut args, "Markdown report")?;
+            let worker = required_worker(&mut args)?;
             reject_extra_args(args)?;
-            let (json, markdown) = analyze(&manifest_path, &cache_dir)?;
+            let (json, markdown) = analyze(&manifest_path, &cache_dir, &worker)?;
             if command == "analyze" {
                 fs::write(&json_path, json)?;
                 fs::write(&markdown_path, markdown)?;
@@ -178,6 +205,12 @@ fn run() -> Result<(), AnyError> {
             verify_committed_report(&manifest_path, &json_path, &markdown_path)?;
             println!("wheel compatibility report is internally consistent and current");
         }
+        "supervised-smoke" => {
+            let worker = required_worker(&mut args)?;
+            reject_extra_args(args)?;
+            supervised_smoke(&worker)?;
+            println!("wheel laboratory supervised boundary passed");
+        }
         _ => return Err(usage_error()),
     }
     Ok(())
@@ -186,9 +219,47 @@ fn run() -> Result<(), AnyError> {
 fn usage_error() -> AnyError {
     io::Error::new(
         io::ErrorKind::InvalidInput,
-        "usage: sealr-wheel-lab validate-manifest <manifest> | (analyze|check) <manifest> <cache-dir> <report.json> <report.md> | verify-report <manifest> <report.json> <report.md>",
+        "usage: sealr-wheel-lab validate-manifest <manifest> | (analyze|check) <manifest> <cache-dir> <report.json> <report.md> --worker-manifest <absolute-path> | verify-report <manifest> <report.json> <report.md> | supervised-smoke --worker-manifest <absolute-path>",
     )
     .into()
+}
+
+fn required_worker(args: &mut impl Iterator<Item = String>) -> Result<LinuxWorker, AnyError> {
+    if args.next().as_deref() != Some("--worker-manifest") {
+        return invalid("missing required --worker-manifest option");
+    }
+    let manifest = required_path(args, "worker manifest")?;
+    Ok(LinuxWorker::load_from_manifest(&manifest)?)
+}
+
+fn supervised_smoke(worker: &LinuxWorker) -> Result<(), AnyError> {
+    let policy = Policy::default_v1();
+    let options =
+        ApplyOptions::new().with_interpretation_profile(ZipInterpretationProfile::StrictAsciiV2);
+    let outcome = apply_supervised(
+        Request {
+            source: Source::Bytes {
+                path: Some("supervised-smoke.whl"),
+                data: SUPERVISED_SMOKE_ZIP,
+            },
+            policy: &policy,
+            dest: None,
+        },
+        &options,
+        worker,
+    )?;
+    if outcome.rejected()
+        || outcome.archive_ir().map(|ir| ir.profile()) != Some(ZIP_STRICT_ASCII_V2)
+    {
+        return invalid("supervised wheel laboratory smoke archive was not admitted");
+    }
+    let archive = outcome
+        .verified_archive()
+        .ok_or_else(|| io::Error::other("supervised smoke did not return verified authority"))?;
+    if archive.read_member("hello.txt", 5)? != b"hello" {
+        return invalid("supervised wheel laboratory smoke read changed content");
+    }
+    Ok(())
 }
 
 fn required_path(
@@ -414,7 +485,11 @@ fn read_bounded_string(path: &Path, max_bytes: u64, label: &str) -> Result<Strin
     Ok(String::from_utf8(read_bounded(path, max_bytes, label)?)?)
 }
 
-fn analyze(manifest_path: &Path, cache_dir: &Path) -> Result<(String, String), AnyError> {
+fn analyze(
+    manifest_path: &Path,
+    cache_dir: &Path,
+    worker: &LinuxWorker,
+) -> Result<(String, String), AnyError> {
     let manifest_raw = read_bounded(manifest_path, MAX_MANIFEST_BYTES, "manifest")?;
     let manifest = parse_manifest(&manifest_raw)?;
     let policy = Policy::default_v1();
@@ -422,7 +497,7 @@ fn analyze(manifest_path: &Path, cache_dir: &Path) -> Result<(String, String), A
     let mut inventoried_members = 0_u64;
     let mut finding_occurrences = 0_u64;
     for entry in &manifest.entries {
-        let artifact = analyze_artifact(entry, cache_dir, &policy)?;
+        let artifact = analyze_artifact(entry, cache_dir, &policy, worker)?;
         inventoried_members = inventoried_members
             .checked_add(artifact.member_count)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "member count overflow"))?;
@@ -473,6 +548,7 @@ fn analyze_artifact(
     entry: &ManifestEntry,
     cache_dir: &Path,
     policy: &Policy,
+    worker: &LinuxWorker,
 ) -> Result<ArtifactReport, AnyError> {
     let path = cache_dir.join(format!("{}.whl", entry.sha256));
     let metadata = fs::metadata(&path).map_err(|error| {
@@ -509,7 +585,7 @@ fn analyze_artifact(
 
     let options =
         ApplyOptions::new().with_interpretation_profile(ZipInterpretationProfile::StrictAsciiV2);
-    let outcome = apply_with_options(
+    let outcome = apply_supervised(
         Request {
             source: Source::Bytes {
                 path: Some(&entry.filename),
@@ -519,7 +595,8 @@ fn analyze_artifact(
             dest: None,
         },
         &options,
-    );
+        worker,
+    )?;
     let admission = match outcome.admission {
         AdmissionStatus::Admitted => "admitted",
         AdmissionStatus::Denied => "denied",
@@ -899,7 +976,7 @@ fn render_markdown(report: &Report) -> String {
     render_denial_evidence(&mut output, report);
     writeln!(output, "## Interpretation").unwrap();
     writeln!(output).unwrap();
-    writeln!(output, "The report is produced only through Sealr's public `apply` outcome and read-only `ArchiveIR`. It does not invoke Python `zipfile`, another ZIP parser, or an external extractor. Counts describe the exact byte-addressed artifacts in the manifest. Rejected artifacts can lack an IR, so their container features are not inferred by a fallback parser.").unwrap();
+    writeln!(output, "The report is produced only through Sealr's public fail-closed `apply_supervised` outcome and read-only `ArchiveIR`. It does not invoke Python `zipfile`, another ZIP parser, an external extractor, or the in-process fallback. Counts describe the exact byte-addressed artifacts in the manifest. Rejected artifacts can lack an IR, so their container features are not inferred by a fallback parser.").unwrap();
     writeln!(output).unwrap();
     writeln!(output, "The `.dist-info` and metadata-name counts are structural candidates only. They do not parse metadata or decide which directory matches the outer wheel filename. Distinguishing one top-level artifact directory from nested vendored `.dist-info` trees is a required consumer step.").unwrap();
     writeln!(output).unwrap();
@@ -1294,6 +1371,33 @@ fn sha256_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn supervised_smoke_archive_is_a_valid_strict_v2_fixture() {
+        let policy = Policy::default_v1();
+        let options = ApplyOptions::new()
+            .with_interpretation_profile(ZipInterpretationProfile::StrictAsciiV2);
+        let outcome = sealr::apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("supervised-smoke.whl"),
+                    data: SUPERVISED_SMOKE_ZIP,
+                },
+                policy: &policy,
+                dest: None,
+            },
+            &options,
+        );
+        assert!(!outcome.rejected(), "{:?}", outcome.view.findings);
+        assert_eq!(
+            outcome
+                .verified_archive()
+                .unwrap()
+                .read_member("hello.txt", 5)
+                .unwrap(),
+            b"hello"
+        );
+    }
 
     fn entry(filename: &str, digest: &str) -> ManifestEntry {
         ManifestEntry {

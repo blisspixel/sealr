@@ -3,7 +3,9 @@ param(
     [Parameter(Mandatory)][string]$ArchivePath,
     [Parameter(Mandatory)][string]$Version,
     [Parameter(Mandatory)][string]$TargetTriple,
-    [string]$LabBinary
+    [string]$LabBinary,
+    [string]$WheelLabBinary,
+    [string]$PackagedConsumerBinary
 )
 
 $ErrorActionPreference = 'Stop'
@@ -104,9 +106,21 @@ if ($isLinuxTarget) {
     if ([string]::IsNullOrWhiteSpace($LabBinary)) {
         throw 'Linux package verification requires the repository lab binary'
     }
+    if ([string]::IsNullOrWhiteSpace($WheelLabBinary)) {
+        throw 'Linux package verification requires the wheel laboratory binary'
+    }
+    if ([string]::IsNullOrWhiteSpace($PackagedConsumerBinary)) {
+        throw 'Linux package verification requires the packaged consumer binary'
+    }
     $LabBinary = Resolve-RequiredFile -Path $LabBinary -Role 'repository lab binary'
-} elseif (-not [string]::IsNullOrWhiteSpace($LabBinary)) {
-    throw "lab binary input is forbidden for non-Linux target $TargetTriple"
+    $WheelLabBinary = Resolve-RequiredFile -Path $WheelLabBinary -Role 'wheel laboratory binary'
+    $PackagedConsumerBinary = Resolve-RequiredFile `
+        -Path $PackagedConsumerBinary `
+        -Role 'packaged consumer binary'
+} elseif (-not [string]::IsNullOrWhiteSpace($LabBinary) -or
+    -not [string]::IsNullOrWhiteSpace($WheelLabBinary) -or
+    -not [string]::IsNullOrWhiteSpace($PackagedConsumerBinary)) {
+    throw "Linux-only verifier binary input is forbidden for target $TargetTriple"
 }
 
 $archiveEntries = @()
@@ -270,6 +284,35 @@ try {
         & $LabBinary package-smoke --worker $helper --bytes $helperLength --sha256 $helperHash
         if ($LASTEXITCODE -ne 0) {
             throw 'extracted helper authentication and handshake smoke failed'
+        }
+        & $WheelLabBinary supervised-smoke --worker-manifest $manifestPath
+        if ($LASTEXITCODE -ne 0) {
+            throw 'wheel laboratory did not complete through the extracted worker boundary'
+        }
+        & $PackagedConsumerBinary --worker-manifest $manifestPath
+        if ($LASTEXITCODE -ne 0) {
+            throw 'packaged crate consumer did not complete through the extracted worker boundary'
+        }
+
+        $smokeArchive = Join-Path $temporaryRoot 'supervised-empty.zip'
+        [System.IO.File]::WriteAllBytes(
+            $smokeArchive,
+            [System.Convert]::FromBase64String('UEsFBgAAAAAAAAAAAAAAAAAAAAAAAA==')
+        )
+        $receiptPath = Join-Path $temporaryRoot 'supervised-receipt.json'
+        $viewText = (& $packagedCli `
+                --worker-manifest $manifestPath `
+                $smokeArchive 2> $receiptPath | Out-String).Trim()
+        if ($LASTEXITCODE -ne 0) {
+            throw 'packaged CLI did not complete through the extracted worker boundary'
+        }
+        $view = $viewText | ConvertFrom-Json
+        $receipt = Get-Content -Raw -LiteralPath $receiptPath | ConvertFrom-Json
+        if ($view.schema -cne 'sealr.view.v1' -or
+            $receipt.schema -cne 'sealr.receipt.v2' -or
+            $view.admission.status -cne 'admitted' -or
+            $view.verification.status -cne 'complete') {
+            throw 'packaged CLI supervised smoke returned unexpected semantic output'
         }
     }
 

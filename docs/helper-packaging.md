@@ -2,7 +2,7 @@
 
 The native Linux release archive has one fixed production-helper boundary. The helper is present only in the `x86_64-unknown-linux-gnu` archive at `libexec/sealr/sealr-worker`. It is not a command, is never selected through `PATH`, and is absent from the macOS and Windows archives.
 
-This contract packages the authenticated helper foundation consumed by the explicit Linux supervisor. Packaging alone does not select the worker for the default library or CLI path.
+This contract packages the authenticated helper consumed by the explicit Linux supervisor. Packaging alone does not change the default library or CLI path; callers select it through the manifest-backed fail-closed API or CLI option.
 
 ## Exact archive shape
 
@@ -52,10 +52,11 @@ Linux additionally requires:
 - exact manifest fields, release version, helper target, bootstrap ABI, length, and SHA-256;
 - ELF64 x86-64 identity and absence of `PT_INTERP`;
 - bounded refusal of direct invocation and `--help`;
-- an authenticated extracted-helper hello, executable-identity proof, restricted inspect completion, clean exit, and exact reap through the repository lab.
+- an authenticated extracted-helper hello, executable-identity proof, restricted inspect completion, clean exit, and exact reap through the repository lab;
+- supervised completion through the packaged CLI, wheel laboratory, and a binary built against the extracted crate, all using the exact extracted manifest and helper with no fallback.
 
 The release workflow calls the same package and verification scripts before uploading any archive. The external Alpha.5 release remains historical and does not contain this helper; the contract applies to the next release candidate cut from a commit that includes it.
 
 ## Nonclaims
 
-The package contract does not activate a worker implicitly. Current source requires callers to pass its exact path, length, and SHA-256 to `LinuxWorker::load`; successful `apply_supervised` or `inspect_supervised` calls may then construct worker-backed `VerifiedArchive` state. Request-level supervised execution covers inspect and materialize while keeping destination publication authority in the supervisor. CLI selection, real-kernel restriction-failure evidence, and macOS or Windows containment remain separate Alpha.6 gates.
+The package contract does not activate a worker implicitly. `LinuxWorker::load_from_manifest` bounds and validates the fixed manifest, release version, helper target, bootstrap ABI, byte length, and lowercase SHA-256, selects only its sibling helper, and then applies the same sealed-executable authentication as `LinuxWorker::load`. Successful `apply_supervised` calls construct worker-backed `VerifiedArchive` state for inspect or materialize while keeping destination publication authority in the supervisor. `sealr --worker-manifest ABSOLUTE_PATH`, corpus execution in the wheel laboratory, and the extracted-package consumer all select that same boundary and fail closed without an in-process fallback. macOS and Windows containment remain separate future work.

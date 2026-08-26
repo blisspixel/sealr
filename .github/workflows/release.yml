@@ -293,6 +293,10 @@ jobs:
             --target x86_64-unknown-linux-musl
           cargo build --locked --release -p sealr-worker-bootstrap-lab `
             --features lab --bin sealr-worker-bootstrap-lab
+          cargo build --locked --release -p sealr-wheel-lab
+          cargo package --locked -p sealr
+          cargo build --locked --release `
+            --manifest-path tests/packaged-consumer/Cargo.toml
 
       - name: Package and verify native release archive
         id: package
@@ -319,6 +323,8 @@ jobs:
           if ($IsLinux) {
             $packageArguments.HelperBinary = 'target/x86_64-unknown-linux-musl/release/sealr-worker'
             $verifyArguments.LabBinary = 'target/release/sealr-worker-bootstrap-lab'
+            $verifyArguments.WheelLabBinary = 'target/release/sealr-wheel-lab'
+            $verifyArguments.PackagedConsumerBinary = 'tests/packaged-consumer/target/release/sealr-packaged-consumer'
           }
           & scripts/package_native.ps1 @packageArguments
           & scripts/verify_native_package.ps1 @verifyArguments

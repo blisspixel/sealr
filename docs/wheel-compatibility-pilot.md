@@ -5,7 +5,7 @@
 - Query date: `2026-08-22`
 - Artifacts: `20`
 - Source bytes: `90417280`
-- Analyzer revision: `sealr-wheel-lab.v2`
+- Analyzer revision: `sealr-wheel-lab.v3`
 - Interpretation profile: `sealr.profile.zip.strict-ascii.v2`
 - Interpretation profile SHA-256: `384dceb8623a2b32d430034fefda2a9498439927285952c10a60c9f6caa51d45`
 - Policy: `sealr:policy/default/v1`
@@ -127,7 +127,7 @@ No observations.
 
 ## Interpretation
 
-The report is produced only through Sealr's public `apply` outcome and read-only `ArchiveIR`. It does not invoke Python `zipfile`, another ZIP parser, or an external extractor. Counts describe the exact byte-addressed artifacts in the manifest. Rejected artifacts can lack an IR, so their container features are not inferred by a fallback parser.
+The report is produced only through Sealr's public fail-closed `apply_supervised` outcome and read-only `ArchiveIR`. It does not invoke Python `zipfile`, another ZIP parser, an external extractor, or the in-process fallback. Counts describe the exact byte-addressed artifacts in the manifest. Rejected artifacts can lack an IR, so their container features are not inferred by a fallback parser.
 
 The `.dist-info` and metadata-name counts are structural candidates only. They do not parse metadata or decide which directory matches the outer wheel filename. Distinguishing one top-level artifact directory from nested vendored `.dist-info` trees is a required consumer step.
 

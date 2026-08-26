@@ -1,6 +1,7 @@
 use sealr::{
-    apply_with_options, ApplyOptions, MemberReadErrorKind, Policy, Request, RetentionPlan,
-    RetentionStatus, Source, VerifiedArchive, ZipInterpretationProfile, ZIP_STRICT_ASCII_V2,
+    apply_supervised, ApplyOptions, LinuxWorker, MemberReadErrorKind, Policy, Request,
+    RetentionPlan, RetentionStatus, Source, VerifiedArchive, ZipInterpretationProfile,
+    ZIP_STRICT_ASCII_V2,
 };
 
 // A canonical ZIP32 archive containing stored `hello.txt` with bytes `hello`.
@@ -46,6 +47,21 @@ const HELLO_ZIP: &[u8] = &[
 ];
 
 fn main() {
+    let mut args = std::env::args_os().skip(1);
+    assert_eq!(
+        args.next().as_deref(),
+        Some(std::ffi::OsStr::new("--worker-manifest")),
+        "usage: sealr-packaged-consumer --worker-manifest <absolute-path>"
+    );
+    let manifest = args
+        .next()
+        .expect("worker manifest path is required for the packaged consumer");
+    assert!(
+        args.next().is_none(),
+        "packaged consumer rejects unexpected arguments"
+    );
+    let worker = LinuxWorker::load_from_manifest(std::path::Path::new(&manifest))
+        .expect("packaged crate must authenticate the selected production helper");
     let policy = Policy::default_v1();
     let retention = RetentionPlan::new(5, 5)
         .with_path("hello.txt")
@@ -53,7 +69,7 @@ fn main() {
     let options = ApplyOptions::new()
         .with_interpretation_profile(ZipInterpretationProfile::StrictAsciiV2)
         .with_retention(retention);
-    let outcome = apply_with_options(
+    let outcome = apply_supervised(
         Request {
             source: Source::Bytes {
                 path: Some("hello.zip"),
@@ -63,7 +79,9 @@ fn main() {
             dest: None,
         },
         &options,
-    );
+        &worker,
+    )
+    .expect("packaged crate must complete through the supervised boundary");
 
     assert!(!outcome.rejected(), "{:?}", outcome.view.findings);
     assert_eq!(outcome.archive_ir().unwrap().profile(), ZIP_STRICT_ASCII_V2);

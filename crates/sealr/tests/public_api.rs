@@ -35,6 +35,13 @@ fn supervised_worker_loading_fails_closed_off_linux() {
     let error = LinuxWorker::load(std::path::Path::new("/sealr-worker"), 1, &"00".repeat(32))
         .expect_err("non-Linux worker activation must fail closed");
     assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
+    let manifest_error =
+        LinuxWorker::load_from_manifest(std::path::Path::new("/sealr-worker.manifest"))
+            .expect_err("non-Linux manifest activation must fail closed");
+    assert_eq!(
+        manifest_error.kind(),
+        SupervisionErrorKind::IsolationUnavailable
+    );
 }
 
 fn member_zip() -> Vec<u8> {

@@ -3,7 +3,9 @@ use std::path::PathBuf;
 use std::process::ExitCode;
 
 use clap::Parser;
-use sealr::{apply, Policy, Request, Source};
+use sealr::{
+    apply_supervised, apply_with_options, ApplyOptions, LinuxWorker, Policy, Request, Source,
+};
 use serde::Serialize;
 
 #[derive(Parser, Debug)]
@@ -18,16 +20,38 @@ struct Cli {
     /// Materialize into a new directory below an existing parent
     #[arg(long)]
     dest: Option<PathBuf>,
+    /// Use the exact packaged Linux worker bound by this manifest
+    #[arg(long, value_name = "ABSOLUTE_PATH")]
+    worker_manifest: Option<PathBuf>,
 }
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
     let policy = Policy::default_v1();
-    let out = apply(Request {
+    let options = ApplyOptions::new();
+    let request = Request {
         source: Source::Path(&cli.archive),
         policy: &policy,
         dest: cli.dest.as_deref(),
-    });
+    };
+    let out = if let Some(manifest) = cli.worker_manifest.as_deref() {
+        let worker = match LinuxWorker::load_from_manifest(manifest) {
+            Ok(worker) => worker,
+            Err(error) => {
+                eprintln!("sealr: supervised execution failed: {error}");
+                return ExitCode::FAILURE;
+            }
+        };
+        match apply_supervised(request, &options, &worker) {
+            Ok(outcome) => outcome,
+            Err(error) => {
+                eprintln!("sealr: supervised execution failed: {error}");
+                return ExitCode::FAILURE;
+            }
+        }
+    } else {
+        apply_with_options(request, &options)
+    };
     write_outputs(
         &mut io::stdout().lock(),
         &mut io::stderr().lock(),
