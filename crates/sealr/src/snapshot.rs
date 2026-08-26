@@ -302,6 +302,18 @@ impl<'a> SourceSnapshot<'a> {
         Self::private_file_from_opened(source, path, max_archive_bytes, || {})
     }
 
+    /// Copy caller-owned bytes into the same private, unlinked file backend
+    /// used for path snapshots before transferring read authority to a worker.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn private_file_from_bytes(
+        path: Option<String>,
+        bytes: &[u8],
+        max_archive_bytes: u64,
+    ) -> Result<Self, Finding> {
+        let expected_len = bytes.len() as u64;
+        Self::private_file_from_reader(path, bytes, expected_len, max_archive_bytes)
+    }
+
     fn private_file_from_opened(
         mut source: File,
         path: Option<String>,
@@ -503,6 +515,33 @@ impl<'a> SourceSnapshot<'a> {
 
     pub fn digest(&self) -> &SourceDigest {
         &self.digest
+    }
+
+    /// Duplicate the exact read-only private-file authority for a worker.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn try_clone_worker_file(&self) -> Result<File, Finding> {
+        match &self.backing {
+            SnapshotBacking::PrivateFile(snapshot) => snapshot
+                .file
+                .as_ref()
+                .ok_or_else(|| {
+                    Finding::error(
+                        FindingCode::SourceIo,
+                        "private source reader is unavailable",
+                    )
+                })?
+                .try_clone()
+                .map_err(|error| {
+                    Finding::error(
+                        FindingCode::SourceIo,
+                        format!("clone private source authority: {error}"),
+                    )
+                }),
+            SnapshotBacking::Memory(_) => Err(Finding::error(
+                FindingCode::SourceIo,
+                "worker source authority requires a private-file snapshot",
+            )),
+        }
     }
 
     pub fn kind(&self) -> SnapshotKind {

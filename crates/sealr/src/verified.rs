@@ -316,6 +316,9 @@ pub enum MemberReadErrorKind {
     AllocationFailed,
     SourceIo,
     IntegrityMismatch,
+    IsolationUnavailable,
+    WorkerFailed,
+    TimedOut,
 }
 
 /// Failure returned by [`VerifiedArchive::read_member`].
@@ -331,7 +334,11 @@ pub struct MemberReadError {
 }
 
 impl MemberReadError {
-    fn new(kind: MemberReadErrorKind, path: impl Into<String>, detail: impl Into<String>) -> Self {
+    pub(crate) fn new(
+        kind: MemberReadErrorKind,
+        path: impl Into<String>,
+        detail: impl Into<String>,
+    ) -> Self {
         Self {
             kind,
             path: path.into(),
@@ -361,11 +368,17 @@ impl fmt::Display for MemberReadError {
 impl std::error::Error for MemberReadError {}
 
 struct VerifiedArchiveInner {
-    snapshot: SourceSnapshot<'static>,
+    backend: VerifiedArchiveBackend,
     ir: ArchiveIR,
     budget: ResourceBudget,
     members_by_path: BTreeMap<String, usize>,
     retention: BTreeMap<String, RetentionEntry>,
+}
+
+enum VerifiedArchiveBackend {
+    InProcess(SourceSnapshot<'static>),
+    #[cfg(target_os = "linux")]
+    Supervised(crate::supervised::WorkerReadAuthority),
 }
 
 /// Opaque authority for one fully verified admitted archive.
@@ -417,7 +430,37 @@ impl VerifiedArchive {
 
         Self {
             inner: Arc::new(VerifiedArchiveInner {
-                snapshot: snapshot.into_owned(),
+                backend: VerifiedArchiveBackend::InProcess(snapshot.into_owned()),
+                ir,
+                budget,
+                members_by_path,
+                retention: retention.entries,
+            }),
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(crate) fn new_supervised(
+        authority: crate::supervised::WorkerReadAuthority,
+        ir: ArchiveIR,
+        budget: ResourceBudget,
+        retention: RetentionBuild,
+    ) -> Self {
+        debug_assert!(ir
+            .members()
+            .iter()
+            .all(|member| matches!(&member.verification, MemberVerification::Verified)));
+        debug_assert_eq!(authority.source_digest(), ir.source_digest());
+
+        let mut members_by_path = BTreeMap::new();
+        for (index, member) in ir.members().iter().enumerate() {
+            let previous = members_by_path.insert(member.canonical_path.clone(), index);
+            debug_assert!(previous.is_none());
+        }
+
+        Self {
+            inner: Arc::new(VerifiedArchiveInner {
+                backend: VerifiedArchiveBackend::Supervised(authority),
                 ir,
                 budget,
                 members_by_path,
@@ -553,39 +596,46 @@ impl VerifiedArchive {
             bytes.extend_from_slice(retained);
             return Ok(bytes);
         }
-        let mut bytes = Vec::new();
-        bytes.try_reserve_exact(capacity).map_err(|error| {
-            MemberReadError::new(
-                MemberReadErrorKind::AllocationFailed,
-                canonical_path,
-                format!("could not reserve {expected_size} bytes: {error}"),
-            )
-        })?;
+        match &self.inner.backend {
+            VerifiedArchiveBackend::InProcess(snapshot) => {
+                let mut bytes = Vec::new();
+                bytes.try_reserve_exact(capacity).map_err(|error| {
+                    MemberReadError::new(
+                        MemberReadErrorKind::AllocationFailed,
+                        canonical_path,
+                        format!("could not reserve {expected_size} bytes: {error}"),
+                    )
+                })?;
+                let payload_spec = PayloadSpec::from_ir(member);
+                let payload = zip::planned_payload_reader(snapshot, member)
+                    .map_err(|finding| member_read_error(canonical_path, &finding))?;
+                let payload = BufReader::with_capacity(64 * 1024, payload);
+                let (actual, crc, sha256) = verify_payload(
+                    payload,
+                    payload_spec,
+                    self.inner.budget,
+                    expected_size,
+                    &mut bytes,
+                )
+                .map_err(|finding| member_read_error(canonical_path, &finding))?;
 
-        let payload_spec = PayloadSpec::from_ir(member);
-        let payload = zip::planned_payload_reader(&self.inner.snapshot, member)
-            .map_err(|finding| member_read_error(canonical_path, &finding))?;
-        let payload = BufReader::with_capacity(64 * 1024, payload);
-        let (actual, crc, sha256) = verify_payload(
-            payload,
-            payload_spec,
-            self.inner.budget,
-            expected_size,
-            &mut bytes,
-        )
-        .map_err(|finding| member_read_error(canonical_path, &finding))?;
-
-        if actual != expected_size
-            || Some(crc) != member.actual_crc
-            || member.content_sha256.as_deref() != Some(digest_hex(&sha256).as_str())
-        {
-            return Err(MemberReadError::new(
-                MemberReadErrorKind::IntegrityMismatch,
-                canonical_path,
-                "member bytes disagree with the recorded verified evidence",
-            ));
+                if actual != expected_size
+                    || Some(crc) != member.actual_crc
+                    || member.content_sha256.as_deref() != Some(digest_hex(&sha256).as_str())
+                {
+                    return Err(MemberReadError::new(
+                        MemberReadErrorKind::IntegrityMismatch,
+                        canonical_path,
+                        "member bytes disagree with the recorded verified evidence",
+                    ));
+                }
+                Ok(bytes)
+            }
+            #[cfg(target_os = "linux")]
+            VerifiedArchiveBackend::Supervised(authority) => authority
+                .read_member(canonical_path, max_bytes)
+                .map_err(|error| error.into_member_read_error(canonical_path)),
         }
-        Ok(bytes)
     }
 }
 

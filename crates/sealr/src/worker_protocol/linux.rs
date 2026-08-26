@@ -364,7 +364,6 @@ pub enum TransportError {
 }
 
 impl TransportError {
-    #[cfg(any(feature = "__internal-worker-lab", test))]
     pub fn is_would_block(&self) -> bool {
         match self {
             Self::Errno(error) => *error == rustix::io::Errno::AGAIN,

@@ -42,6 +42,7 @@ static CHILD_PROGRAMS: OnceLock<ChildPrograms> = OnceLock::new();
 
 struct ChildPrograms {
     production: HelperArtifact,
+    public: sealr::LinuxWorker,
     fault_lab: PathBuf,
 }
 
@@ -157,6 +158,7 @@ pub(crate) fn dispatch(args: &[std::ffi::OsString]) -> Result<(), Box<dyn std::e
         .to_str()
         .ok_or("worker SHA-256 is not valid UTF-8")?;
     let production = HelperArtifact::load(&worker_path, expected_len, parse_digest(digest)?)?;
+    let public = sealr::LinuxWorker::load(&worker_path, expected_len, digest)?;
     let fault_lab = std::env::current_exe()?;
     if production.source_matches(&fault_lab)? {
         return Err("production helper and conformance lab identify the same file".into());
@@ -164,6 +166,7 @@ pub(crate) fn dispatch(args: &[std::ffi::OsString]) -> Result<(), Box<dyn std::e
     CHILD_PROGRAMS
         .set(ChildPrograms {
             production,
+            public,
             fault_lab,
         })
         .map_err(|_| "worker child programs were already initialized")?;
@@ -176,12 +179,13 @@ pub(crate) fn dispatch(args: &[std::ffi::OsString]) -> Result<(), Box<dyn std::e
 
 fn run_package_smoke() -> Result<(), Box<dyn std::error::Error>> {
     run_success(false)?;
+    run_public_api_smoke()?;
     let helper = &CHILD_PROGRAMS
         .get()
         .expect("child programs remain initialized during package smoke")
         .production;
     println!(
-        "sealr.worker-package-smoke.v1: authenticated helper sha256={} bytes={}, inspect completed and worker reaped",
+        "sealr.worker-package-smoke.v1: authenticated helper sha256={} bytes={}, private inspect and public supervised inspect, retained borrow, cloned one-shot read, and exact reap passed",
         helper.digest_hex(),
         helper.len()
     );
@@ -190,6 +194,7 @@ fn run_package_smoke() -> Result<(), Box<dyn std::error::Error>> {
 
 fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
     run_success(false)?;
+    run_public_api_smoke()?;
     run_success(true)?;
     run_rejection(CaseMutation::WritableSource, 4)?;
     run_rejection(CaseMutation::WrongSourceLength, 4)?;
@@ -233,10 +238,53 @@ fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
         .expect("child programs remain initialized during conformance")
         .production;
     println!(
-        "sealr.worker-bootstrap-evidence.v1: authenticated helper sha256={} bytes={}, 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 1 supervisor content replay, 1 immutable inspect retention transfer, 1 isolated one-shot Store-and-Deflate read boundary, 1 reaped and audited Store-and-Deflate writer publication with immutable retention transfer, 1 post-reap writer audit-mutation rejection, 1 writer destination-race rejection, 1 distinct writer cleanup failure, 4 writer crash barriers, 2 writer authority-epoch stalls, 22 bootstrap crash barriers, 11 bootstrap authority-epoch stalls, 500 bounded bootstrap stress iterations, 500 bounded writer lifecycle iterations, and bounded reap passed",
+        "sealr.worker-bootstrap-evidence.v1: authenticated helper sha256={} bytes={}, 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 1 supervisor content replay, 1 immutable inspect retention transfer, 1 public supervised inspect with retained borrow and cloned one-shot read, 1 isolated one-shot Store-and-Deflate read boundary, 1 reaped and audited Store-and-Deflate writer publication with immutable retention transfer, 1 post-reap writer audit-mutation rejection, 1 writer destination-race rejection, 1 distinct writer cleanup failure, 4 writer crash barriers, 2 writer authority-epoch stalls, 22 bootstrap crash barriers, 11 bootstrap authority-epoch stalls, 500 bounded bootstrap stress iterations, 500 bounded writer lifecycle iterations, and bounded reap passed",
         helper.digest_hex(),
         helper.len()
     );
+    Ok(())
+}
+
+fn run_public_api_smoke() -> Result<(), Box<dyn std::error::Error>> {
+    let programs = CHILD_PROGRAMS
+        .get()
+        .ok_or("worker child programs are not initialized")?;
+    let mut retention = sealr::RetentionPlan::new(64, 64);
+    retention.add_path("stored.txt")?;
+    let options = sealr::ApplyOptions::new().with_retention(retention);
+    let policy = sealr::Policy::default_v1();
+    let outcome = sealr::inspect_supervised(
+        sealr::Source::Bytes {
+            path: Some("public-supervised-fixture.zip"),
+            data: source_bytes(),
+        },
+        &policy,
+        &options,
+        &programs.public,
+    )?;
+    if outcome.rejected()
+        || outcome.wrote()
+        || outcome.receipt.environment.kernel_jail != "landlock-abi3+seccomp-v1"
+    {
+        return Err(io::Error::other(format!(
+            "public supervised inspect produced unexpected axes or jail evidence: {:?}",
+            outcome.verdict
+        ))
+        .into());
+    }
+    let archive = outcome
+        .into_verified_archive()
+        .ok_or("public supervised inspect produced no verified capability")?;
+    if archive.retained_member("stored.txt") != Some(b"stored payload".as_slice()) {
+        return Err(io::Error::other("public retained borrow is incorrect").into());
+    }
+    let clone = archive.clone();
+    drop(archive);
+    if clone.read_member("deflated.txt", 16)? != b"deflated payload" {
+        return Err(io::Error::other("public cloned one-shot read is incorrect").into());
+    }
+    drop(clone);
+    require_no_supervisor_children("after public supervised capability last-owner drop")?;
     Ok(())
 }
 

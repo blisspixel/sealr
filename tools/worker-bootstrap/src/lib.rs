@@ -20,9 +20,7 @@ mod worker;
 const CHILD_MARKER: &str = "__sealr_worker_bootstrap_child_v1";
 
 #[cfg(target_os = "linux")]
-const HELPER_BOOTSTRAP_ABI: u64 = 1;
-#[cfg(target_os = "linux")]
-const HELPER_FEATURE_ID: u64 = 1;
+use sealr::__worker_protocol::{HELPER_BOOTSTRAP_ABI, HELPER_FEATURE_ID};
 
 #[cfg(target_os = "linux")]
 fn semantic_retention_request() -> Result<sealr::__worker_lab::InspectRetentionRequest, String> {
