@@ -361,6 +361,14 @@ pub(crate) enum TransportError {
 }
 
 impl TransportError {
+    pub(crate) fn is_would_block(&self) -> bool {
+        match self {
+            Self::Errno(error) => *error == rustix::io::Errno::AGAIN,
+            Self::System(error) => error.kind() == std::io::ErrorKind::WouldBlock,
+            _ => false,
+        }
+    }
+
     pub(crate) fn protocol_detail(&self) -> u64 {
         match self {
             Self::Truncated { data, control } => {
@@ -631,5 +639,11 @@ mod tests {
             TransportError::Frame(FrameError::Magic).protocol_detail(),
             0
         );
+        assert!(TransportError::Errno(rustix::io::Errno::AGAIN).is_would_block());
+        assert!(
+            TransportError::System(std::io::Error::from(std::io::ErrorKind::WouldBlock))
+                .is_would_block()
+        );
+        assert!(!TransportError::Frame(FrameError::Magic).is_would_block());
     }
 }

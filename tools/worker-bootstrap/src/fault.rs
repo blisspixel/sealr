@@ -7,6 +7,7 @@ pub(crate) enum ChildMode {
     RestrictionProbeFailure,
     SeccompInstallationFailure,
     UnknownAncillary,
+    StallAt(StallPoint),
     ExitAt(FaultPoint),
 }
 
@@ -18,6 +19,7 @@ impl ChildMode {
             Self::RestrictionProbeFailure => "restriction-probe-failure",
             Self::SeccompInstallationFailure => "seccomp-installation-failure",
             Self::UnknownAncillary => "unknown-ancillary",
+            Self::StallAt(point) => point.argument(),
             Self::ExitAt(point) => point.argument(),
         }
     }
@@ -30,7 +32,9 @@ impl ChildMode {
             "restriction-probe-failure" => Some(Self::RestrictionProbeFailure),
             "seccomp-installation-failure" => Some(Self::SeccompInstallationFailure),
             "unknown-ancillary" => Some(Self::UnknownAncillary),
-            _ => FaultPoint::parse(argument).map(Self::ExitAt),
+            _ => StallPoint::parse(argument)
+                .map(Self::StallAt)
+                .or_else(|| FaultPoint::parse(argument).map(Self::ExitAt)),
         }
     }
 
@@ -41,6 +45,64 @@ impl ChildMode {
             // before authorizing fixture cleanup.
             unsafe { libc::_exit(point.exit_code()) }
         }
+    }
+
+    pub(crate) fn stall_at(self, point: StallPoint) {
+        if self == Self::StallAt(point) {
+            loop {
+                // SAFETY: pause has no memory contract and returns only after
+                // signal delivery. The conformance supervisor owns bounded
+                // SIGKILL termination for this deliberate stalled child.
+                let _ = unsafe { libc::pause() };
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum StallPoint {
+    BootstrapReceive,
+    RestrictionSetup,
+    RestrictedReady,
+    SourceReceive,
+    SourceAcceptance,
+    ProceedReceive,
+    ProbeExecution,
+    ExitAckReceive,
+    ExitCompletion,
+}
+
+impl StallPoint {
+    pub(crate) const ALL: [Self; 9] = [
+        Self::BootstrapReceive,
+        Self::RestrictionSetup,
+        Self::RestrictedReady,
+        Self::SourceReceive,
+        Self::SourceAcceptance,
+        Self::ProceedReceive,
+        Self::ProbeExecution,
+        Self::ExitAckReceive,
+        Self::ExitCompletion,
+    ];
+
+    pub(crate) const fn argument(self) -> &'static str {
+        match self {
+            Self::BootstrapReceive => "stall-before-bootstrap-receive",
+            Self::RestrictionSetup => "stall-before-restriction-setup",
+            Self::RestrictedReady => "stall-before-restriction-ready",
+            Self::SourceReceive => "stall-before-source-receive",
+            Self::SourceAcceptance => "stall-before-source-acceptance",
+            Self::ProceedReceive => "stall-before-proceed-receive",
+            Self::ProbeExecution => "stall-before-probe-execution",
+            Self::ExitAckReceive => "stall-before-exit-ack-receive",
+            Self::ExitCompletion => "stall-before-exit-completion",
+        }
+    }
+
+    fn parse(argument: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|point| point.argument() == argument)
     }
 }
 
@@ -139,11 +201,16 @@ mod tests {
         ] {
             assert_eq!(ChildMode::parse(OsStr::new(mode.argument())), Some(mode));
         }
+        for point in StallPoint::ALL {
+            let mode = ChildMode::StallAt(point);
+            assert_eq!(ChildMode::parse(OsStr::new(mode.argument())), Some(mode));
+        }
         for point in FaultPoint::ALL {
             let mode = ChildMode::ExitAt(point);
             assert_eq!(ChildMode::parse(OsStr::new(mode.argument())), Some(mode));
         }
         assert_eq!(ChildMode::parse(OsStr::new("")), None);
+        assert_eq!(ChildMode::parse(OsStr::new("stall-before-unknown")), None);
         assert_eq!(ChildMode::parse(OsStr::new("exit-after-unknown")), None);
     }
 

@@ -1,4 +1,4 @@
-use crate::fault::{ChildMode, FaultPoint};
+use crate::fault::{ChildMode, FaultPoint, StallPoint};
 use crate::frame::{Frame, Kind};
 use crate::linux::{
     configure_timeout, receive_packet, send_packet, send_raw_conformance_packet, TransportError,
@@ -8,6 +8,7 @@ use crate::linux::{
 use crate::CHILD_MARKER;
 use landlock::{make_bitflags, Access, AccessFs, ABI};
 use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
+use rustix::fs::OFlags;
 use rustix::io::FdFlags;
 use rustix::net::{AddressFamily, SocketFlags, SocketType};
 use rustix::process::{PidfdFlags, Signal};
@@ -22,8 +23,67 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const SOURCE_BYTES: &[u8] = b"sealr authority bootstrap probe";
+const AUTHORITY_EPOCH_TIMEOUT: Duration = Duration::from_secs(1);
 const CHILD_EXIT_TIMEOUT: Duration = Duration::from_secs(1);
 const KILL_REAP_TIMEOUT: Duration = Duration::from_secs(1);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AuthorityEpoch {
+    BootstrapRestriction,
+    SourceTransfer,
+    ProbeExecution,
+    WorkerExit,
+}
+
+impl AuthorityEpoch {
+    const fn for_stall(point: StallPoint) -> Self {
+        match point {
+            StallPoint::BootstrapReceive
+            | StallPoint::RestrictionSetup
+            | StallPoint::RestrictedReady => Self::BootstrapRestriction,
+            StallPoint::SourceReceive | StallPoint::SourceAcceptance => Self::SourceTransfer,
+            StallPoint::ProceedReceive | StallPoint::ProbeExecution => Self::ProbeExecution,
+            StallPoint::ExitAckReceive | StallPoint::ExitCompletion => Self::WorkerExit,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct EpochDeadline {
+    epoch: AuthorityEpoch,
+    expires_at: Instant,
+}
+
+impl EpochDeadline {
+    fn start(epoch: AuthorityEpoch) -> Self {
+        Self {
+            epoch,
+            expires_at: Instant::now() + AUTHORITY_EPOCH_TIMEOUT,
+        }
+    }
+
+    fn poll_timeout_ms(self) -> Option<libc::c_int> {
+        let remaining = self.expires_at.checked_duration_since(Instant::now())?;
+        if remaining.is_zero() {
+            return None;
+        }
+        let milliseconds = remaining.as_nanos().div_ceil(1_000_000);
+        Some(
+            libc::c_int::try_from(milliseconds)
+                .unwrap_or(libc::c_int::MAX)
+                .max(1),
+        )
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "authority epoch {epoch:?} exceeded its absolute deadline and was reaped by signal {signal}"
+)]
+struct EpochTimeout {
+    epoch: AuthorityEpoch,
+    signal: libc::c_int,
+}
 
 pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
     run_success(false)?;
@@ -54,9 +114,12 @@ pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
     for point in FaultPoint::ALL {
         run_crash_barrier(point)?;
     }
+    for point in StallPoint::ALL {
+        run_stall_epoch(point)?;
+    }
     run_timeout_reap()?;
     println!(
-        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 18 crash barriers, and bounded reap passed"
+        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 18 crash barriers, 9 authority-epoch stalls, and bounded reap passed"
     );
     Ok(())
 }
@@ -244,6 +307,40 @@ fn run_crash_barrier(point: FaultPoint) -> Result<(), Box<dyn std::error::Error>
     finish_fixture(&fixture, result)
 }
 
+fn run_stall_epoch(point: StallPoint) -> Result<(), Box<dyn std::error::Error>> {
+    let fixture = Fixture::new(true, false, false)?;
+    let expected_epoch = AuthorityEpoch::for_stall(point);
+    let result = match exchange(&fixture, CaseMutation::None, ChildMode::StallAt(point)) {
+        Err(error) => {
+            let timeout = error.downcast_ref::<EpochTimeout>().ok_or_else(|| {
+                io::Error::other(format!(
+                    "worker stall at {point:?} did not produce an epoch timeout: {error}"
+                ))
+            })?;
+            if timeout.epoch != expected_epoch || timeout.signal != libc::SIGKILL {
+                Err(io::Error::other(format!(
+                    "worker stall at {point:?} ended as {timeout}; expected {expected_epoch:?} through SIGKILL"
+                ))
+                .into())
+            } else {
+                fixture
+                    .verify_authority_state(matches!(
+                        point,
+                        StallPoint::ProbeExecution
+                            | StallPoint::ExitAckReceive
+                            | StallPoint::ExitCompletion
+                    ))
+                    .map_err(Into::into)
+            }
+        }
+        Ok(_) => Err(io::Error::other(format!(
+            "worker completed past injected stall at {point:?}"
+        ))
+        .into()),
+    };
+    finish_fixture(&fixture, result)
+}
+
 fn finish_fixture<T>(
     fixture: &Fixture,
     result: Result<T, Box<dyn std::error::Error>>,
@@ -286,6 +383,13 @@ fn run_timeout_reap() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+fn configure_supervisor_control(control: &OwnedFd) -> Result<(), TransportError> {
+    configure_timeout(control)?;
+    let flags = rustix::fs::fcntl_getfl(control)?;
+    rustix::fs::fcntl_setfl(control, flags | OFlags::NONBLOCK)?;
+    Ok(())
+}
+
 fn exchange(
     fixture: &Fixture,
     mutation: CaseMutation,
@@ -298,7 +402,7 @@ fn exchange(
         SocketFlags::CLOEXEC,
         None,
     )?;
-    configure_timeout(&control)?;
+    configure_supervisor_control(&control)?;
 
     let sentinel_flags = rustix::io::fcntl_getfd(&fixture.outside_sentinel)?;
     rustix::io::fcntl_setfd(&fixture.outside_sentinel, sentinel_flags - FdFlags::CLOEXEC)?;
@@ -397,6 +501,23 @@ fn exchange(
     result
 }
 
+fn transport_until<T>(
+    control: &OwnedFd,
+    child: &mut ChildBoundary,
+    deadline: EpochDeadline,
+    events: libc::c_short,
+    mut operation: impl FnMut() -> Result<T, TransportError>,
+) -> Result<T, Box<dyn std::error::Error>> {
+    loop {
+        child.wait_for_control(control, deadline, events)?;
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error) if error.is_would_block() => {}
+            Err(error) => return Err(error.into()),
+        }
+    }
+}
+
 fn exchange_active(
     fixture: &Fixture,
     mutation: CaseMutation,
@@ -424,8 +545,11 @@ fn exchange_active(
         CaseMutation::ExtraInspectDescriptor => vec![fixture.outside_sentinel.as_fd()],
         _ => fixture.stage.iter().map(AsFd::as_fd).collect(),
     };
+    let restriction_deadline = EpochDeadline::start(AuthorityEpoch::BootstrapRestriction);
     expect_crash_transport(
-        send_packet(control, bootstrap, &stage_descriptors),
+        transport_until(control, child, restriction_deadline, libc::POLLOUT, || {
+            send_packet(control, bootstrap, &stage_descriptors)
+        }),
         mode,
         &[
             FaultPoint::ExecEntry,
@@ -436,7 +560,9 @@ fn exchange_active(
     )?;
 
     let (first_response, descriptors) = expect_crash_transport(
-        receive_packet(control, Some(0)),
+        transport_until(control, child, restriction_deadline, libc::POLLIN, || {
+            receive_packet(control, Some(0))
+        }),
         mode,
         &[
             FaultPoint::ExecEntry,
@@ -489,14 +615,17 @@ fn exchange_active(
     } else {
         vec![source_descriptor.as_fd()]
     };
+    let source_deadline = EpochDeadline::start(AuthorityEpoch::SourceTransfer);
     match mutation {
         CaseMutation::ShortSource => {
             let encoded = source.encode();
-            let written = send_raw_conformance_packet(
-                control,
-                &encoded[..encoded.len() - 1],
-                &[source_descriptor.as_fd()],
-            )?;
+            let written = transport_until(control, child, source_deadline, libc::POLLOUT, || {
+                send_raw_conformance_packet(
+                    control,
+                    &encoded[..encoded.len() - 1],
+                    &[source_descriptor.as_fd()],
+                )
+            })?;
             if written != encoded.len() - 1 {
                 return Err(
                     io::Error::other("short source test packet was not sent atomically").into(),
@@ -506,8 +635,9 @@ fn exchange_active(
         CaseMutation::LongSource => {
             let mut encoded = source.encode().to_vec();
             encoded.push(0);
-            let written =
-                send_raw_conformance_packet(control, &encoded, &[source_descriptor.as_fd()])?;
+            let written = transport_until(control, child, source_deadline, libc::POLLOUT, || {
+                send_raw_conformance_packet(control, &encoded, &[source_descriptor.as_fd()])
+            })?;
             if written != encoded.len() {
                 return Err(
                     io::Error::other("long source test packet was not sent atomically").into(),
@@ -517,7 +647,9 @@ fn exchange_active(
         CaseMutation::TruncatedSourceControl => {
             let encoded = source.encode();
             let descriptors = vec![fixture.outside_sentinel.as_fd(); 20];
-            let written = send_raw_conformance_packet(control, &encoded, &descriptors)?;
+            let written = transport_until(control, child, source_deadline, libc::POLLOUT, || {
+                send_raw_conformance_packet(control, &encoded, &descriptors)
+            })?;
             if written != encoded.len() {
                 return Err(io::Error::other(
                     "control-truncation test packet was not sent atomically",
@@ -527,7 +659,9 @@ fn exchange_active(
         }
         _ => {
             expect_crash_transport(
-                send_packet(control, source, &source_descriptors),
+                transport_until(control, child, source_deadline, libc::POLLOUT, || {
+                    send_packet(control, source, &source_descriptors)
+                }),
                 mode,
                 &[],
                 child,
@@ -536,7 +670,9 @@ fn exchange_active(
     }
 
     let (second_response, descriptors) = expect_crash_transport(
-        receive_packet(control, Some(0)),
+        transport_until(control, child, source_deadline, libc::POLLIN, || {
+            receive_packet(control, Some(0))
+        }),
         mode,
         &[FaultPoint::SourceReceive, FaultPoint::SourceValidation],
         child,
@@ -567,10 +703,15 @@ fn exchange_active(
         return finish_observed_crash(control, child, operation_id, FaultPoint::Accepted);
     }
 
+    let probe_deadline = EpochDeadline::start(AuthorityEpoch::ProbeExecution);
     let proceed = Frame::new(Kind::Proceed, operation_id);
-    send_packet(control, proceed, &[])?;
+    transport_until(control, child, probe_deadline, libc::POLLOUT, || {
+        send_packet(control, proceed, &[])
+    })?;
     let (result, descriptors) = expect_crash_transport(
-        receive_packet(control, Some(0)),
+        transport_until(control, child, probe_deadline, libc::POLLIN, || {
+            receive_packet(control, Some(0))
+        }),
         mode,
         &[
             FaultPoint::Proceed,
@@ -591,9 +732,12 @@ fn exchange_active(
         return finish_observed_crash(control, child, operation_id, FaultPoint::Result);
     }
 
+    let exit_deadline = EpochDeadline::start(AuthorityEpoch::WorkerExit);
     let ack = Frame::new(Kind::ExitAck, operation_id);
-    send_packet(control, ack, &[])?;
-    let status = child.wait_bounded()?;
+    transport_until(control, child, exit_deadline, libc::POLLOUT, || {
+        send_packet(control, ack, &[])
+    })?;
+    let status = child.wait_for_exit(exit_deadline)?;
     if mode == ChildMode::ExitAt(FaultPoint::ExitAck) {
         return Err(ExpectedCrash(FaultPoint::ExitAck).into());
     }
@@ -604,7 +748,7 @@ fn exchange_active(
 }
 
 fn expect_crash_transport<T>(
-    result: Result<T, TransportError>,
+    result: Result<T, Box<dyn std::error::Error>>,
     mode: ChildMode,
     points: &[FaultPoint],
     child: &mut ChildBoundary,
@@ -613,10 +757,10 @@ fn expect_crash_transport<T>(
         Ok(value) => Ok(value),
         Err(error) => {
             let ChildMode::ExitAt(point) = mode else {
-                return Err(error.into());
+                return Err(error);
             };
             if !points.contains(&point) {
-                return Err(error.into());
+                return Err(error);
             }
             child.wait_bounded()?;
             Err(ExpectedCrash(point).into())
@@ -630,7 +774,21 @@ fn finish_observed_crash(
     operation_id: [u8; 16],
     point: FaultPoint,
 ) -> Result<ExchangeOutcome, Box<dyn std::error::Error>> {
-    send_packet(control, Frame::new(Kind::Checkpoint, operation_id), &[])?;
+    let epoch = match point {
+        FaultPoint::Ready => AuthorityEpoch::SourceTransfer,
+        FaultPoint::Accepted => AuthorityEpoch::ProbeExecution,
+        FaultPoint::Result => AuthorityEpoch::WorkerExit,
+        _ => {
+            return Err(io::Error::other(
+                "an observation checkpoint was requested for an unsupported crash point",
+            )
+            .into())
+        }
+    };
+    let deadline = EpochDeadline::start(epoch);
+    transport_until(control, child, deadline, libc::POLLOUT, || {
+        send_packet(control, Frame::new(Kind::Checkpoint, operation_id), &[])
+    })?;
     child.wait_bounded()?;
     Err(ExpectedCrash(point).into())
 }
@@ -643,7 +801,7 @@ fn finish_rejection(
     if response.operation_id != operation_id || response.flags != 0 || response.values[3] != 0 {
         return Err(io::Error::other("worker error frame is inconsistent").into());
     }
-    let status = child.wait_bounded()?;
+    let status = child.wait_for_exit(EpochDeadline::start(AuthorityEpoch::WorkerExit))?;
     if status.code() != Some(1) {
         return Err(io::Error::other(format!(
             "worker reported rejection but exited with {status} instead of code 1"
@@ -1208,6 +1366,121 @@ impl ChildBoundary {
         status
     }
 
+    fn expire_epoch<T>(
+        &mut self,
+        deadline: EpochDeadline,
+    ) -> Result<T, Box<dyn std::error::Error>> {
+        let status = self.terminate_and_reap_bounded()?;
+        Err(EpochTimeout {
+            epoch: deadline.epoch,
+            signal: status.signal().unwrap_or(0),
+        }
+        .into())
+    }
+
+    fn wait_for_control(
+        &mut self,
+        control: &OwnedFd,
+        deadline: EpochDeadline,
+        events: libc::c_short,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        loop {
+            let Some(timeout) = deadline.poll_timeout_ms() else {
+                return self.expire_epoch(deadline);
+            };
+            let mut descriptors = [
+                libc::pollfd {
+                    fd: control.as_raw_fd(),
+                    events,
+                    revents: 0,
+                },
+                libc::pollfd {
+                    fd: self.pidfd.as_raw_fd(),
+                    events: libc::POLLIN,
+                    revents: 0,
+                },
+            ];
+            // SAFETY: descriptors is a live two-element pollfd array and the
+            // timeout is a finite recomputation from one absolute Instant.
+            let result = unsafe {
+                libc::poll(
+                    descriptors.as_mut_ptr(),
+                    descriptors.len() as libc::nfds_t,
+                    timeout,
+                )
+            };
+            if result < 0 {
+                let error = io::Error::last_os_error();
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error.into());
+            }
+            if result == 0 {
+                continue;
+            }
+            let control_events = descriptors[0].revents;
+            if control_events & libc::POLLNVAL != 0 {
+                return Err(io::Error::other("worker control descriptor became invalid").into());
+            }
+            if control_events & (events | libc::POLLERR | libc::POLLHUP) != 0 {
+                return Ok(());
+            }
+            let pidfd_events = descriptors[1].revents;
+            if pidfd_events & libc::POLLNVAL != 0 {
+                return Err(io::Error::other("worker pidfd became invalid").into());
+            }
+            if pidfd_events & (libc::POLLIN | libc::POLLERR | libc::POLLHUP) != 0 {
+                let status = self.reap_until(deadline.expires_at)?;
+                return Err(io::Error::new(
+                    io::ErrorKind::BrokenPipe,
+                    format!(
+                        "worker exited as {status} during authority epoch {:?}",
+                        deadline.epoch
+                    ),
+                )
+                .into());
+            }
+        }
+    }
+
+    fn wait_for_exit(
+        &mut self,
+        deadline: EpochDeadline,
+    ) -> Result<ExitStatus, Box<dyn std::error::Error>> {
+        loop {
+            if let Some(status) = self.child.try_wait()? {
+                return Ok(self.record_status(status));
+            }
+            let Some(timeout) = deadline.poll_timeout_ms() else {
+                return self.expire_epoch(deadline);
+            };
+            let mut descriptor = libc::pollfd {
+                fd: self.pidfd.as_raw_fd(),
+                events: libc::POLLIN,
+                revents: 0,
+            };
+            // SAFETY: descriptor is one live pollfd and timeout is finite.
+            let result = unsafe { libc::poll(std::ptr::from_mut(&mut descriptor), 1, timeout) };
+            if result < 0 {
+                let error = io::Error::last_os_error();
+                if error.kind() == io::ErrorKind::Interrupted {
+                    continue;
+                }
+                return Err(error.into());
+            }
+            if result == 0 {
+                continue;
+            }
+            if descriptor.revents & libc::POLLNVAL != 0 {
+                return Err(io::Error::other("worker pidfd became invalid").into());
+            }
+            if descriptor.revents & (libc::POLLIN | libc::POLLERR | libc::POLLHUP) != 0 {
+                return self.reap_until(deadline.expires_at).map_err(Into::into);
+            }
+        }
+    }
+
     fn reap_until(&mut self, deadline: Instant) -> io::Result<ExitStatus> {
         loop {
             if let Some(status) = self.child.try_wait()? {
@@ -1290,5 +1563,47 @@ fn terminate_unbound_child_bounded(child: &mut Child) -> io::Result<ExitStatus> 
             ));
         }
         thread::sleep(Duration::from_millis(10));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_stall_maps_to_the_authority_epoch_that_must_expire() {
+        let bootstrap = StallPoint::ALL
+            .into_iter()
+            .filter(|point| {
+                AuthorityEpoch::for_stall(*point) == AuthorityEpoch::BootstrapRestriction
+            })
+            .count();
+        let source = StallPoint::ALL
+            .into_iter()
+            .filter(|point| AuthorityEpoch::for_stall(*point) == AuthorityEpoch::SourceTransfer)
+            .count();
+        let probe = StallPoint::ALL
+            .into_iter()
+            .filter(|point| AuthorityEpoch::for_stall(*point) == AuthorityEpoch::ProbeExecution)
+            .count();
+        let exit = StallPoint::ALL
+            .into_iter()
+            .filter(|point| AuthorityEpoch::for_stall(*point) == AuthorityEpoch::WorkerExit)
+            .count();
+        assert_eq!([bootstrap, source, probe, exit], [3, 2, 2, 2]);
+    }
+
+    #[test]
+    fn expired_deadline_never_becomes_a_relative_wait() {
+        let deadline = EpochDeadline {
+            epoch: AuthorityEpoch::SourceTransfer,
+            expires_at: Instant::now() - Duration::from_millis(1),
+        };
+        assert_eq!(deadline.poll_timeout_ms(), None);
+
+        let live = EpochDeadline::start(AuthorityEpoch::SourceTransfer)
+            .poll_timeout_ms()
+            .expect("new deadline remains live");
+        assert!((1..=1_000).contains(&live));
     }
 }
