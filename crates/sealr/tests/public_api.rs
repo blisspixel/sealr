@@ -3,10 +3,10 @@
 use std::io::{Cursor, Write};
 
 use sealr::{
-    apply, apply_with_options, ApplyOptions, EnvMeta, MaterializationMeta, MemberReadErrorKind,
-    Outcome, OutcomeIdentities, Policy, PolicyMeta, Receipt, Request, RetentionPlan,
-    RetentionStatus, SnapshotKind, Source, SourceMeta, ToolMeta, VerifiedArchive, View,
-    ZipInterpretationProfile, ZIP_STRICT_ASCII_V2,
+    apply, apply_with_options, ApplyOptions, EnvMeta, LinuxWorker, MaterializationMeta,
+    MemberReadErrorKind, Outcome, OutcomeIdentities, Policy, PolicyMeta, Receipt, Request,
+    RetentionPlan, RetentionStatus, SnapshotKind, Source, SourceMeta, SupervisionErrorKind,
+    ToolMeta, VerifiedArchive, View, ZipInterpretationProfile, ZIP_STRICT_ASCII_V2,
 };
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
@@ -25,6 +25,14 @@ fn assert_public_output_types(outcome: &Outcome) {
     let _: &MaterializationMeta = &outcome.receipt.materialization;
     let _: &OutcomeIdentities = &outcome.receipt.identities;
     let _: SnapshotKind = outcome.receipt.source_snapshot;
+}
+
+#[cfg(not(target_os = "linux"))]
+#[test]
+fn supervised_worker_loading_fails_closed_off_linux() {
+    let error = LinuxWorker::load(std::path::Path::new("/sealr-worker"), 1, &"00".repeat(32))
+        .expect_err("non-Linux worker activation must fail closed");
+    assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
 }
 
 fn member_zip() -> Vec<u8> {

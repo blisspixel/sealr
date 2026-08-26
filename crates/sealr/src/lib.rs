@@ -15,8 +15,9 @@ mod outcome;
 mod policy;
 mod quota;
 mod snapshot;
+mod supervised;
 mod verification;
-#[cfg(any(feature = "__internal-worker-lab", test))]
+#[cfg(any(target_os = "linux", feature = "__internal-worker-lab", test))]
 #[allow(dead_code)]
 mod worker_protocol;
 // Dormant Alpha.6 experiment. It is compiled and tested, but no shipped path
@@ -56,6 +57,9 @@ pub use semantic_record::worker_runtime as __worker_runtime;
 #[cfg(feature = "__internal-worker-lab")]
 #[doc(hidden)]
 pub mod __worker_protocol {
+    #[cfg(target_os = "linux")]
+    pub use crate::worker_protocol::{HELPER_BOOTSTRAP_ABI, HELPER_FEATURE_ID};
+
     pub mod frame {
         pub use crate::worker_protocol::frame::*;
     }
@@ -112,6 +116,7 @@ pub use outcome::{
 };
 pub use policy::{hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget};
 pub use snapshot::SnapshotKind;
+pub use supervised::{inspect_supervised, LinuxWorker, SupervisionError, SupervisionErrorKind};
 pub use verified::{
     MemberReadError, MemberReadErrorKind, RetentionPlan, RetentionPlanError,
     RetentionPlanErrorKind, RetentionStatus, VerifiedArchive, MAX_RETENTION_PATHS,

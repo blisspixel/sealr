@@ -285,10 +285,10 @@ pub fn apply_with_options(req: Request<'_>, options: &ApplyOptions) -> Outcome {
 
 #[derive(Debug)]
 pub(crate) struct SourceFailure {
-    path: Option<String>,
-    digest: SourceDigest,
-    finding: Finding,
-    snapshot_kind: SnapshotKind,
+    pub(crate) path: Option<String>,
+    pub(crate) digest: SourceDigest,
+    pub(crate) finding: Finding,
+    pub(crate) snapshot_kind: SnapshotKind,
 }
 
 fn read_source<'a>(
@@ -452,6 +452,39 @@ pub(crate) fn plan_source<'a>(
     context: PlanningContext,
 ) -> Result<PlanDecision<'a>, SourceFailure> {
     let snapshot = read_source(source, context.controls.budget)?;
+    Ok(plan_snapshot(snapshot, context))
+}
+
+/// Acquire every supervised input as an owned private file before planning so
+/// the exact same read-only object can be delegated to authenticated workers.
+#[cfg(target_os = "linux")]
+pub(crate) fn plan_supervised_source(
+    source: &Source<'_>,
+    context: PlanningContext,
+) -> Result<PlanDecision<'static>, SourceFailure> {
+    let budget = context.controls.budget;
+    let snapshot = match source {
+        Source::Path(path) => {
+            let display = Some(path.display().to_string());
+            SourceSnapshot::private_file_from_path(path, display.clone(), budget.max_archive_bytes)
+                .map_err(|finding| SourceFailure {
+                    path: display,
+                    digest: SourceDigest::unavailable(),
+                    finding,
+                    snapshot_kind: SnapshotKind::Unavailable,
+                })?
+        }
+        Source::Bytes { path, data } => {
+            let path = path.map(str::to_owned);
+            SourceSnapshot::private_file_from_bytes(path.clone(), data, budget.max_archive_bytes)
+                .map_err(|finding| SourceFailure {
+                    path,
+                    digest: SourceDigest::available(hex_sha256(data)),
+                    finding,
+                    snapshot_kind: SnapshotKind::Unavailable,
+                })?
+        }
+    };
     Ok(plan_snapshot(snapshot, context))
 }
 
@@ -1083,6 +1116,31 @@ fn finish(
     axes: SemanticAxes,
     identities: OutcomeIdentities,
 ) -> Outcome {
+    finish_with_jail(
+        (path, source_digest, source_snapshot),
+        magic,
+        policy,
+        findings,
+        members,
+        materialization,
+        axes,
+        identities,
+        "unavailable",
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn finish_with_jail(
+    (path, source_digest, source_snapshot): (Option<String>, SourceDigest, SnapshotKind),
+    magic: &'static str,
+    policy: &Policy,
+    findings: Vec<Finding>,
+    members: Vec<MemberView>,
+    materialization: MaterializationMeta,
+    axes: SemanticAxes,
+    identities: OutcomeIdentities,
+    kernel_jail: &'static str,
+) -> Outcome {
     let verdict = compat_verdict(&axes);
     let (verdict_s, wrote) = match &verdict {
         Verdict::Allowed { wrote } => ("allowed", *wrote),
@@ -1135,7 +1193,7 @@ fn finish(
         environment: EnvMeta {
             os: std::env::consts::OS,
             arch: std::env::consts::ARCH,
-            kernel_jail: "unavailable",
+            kernel_jail,
         },
         materialization,
         signed: false,
@@ -1155,14 +1213,14 @@ fn finish(
     }
 }
 
-fn with_ir(mut outcome: Outcome, ir: ArchiveIR) -> Outcome {
+pub(crate) fn with_ir(mut outcome: Outcome, ir: ArchiveIR) -> Outcome {
     outcome.receipt.identities =
         OutcomeIdentities::from_ir(outcome.receipt.source.clone(), &ir, &outcome.verification);
     outcome.archive_ir = Some(ir);
     outcome
 }
 
-fn with_verified_archive(mut outcome: Outcome, archive: VerifiedArchive) -> Outcome {
+pub(crate) fn with_verified_archive(mut outcome: Outcome, archive: VerifiedArchive) -> Outcome {
     outcome.receipt.identities = OutcomeIdentities::from_ir(
         outcome.receipt.source.clone(),
         archive.archive_ir(),
@@ -1172,7 +1230,7 @@ fn with_verified_archive(mut outcome: Outcome, archive: VerifiedArchive) -> Outc
     outcome
 }
 
-fn member_view(member: &IrMember) -> MemberView {
+pub(crate) fn member_view(member: &IrMember) -> MemberView {
     let method = if member.method == 0 {
         "store"
     } else {
@@ -1200,7 +1258,7 @@ fn member_view(member: &IrMember) -> MemberView {
     }
 }
 
-fn reject_only(
+pub(crate) fn reject_only(
     (path, digest, policy): (Option<String>, SourceDigest, Policy),
     findings: Vec<Finding>,
     magic: Option<&'static str>,
