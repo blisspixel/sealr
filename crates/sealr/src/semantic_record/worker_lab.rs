@@ -101,6 +101,43 @@ pub fn validate_inspect_completion(
     Ok(completion_evidence(proposal))
 }
 
+/// Replay one accepted plan against the supervisor's exact retained source and
+/// require the worker completion to equal the source-derived canonical bytes.
+/// This is independent of worker output, but deliberately reuses the same
+/// bounded verifier implementation.
+pub fn authorize_inspect_completion(
+    source: File,
+    source_len: u64,
+    operation_id: [u8; 16],
+    planning: &[u8],
+    completion: &[u8],
+) -> Result<InspectCompletionEvidence, String> {
+    let policy = Policy::default_v1();
+    let context = context(&policy)?;
+    let snapshot = SourceSnapshot::worker_lab_from_file(
+        source,
+        Some("worker-lab-supervisor.zip".into()),
+        source_len,
+        context.controls().budget.max_archive_bytes,
+    )
+    .map_err(debug_error)?;
+    let binding = inspect_binding(&snapshot, &context, operation_id)?;
+    let planning = decode_planning(planning, &binding, &snapshot).map_err(debug_error)?;
+    let executed = planning
+        .bind_inspect_execution(snapshot)
+        .map_err(debug_error)?
+        .execute()
+        .map_err(debug_error)?;
+    if executed.completion() != completion {
+        return Err(
+            "worker completion differs from the supervisor's source-derived replay".to_owned(),
+        );
+    }
+    let proposal =
+        decode_completion(executed.completion(), executed.planning()).map_err(debug_error)?;
+    Ok(completion_evidence(proposal))
+}
+
 fn context(policy: &Policy) -> Result<PlanningContext, String> {
     PlanningContext::compile(policy, ZipInterpretationProfile::StrictAsciiV2).map_err(debug_error)
 }
@@ -262,6 +299,17 @@ mod tests {
         assert_eq!(crate::zip::parse_calls(), 0);
         validate_inspect_completion(&source, operation_id, &planning, executed.completion())
             .unwrap();
+        let authority = authorize_inspect_completion(
+            File::open(&path).unwrap(),
+            source.len() as u64,
+            operation_id,
+            &planning,
+            executed.completion(),
+        )
+        .unwrap();
+        assert_eq!(authority, evidence);
+        assert_eq!(crate::zip::parse_calls(), 0);
+        assert_eq!(crate::verification::verify_payload_calls(), 2);
         drop(executed);
         fs::remove_file(path).unwrap();
     }
@@ -279,6 +327,55 @@ mod tests {
         drifted[0] ^= 1;
         let (file, path) = source_file(&drifted);
         assert!(validate_inspect(file, drifted.len() as u64, operation_id, &planning).is_err());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn supervisor_replay_rejects_a_canonical_forged_content_digest() {
+        use crate::semantic_record::{
+            encode_completion, CompletionDisposition, CompletionRecord, MemberCompletion,
+        };
+
+        let source = source();
+        let operation_id = [0x41; 16];
+        let planning_bytes = plan_inspect(&source, operation_id).unwrap();
+        let (file, path) = source_file(&source);
+        let executed = validate_inspect(file, source.len() as u64, operation_id, &planning_bytes)
+            .unwrap()
+            .execute()
+            .unwrap();
+        let planning = executed.executed.planning();
+        let forged = encode_completion(
+            &CompletionRecord {
+                operation_id,
+                request_id: planning.request_id,
+                plan_id: planning.plan_id,
+                disposition: CompletionDisposition::Complete,
+                members: vec![MemberCompletion::Verified {
+                    actual_uncomp_size: b"planned payload".len() as u64,
+                    actual_crc: crc32fast::hash(b"planned payload"),
+                    content_sha256: [0xA5; 32],
+                }],
+                findings: Vec::new(),
+            },
+            planning,
+        )
+        .unwrap();
+        assert!(
+            validate_inspect_completion(&source, operation_id, &planning_bytes, &forged)
+                .unwrap()
+                .complete
+        );
+        let error = authorize_inspect_completion(
+            File::open(&path).unwrap(),
+            source.len() as u64,
+            operation_id,
+            &planning_bytes,
+            &forged,
+        )
+        .unwrap_err();
+        assert!(error.contains("source-derived replay"));
+        drop(executed);
         fs::remove_file(path).unwrap();
     }
 }

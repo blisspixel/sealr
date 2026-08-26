@@ -164,7 +164,7 @@ pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
     run_timeout_reap()?;
     run_repeated_stress()?;
     println!(
-        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 22 crash barriers, 11 authority-epoch stalls, 500 bounded stress iterations, and bounded reap passed"
+        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 1 supervisor content replay, 22 crash barriers, 11 authority-epoch stalls, 500 bounded stress iterations, and bounded reap passed"
     );
     Ok(())
 }
@@ -1025,8 +1025,9 @@ fn exchange_active(
     if !status.success() {
         return Err(io::Error::other(format!("worker exited unsuccessfully: {status}")).into());
     }
-    let semantic_evidence = sealr::__worker_lab::validate_inspect_completion(
-        source_bytes(),
+    let semantic_evidence = sealr::__worker_lab::authorize_inspect_completion(
+        source_descriptor.try_clone()?,
+        source_values[0],
         operation_id,
         validated_plan
             .as_ref()
@@ -1034,7 +1035,7 @@ fn exchange_active(
             .bytes(),
         completion.bytes(),
     )
-    .map_err(|error| io::Error::other(format!("validating semantic completion: {error}")))?;
+    .map_err(|error| io::Error::other(format!("authorizing semantic completion: {error}")))?;
     if !semantic_evidence.complete
         || semantic_evidence.member_count != SOURCE_MEMBER_COUNT
         || semantic_evidence.verified_members != SOURCE_MEMBER_COUNT
