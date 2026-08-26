@@ -12,6 +12,8 @@ export PATH=/bin
 /bin/busybox mount -t sysfs sysfs /sys || fail "could not mount sysfs"
 /bin/busybox mount -t devtmpfs devtmpfs /dev || fail "could not mount devtmpfs"
 /bin/busybox mkdir -p /tmp
+/bin/busybox mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp || \
+    fail "could not mount private test tmpfs"
 /bin/busybox chmod 1777 /tmp
 
 worker_bytes=""
