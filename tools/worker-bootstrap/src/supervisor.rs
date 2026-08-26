@@ -139,9 +139,9 @@ struct EpochTimeout {
 }
 
 pub(crate) fn dispatch(args: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error>> {
-    let usage = "usage: sealr-worker-bootstrap-lab conformance --worker <absolute-path> --bytes <length> --sha256 <digest>";
+    let usage = "usage: sealr-worker-bootstrap-lab <conformance|package-smoke> --worker <absolute-path> --bytes <length> --sha256 <digest>";
     if args.len() != 7
-        || args[0] != "conformance"
+        || (args[0] != "conformance" && args[0] != "package-smoke")
         || args[1] != "--worker"
         || args[3] != "--bytes"
         || args[5] != "--sha256"
@@ -167,7 +167,25 @@ pub(crate) fn dispatch(args: &[std::ffi::OsString]) -> Result<(), Box<dyn std::e
             fault_lab,
         })
         .map_err(|_| "worker child programs were already initialized")?;
-    run_conformance()
+    if args[0] == "conformance" {
+        run_conformance()
+    } else {
+        run_package_smoke()
+    }
+}
+
+fn run_package_smoke() -> Result<(), Box<dyn std::error::Error>> {
+    run_success(false)?;
+    let helper = &CHILD_PROGRAMS
+        .get()
+        .expect("child programs remain initialized during package smoke")
+        .production;
+    println!(
+        "sealr.worker-package-smoke.v1: authenticated helper sha256={} bytes={}, inspect completed and worker reaped",
+        helper.digest_hex(),
+        helper.len()
+    );
+    Ok(())
 }
 
 fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {

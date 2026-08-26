@@ -128,6 +128,30 @@ if ($releaseWorkflowVersion -ne $version -or
     throw 'Release workflow, publisher, or candidate tag version does not match Cargo.toml'
 }
 
+$helperPackaging = Get-Content -Raw -LiteralPath (Join-Path $workspace 'docs/helper-packaging.md')
+foreach ($term in @(
+    'libexec/sealr/sealr-worker',
+    'libexec/sealr/sealr-worker.manifest',
+    'sealr.worker-artifact.v1',
+    'x86_64-unknown-linux-musl',
+    'production-only helper graph',
+    'macOS and Windows archives retain their exact five-file contracts'
+)) {
+    if (-not $helperPackaging.Contains($term, [StringComparison]::Ordinal)) {
+        throw "docs/helper-packaging.md is missing its exact package contract: $term"
+    }
+}
+foreach ($workflow in @(
+    @{ Name = 'CI'; Text = (Get-Content -Raw -LiteralPath (Join-Path $workspace '.github/workflows/ci.yml')) }
+    @{ Name = 'release'; Text = $releaseWorkflow }
+)) {
+    foreach ($script in @('scripts/package_native.ps1', 'scripts/verify_native_package.ps1')) {
+        if (-not $workflow.Text.Contains($script, [StringComparison]::Ordinal)) {
+            throw "The $($workflow.Name) workflow does not enforce $script"
+        }
+    }
+}
+
 $workflowTitleTemplate = [regex]::Match(
     $releaseWorkflow,
     '(?m)^\s*release_title="(?<value>[^"]+)"\s*$'

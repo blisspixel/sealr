@@ -77,7 +77,7 @@ pub fn lab_main(
         if args.is_empty() || args.first().is_some_and(|arg| arg == "conformance") {
             Err("the authority-bootstrap conformance lab requires Linux".into())
         } else {
-            Err("usage: sealr-worker-bootstrap-lab conformance --worker <absolute-path> --bytes <length> --sha256 <digest>".into())
+            Err("usage: sealr-worker-bootstrap-lab <conformance|package-smoke> --worker <absolute-path> --bytes <length> --sha256 <digest>".into())
         }
     }
 }

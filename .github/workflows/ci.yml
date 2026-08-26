@@ -141,6 +141,26 @@ jobs:
       - name: Build optimized workspace
         run: cargo build --locked --release --workspace --all-features
 
+      - name: Verify native release package contract
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          $versions = @($metadata.packages.version | Sort-Object -Unique)
+          if ($versions.Count -ne 1) {
+            throw "workspace packages do not have one release version: $($versions -join ', ')"
+          }
+          $archive = Join-Path $PWD "target/native-package-contract/sealr-$($versions[0])-x86_64-unknown-linux-gnu.tar.gz"
+          pwsh -NoLogo -NoProfile -File scripts/package_native.ps1 `
+            -Version $versions[0] `
+            -TargetTriple x86_64-unknown-linux-gnu `
+            -HelperBinary target/x86_64-unknown-linux-musl/release/sealr-worker `
+            -OutputDirectory target/native-package-contract
+          pwsh -NoLogo -NoProfile -File scripts/verify_native_package.ps1 `
+            -ArchivePath $archive `
+            -Version $versions[0] `
+            -TargetTriple x86_64-unknown-linux-gnu `
+            -LabBinary target/release/sealr-worker-bootstrap-lab
+
       - name: Verify README walkthrough
         shell: pwsh
         run: |
@@ -195,6 +215,31 @@ jobs:
           cargo test --locked --release -p sealr --lib
           semantic_record::peak_live::completion_reconstruction_peak_live_is_bounded --
           --ignored --exact --nocapture --test-threads=1
+
+      - name: Verify native release package contract
+        shell: pwsh
+        run: |
+          cargo build --locked --release -p sealr-cli
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          $versions = @($metadata.packages.version | Sort-Object -Unique)
+          if ($versions.Count -ne 1) {
+            throw "workspace packages do not have one release version: $($versions -join ', ')"
+          }
+          $targetLine = rustc -vV | Select-String -Pattern '^host: '
+          if ($null -eq $targetLine) {
+            throw 'rustc did not report its host target'
+          }
+          $targetTriple = $targetLine.Line.Substring(6).Trim()
+          $extension = if ($IsWindows) { 'zip' } else { 'tar.gz' }
+          $archive = Join-Path $PWD "target/native-package-contract/sealr-$($versions[0])-$targetTriple.$extension"
+          pwsh -NoLogo -NoProfile -File scripts/package_native.ps1 `
+            -Version $versions[0] `
+            -TargetTriple $targetTriple `
+            -OutputDirectory target/native-package-contract
+          pwsh -NoLogo -NoProfile -File scripts/verify_native_package.ps1 `
+            -ArchivePath $archive `
+            -Version $versions[0] `
+            -TargetTriple $targetTriple
 
   zipdiff:
     name: ZipDiff 14-class gate

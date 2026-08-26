@@ -520,6 +520,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sealr-release-license-closure"
+version = "0.1.0-alpha.5"
+dependencies = [
+ "clap",
+ "sealr",
+ "sealr-worker-bootstrap-lab",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "sealr-wheel-lab"
 version = "0.1.0-alpha.5"
 dependencies = [

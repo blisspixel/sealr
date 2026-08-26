@@ -272,98 +272,55 @@ jobs:
         shell: pwsh
         run: rustup default $env:RUST_VERSION
 
+      - name: Install production Linux helper target
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: rustup target add x86_64-unknown-linux-musl
+
       - name: Run optimized tests
         run: cargo test --locked --release --workspace --all-features
 
       - name: Build release binary
         run: cargo build --locked --release -p sealr-cli
 
-      - name: Package and smoke-test native binary
+      - name: Build production Linux helper and package verifier
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: |
+          cargo build --locked --release -p sealr-worker-bootstrap-lab `
+            --no-default-features --bin sealr-worker `
+            --target x86_64-unknown-linux-musl
+          cargo build --locked --release -p sealr-worker-bootstrap-lab `
+            --features lab --bin sealr-worker-bootstrap-lab
+
+      - name: Package and verify native release archive
         id: package
         shell: pwsh
         run: |
           $ErrorActionPreference = "Stop"
-
           $targetLine = rustc -vV | Select-String -Pattern '^host: '
           if ($null -eq $targetLine) {
             throw "rustc did not report its host target"
           }
           $targetTriple = $targetLine.Line.Substring(6).Trim()
-          $archiveBase = "sealr-$env:RELEASE_VERSION-$targetTriple"
-          $packageParent = Join-Path $PWD "package"
-          $packageRoot = Join-Path $packageParent $archiveBase
-          $distRoot = Join-Path $PWD "dist"
-          $binaryName = if ($IsWindows) { "sealr.exe" } else { "sealr" }
-
-          New-Item -ItemType Directory -Path $packageRoot -Force | Out-Null
-          New-Item -ItemType Directory -Path $distRoot -Force | Out-Null
-          Copy-Item -LiteralPath (Join-Path $PWD "target/release/$binaryName") -Destination $packageRoot
-          Copy-Item -LiteralPath (Join-Path $PWD "README.md") -Destination $packageRoot
-          Copy-Item -LiteralPath (Join-Path $PWD "CHANGELOG.md") -Destination $packageRoot
-          Copy-Item -LiteralPath (Join-Path $PWD "LICENSE") -Destination $packageRoot
-          $thirdPartyLicenses = Join-Path $PWD "licenses/THIRD_PARTY_LICENSES-$targetTriple.txt"
-          if (-not (Test-Path -LiteralPath $thirdPartyLicenses -PathType Leaf)) {
-            throw "missing third-party license bundle for $targetTriple"
+          $extension = if ($IsWindows) { 'zip' } else { 'tar.gz' }
+          $archivePath = Join-Path $PWD "dist/sealr-$env:RELEASE_VERSION-$targetTriple.$extension"
+          $packageArguments = @{
+            Version = $env:RELEASE_VERSION
+            TargetTriple = $targetTriple
+            OutputDirectory = 'dist'
           }
-          Copy-Item -LiteralPath $thirdPartyLicenses `
-            -Destination (Join-Path $packageRoot "THIRD_PARTY_LICENSES.txt")
-          if (-not $IsWindows) {
-            chmod 755 (Join-Path $packageRoot $binaryName)
-            if ($LASTEXITCODE -ne 0) {
-              throw "chmod failed with exit code $LASTEXITCODE"
-            }
+          $verifyArguments = @{
+            ArchivePath = $archivePath
+            Version = $env:RELEASE_VERSION
+            TargetTriple = $targetTriple
           }
-
-          if ($IsWindows) {
-            $archivePath = Join-Path $distRoot "$archiveBase.zip"
-            Push-Location $packageParent
-            try {
-              Compress-Archive -Path $archiveBase -DestinationPath $archivePath
-            } finally {
-              Pop-Location
-            }
-          } else {
-            $archivePath = Join-Path $distRoot "$archiveBase.tar.gz"
-            tar -C $packageParent -czf $archivePath $archiveBase
-            if ($LASTEXITCODE -ne 0) {
-              throw "tar failed with exit code $LASTEXITCODE"
-            }
+          if ($IsLinux) {
+            $packageArguments.HelperBinary = 'target/x86_64-unknown-linux-musl/release/sealr-worker'
+            $verifyArguments.LabBinary = 'target/release/sealr-worker-bootstrap-lab'
           }
-
-          $smokeRoot = Join-Path $PWD "smoke"
-          New-Item -ItemType Directory -Path $smokeRoot -Force | Out-Null
-          if ($IsWindows) {
-            Expand-Archive -LiteralPath $archivePath -DestinationPath $smokeRoot
-          } else {
-            tar -C $smokeRoot -xzf $archivePath
-            if ($LASTEXITCODE -ne 0) {
-              throw "archive extraction failed with exit code $LASTEXITCODE"
-            }
-          }
-
-          $packagedBinary = Join-Path (Join-Path $smokeRoot $archiveBase) $binaryName
-          $packagedThirdPartyLicenses = Join-Path `
-            (Join-Path $smokeRoot $archiveBase) `
-            "THIRD_PARTY_LICENSES.txt"
-          if (-not (Test-Path -LiteralPath $packagedThirdPartyLicenses -PathType Leaf)) {
-            throw "packaged third-party license bundle is missing"
-          }
-          $expectedLicenseHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $thirdPartyLicenses).Hash
-          $packagedLicenseHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $packagedThirdPartyLicenses).Hash
-          if ($packagedLicenseHash -ne $expectedLicenseHash) {
-            throw "packaged third-party license bundle changed"
-          }
-          $reportedVersion = (& $packagedBinary --version | Out-String).Trim()
-          if ($LASTEXITCODE -ne 0 -or $reportedVersion -ne "sealr $env:RELEASE_VERSION") {
-            throw "packaged binary reported unexpected version: $reportedVersion"
-          }
-          & $packagedBinary --help | Out-Null
-          if ($LASTEXITCODE -ne 0) {
-            throw "packaged binary help smoke test failed"
-          }
-
-          "archive=$archivePath" >> $env:GITHUB_OUTPUT
-          "target=$targetTriple" >> $env:GITHUB_OUTPUT
+          & scripts/package_native.ps1 @packageArguments
+          & scripts/verify_native_package.ps1 @verifyArguments
 
       - name: Upload native release archive
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
