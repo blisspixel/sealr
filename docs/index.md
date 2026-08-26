@@ -25,6 +25,7 @@ Start with the [README](../README.md) for the published Alpha.5 boundary and a s
 | [Differentials](differentials.md) | Single-interpretation rules and the ZipDiff corpus |
 | [Reduced-authority execution](sandbox.md) | Supervisor and worker design |
 | [Linux helper packaging](helper-packaging.md) | Fixed archive placement, manifest, license closure, and extracted-artifact verification |
+| [Real-kernel restriction floor](../tests/kernel-floor/README.md) | Pinned Landlock ABI 2 fail-closed fixture and QEMU execution contract |
 | [Finding registry](findings.md) | Stable machine finding codes |
 | [Worker protocol v1](worker-protocol.md) | Bounded control frames, capability slots, decoder rules, and fuzz evidence |
 | [Alpha.6 semantic ownership](decisions/0001-alpha6-semantic-ownership.md) | Accepted private record experiment and provisional public capability gates |

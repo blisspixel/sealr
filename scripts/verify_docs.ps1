@@ -151,6 +151,10 @@ foreach ($workflow in @(
         }
     }
 }
+if (-not $releaseWorkflow.Contains('            "Real-kernel Landlock ABI 2 floor"', [StringComparison]::Ordinal) -or
+    -not $publisher.Contains("    'Real-kernel Landlock ABI 2 floor'", [StringComparison]::Ordinal)) {
+    throw 'Release verification does not require the real-kernel promotion job'
+}
 
 $workflowTitleTemplate = [regex]::Match(
     $releaseWorkflow,
@@ -205,13 +209,15 @@ $qualityStart = $ciWorkflow.IndexOf("  quality:`n", [StringComparison]::Ordinal)
 $platformStart = $ciWorkflow.IndexOf("  platform:`n", [StringComparison]::Ordinal)
 $zipDiffStart = $ciWorkflow.IndexOf("  zipdiff:`n", [StringComparison]::Ordinal)
 $supplyChainStart = $ciWorkflow.IndexOf("  supply-chain:`n", [StringComparison]::Ordinal)
+$kernelFloorStart = $ciWorkflow.IndexOf("  kernel-floor:`n", [StringComparison]::Ordinal)
 $requiredStart = $ciWorkflow.IndexOf("  required:`n", [StringComparison]::Ordinal)
 if ($qualityStart -lt 0 -or
     $platformStart -le $qualityStart -or
     $zipDiffStart -le $platformStart -or
     $supplyChainStart -le $zipDiffStart -or
-    $requiredStart -le $supplyChainStart) {
-    throw 'Could not locate the required quality and platform CI jobs'
+    $kernelFloorStart -le $supplyChainStart -or
+    $requiredStart -le $kernelFloorStart) {
+    throw 'Could not locate the required CI jobs in their expected order'
 }
 $qualityJob = $ciWorkflow.Substring($qualityStart, $platformStart - $qualityStart)
 $platformJob = $ciWorkflow.Substring($platformStart, $zipDiffStart - $platformStart)
@@ -230,19 +236,69 @@ foreach ($job in @(
     }
 }
 
+$kernelFloorJob = $ciWorkflow.Substring($kernelFloorStart, $requiredStart - $kernelFloorStart)
+foreach ($fragment in @(
+    '    name: Real-kernel Landlock ABI 2 floor',
+    '    runs-on: ubuntu-latest',
+    '    timeout-minutes: 15',
+    'sudo apt-get install --yes --no-install-recommends cpio qemu-system-x86',
+    'run: bash scripts/verify_kernel_floor.sh'
+)) {
+    if (-not $kernelFloorJob.Contains($fragment, [StringComparison]::Ordinal)) {
+        throw "The real-kernel CI job is missing its exact required contract: $fragment"
+    }
+}
+
 $requiredJob = $ciWorkflow.Substring($requiredStart)
 foreach ($fragment in @(
     '    name: Required CI',
     '    if: ${{ always() }}',
-    '    needs: [quality, platform, zipdiff, supply-chain]',
+    '    needs: [quality, platform, zipdiff, supply-chain, kernel-floor]',
     '          QUALITY_RESULT: ${{ needs.quality.result }}',
     '          PLATFORM_RESULT: ${{ needs.platform.result }}',
     '          ZIPDIFF_RESULT: ${{ needs.zipdiff.result }}',
     "          SUPPLY_CHAIN_RESULT: `${{ needs['supply-chain'].result }}",
+    "          KERNEL_FLOOR_RESULT: `${{ needs['kernel-floor'].result }}",
     '          exit "${failed}"'
 )) {
     if (-not $requiredJob.Contains($fragment, [StringComparison]::Ordinal)) {
         throw "The Required CI aggregator is missing its exact dependency contract: $fragment"
+    }
+}
+
+$kernelFloorScript = Get-Content -Raw -LiteralPath (Join-Path $workspace 'scripts/verify_kernel_floor.sh')
+$kernelFloorDoc = Get-Content -Raw -LiteralPath (Join-Path $workspace 'tests/kernel-floor/README.md')
+$kernelFloorSums = Get-Content -Raw -LiteralPath (Join-Path $workspace 'tests/kernel-floor/SHA256SUMS')
+$kernelFloorInit = Get-Content -Raw -LiteralPath (Join-Path $workspace 'tests/kernel-floor/init')
+foreach ($contract in @(
+    @{ Name = 'script'; Text = $kernelFloorScript; Terms = @(
+        'https://snapshot.debian.org/archive/debian/20240210T000000Z/',
+        'https://snapshot.debian.org/archive/debian/20260820T000000Z/',
+        'sha256sum --check "${fixture_root}/SHA256SUMS"',
+        '-machine pc,accel=tcg',
+        '-nic none',
+        'timeout --signal=KILL 90s',
+        'SEALR_KERNEL_FLOOR_PASS'
+    ) },
+    @{ Name = 'fixture documentation'; Text = $kernelFloorDoc; Terms = @(
+        'Landlock ABI to equal 2',
+        '`RestrictionUnavailable`',
+        'does not depend on KVM availability'
+    ) },
+    @{ Name = 'checksums'; Text = $kernelFloorSums; Terms = @(
+        '843aec866adf10d9cce3406f61e5e2b760b5f8a64fd33a9e41be30c1c2c83368  linux-6.1.0-15-amd64',
+        '3d3fdbe91d4660c873e14b092c213fe81c1da6362daa236eb25d0171eb108744  busybox-static_1.35.0-4+deb12u1+b1_amd64.deb'
+    ) },
+    @{ Name = 'guest init'; Text = $kernelFloorInit; Terms = @(
+        '/bin/sealr-worker-bootstrap-lab kernel-floor',
+        'SEALR_KERNEL_FLOOR_FAIL',
+        'SEALR_KERNEL_FLOOR_PASS'
+    ) }
+)) {
+    foreach ($term in $contract.Terms) {
+        if (-not $contract.Text.Contains($term, [StringComparison]::Ordinal)) {
+            throw "The kernel-floor $($contract.Name) is missing its exact contract: $term"
+        }
     }
 }
 

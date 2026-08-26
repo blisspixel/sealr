@@ -140,9 +140,9 @@ struct EpochTimeout {
 }
 
 pub(crate) fn dispatch(args: &[std::ffi::OsString]) -> Result<(), Box<dyn std::error::Error>> {
-    let usage = "usage: sealr-worker-bootstrap-lab <conformance|package-smoke> --worker <absolute-path> --bytes <length> --sha256 <digest>";
+    let usage = "usage: sealr-worker-bootstrap-lab <conformance|package-smoke|kernel-floor> --worker <absolute-path> --bytes <length> --sha256 <digest>";
     if args.len() != 7
-        || (args[0] != "conformance" && args[0] != "package-smoke")
+        || (args[0] != "conformance" && args[0] != "package-smoke" && args[0] != "kernel-floor")
         || args[1] != "--worker"
         || args[3] != "--bytes"
         || args[5] != "--sha256"
@@ -170,11 +170,114 @@ pub(crate) fn dispatch(args: &[std::ffi::OsString]) -> Result<(), Box<dyn std::e
             fault_lab,
         })
         .map_err(|_| "worker child programs were already initialized")?;
-    if args[0] == "conformance" {
-        run_conformance()
-    } else {
-        run_package_smoke()
+    match args[0].to_str() {
+        Some("conformance") => run_conformance(),
+        Some("package-smoke") => run_package_smoke(),
+        Some("kernel-floor") => run_kernel_floor(),
+        _ => Err(usage.into()),
     }
+}
+
+fn run_kernel_floor() -> Result<(), Box<dyn std::error::Error>> {
+    let abi = running_landlock_abi()?;
+    if abi != 2 {
+        return Err(io::Error::other(format!(
+            "kernel-floor evidence requires Landlock ABI 2 exactly, observed {abi}"
+        ))
+        .into());
+    }
+    let programs = CHILD_PROGRAMS
+        .get()
+        .ok_or("worker child programs are not initialized")?;
+    let options = sealr::ApplyOptions::new();
+    let policy = sealr::Policy::default_v1();
+
+    expect_real_kernel_restriction_failure(sealr::inspect_supervised(
+        sealr::Source::Bytes {
+            path: Some("kernel-floor-inspect.zip"),
+            data: source_bytes(),
+        },
+        &policy,
+        &options,
+        &programs.public,
+    ))?;
+    require_no_supervisor_children("after real-kernel inspect setup failure")?;
+
+    let fixture = Fixture::new(false, false, false)?;
+    let destination = fixture.root.join("public-output");
+    expect_real_kernel_restriction_failure(sealr::apply_supervised(
+        sealr::Request {
+            source: sealr::Source::Bytes {
+                path: Some("kernel-floor-materialize.zip"),
+                data: source_bytes(),
+            },
+            policy: &policy,
+            dest: Some(&destination),
+        },
+        &options,
+        &programs.public,
+    ))?;
+    require_no_supervisor_children("after real-kernel materialize setup failure")?;
+    fixture.verify_retained_authority_state()?;
+    if destination.try_exists()?
+        || directory_entry_names(&fixture.root)? != vec!["outside-sentinel".to_owned()]
+    {
+        return Err(io::Error::other(
+            "real-kernel materialize setup failure changed the destination namespace",
+        )
+        .into());
+    }
+    fixture.cleanup()?;
+
+    println!(
+        "sealr.kernel-floor.v1: authenticated helper sha256={} bytes={}, Landlock ABI {abi}, public inspect and materialize rejected before source transfer, no fallback, destination preservation, stage cleanup, and exact reap passed",
+        programs.production.digest_hex(),
+        programs.production.len()
+    );
+    Ok(())
+}
+
+fn expect_real_kernel_restriction_failure(
+    result: Result<sealr::Outcome, sealr::SupervisionError>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let error = match result {
+        Ok(_) => {
+            return Err(io::Error::other(
+                "a real Landlock ABI 2 kernel unexpectedly satisfied the ABI 3 supervisor floor",
+            )
+            .into());
+        }
+        Err(error) => error,
+    };
+    let expected_detail =
+        format!("worker rejected authority with code {ERROR_RESTRICTION}, phase 3, detail 0");
+    if error.kind() != sealr::SupervisionErrorKind::RestrictionUnavailable
+        || error.detail() != expected_detail
+    {
+        return Err(io::Error::other(format!(
+            "real-kernel setup failure returned the wrong boundary error: {error}"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+fn running_landlock_abi() -> io::Result<u64> {
+    const LANDLOCK_CREATE_RULESET_VERSION: u32 = 1;
+    // SAFETY: a null attribute pointer and zero size are the kernel's
+    // documented Landlock ABI query. No userspace memory is read or written.
+    let observed = unsafe {
+        libc::syscall(
+            libc::SYS_landlock_create_ruleset,
+            std::ptr::null::<libc::c_void>(),
+            0_usize,
+            LANDLOCK_CREATE_RULESET_VERSION,
+        ) as i64
+    };
+    if observed < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    u64::try_from(observed).map_err(|_| io::Error::other("Landlock ABI is unrepresentable"))
 }
 
 fn run_package_smoke() -> Result<(), Box<dyn std::error::Error>> {

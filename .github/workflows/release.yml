@@ -94,6 +94,7 @@ jobs:
             "Test on macos-latest"
             "ZipDiff 14-class gate"
             "Supply chain"
+            "Real-kernel Landlock ABI 2 floor"
           )
           run_json=""
           for attempt in {1..90}; do

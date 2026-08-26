@@ -323,10 +323,33 @@ jobs:
         shell: pwsh
         run: pwsh -NoLogo -NoProfile -File scripts/verify_third_party_licenses.ps1
 
+  kernel-floor:
+    name: Real-kernel Landlock ABI 2 floor
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install guest tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends cpio qemu-system-x86
+
+      - name: Install pinned Rust
+        run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
+
+      - name: Select pinned Rust
+        run: rustup default ${{ env.RUST_VERSION }}
+
+      - name: Verify fail-closed behavior on Landlock ABI 2
+        shell: bash
+        run: bash scripts/verify_kernel_floor.sh
+
   required:
     name: Required CI
     if: ${{ always() }}
-    needs: [quality, platform, zipdiff, supply-chain]
+    needs: [quality, platform, zipdiff, supply-chain, kernel-floor]
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
@@ -336,6 +359,7 @@ jobs:
           PLATFORM_RESULT: ${{ needs.platform.result }}
           ZIPDIFF_RESULT: ${{ needs.zipdiff.result }}
           SUPPLY_CHAIN_RESULT: ${{ needs['supply-chain'].result }}
+          KERNEL_FLOOR_RESULT: ${{ needs['kernel-floor'].result }}
         shell: bash
         run: |
           set -euo pipefail
@@ -344,7 +368,8 @@ jobs:
             QUALITY_RESULT \
             PLATFORM_RESULT \
             ZIPDIFF_RESULT \
-            SUPPLY_CHAIN_RESULT; do
+            SUPPLY_CHAIN_RESULT \
+            KERNEL_FLOOR_RESULT; do
             result="${!gate}"
             if [[ "${result}" != "success" ]]; then
               echo "::error::${gate} completed as ${result}"

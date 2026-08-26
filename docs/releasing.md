@@ -62,7 +62,7 @@ Create an annotated tag at the verified commit and push only that tag. For `0.1.
 The tag workflow:
 
 1. verifies the annotated tag, workspace version, clean checkout, and identity with current `main`;
-2. waits for the exact protected `main` CI run at that commit, requires all five promotion jobs to succeed, and verifies the stable `Required CI` branch-protection check;
+2. waits for the exact protected `main` CI run at that commit, requires all six promotion jobs to succeed, and verifies the stable `Required CI` branch-protection check;
 3. requires successful bounded worker-protocol and semantic-record fuzz campaigns on that exact commit;
 4. tests optimized workspace builds on standard Ubuntu, Windows, and macOS runners;
 5. builds and packages each native executable with README, changelog, the Apache-2.0 project license, and the verified target-specific third-party license bundle, including upstream root notice and copyright files;
@@ -92,7 +92,7 @@ The script accepts no repository, tag, or release parameters. Before changing th
 
 - a clean, unmodified checkout whose `HEAD` equals remote `main` and the annotated release tag;
 - exact workspace version and tagged release notes;
-- unchanged strict branch protection, enforced administrators, pull requests, linear history, resolved conversations, and the exact GitHub Actions `Required CI` check that aggregates all five promotion jobs;
+- unchanged strict branch protection, enforced administrators, pull requests, linear history, resolved conversations, and the exact GitHub Actions `Required CI` check that aggregates all six promotion jobs;
 - successful exact-commit `main` CI, exact-commit on-demand fuzz, and exact-tag Release workflow runs;
 - repository release immutability enabled;
 - the exact draft ID, title, notes, prerelease state, and four expected assets;
