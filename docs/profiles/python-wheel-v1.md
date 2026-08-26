@@ -1,6 +1,6 @@
 # Python wheel consumer profile draft
 
-> Status: implemented repository-only research consumer. Alpha.6 exposes the generic verified-member facts needed by the laboratory, but does not advertise or ship wheel support through the library or CLI. The non-published `sealr-wheel-lab` crate implements the exact UTF-8 container profile, bounded artifact and plan evaluation, distinct research identities, hostile regressions, and a pinned PyPA `installer` bridge. No wheel-specific rule or identity on this page is a supported public contract.
+> Status: implemented repository-only research consumer in Alpha.7. The library exposes the generic verified-member and immutable container facts needed by the laboratory, but does not advertise or ship wheel support through the supported library surface or CLI. The non-published `sealr-wheel-lab` crate implements the exact UTF-8 container profile, bounded artifact and plan evaluation, distinct research identities, hostile regressions, and a pinned PyPA `installer` bridge. No wheel-specific rule or identity on this page is a supported public contract.
 
 The first consumer should force Sealr to prove its category: another tool receives one admitted representation and does not open the ZIP again. Python wheels are a strong target because wheel installation has archive semantics, package metadata, an internal content manifest, relocations, and target-dependent transformations.
 

@@ -8,7 +8,7 @@ Start with the [README](../README.md) for the published Alpha.6 boundary and a s
 |---|---|
 | [Usage](usage.md) | Current CLI behavior and examples |
 | [API contract](api.md) | Current Rust and JSON surface, plus clearly marked target notation |
-| [Current release notes](releases/v0.1.0-alpha.6.md) | Alpha.6 contents and limitations |
+| [Current release notes](releases/v0.1.0-alpha.7.md) | Alpha.7 contents and limitations |
 | [Release verification](release-verification.md) | Verify checksums, provenance, tag, and immutable release state |
 | [Distribution contract](distribution-contract.md) | Exact source-package scope, compatibility policy, and native archive floors |
 

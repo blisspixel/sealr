@@ -1,6 +1,6 @@
 # Bounded worker protocol v1
 
-Status: implemented as a non-published, zero-dependency codec in `sealr-worker-protocol`. The protocol is preparation for the Alpha.6 supervisor-worker boundary. It does not start a worker, transfer an operating-system handle, or provide process isolation by itself.
+Status: implemented as a non-published, zero-dependency codec in `sealr-worker-protocol`. It remains a transport foundation alongside the separate private semantic records used by the Alpha.6 supervisor-worker boundary. It does not start a worker, transfer an operating-system handle, or provide process isolation by itself.
 
 The [private semantic-record implementation](semantic-record.md) is a separate internal format with independent `SEALRSEM` magic. The supported Linux supervisor now uses semantic-record version 2 to carry verified ZIP creator-system and external-attribute evidence. This does not revise or reinterpret the authenticated `SLRAB001` worker protocol v1. Deterministic tests reject cross-decoding between semantic planning and completion records; protocol v1 golden and fuzz surfaces remain unchanged.
 
@@ -119,7 +119,7 @@ Version 1 contains no range list. If a later worker needs ranges, that protocol 
 
 ### Deliberate version 1 limits
 
-Version 1 is a non-shipping transport foundation, not the final Alpha.6 semantic contract. Its single status is a worker-operation status. It does not preserve the public interpretation, admission, verification, effect, and lifecycle axes independently, and failed or rejected results intentionally discard the manifest and content root. It therefore cannot represent every admitted-but-effect-failed outcome.
+Version 1 is a non-shipping transport foundation, not the supported supervisor's semantic contract. Its single status is a worker-operation status. It does not preserve the public interpretation, admission, verification, effect, and lifecycle axes independently, and failed or rejected results intentionally discard the manifest and content root. It therefore cannot represent every admitted-but-effect-failed outcome.
 
 The result carries a reduced staged-member manifest, findings, and preview roots. It does not carry a complete `ArchiveIR`, byte ranges, compressed sizes, methods, CRC32 values, extra-field dispositions, normalization actions, snapshot ownership, or an independently checkable proof that the manifest is the unique meaning of the snapshot. It therefore cannot construct the public `Outcome`, `ArchiveIR`, or `VerifiedArchive`. A supervisor can validate the frame and, after proving that all writers are quiescent, compare a stage with the returned claim. Protocol v1 alone does not let it independently verify archive semantics or preserve bounded later member reads.
 

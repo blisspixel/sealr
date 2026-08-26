@@ -339,7 +339,7 @@ dependencies = [
 
 [[package]]
 name = "sealr"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 dependencies = [
  "cap-fs-ext",
  "cap-std",
@@ -367,7 +367,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-worker-protocol"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 
 [[package]]
 name = "serde"

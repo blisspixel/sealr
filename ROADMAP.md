@@ -120,6 +120,7 @@ The repository now has:
 - protected `main` requiring pull requests, linear history, resolved conversations, and one stable `Required CI` check that fails unless all six platform, quality, corpus, supply-chain, and real-kernel gates pass;
 - an executable [distribution contract](docs/distribution-contract.md) that allowlists only the `sealr` crate, pins its exact package contents and Rust 1.98 contract, and tests native archives on explicit Ubuntu 24.04, macOS 15 arm64, and Windows Server 2022 floors rather than mutable latest labels;
 - the `v0.1.0-alpha.6` reduced-authority Linux preview line, built from protected `main` through all six underlying required-CI gates, exact-commit on-demand fuzz evidence, and the release workflow, with immutable releases enabled.
+- the `v0.1.0-alpha.7` wheel-research and distribution-contract preview line, with an exact repository-only UTF-8 wheel profile, bounded consumer evaluator, hostile corpus, non-reopening PyPA installer bridge, one allowlisted source crate, exact package contents, and pinned native build floors.
 
 This is the released Alpha.6 baseline. It is incomplete and is not a production security boundary. The explicit x86_64 Linux worker reduces authority for payload verification, stage writes, and later non-retained reads, while structural planning and final publication remain supervisor-owned. Default APIs remain in process, caller byte inputs remain memory-backed by definition, and broader native, kernel, resource, and semantic history continues as assurance work.
 

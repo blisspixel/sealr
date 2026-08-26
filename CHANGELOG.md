@@ -8,6 +8,27 @@ The project is in initial development. Compatibility may change between preview 
 
 No unreleased changes.
 
+## [0.1.0-alpha.7] - 2026-08-26
+
+### Added
+
+- Added the exact repository-only `sealr.profile.zip.wheel-utf8.v1` interpretation. It closes all 65,536 flag combinations and extra-field identifiers, permits only Store and Deflate, requires strict UTF-8 and NFC names, rejects dot-component normalization, and detects lowercase-plus-NFC collisions without widening the released default profiles.
+- Added a pure bounded wheel consumer laboratory. It validates the outer filename, `.dist-info` ownership, `WHEEL`, Core Metadata, `RECORD`, `.data` relocation, generated targets, entry points, executable disposition, and resource ceilings into explicit admitted, denied, unsupported, or infrastructure-failure outcomes.
+- Added domain-separated source, archive-tree, wheel-artifact, scheme-relative install-plan, and target-realization identities. Immutable central-directory creator-system and external-attribute facts reach consumers without changing `sealrTreeV1`.
+- Added thirteen minimized hostile wheel fixtures and a predecessor-bound semantic inventory over the exact 20-wheel pilot. The inventory records producer, metadata, tag, creator-system, executable, relocation, Unicode, and rejection-cluster evidence without treating the sample as an ecosystem prevalence estimate.
+- Added a hash-pinned PyPA `installer` 0.7.0 bridge. Rust stages only bounded `VerifiedArchive` member blobs and a closed descriptor; the test deletes the source wheel before Python starts, installs an audit hook before importing the installer, rejects every wheel open, and compares the external install actions with Sealr's plan.
+- Added an executable distribution contract. Only the `sealr` library crate is allowlisted for crates.io, required CI pins its exact 47-file package, README, Apache-2.0 license, Rust 1.98 MSRV, and extracted downstream build, and every other workspace crate remains non-publishable.
+- Added exact native archive floors for Ubuntu 24.04 x86_64 with glibc 2.39, macOS 15 arm64 with Darwin 24 and deployment target 15.0, and Windows Server 2022 x64 build 20348. CI and release jobs assert the host contract before tests and archive packaging.
+
+### Changed
+
+- Pinned required and release workflows to `ubuntu-24.04`, `macos-15`, and `windows-2022` instead of mutable latest labels, and synchronized release validation, publisher job names, target license closures, and resource-evidence runners.
+- Advanced the private semantic-record wire to version 2 for source-bound ZIP creator and external-attribute facts. The immutable Alpha.6 semantic-shadow files retain their original bytes and hashes; live tests compare all stable fields and separately pin the current wire frame.
+
+### Security
+
+- Wheel research remains fail closed and non-shipping. The implementation accepts no source reopen, alternate ZIP parser, unbounded metadata read, unknown scheme, undeclared `RECORD` member, duplicate security-significant header, or unsupported metadata version as an admitted install plan.
+
 ## [0.1.0-alpha.6] - 2026-08-26
 
 ### Added
@@ -225,7 +246,8 @@ First public development preview of the ZIP boundary.
 
 This preview is not a production-ready security boundary and has not received an external security audit. See the security limitations in the README and the reporting policy in `SECURITY.md` before evaluating it.
 
-[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.6...HEAD
+[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.7...HEAD
+[0.1.0-alpha.7]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.6...v0.1.0-alpha.7
 [0.1.0-alpha.6]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.5...v0.1.0-alpha.6
 [0.1.0-alpha.5]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.4...v0.1.0-alpha.5
 [0.1.0-alpha.4]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.3...v0.1.0-alpha.4

@@ -13,9 +13,9 @@ Untrusted archive x policy
 
 The longer-term aim is an archive-to-tree admission boundary whose decision and evidence can be reused by other systems. The current release is a small step toward that aim, not proof that the category or design is finished. Usefulness is not “more unzip.” It is: same bytes and policy produce one tree or no tree on Linux, macOS, and Windows, and the next tool consumes that tree instead of opening the ZIP again. Until a dependent does that, a receipt is just a receipt. The [usefulness test](docs/usefulness.md) is the quality bar.
 
-> Status: `v0.1.0-alpha.6` is the sixth development preview of the ZIP boundary. It is useful for evaluation, development, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. The limitations below are security boundaries, not fine print.
+> Status: `v0.1.0-alpha.7` is the seventh development preview of the ZIP boundary. It is useful for evaluation, development, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. The limitations below are security boundaries, not fine print.
 
-> Release contents: Alpha.6 adds explicit fail-closed Linux supervision, an authenticated packaged helper, source-derived result replay, supervisor-owned publication, worker-backed verified reads, real-kernel restriction-floor evidence, and machine-checked assurance promotion. The [Alpha.6 release notes](docs/releases/v0.1.0-alpha.6.md) define the shipped delta and remaining limitations.
+> Release contents: Alpha.7 adds the exact repository-only wheel UTF-8 profile and bounded consumer laboratory, hostile wheel regressions, distinct consumer identities, an external PyPA installer bridge that cannot reopen the source wheel, exact crate-publication checks, and pinned native archive floors. It preserves the Alpha.6 supervised Linux boundary and does not advertise supported wheel admission. The [Alpha.7 release notes](docs/releases/v0.1.0-alpha.7.md) define the shipped delta and remaining limitations.
 
 ## Why this exists
 
@@ -102,7 +102,7 @@ The repository pins Rust 1.98.0 in `rust-toolchain.toml`; rustup selects it auto
 
 The crate's current minimum supported Rust version is 1.98, declared through `rust-version`. CI selects exactly 1.98.0. Preview releases may raise this minimum only as a documented compatibility change; patch releases within a stable 1.x line will not.
 
-Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.6` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.6). Runnable checksum and provenance commands are in [release verification](docs/release-verification.md). To build from source:
+Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.7` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.7). Runnable checksum and provenance commands are in [release verification](docs/release-verification.md). To build from source:
 
 ```text
 git clone https://github.com/blisspixel/sealr.git

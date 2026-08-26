@@ -196,7 +196,7 @@ This is a requested Rust-heap measurement of `decode_completion` against accepte
 
 ## Remaining gates
 
-The first bounded matrix expansion, shared owning planning seam, public worker-backed capability, supervised materialization, and manifest-backed CLI, wheel-laboratory, and extracted-package-consumer activation are complete. Continued parity growth beyond these named fixtures remains assurance work. Alpha.6 release readiness still requires accumulated clean scheduled fuzz and main-branch history, with every reproducible failure promoted to a deterministic regression.
+The first bounded matrix expansion, shared owning planning seam, public worker-backed capability, supervised materialization, and manifest-backed CLI, wheel-laboratory, and extracted-package-consumer activation shipped in Alpha.6. Continued parity growth, clean scheduled fuzz history, and main-branch assurance history remain active work, with every reproducible failure promoted to a deterministic regression.
 
 The isolated bridge has landed as Linux-only, repository-only inspect, read, and materialize evidence. Normal cases execute a distinct child-only helper only after exact-byte authentication, a private hello, running executable identity proof, and pidfd binding; deliberate fault cases retain the lab executable. Shared authenticated worker protocol primitives now place the frame codec, raw descriptor transport, sealed-blob envelope, and helper-artifact authenticator in the library, with the helper tool using a hidden bridge to the same implementation. The [fixed helper package](helper-packaging.md) separately binds release placement, artifact identity, production-only license closure, and extracted-helper conformance.
 

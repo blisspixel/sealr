@@ -474,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "sealr"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 dependencies = [
  "cap-fs-ext",
  "cap-std",
@@ -494,7 +494,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-cli"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 dependencies = [
  "clap",
  "sealr",
@@ -504,7 +504,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-identity-verifier"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 dependencies = [
  "serde",
  "serde_json",
@@ -513,7 +513,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-materialization-lifecycle"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 dependencies = [
  "getrandom",
  "sealr",
@@ -522,7 +522,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-release-license-closure"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 dependencies = [
  "clap",
  "sealr",
@@ -533,7 +533,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-wheel-lab"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 dependencies = [
  "sealr",
  "serde",
@@ -545,7 +545,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-worker-bootstrap-lab"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 dependencies = [
  "getrandom",
  "landlock",
@@ -559,7 +559,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-worker-protocol"
-version = "0.1.0-alpha.6"
+version = "0.1.0-alpha.7"
 
 [[package]]
 name = "serde"

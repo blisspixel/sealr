@@ -79,7 +79,7 @@ Member lookup consumes the canonical paths in the existing `ArchiveIR`. It MUST 
 
 A worker control frame MUST name capabilities rather than contain archive bytes. Frame length, counts, strings, manifests, and findings are bounded before allocation or effect. The received capability count MUST equal the declared count; inspect receives only a source, materialize receives distinct source and stage slots, and results receive none. A result MUST match the supervisor's nonzero operation ID, use a coherent status and root state, and provide a strictly ordered canonical manifest. Reserved fields, unknown variants, trailing bytes, and absent fields with nonzero storage fail closed.
 
-The [protocol v1 codec](worker-protocol.md) implements these byte-level rules. It does not establish that a future transport passed the right handles or that their rights are restricted. Handle-right validation, inherited-descriptor closure, worker confinement, supervisor audit, and lifecycle control remain Alpha.6 obligations.
+The [protocol v1 codec](worker-protocol.md) implements these byte-level rules. It does not establish that a transport passed the right handles or that their rights are restricted. The separate Alpha.6 Linux supervisor implements handle-right validation, inherited-descriptor closure, worker confinement, supervisor audit, and lifecycle control for its supported route; protocol v1 alone proves none of them.
 
 ---
 

@@ -10,7 +10,7 @@ publish = false
 
 [dependencies]
 clap.workspace = true
-sealr = { version = "=0.1.0-alpha.6", path = "../../crates/sealr" }
-sealr-worker-bootstrap-lab = { version = "=0.1.0-alpha.6", path = "../worker-bootstrap", default-features = false }
+sealr = { version = "=0.1.0-alpha.7", path = "../../crates/sealr" }
+sealr-worker-bootstrap-lab = { version = "=0.1.0-alpha.7", path = "../worker-bootstrap", default-features = false }
 serde.workspace = true
 serde_json.workspace = true
