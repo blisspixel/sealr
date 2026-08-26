@@ -13,6 +13,7 @@ pub(crate) const FLAG_NO_NEW_PRIVS: u8 = 1 << 1;
 pub(crate) const FLAG_CLOSE_RANGE: u8 = 1 << 2;
 pub(crate) const FLAG_LANDLOCK_ENFORCED: u8 = 1 << 3;
 pub(crate) const FLAG_SECCOMP_ENFORCED: u8 = 1 << 4;
+pub(crate) const FLAG_MEMBER_READ: u8 = 1 << 5;
 pub(crate) const READY_FLAGS: u8 =
     FLAG_NO_NEW_PRIVS | FLAG_CLOSE_RANGE | FLAG_LANDLOCK_ENFORCED | FLAG_SECCOMP_ENFORCED;
 pub(crate) const PROTOCOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);

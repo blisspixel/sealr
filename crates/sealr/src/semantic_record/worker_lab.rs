@@ -1,6 +1,7 @@
 //! Feature-gated bridge for the repository-only Linux worker lab.
 
 use std::fs::File;
+use std::io::{BufReader, Write};
 
 use super::{
     decode_completion, decode_planning, encode_planning, parse_hex_32, InvocationBinding,
@@ -11,7 +12,9 @@ use crate::ir::{MemberVerification, ZipInterpretationProfile};
 use crate::outcome::VerificationStatus;
 use crate::policy::Policy;
 use crate::snapshot::SourceSnapshot;
+use crate::verification::{verify_payload, PayloadSpec};
 use crate::verified::RetentionPlan;
+use crate::zip as zip_ranges;
 
 /// A canonical planning record bound to the exact worker source descriptor.
 #[derive(Debug)]
@@ -24,6 +27,15 @@ pub struct ValidatedInspectOperation {
 #[derive(Debug)]
 pub struct ExecutedInspectOperation {
     executed: super::executor::ExecutedInspectPlan<'static>,
+}
+
+/// One exact, caller-bounded non-retained member read validated against a
+/// supervisor-authorized plan and completion.
+#[derive(Debug)]
+pub struct ValidatedInspectMemberRead {
+    planning: super::ValidatedPlanningRecord,
+    snapshot: SourceSnapshot<'static>,
+    request: super::member_read::MemberReadRequest,
 }
 
 /// Bounded semantic result observed by the repository worker lab.
@@ -53,6 +65,43 @@ pub struct InspectRetentionEvidence {
     pub retained_members: u64,
     /// Aggregate logical bytes in the immutable retention bundle.
     pub retained_bytes: u64,
+}
+
+/// Exact evidence for one isolated member-read result.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InspectMemberReadEvidence {
+    /// Source-order member index bound into the canonical request.
+    pub member_index: u64,
+    /// Exact verified logical bytes returned by the isolated worker.
+    pub actual_bytes: u64,
+    /// CRC32 recomputed while the selected planned range was decoded.
+    pub actual_crc: u32,
+}
+
+/// Borrowed supervisor-owned authority needed to bind one isolated read.
+#[derive(Clone, Copy, Debug)]
+pub struct InspectMemberReadAuthority<'a> {
+    operation_id: [u8; 16],
+    planning: &'a [u8],
+    completion: &'a [u8],
+    retention: &'a InspectRetentionRequest,
+}
+
+impl<'a> InspectMemberReadAuthority<'a> {
+    /// Bind an already authorized plan and completion for one-shot reads.
+    pub fn new(
+        operation_id: [u8; 16],
+        planning: &'a [u8],
+        completion: &'a [u8],
+        retention: &'a InspectRetentionRequest,
+    ) -> Self {
+        Self {
+            operation_id,
+            planning,
+            completion,
+            retention,
+        }
+    }
 }
 
 impl InspectRetentionRequest {
@@ -173,6 +222,132 @@ pub fn validate_inspect_retained_content(
     let evidence = super::retained_content::validate(&planning, completion, retained_content)
         .map_err(debug_error)?;
     Ok(retention_evidence(evidence))
+}
+
+/// Create one canonical request for a non-retained read from an already
+/// accepted plan and completion.
+pub fn create_inspect_member_read_request(
+    source: &[u8],
+    authority: InspectMemberReadAuthority<'_>,
+    read_operation_id: [u8; 16],
+    canonical_path: &str,
+    max_bytes: u64,
+) -> Result<Vec<u8>, String> {
+    let policy = Policy::default_v1();
+    let context = context(&policy)?;
+    let snapshot = SourceSnapshot::borrowed(Some("worker-lab.zip".into()), source);
+    let binding = inspect_binding(
+        &snapshot,
+        &context,
+        authority.operation_id,
+        Some(authority.retention),
+    )?;
+    let planning = decode_planning(authority.planning, &binding, &snapshot).map_err(debug_error)?;
+    super::member_read::encode(
+        &planning,
+        authority.completion,
+        read_operation_id,
+        canonical_path,
+        max_bytes,
+    )
+    .map_err(debug_error)
+}
+
+/// Bind a canonical one-shot read request to the exact source descriptor,
+/// accepted plan, and supervisor-authorized completion.
+pub fn validate_inspect_member_read(
+    source: File,
+    source_len: u64,
+    authority: InspectMemberReadAuthority<'_>,
+    request: &[u8],
+    read_operation_id: [u8; 16],
+) -> Result<ValidatedInspectMemberRead, String> {
+    let policy = Policy::default_v1();
+    let context = context(&policy)?;
+    let snapshot = SourceSnapshot::worker_lab_from_file(
+        source,
+        Some("worker-lab-read.zip".into()),
+        source_len,
+        context.controls().budget.max_archive_bytes,
+    )
+    .map_err(debug_error)?;
+    let binding = inspect_binding(
+        &snapshot,
+        &context,
+        authority.operation_id,
+        Some(authority.retention),
+    )?;
+    let planning = decode_planning(authority.planning, &binding, &snapshot).map_err(debug_error)?;
+    let request =
+        super::member_read::decode(&planning, authority.completion, request, read_operation_id)
+            .map_err(debug_error)?;
+    Ok(ValidatedInspectMemberRead {
+        planning,
+        snapshot,
+        request,
+    })
+}
+
+/// Validate buffered worker output against the exact request and authorized
+/// completion without executing a codec or structural parser.
+pub fn validate_inspect_member_read_result(
+    source: &[u8],
+    authority: InspectMemberReadAuthority<'_>,
+    request: &[u8],
+    read_operation_id: [u8; 16],
+    bytes: &[u8],
+) -> Result<InspectMemberReadEvidence, String> {
+    let policy = Policy::default_v1();
+    let context = context(&policy)?;
+    let snapshot = SourceSnapshot::borrowed(Some("worker-lab.zip".into()), source);
+    let binding = inspect_binding(
+        &snapshot,
+        &context,
+        authority.operation_id,
+        Some(authority.retention),
+    )?;
+    let planning = decode_planning(authority.planning, &binding, &snapshot).map_err(debug_error)?;
+    let request = super::member_read::validate_result(
+        &planning,
+        authority.completion,
+        request,
+        read_operation_id,
+        bytes,
+    )
+    .map_err(debug_error)?;
+    Ok(InspectMemberReadEvidence {
+        member_index: request.member_index as u64,
+        actual_bytes: request.expected_size,
+        actual_crc: request.expected_crc,
+    })
+}
+
+/// Preflight one canonical member-read request against local authorized
+/// evidence before allocation or worker spawn.
+pub fn validate_inspect_member_read_request(
+    source: &[u8],
+    authority: InspectMemberReadAuthority<'_>,
+    request: &[u8],
+    read_operation_id: [u8; 16],
+) -> Result<InspectMemberReadEvidence, String> {
+    let policy = Policy::default_v1();
+    let context = context(&policy)?;
+    let snapshot = SourceSnapshot::borrowed(Some("worker-lab.zip".into()), source);
+    let binding = inspect_binding(
+        &snapshot,
+        &context,
+        authority.operation_id,
+        Some(authority.retention),
+    )?;
+    let planning = decode_planning(authority.planning, &binding, &snapshot).map_err(debug_error)?;
+    let request =
+        super::member_read::decode(&planning, authority.completion, request, read_operation_id)
+            .map_err(debug_error)?;
+    Ok(InspectMemberReadEvidence {
+        member_index: request.member_index as u64,
+        actual_bytes: request.expected_size,
+        actual_crc: request.expected_crc,
+    })
 }
 
 /// Validate a worker completion as a canonical, plan-bound proposal. This does
@@ -376,6 +551,50 @@ impl ExecutedInspectOperation {
         )
         .map_err(debug_error)?;
         Ok(retention_evidence(evidence))
+    }
+}
+
+impl ValidatedInspectMemberRead {
+    /// Decode only the selected planned payload range into the supplied
+    /// backpressured output and recheck complete authorized content evidence.
+    pub fn execute_into(
+        self,
+        output: &mut impl Write,
+    ) -> Result<InspectMemberReadEvidence, String> {
+        let planned = self
+            .planning
+            .record
+            .ir
+            .as_ref()
+            .and_then(|ir| ir.members().get(self.request.member_index))
+            .ok_or_else(|| "validated member-read index is absent from its plan".to_owned())?;
+        if planned.canonical_path != self.request.path {
+            return Err("validated member-read path drifted from its plan".to_owned());
+        }
+        let payload =
+            zip_ranges::planned_payload_reader(&self.snapshot, planned).map_err(debug_error)?;
+        let payload = BufReader::with_capacity(64 * 1024, payload);
+        let (actual, crc, sha256) = verify_payload(
+            payload,
+            PayloadSpec::from_ir(planned),
+            self.planning.record.binding.budget,
+            self.request.expected_size,
+            output,
+        )
+        .map_err(debug_error)?;
+        if actual != self.request.expected_size
+            || crc != self.request.expected_crc
+            || sha256 != self.request.expected_sha256
+        {
+            return Err(
+                "isolated member read disagrees with authorized completion evidence".to_owned(),
+            );
+        }
+        Ok(InspectMemberReadEvidence {
+            member_index: self.request.member_index as u64,
+            actual_bytes: actual,
+            actual_crc: crc,
+        })
     }
 }
 
@@ -583,6 +802,149 @@ mod tests {
             )
             .is_err());
         }
+        drop(executed);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn member_read_request_executes_one_planned_range_and_validates_output() {
+        let source = source();
+        let operation_id = [0x71; 16];
+        let read_operation_id = [0x72; 16];
+        let retention = InspectRetentionRequest::new(0, 0);
+        let planning = plan_inspect_retaining(&source, operation_id, &retention).unwrap();
+        let (file, path) = source_file(&source);
+        let executed = validate_inspect_retaining(
+            file,
+            source.len() as u64,
+            operation_id,
+            &planning,
+            &retention,
+        )
+        .unwrap()
+        .execute()
+        .unwrap();
+        let authority = InspectMemberReadAuthority::new(
+            operation_id,
+            &planning,
+            executed.completion(),
+            &retention,
+        );
+        let request = create_inspect_member_read_request(
+            &source,
+            authority,
+            read_operation_id,
+            "planned.txt",
+            b"planned payload".len() as u64,
+        )
+        .unwrap();
+
+        crate::zip::reset_parse_calls();
+        crate::verification::reset_verify_payload_calls();
+        let read = validate_inspect_member_read(
+            File::open(&path).unwrap(),
+            source.len() as u64,
+            authority,
+            &request,
+            read_operation_id,
+        )
+        .unwrap();
+        let mut bytes = Vec::new();
+        let evidence = read.execute_into(&mut bytes).unwrap();
+        assert_eq!(bytes, b"planned payload");
+        assert_eq!(evidence.member_index, 0);
+        assert_eq!(evidence.actual_bytes, bytes.len() as u64);
+        assert_eq!(evidence.actual_crc, crc32fast::hash(&bytes));
+        assert_eq!(crate::zip::parse_calls(), 0);
+        assert_eq!(crate::verification::verify_payload_calls(), 1);
+        assert_eq!(
+            validate_inspect_member_read_result(
+                &source,
+                authority,
+                &request,
+                read_operation_id,
+                &bytes,
+            )
+            .unwrap(),
+            evidence
+        );
+        assert!(create_inspect_member_read_request(
+            &source,
+            authority,
+            [0x73; 16],
+            "planned.txt",
+            bytes.len() as u64 - 1,
+        )
+        .is_err());
+        assert!(create_inspect_member_read_request(
+            &source,
+            authority,
+            [0x74; 16],
+            "missing.txt",
+            64,
+        )
+        .is_err());
+        assert!(create_inspect_member_read_request(
+            &source,
+            authority,
+            [0x75; 16],
+            "planned.txt",
+            super::super::member_read::MAX_ISOLATED_READ_BYTES + 1,
+        )
+        .is_err());
+        let mut mutated = bytes.clone();
+        mutated[0] ^= 1;
+        assert!(validate_inspect_member_read_result(
+            &source,
+            authority,
+            &request,
+            read_operation_id,
+            &mutated,
+        )
+        .is_err());
+
+        let policy = Policy::default_v1();
+        let context = context(&policy).unwrap();
+        let snapshot = SourceSnapshot::borrowed(Some("worker-lab.zip".into()), &source);
+        let binding = inspect_binding(&snapshot, &context, operation_id, Some(&retention)).unwrap();
+        let decoded = decode_planning(&planning, &binding, &snapshot).unwrap();
+        let mut wrong_read_operation = request.clone();
+        wrong_read_operation[16] ^= 1;
+        assert!(super::super::member_read::decode(
+            &decoded,
+            executed.completion(),
+            &wrong_read_operation,
+            read_operation_id,
+        )
+        .is_err());
+        let mut wrong_completion = request.clone();
+        wrong_completion[16 + 16 + 16 + 32 + 32] ^= 1;
+        assert!(super::super::member_read::decode(
+            &decoded,
+            executed.completion(),
+            &wrong_completion,
+            read_operation_id,
+        )
+        .is_err());
+
+        for length in 0..request.len() {
+            assert!(super::super::member_read::decode(
+                &decoded,
+                executed.completion(),
+                &request[..length],
+                read_operation_id,
+            )
+            .is_err());
+        }
+        let mut trailing = request.clone();
+        trailing.push(0);
+        assert!(super::super::member_read::decode(
+            &decoded,
+            executed.completion(),
+            &trailing,
+            read_operation_id,
+        )
+        .is_err());
         drop(executed);
         fs::remove_file(path).unwrap();
     }

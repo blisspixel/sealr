@@ -3,7 +3,7 @@ use crate::frame::{Frame, Kind};
 use crate::linux::{
     close_inherited_authority, configure_timeout, receive_packet, send_packet,
     ERROR_AUTHORITY_CLOSE, ERROR_DESCRIPTOR, ERROR_PROBE, ERROR_PROTOCOL, ERROR_RESTRICTION,
-    FLAG_STAGE, READY_FLAGS,
+    FLAG_MEMBER_READ, FLAG_STAGE, READY_FLAGS,
 };
 use crate::sealed::{self, BlobRole};
 use crate::seccomp;
@@ -26,6 +26,7 @@ const PHASE_SOURCE: u64 = 4;
 const PHASE_PROBE: u64 = 5;
 const PHASE_EXIT: u64 = 6;
 const PHASE_PLAN: u64 = 7;
+const PHASE_MEMBER_READ: u64 = 8;
 const SOURCE_RETAINED_BYTES: u64 = 30;
 
 pub(crate) fn entry(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>> {
@@ -95,10 +96,17 @@ fn run(
     mode: ChildMode,
 ) -> Result<(), WorkerFailure> {
     require_kind(&bootstrap, Kind::Bootstrap, PHASE_BOOTSTRAP)?;
-    if bootstrap.flags & !FLAG_STAGE != 0 {
+    if bootstrap.flags & !(FLAG_STAGE | FLAG_MEMBER_READ) != 0 {
         return Err(protocol(PHASE_BOOTSTRAP, "bootstrap flags are invalid"));
     }
-    let has_stage = bootstrap.flags == FLAG_STAGE;
+    if bootstrap.flags & FLAG_STAGE != 0 && bootstrap.flags & FLAG_MEMBER_READ != 0 {
+        return Err(protocol(
+            PHASE_BOOTSTRAP,
+            "member-read worker cannot receive stage authority",
+        ));
+    }
+    let has_stage = bootstrap.flags & FLAG_STAGE != 0;
+    let member_read = bootstrap.flags & FLAG_MEMBER_READ != 0;
     let expected = usize::from(has_stage);
     if descriptors.len() != expected {
         return Err(descriptor(PHASE_STAGE, "stage descriptor count is invalid"));
@@ -179,7 +187,7 @@ fn run(
 
     let operation_id = bootstrap.operation_id;
     let mut ready = Frame::new(Kind::RestrictedReady, operation_id);
-    ready.flags = READY_FLAGS | (bootstrap.flags & FLAG_STAGE);
+    ready.flags = READY_FLAGS | (bootstrap.flags & (FLAG_STAGE | FLAG_MEMBER_READ));
     ready.values = [
         effective_abi,
         handled.bits(),
@@ -229,7 +237,24 @@ fn run(
         .map_err(|error| protocol(PHASE_PLAN, format!("receiving sealed plan failed: {error}")))?;
     mode.exit_at(FaultPoint::PlanReceive);
     require_kind_and_operation(&plan_frame, Kind::Plan, operation_id, PHASE_PLAN)?;
-    if plan_frame.flags != 0 || plan_frame.values[0] == 0 || plan_frame.values[1..] != [0; 3] {
+    let original_operation_id = if member_read {
+        let mut original = [0_u8; 16];
+        original[..8].copy_from_slice(&plan_frame.values[1].to_le_bytes());
+        original[8..].copy_from_slice(&plan_frame.values[2].to_le_bytes());
+        if original == [0; 16] || plan_frame.values[3] != 0 {
+            return Err(protocol(
+                PHASE_PLAN,
+                "member-read plan binding fields are invalid",
+            ));
+        }
+        original
+    } else {
+        if plan_frame.values[1..] != [0; 3] {
+            return Err(protocol(PHASE_PLAN, "sealed plan frame fields are invalid"));
+        }
+        operation_id
+    };
+    if plan_frame.flags != 0 || plan_frame.values[0] == 0 {
         return Err(protocol(PHASE_PLAN, "sealed plan frame fields are invalid"));
     }
     let plan_descriptor = plan_descriptors
@@ -242,16 +267,38 @@ fn run(
                 format!("validating sealed plan failed: {error}"),
             )
         })?;
-    let retention = crate::semantic_retention_request().map_err(|error| {
+    let retention = if member_read {
+        crate::semantic_read_retention_request()
+    } else {
+        crate::semantic_retention_request()
+    }
+    .map_err(|error| {
         protocol(
             PHASE_PLAN,
             format!("constructing semantic retention request failed: {error}"),
         )
     })?;
+    let mut source = Some(File::from(source));
+    let validation_source = if member_read {
+        source
+            .as_ref()
+            .expect("member-read source is retained")
+            .try_clone()
+            .map_err(|error| {
+                descriptor(
+                    PHASE_SOURCE,
+                    format!("cloning exact source for plan validation failed: {error}"),
+                )
+            })?
+    } else {
+        source
+            .take()
+            .expect("ordinary execution consumes its source")
+    };
     let validated_operation = sealr::__worker_lab::validate_inspect_retaining(
-        File::from(source),
+        validation_source,
         source_frame.values[0],
-        operation_id,
+        original_operation_id,
         plan.bytes(),
         &retention,
     )
@@ -265,12 +312,21 @@ fn run(
     mode.stall_at(StallPoint::PlanAcceptance);
 
     let mut plan_accepted = Frame::new(Kind::PlanAccepted, operation_id);
-    plan_accepted.values = [
-        plan_frame.values[0],
-        plan_descriptor.as_raw_fd() as u64,
-        0,
-        0,
-    ];
+    plan_accepted.values = if member_read {
+        [
+            plan_frame.values[0],
+            plan_descriptor.as_raw_fd() as u64,
+            plan_frame.values[1],
+            plan_frame.values[2],
+        ]
+    } else {
+        [
+            plan_frame.values[0],
+            plan_descriptor.as_raw_fd() as u64,
+            0,
+            0,
+        ]
+    };
     send_packet(control, plan_accepted, &[]).map_err(|error| {
         protocol(
             PHASE_PLAN,
@@ -278,6 +334,20 @@ fn run(
         )
     })?;
     await_observation_checkpoint(control, mode, FaultPoint::PlanAccepted, operation_id)?;
+
+    if member_read {
+        drop(validated_operation);
+        return run_member_read(
+            control,
+            mode,
+            operation_id,
+            original_operation_id,
+            source.take().expect("member-read source is retained"),
+            source_frame.values[0],
+            plan.bytes(),
+            &retention,
+        );
+    }
 
     mode.stall_at(StallPoint::ProceedReceive);
     let (proceed, descriptors) = receive_packet(control, Some(0))
@@ -424,6 +494,199 @@ fn run(
     drop(executed_operation);
     mode.exit_at(FaultPoint::ExitAck);
     mode.stall_at(StallPoint::ExitCompletion);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_member_read(
+    control: rustix::fd::BorrowedFd<'_>,
+    mode: ChildMode,
+    read_operation_id: [u8; 16],
+    original_operation_id: [u8; 16],
+    source: File,
+    source_len: u64,
+    planning: &[u8],
+    retention: &sealr::__worker_lab::InspectRetentionRequest,
+) -> Result<(), WorkerFailure> {
+    let (read_frame, mut descriptors) = receive_packet(control, Some(2)).map_err(|error| {
+        protocol(
+            PHASE_MEMBER_READ,
+            format!("receiving member-read authority failed: {error}"),
+        )
+    })?;
+    require_kind_and_operation(
+        &read_frame,
+        Kind::MemberRead,
+        read_operation_id,
+        PHASE_MEMBER_READ,
+    )?;
+    if read_frame.flags != 0
+        || read_frame.values[0] == 0
+        || read_frame.values[1] == 0
+        || read_frame.values[2..] != [0; 2]
+    {
+        return Err(protocol(
+            PHASE_MEMBER_READ,
+            "member-read authority fields are invalid",
+        ));
+    }
+    let request_descriptor = descriptors
+        .pop()
+        .expect("member-read request descriptor count was validated");
+    let completion_descriptor = descriptors
+        .pop()
+        .expect("completion descriptor count was validated");
+    let completion = sealed::validate(
+        &completion_descriptor,
+        BlobRole::Completion,
+        read_frame.values[0],
+    )
+    .map_err(|error| {
+        protocol(
+            PHASE_MEMBER_READ,
+            format!("validating member-read completion failed: {error}"),
+        )
+    })?;
+    let request = sealed::validate(
+        &request_descriptor,
+        BlobRole::MemberReadRequest,
+        read_frame.values[1],
+    )
+    .map_err(|error| {
+        protocol(
+            PHASE_MEMBER_READ,
+            format!("validating member-read request failed: {error}"),
+        )
+    })?;
+    let authority = sealr::__worker_lab::InspectMemberReadAuthority::new(
+        original_operation_id,
+        planning,
+        completion.bytes(),
+        retention,
+    );
+    let read = sealr::__worker_lab::validate_inspect_member_read(
+        source,
+        source_len,
+        authority,
+        request.bytes(),
+        read_operation_id,
+    )
+    .map_err(|error| {
+        protocol(
+            PHASE_MEMBER_READ,
+            format!("validating member-read semantics failed: {error}"),
+        )
+    })?;
+    let mut accepted = Frame::new(Kind::MemberReadAccepted, read_operation_id);
+    accepted.values = [
+        read_frame.values[0],
+        completion_descriptor.as_raw_fd() as u64,
+        read_frame.values[1],
+        request_descriptor.as_raw_fd() as u64,
+    ];
+    send_packet(control, accepted, &[]).map_err(|error| {
+        protocol(
+            PHASE_MEMBER_READ,
+            format!("sending member-read acceptance failed: {error}"),
+        )
+    })?;
+
+    let (proceed, mut output_descriptors) = receive_packet(control, Some(1)).map_err(|error| {
+        protocol(
+            PHASE_MEMBER_READ,
+            format!("receiving member-read output authority failed: {error}"),
+        )
+    })?;
+    require_kind_and_operation(
+        &proceed,
+        Kind::Proceed,
+        read_operation_id,
+        PHASE_MEMBER_READ,
+    )?;
+    if proceed.flags != 0 || proceed.values[1..] != [0; 3] {
+        return Err(protocol(
+            PHASE_MEMBER_READ,
+            "member-read proceed fields are invalid",
+        ));
+    }
+    let output = output_descriptors
+        .pop()
+        .expect("member-read output descriptor count was validated");
+    validate_output_pipe(&output)?;
+    mode.exit_at(FaultPoint::Proceed);
+    mode.stall_at(StallPoint::ProbeExecution);
+    let mut output = File::from(output);
+    let evidence = read.execute_into(&mut output).map_err(|error| {
+        protocol(
+            PHASE_MEMBER_READ,
+            format!("executing member read failed: {error}"),
+        )
+    })?;
+    drop(output);
+    if evidence.actual_bytes != proceed.values[0] {
+        return Err(protocol(
+            PHASE_MEMBER_READ,
+            "member-read output length differs from supervisor preflight",
+        ));
+    }
+    let mut result = Frame::new(Kind::MemberReadResult, read_operation_id);
+    result.values = [
+        evidence.member_index,
+        evidence.actual_bytes,
+        u64::from(evidence.actual_crc),
+        0,
+    ];
+    send_packet(control, result, &[]).map_err(|error| {
+        protocol(
+            PHASE_MEMBER_READ,
+            format!("sending member-read result failed: {error}"),
+        )
+    })?;
+    await_observation_checkpoint(control, mode, FaultPoint::Result, read_operation_id)?;
+
+    let (ack, descriptors) = receive_packet(control, Some(0)).map_err(|error| {
+        protocol(
+            PHASE_EXIT,
+            format!("receiving member-read exit ack failed: {error}"),
+        )
+    })?;
+    require_kind_and_operation(&ack, Kind::ExitAck, read_operation_id, PHASE_EXIT)?;
+    if ack.flags != 0 || ack.values != [0; 4] || !descriptors.is_empty() {
+        return Err(protocol(
+            PHASE_EXIT,
+            "member-read exit acknowledgement is not empty",
+        ));
+    }
+    mode.exit_at(FaultPoint::ExitAck);
+    mode.stall_at(StallPoint::ExitCompletion);
+    Ok(())
+}
+
+fn validate_output_pipe(output: &OwnedFd) -> Result<(), WorkerFailure> {
+    let stat = rustix::fs::fstat(output).map_err(|error| {
+        descriptor(
+            PHASE_MEMBER_READ,
+            format!("member-read output fstat failed: {error}"),
+        )
+    })?;
+    if stat.st_mode & libc::S_IFMT != libc::S_IFIFO {
+        return Err(descriptor(
+            PHASE_MEMBER_READ,
+            "member-read output is not a pipe",
+        ));
+    }
+    let flags = rustix::fs::fcntl_getfl(output).map_err(|error| {
+        descriptor(
+            PHASE_MEMBER_READ,
+            format!("member-read output flags failed: {error}"),
+        )
+    })?;
+    if flags & OFlags::RWMODE != OFlags::WRONLY || flags.contains(OFlags::PATH) {
+        return Err(descriptor(
+            PHASE_MEMBER_READ,
+            "member-read output is not a write-only pipe",
+        ));
+    }
     Ok(())
 }
 
