@@ -61,7 +61,7 @@ A complete record proves representation completeness and internal coherence. It 
 | Complete record plus every expanded member | Makes later reads local | Becomes the separately planned content-store problem and scales with expanded content |
 | Hybrid record, retained bundle, and isolated read backend | Best fit with current semantics | Helper packaging, backend lifetime, and public activation remain unresolved |
 
-Only the private semantic-record experiment is accepted now. Immutable original-pass retained-content transfer, the one-shot content-read backend, the reaped materializing-writer lifecycle, and an authenticated child-only helper for normal repository conformance have landed inside that lab. Fixed release packaging, materialization retention parity, public `VerifiedArchive` integration, and real-kernel setup failure remain explicit gates.
+Only the private semantic-record experiment is accepted now. Immutable inspect and materialize retained-content transfer, the one-shot content-read backend, the reaped materializing-writer lifecycle, an authenticated child-only helper for normal repository conformance, and fixed release packaging have landed. Public `VerifiedArchive` integration and real-kernel setup failure remain explicit gates.
 
 ## Experimental handoff records
 
@@ -98,7 +98,7 @@ Before any allocation sized from untrusted fields or any typed conversion, the s
 7. consistency among record-owned axes, findings, IR presence, member verification metadata, retention metadata, and the supervisor-authored requested effect;
 8. exact planning-record digest and operation binding across split phases.
 
-Do not add `Deserialize` or a public constructor to `ArchiveIR`. Conversion from a fully validated planning record into crate-private `ArchiveIR` and outcome evidence remains crate-private and associated with the supervisor-owned snapshot. The private materializing-writer lifecycle and authenticated child-only helper have landed. The experiment must not construct `VerifiedArchive` until release packaging and materialization retention parity pass together with an end-to-end public capability review.
+Do not add `Deserialize` or a public constructor to `ArchiveIR`. Conversion from a fully validated planning record into crate-private `ArchiveIR` and outcome evidence remains crate-private and associated with the supervisor-owned snapshot. The private materializing-writer lifecycle, authenticated child-only helper, release packaging, and materialization retention parity have landed. The experiment must not construct `VerifiedArchive` until the end-to-end public capability review passes.
 
 ## Content-authority gate
 

@@ -39,6 +39,21 @@ pub fn __fuzz_semantic_records(input: &[u8]) {
 #[doc(hidden)]
 pub use semantic_record::worker_lab as __worker_lab;
 
+/// Repository-only bridge used by the native materialization lifecycle lab.
+///
+/// This module is absent unless the private `__internal-lifecycle-lab`
+/// feature is selected. It is not a supported runtime or public API surface.
+#[cfg(feature = "__internal-lifecycle-lab")]
+#[doc(hidden)]
+pub mod __materialization_lifecycle_lab {
+    /// Plants a destination after staged-tree audit and immediately before
+    /// native no-replace publication on the current thread.
+    #[must_use]
+    pub fn plant_destination_before_publication_for_current_thread() -> impl Drop {
+        crate::materialize::plant_destination_before_publication_for_current_thread()
+    }
+}
+
 pub use apply::{
     apply, apply_with_options, ApplyOptions, EnvMeta, MemberView, Outcome, PolicyMeta, Receipt,
     Request, Source, SourceMeta, ToolMeta, Verdict, View,

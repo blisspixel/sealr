@@ -8,7 +8,11 @@ use cap_std::fs::{Dir as CapDir, File as CapFile, OpenOptions as CapOpenOptions}
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-#[cfg(any(test, feature = "__internal-worker-lab"))]
+#[cfg(any(
+    test,
+    feature = "__internal-lifecycle-lab",
+    feature = "__internal-worker-lab"
+))]
 use std::cell::Cell;
 #[cfg(test)]
 use std::cell::RefCell;
@@ -39,6 +43,11 @@ enum InjectedStageMutation {
 #[cfg(any(test, feature = "__internal-worker-lab"))]
 std::thread_local! {
     static INJECTED_CLEANUP_FAILURES: Cell<u32> = const { Cell::new(0) };
+}
+
+#[cfg(feature = "__internal-lifecycle-lab")]
+std::thread_local! {
+    static PLANT_DESTINATION_BEFORE_PUBLICATION: Cell<bool> = const { Cell::new(false) };
 }
 
 #[cfg(test)]
@@ -81,6 +90,49 @@ fn injected_cleanup_failure() -> Option<io::Error> {
 #[cfg(not(any(test, feature = "__internal-worker-lab")))]
 fn injected_cleanup_failure() -> Option<io::Error> {
     None
+}
+
+#[cfg(feature = "__internal-lifecycle-lab")]
+pub(crate) struct DestinationPublicationGuard {
+    previous: bool,
+}
+
+#[cfg(feature = "__internal-lifecycle-lab")]
+impl Drop for DestinationPublicationGuard {
+    fn drop(&mut self) {
+        PLANT_DESTINATION_BEFORE_PUBLICATION.with(|enabled| enabled.set(self.previous));
+    }
+}
+
+#[cfg(feature = "__internal-lifecycle-lab")]
+pub(crate) fn plant_destination_before_publication_for_current_thread(
+) -> DestinationPublicationGuard {
+    let previous = PLANT_DESTINATION_BEFORE_PUBLICATION.with(|enabled| enabled.replace(true));
+    DestinationPublicationGuard { previous }
+}
+
+#[cfg(feature = "__internal-lifecycle-lab")]
+fn plant_injected_destination(parent: &CapDir, final_name: &Path) -> io::Result<()> {
+    let enabled = PLANT_DESTINATION_BEFORE_PUBLICATION.with(|value| value.replace(false));
+    if !enabled {
+        return Ok(());
+    }
+
+    parent.create_dir(final_name)?;
+    let destination = parent.open_dir(final_name)?;
+    let mut options = CapOpenOptions::new();
+    options
+        .write(true)
+        .create_new(true)
+        .follow(FollowSymlinks::No);
+    let mut sentinel = destination.open_with("sentinel", &options)?;
+    sentinel.write_all(b"raced")?;
+    sentinel.sync_all()
+}
+
+#[cfg(not(feature = "__internal-lifecycle-lab"))]
+fn plant_injected_destination(_parent: &CapDir, _final_name: &Path) -> io::Result<()> {
+    Ok(())
 }
 
 #[cfg(test)]
@@ -869,6 +921,13 @@ impl CapabilityMaterializer {
                 format!("staging name no longer identifies the audited root: {error}"),
             )
         })?;
+        if let Err(error) = plant_injected_destination(&self.parent, &self.final_name) {
+            self.outcome = "publication-failed";
+            return Err(Finding::error(
+                FindingCode::MaterializeCommit,
+                format!("plant lifecycle destination before publication: {error}"),
+            ));
+        }
         if let Err(error) = rename_noreplace(&self.parent, root, &self.stage_name, &self.final_name)
         {
             self.outcome = "publication-failed";

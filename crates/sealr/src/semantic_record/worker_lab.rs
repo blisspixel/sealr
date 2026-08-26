@@ -164,6 +164,23 @@ pub fn plan_inspect(source: &[u8], operation_id: [u8; 16]) -> Result<Vec<u8>, St
 
 /// Plan one private materialization operation for the repository lab.
 pub fn plan_materialize(source: &[u8], operation_id: [u8; 16]) -> Result<Vec<u8>, String> {
+    plan_materialize_with_retention(source, operation_id, None)
+}
+
+/// Plan one private materialization operation with retained-content transfer.
+pub fn plan_materialize_retaining(
+    source: &[u8],
+    operation_id: [u8; 16],
+    retention: &InspectRetentionRequest,
+) -> Result<Vec<u8>, String> {
+    plan_materialize_with_retention(source, operation_id, Some(retention))
+}
+
+fn plan_materialize_with_retention(
+    source: &[u8],
+    operation_id: [u8; 16],
+    retention: Option<&InspectRetentionRequest>,
+) -> Result<Vec<u8>, String> {
     let policy = Policy::default_v1();
     let context = context(&policy)?;
     let source = Source::Bytes {
@@ -179,7 +196,7 @@ pub fn plan_materialize(source: &[u8], operation_id: [u8; 16]) -> Result<Vec<u8>
         }
     };
     let (snapshot, ir, findings, context) = ready.into_parts();
-    let binding = materialize_binding(&snapshot, &context, operation_id)?;
+    let binding = materialize_binding(&snapshot, &context, operation_id, retention)?;
     encode_planning(&PlanningRecord {
         binding,
         disposition: PlanningDisposition::ReadyForVerification,
@@ -245,6 +262,27 @@ pub fn validate_materialize(
     operation_id: [u8; 16],
     planning: &[u8],
 ) -> Result<ValidatedMaterializeOperation, String> {
+    validate_materialize_with_retention(source, source_len, operation_id, planning, None)
+}
+
+/// Validate one retained-content materialization plan against the exact source.
+pub fn validate_materialize_retaining(
+    source: File,
+    source_len: u64,
+    operation_id: [u8; 16],
+    planning: &[u8],
+    retention: &InspectRetentionRequest,
+) -> Result<ValidatedMaterializeOperation, String> {
+    validate_materialize_with_retention(source, source_len, operation_id, planning, Some(retention))
+}
+
+fn validate_materialize_with_retention(
+    source: File,
+    source_len: u64,
+    operation_id: [u8; 16],
+    planning: &[u8],
+    retention: Option<&InspectRetentionRequest>,
+) -> Result<ValidatedMaterializeOperation, String> {
     let policy = Policy::default_v1();
     let context = context(&policy)?;
     let snapshot = SourceSnapshot::worker_lab_from_file(
@@ -254,7 +292,7 @@ pub fn validate_materialize(
         context.controls().budget.max_archive_bytes,
     )
     .map_err(debug_error)?;
-    let binding = materialize_binding(&snapshot, &context, operation_id)?;
+    let binding = materialize_binding(&snapshot, &context, operation_id, retention)?;
     let planning = decode_planning(planning, &binding, &snapshot).map_err(debug_error)?;
     Ok(ValidatedMaterializeOperation { planning, snapshot })
 }
@@ -549,7 +587,59 @@ pub fn authorize_materialize_execution(
     operation_id: [u8; 16],
     planning: &[u8],
     completion: &[u8],
+    retained_content: &[u8],
 ) -> Result<AuthorizedStageManifest, String> {
+    let (manifest, retention) = authorize_materialize_with_retention(
+        source,
+        source_len,
+        operation_id,
+        planning,
+        completion,
+        retained_content,
+        None,
+    )?;
+    if retention.requested_paths != 0
+        || retention.retained_members != 0
+        || retention.retained_bytes != 0
+    {
+        return Err("materialization without retention produced retained content".to_owned());
+    }
+    Ok(manifest)
+}
+
+/// Replay a retained-content materialization against the supervisor source.
+/// Both worker outputs must equal the canonical source-derived replay before
+/// the stage manifest or retained-content evidence is authorized.
+pub fn authorize_materialize_retained_execution(
+    source: File,
+    source_len: u64,
+    operation_id: [u8; 16],
+    planning: &[u8],
+    completion: &[u8],
+    retained_content: &[u8],
+    retention: &InspectRetentionRequest,
+) -> Result<(AuthorizedStageManifest, InspectRetentionEvidence), String> {
+    authorize_materialize_with_retention(
+        source,
+        source_len,
+        operation_id,
+        planning,
+        completion,
+        retained_content,
+        Some(retention),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn authorize_materialize_with_retention(
+    source: File,
+    source_len: u64,
+    operation_id: [u8; 16],
+    planning: &[u8],
+    completion: &[u8],
+    retained_content: &[u8],
+    retention: Option<&InspectRetentionRequest>,
+) -> Result<(AuthorizedStageManifest, InspectRetentionEvidence), String> {
     let policy = Policy::default_v1();
     let context = context(&policy)?;
     let snapshot = SourceSnapshot::worker_lab_from_file(
@@ -559,7 +649,7 @@ pub fn authorize_materialize_execution(
         context.controls().budget.max_archive_bytes,
     )
     .map_err(debug_error)?;
-    let binding = materialize_binding(&snapshot, &context, operation_id)?;
+    let binding = materialize_binding(&snapshot, &context, operation_id, retention)?;
     let planning = decode_planning(planning, &binding, &snapshot).map_err(debug_error)?;
     let executed = planning
         .bind_materialize_replay(snapshot)
@@ -571,16 +661,31 @@ pub fn authorize_materialize_execution(
             "worker completion differs from the supervisor's source-derived replay".to_owned(),
         );
     }
+    if executed.retained_content() != retained_content {
+        return Err(
+            "worker retained content differs from the supervisor's source-derived replay"
+                .to_owned(),
+        );
+    }
     let proposal =
         decode_completion(executed.completion(), executed.planning()).map_err(debug_error)?;
     let evidence = completion_evidence(proposal.clone());
     if !evidence.complete {
         return Err("only a complete source-derived execution can authorize a stage".to_owned());
     }
-    Ok(AuthorizedStageManifest {
-        ir: proposal.ir,
-        evidence,
-    })
+    let retained = super::retained_content::validate(
+        executed.planning(),
+        executed.completion(),
+        executed.retained_content(),
+    )
+    .map_err(debug_error)?;
+    Ok((
+        AuthorizedStageManifest {
+            ir: proposal.ir,
+            evidence,
+        },
+        retention_evidence(retained),
+    ))
 }
 
 impl WorkerLabStage {
@@ -690,6 +795,7 @@ fn materialize_binding(
     snapshot: &SourceSnapshot<'_>,
     context: &PlanningContext,
     operation_id: [u8; 16],
+    retention: Option<&InspectRetentionRequest>,
 ) -> Result<InvocationBinding, String> {
     let controls = context.controls();
     let source_sha256 = parse_hex_32(
@@ -718,7 +824,9 @@ fn materialize_binding(
         requested_effect: RequestedEffect::Materialize,
         target_sha256: Some(target_sha256),
         member_sync: controls.effect.member_sync,
-        retention: RetentionBinding::None,
+        retention: retention.map_or(RetentionBinding::None, |retention| {
+            RetentionBinding::from_plan(Some(&retention.plan))
+        }),
     })
 }
 
@@ -809,7 +917,7 @@ impl ExecutedMaterializeOperation {
         self.executed.completion()
     }
 
-    /// Return the canonical empty retention bundle bound to this execution.
+    /// Return the canonical retention bundle captured during execution.
     pub fn retained_content(&self) -> &[u8] {
         self.executed.retained_content()
     }
@@ -819,6 +927,18 @@ impl ExecutedMaterializeOperation {
         let proposal = decode_completion(self.executed.completion(), self.executed.planning())
             .map_err(debug_error)?;
         Ok(completion_evidence(proposal))
+    }
+
+    /// Revalidate the canonical retained-content transfer against the
+    /// completion and retained planning state.
+    pub fn retention_evidence(&self) -> Result<InspectRetentionEvidence, String> {
+        let evidence = super::retained_content::validate(
+            self.executed.planning(),
+            self.executed.completion(),
+            self.executed.retained_content(),
+        )
+        .map_err(debug_error)?;
+        Ok(retention_evidence(evidence))
     }
 }
 
@@ -998,7 +1118,10 @@ mod tests {
     fn materialize_bridge_replays_audits_and_publishes_exact_tree() {
         let source = materialize_source();
         let operation_id = [0x51; 16];
-        let planning = plan_materialize(&source, operation_id).unwrap();
+        let mut retention = InspectRetentionRequest::new(64, 64);
+        retention.add_path("nested/deflated.txt").unwrap();
+        retention.add_path("stored.txt").unwrap();
+        let planning = plan_materialize_retaining(&source, operation_id, &retention).unwrap();
         let (file, source_path) = source_file(&source);
         let root = unique_directory("materialize-success");
         let destination = root.join("published");
@@ -1007,10 +1130,16 @@ mod tests {
 
         crate::zip::reset_parse_calls();
         crate::verification::reset_verify_payload_calls();
-        let executed = validate_materialize(file, source.len() as u64, operation_id, &planning)
-            .unwrap()
-            .execute_into(writer)
-            .unwrap();
+        let executed = validate_materialize_retaining(
+            file,
+            source.len() as u64,
+            operation_id,
+            &planning,
+            &retention,
+        )
+        .unwrap()
+        .execute_into(writer)
+        .unwrap();
         assert_eq!(crate::zip::parse_calls(), 0);
         assert_eq!(crate::verification::verify_payload_calls(), 3);
         let completion = executed.completion().to_vec();
@@ -1022,6 +1151,80 @@ mod tests {
                 verified_members: 4,
             }
         );
+        assert_eq!(
+            executed.retention_evidence().unwrap(),
+            InspectRetentionEvidence {
+                requested_paths: 2,
+                retained_members: 2,
+                retained_bytes: 30,
+            }
+        );
+        let retained_content = executed.retained_content().to_vec();
+        drop(executed);
+
+        let (manifest, retained) = authorize_materialize_retained_execution(
+            File::open(&source_path).unwrap(),
+            source.len() as u64,
+            operation_id,
+            &planning,
+            &completion,
+            &retained_content,
+            &retention,
+        )
+        .unwrap();
+        assert_eq!(
+            retained,
+            InspectRetentionEvidence {
+                requested_paths: 2,
+                retained_members: 2,
+                retained_bytes: 30,
+            }
+        );
+        assert_eq!(crate::zip::parse_calls(), 0);
+        assert_eq!(crate::verification::verify_payload_calls(), 6);
+        let mut changed_retained = retained_content.clone();
+        *changed_retained.last_mut().unwrap() ^= 1;
+        assert!(authorize_materialize_retained_execution(
+            File::open(&source_path).unwrap(),
+            source.len() as u64,
+            operation_id,
+            &planning,
+            &completion,
+            &changed_retained,
+            &retention,
+        )
+        .is_err());
+        stage.audit(&manifest).unwrap().publish().unwrap();
+
+        verify_materialized_tree(&destination);
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_file(source_path).unwrap();
+    }
+
+    #[test]
+    fn materialize_without_retention_authorizes_the_canonical_empty_bundle() {
+        let source = materialize_source();
+        let operation_id = [0x52; 16];
+        let planning = plan_materialize(&source, operation_id).unwrap();
+        let (file, source_path) = source_file(&source);
+        let root = unique_directory("materialize-no-retention");
+        let destination = root.join("published");
+        let stage = WorkerLabStage::create(&destination).unwrap();
+        let writer = stage.try_clone_writer_file().unwrap();
+        let executed = validate_materialize(file, source.len() as u64, operation_id, &planning)
+            .unwrap()
+            .execute_into(writer)
+            .unwrap();
+        assert_eq!(
+            executed.retention_evidence().unwrap(),
+            InspectRetentionEvidence {
+                requested_paths: 0,
+                retained_members: 0,
+                retained_bytes: 0,
+            }
+        );
+        let completion = executed.completion().to_vec();
+        let retained_content = executed.retained_content().to_vec();
         drop(executed);
 
         let manifest = authorize_materialize_execution(
@@ -1030,12 +1233,16 @@ mod tests {
             operation_id,
             &planning,
             &completion,
+            &retained_content,
         )
         .unwrap();
-        assert_eq!(crate::zip::parse_calls(), 0);
-        assert_eq!(crate::verification::verify_payload_calls(), 6);
         stage.audit(&manifest).unwrap().publish().unwrap();
+        verify_materialized_tree(&destination);
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_file(source_path).unwrap();
+    }
 
+    fn verify_materialized_tree(destination: &Path) {
         assert_eq!(
             fs::read(destination.join("stored.txt")).unwrap(),
             b"stored payload"
@@ -1045,8 +1252,6 @@ mod tests {
             fs::read(destination.join("nested/deflated.txt")).unwrap(),
             b"deflated payload"
         );
-        fs::remove_dir_all(root).unwrap();
-        fs::remove_file(source_path).unwrap();
     }
 
     fn unique_directory(label: &str) -> PathBuf {
@@ -1329,6 +1534,40 @@ mod tests {
         let error = validated.execute().unwrap_err();
         assert!(error.contains("transfer content bound"));
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn materialize_retention_rejects_an_oversized_request_before_stage_writes() {
+        let source = materialize_source();
+        let operation_id = [0x63; 16];
+        let mut retention = InspectRetentionRequest::new(
+            super::super::retained_content::MAX_TRANSFER_CONTENT_BYTES as u64 + 1,
+            super::super::retained_content::MAX_TRANSFER_CONTENT_BYTES as u64 + 1,
+        );
+        retention.add_path("stored.txt").unwrap();
+        let planning = plan_materialize_retaining(&source, operation_id, &retention).unwrap();
+        let (file, source_path) = source_file(&source);
+        let root = unique_directory("materialize-oversized-retention");
+        let destination = root.join("published");
+        let stage = WorkerLabStage::create(&destination).unwrap();
+        let writer = stage.try_clone_writer_file().unwrap();
+        let validated = validate_materialize_retaining(
+            file,
+            source.len() as u64,
+            operation_id,
+            &planning,
+            &retention,
+        )
+        .unwrap();
+
+        crate::verification::reset_verify_payload_calls();
+        let error = validated.execute_into(writer).unwrap_err();
+        assert!(error.contains("transfer content bound"));
+        assert_eq!(crate::verification::verify_payload_calls(), 0);
+        stage.abort().unwrap();
+        assert!(!destination.try_exists().unwrap());
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_file(source_path).unwrap();
     }
 
     #[test]

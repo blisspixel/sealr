@@ -14,6 +14,9 @@ __internal-fuzzing = []
 # Enables only the repository Linux worker conformance bridge. This is not a
 # shipped API or a supported runtime activation surface.
 __internal-worker-lab = []
+# Enables only the repository native materialization lifecycle seam. This is
+# not a shipped API or a supported runtime activation surface.
+__internal-lifecycle-lab = []
 
 [dependencies]
 cap-fs-ext.workspace = true

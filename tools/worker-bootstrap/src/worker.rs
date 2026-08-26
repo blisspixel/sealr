@@ -93,7 +93,7 @@ impl ExecutedOperation {
     ) -> Result<Option<sealr::__worker_lab::InspectRetentionEvidence>, String> {
         match self {
             Self::Inspect(operation) => operation.retention_evidence().map(Some),
-            Self::Materialize(_) => Ok(None),
+            Self::Materialize(operation) => operation.retention_evidence().map(Some),
         }
     }
 }
@@ -462,11 +462,12 @@ fn run(
             .expect("ordinary execution consumes its source")
     };
     let validated_operation = if materialize {
-        sealr::__worker_lab::validate_materialize(
+        sealr::__worker_lab::validate_materialize_retaining(
             validation_source,
             source_frame.values[0],
             operation_id,
             plan.bytes(),
+            &retention,
         )
         .map(ValidatedOperation::Materialize)
     } else {
@@ -568,8 +569,7 @@ fn run(
         )
     })?;
     if !semantic_evidence.complete
-        || semantic_evidence.member_count != 2
-        || semantic_evidence.verified_members != 2
+        || semantic_evidence.verified_members != semantic_evidence.member_count
     {
         return Err(protocol(
             PHASE_PROBE,
@@ -582,16 +582,20 @@ fn run(
             format!("revalidating retained content failed: {error}"),
         )
     })?;
-    if let Some(retention_evidence) = retention_evidence {
-        if retention_evidence.requested_paths != 2
-            || retention_evidence.retained_members != 2
-            || retention_evidence.retained_bytes != SOURCE_RETAINED_BYTES
-        {
-            return Err(protocol(
-                PHASE_PROBE,
-                format!("retained-content evidence is incomplete: {retention_evidence:?}"),
-            ));
-        }
+    let retention_evidence = retention_evidence.ok_or_else(|| {
+        protocol(
+            PHASE_PROBE,
+            "semantic execution did not produce retained-content evidence",
+        )
+    })?;
+    if retention_evidence.requested_paths != 2
+        || retention_evidence.retained_members != 2
+        || retention_evidence.retained_bytes != SOURCE_RETAINED_BYTES
+    {
+        return Err(protocol(
+            PHASE_PROBE,
+            format!("retained-content evidence is incomplete: {retention_evidence:?}"),
+        ));
     }
     let completion_payload = executed_operation.completion();
     let completion_descriptor =
