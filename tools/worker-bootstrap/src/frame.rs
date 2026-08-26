@@ -18,6 +18,9 @@ pub(crate) enum Kind {
     Checkpoint = 9,
     Plan = 10,
     PlanAccepted = 11,
+    MemberRead = 12,
+    MemberReadAccepted = 13,
+    MemberReadResult = 14,
 }
 
 impl TryFrom<u8> for Kind {
@@ -36,6 +39,9 @@ impl TryFrom<u8> for Kind {
             9 => Ok(Self::Checkpoint),
             10 => Ok(Self::Plan),
             11 => Ok(Self::PlanAccepted),
+            12 => Ok(Self::MemberRead),
+            13 => Ok(Self::MemberReadAccepted),
+            14 => Ok(Self::MemberReadResult),
             _ => Err(FrameError::Kind(value)),
         }
     }
@@ -168,6 +174,9 @@ mod tests {
             Kind::Checkpoint,
             Kind::Plan,
             Kind::PlanAccepted,
+            Kind::MemberRead,
+            Kind::MemberReadAccepted,
+            Kind::MemberReadResult,
         ] {
             let frame = Frame::new(kind, OPERATION_ID);
             assert_eq!(Frame::decode(&frame.encode()), Ok(frame));

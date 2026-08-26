@@ -20,6 +20,7 @@ pub(crate) enum BlobRole {
     Planning = 1,
     Completion = 2,
     RetainedContent = 3,
+    MemberReadRequest = 4,
 }
 
 impl BlobRole {
@@ -28,6 +29,7 @@ impl BlobRole {
             Self::Planning => "sealr-planning",
             Self::Completion => "sealr-completion",
             Self::RetainedContent => "sealr-retained-content",
+            Self::MemberReadRequest => "sealr-member-read-request",
         }
     }
 }
@@ -271,6 +273,7 @@ mod tests {
             BlobRole::Planning,
             BlobRole::Completion,
             BlobRole::RetainedContent,
+            BlobRole::MemberReadRequest,
         ] {
             let payload = b"bound semantic handoff";
             let fd = create(role, payload).unwrap();

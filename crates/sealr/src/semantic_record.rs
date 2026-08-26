@@ -34,6 +34,7 @@ const HEADER_BYTES: usize = 16;
 const KIND_PLANNING: u8 = 1;
 const KIND_COMPLETION: u8 = 2;
 const KIND_RETAINED_CONTENT: u8 = 3;
+const KIND_MEMBER_READ_REQUEST: u8 = 4;
 const MAX_RECORD_BYTES: usize = 64 * 1024 * 1024;
 const MAX_MEMBERS: usize = 65_535;
 const MAX_FINDINGS: usize = 65_535;
@@ -49,6 +50,7 @@ const REQUEST_DOMAIN: &[u8] = b"sealr.semantic-request.experimental.v1\0";
 const PLAN_DOMAIN: &[u8] = b"sealr.semantic-plan.experimental.v1\0";
 
 mod executor;
+mod member_read;
 #[cfg(test)]
 mod peak_live;
 mod retained_content;

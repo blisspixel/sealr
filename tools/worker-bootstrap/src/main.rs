@@ -25,6 +25,12 @@ fn semantic_retention_request() -> Result<sealr::__worker_lab::InspectRetentionR
     Ok(request)
 }
 
+#[cfg(target_os = "linux")]
+fn semantic_read_retention_request() -> Result<sealr::__worker_lab::InspectRetentionRequest, String>
+{
+    Ok(sealr::__worker_lab::InspectRetentionRequest::new(0, 0))
+}
+
 fn main() {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
 

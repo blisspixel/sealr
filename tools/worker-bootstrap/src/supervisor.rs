@@ -26,6 +26,8 @@ use std::time::{Duration, Instant};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
+mod read;
+
 const SOURCE_MEMBER_COUNT: u64 = 2;
 const SOURCE_RETAINED_BYTES: u64 = 30;
 const STRESS_CASES: usize = 44;
@@ -163,9 +165,10 @@ pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
         run_stall_epoch(point)?;
     }
     run_timeout_reap()?;
+    read::run_conformance()?;
     run_repeated_stress()?;
     println!(
-        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 1 supervisor content replay, 1 immutable original-pass retention transfer, 22 crash barriers, 11 authority-epoch stalls, 500 bounded stress iterations, and bounded reap passed"
+        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 1 supervisor content replay, 1 immutable original-pass retention transfer, 1 isolated one-shot Store-and-Deflate read boundary, 22 crash barriers, 11 authority-epoch stalls, 500 bounded stress iterations, and bounded reap passed"
     );
     Ok(())
 }
