@@ -181,7 +181,7 @@ The target configuration separates five layers.
 
 ### Interpretation profile
 
-Defines what source bytes mean. It binds redundant metadata rules, encodings, allowed flags, extra fields, offsets, and structural layout. `sealr.profile.zip.strict-ascii.v1` remains the `apply()` compatibility default. [`sealr.profile.zip.strict-ascii.v2`](profiles/zip-strict-ascii-v2.md) is explicitly selectable through the Rust options API and closes every flag and extra-field disposition. A future Unicode profile receives a separate identifier and evidence.
+Defines what source bytes mean. It binds redundant metadata rules, encodings, allowed flags, extra fields, offsets, and structural layout. `sealr.profile.zip.strict-ascii.v1` remains the `apply()` compatibility default. [`sealr.profile.zip.strict-ascii.v2`](profiles/zip-strict-ascii-v2.md) is explicitly selectable through the Rust options API and closes every flag and extra-field disposition. The separately identified `sealr.profile.zip.wheel-utf8.v1` repository profile implements a strict UTF-8 NFC research language. A general Unicode or legacy CP437 profile still requires its own identifier and evidence.
 
 ### Deterministic resource budget
 
@@ -267,9 +267,9 @@ A future small independent verifier should validate canonical evidence serializa
 
 ## Consumer sequence
 
-Research the first consumer while semantic identity stabilizes, then ship it only after its dependencies are executable. The [wheel profile draft](profiles/python-wheel-v1.md) is the current design probe.
+Research the first consumer while semantic identity stabilizes, then ship it only after its dependencies are executable. The [wheel profile draft](profiles/python-wheel-v1.md) now describes the implemented repository-only probe and its remaining promotion gates.
 
-For wheels, the proposed semantic pipeline is:
+For wheels, the repository laboratory executes this semantic pipeline:
 
 ```text
 verified ArchiveIR
@@ -282,7 +282,7 @@ These stages have distinct identities. `WheelArtifactIR` binds the exact outer a
 
 The archive content root therefore cannot be relabeled as a universal installed-tree root. A consumer profile must state which artifact and plan transformations it authorizes, which target model it uses, and which identity each claim names.
 
-1. **Python wheel admission**: first candidate because wheel parser differentials have produced real same-bytes, different-installed-tree advisories. A future `python-wheel.v1` must bind the artifact filename and validate wheel metadata, `.dist-info`, `RECORD`, relocation, path uniqueness, and scheme-relative plan identity rather than merely applying strict ZIP checks.
+1. **Python wheel admission**: first candidate because wheel parser differentials have produced real same-bytes, different-installed-tree advisories. The repository-only `python-wheel.v1-research` implementation binds the artifact filename and validates wheel metadata, `.dist-info`, `RECORD`, relocation, path uniqueness, and scheme-relative plan identity rather than merely applying strict ZIP checks. Supported promotion remains gated.
 2. **Agent workspace admission**: inspect first, expose a read-only admitted tree, verify content on read, and require explicit promotion. This does not claim to detect malware, malicious source, prompt injection, or unsafe build scripts.
 3. **Hermetic build inputs**: make the canonical tree, not a second extraction, the build input and cache key.
 4. **OCI layers and other rich formats**: later, because whiteouts, ownership, xattrs, links, devices, and ordered application require a dedicated consumer model.

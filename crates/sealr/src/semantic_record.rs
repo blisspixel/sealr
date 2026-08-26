@@ -1,7 +1,8 @@
-//! Dormant Alpha.6 semantic handoff experiment.
+//! Crate-private semantic handoff for the explicit Linux supervisor.
 //!
-//! This is a crate-private, behavior-neutral record codec. It is deliberately
-//! independent from worker protocol v1 and is not invoked by a shipped path.
+//! This bounded record codec carries validated plans and results for supervised
+//! inspect, materialize, and later member-read operations. It remains
+//! independent from worker protocol v1 and outside the supported public API.
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -17,7 +18,7 @@ use crate::ir::{
     MemberKind, MemberSourceRanges, MemberVerification, NormalizationAction,
     ZipInterpretationProfile,
 };
-use crate::jail::{jail_name_fallible, JailNameError, JailedName};
+use crate::jail::{jail_name_fallible, portable_case_fold, JailNameError, JailedName};
 use crate::outcome::{
     AdmissionStatus, InterpretationStatus, SemanticAxes, SourceDigest, StoppingPhase,
     VerificationStatus, ViewCompleteness,
@@ -29,7 +30,7 @@ use crate::verified::{
 };
 
 const MAGIC: [u8; 8] = *b"SEALRSEM";
-const VERSION: u16 = 1;
+const VERSION: u16 = 2;
 const HEADER_BYTES: usize = 16;
 const KIND_PLANNING: u8 = 1;
 const KIND_COMPLETION: u8 = 2;
@@ -697,6 +698,7 @@ fn encode_binding_validated(
     encoder.u8(match binding.profile {
         ZipInterpretationProfile::StrictAsciiV1 => 1,
         ZipInterpretationProfile::StrictAsciiV2 => 2,
+        ZipInterpretationProfile::WheelUtf8V1 => 3,
     });
     encoder.fixed(&binding.profile_sha256);
     encoder.string(&binding.policy_id)?;
@@ -768,6 +770,7 @@ fn decode_binding(cursor: &mut Cursor<'_>) -> Result<InvocationBinding, RecordEr
     let profile = match cursor.u8()? {
         1 => ZipInterpretationProfile::StrictAsciiV1,
         2 => ZipInterpretationProfile::StrictAsciiV2,
+        3 => ZipInterpretationProfile::WheelUtf8V1,
         _ => {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidEnum,
@@ -1351,6 +1354,8 @@ fn encode_ir(encoder: &mut Encoder, ir: &ArchiveIR) -> Result<(), RecordError> {
         });
         encoder.u16(member.method);
         encoder.u16(member.flags);
+        encoder.u8(member.creator_system);
+        encoder.u32(member.external_attributes);
         encoder.u32(member.declared_crc);
         encoder.u64(member.declared_comp_size);
         encoder.u64(member.declared_uncomp_size);
@@ -1462,6 +1467,8 @@ fn decode_ir(
         };
         let method = cursor.u16()?;
         let flags = cursor.u16()?;
+        let creator_system = cursor.u8()?;
+        let external_attributes = cursor.u32()?;
         let declared_crc = cursor.u32()?;
         let declared_comp_size = cursor.u64()?;
         let declared_uncomp_size = cursor.u64()?;
@@ -1576,6 +1583,8 @@ fn decode_ir(
             kind,
             method,
             flags,
+            creator_system,
+            external_attributes,
             declared_crc,
             declared_comp_size,
             declared_uncomp_size,
@@ -1921,6 +1930,20 @@ fn validate_pending_member(
             "strict v2 IR carries a denied flag bit",
         ));
     }
+    if binding.profile == ZipInterpretationProfile::WheelUtf8V1
+        && ((member.flags & !0x0800) != 0
+            || (!member.raw_name_bytes.is_ascii() && (member.flags & 0x0800) == 0)
+            || member
+                .normalization_actions
+                .iter()
+                .any(|action| matches!(action, NormalizationAction::DropDotComponent { .. })))
+    {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "wheel UTF-8 IR violates its flag or normalization contract",
+        ));
+    }
     if is_dir
         && (member.method != 0
             || member.declared_comp_size != 0
@@ -2014,7 +2037,11 @@ fn validate_extra_fields(
             "member extra-field count exceeds its bound",
         ));
     }
-    if profile == ZipInterpretationProfile::StrictAsciiV2 && !member.extra_fields.is_empty() {
+    if matches!(
+        profile,
+        ZipInterpretationProfile::StrictAsciiV2 | ZipInterpretationProfile::WheelUtf8V1
+    ) && !member.extra_fields.is_empty()
+    {
         return Err(RecordError::new(
             RecordErrorKind::InvalidSemanticState,
             0,
@@ -2246,9 +2273,7 @@ fn validate_path_topology(
 
 fn path_compare(left: &str, right: &str, ascii_folded: bool) -> Ordering {
     if ascii_folded {
-        left.bytes()
-            .map(|byte| byte.to_ascii_lowercase())
-            .cmp(right.bytes().map(|byte| byte.to_ascii_lowercase()))
+        portable_case_fold(left).cmp(&portable_case_fold(right))
     } else {
         left.cmp(right)
     }
@@ -2256,7 +2281,7 @@ fn path_compare(left: &str, right: &str, ascii_folded: bool) -> Ordering {
 
 fn path_equal(left: &str, right: &str, ascii_folded: bool) -> bool {
     if ascii_folded {
-        left.eq_ignore_ascii_case(right)
+        portable_case_fold(left) == portable_case_fold(right)
     } else {
         left == right
     }
@@ -2683,6 +2708,15 @@ fn validate_ready_ir_source_fields(
                 RecordErrorKind::InvalidSemanticState,
                 0,
                 "planning central-header semantics do not match the supervisor snapshot",
+            ));
+        }
+        if member.creator_system != (central_version_made_by >> 8) as u8
+            || member.external_attributes != central_external_attributes
+        {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "planning member container facts disagree with the central header",
             ));
         }
         validate_source_member_kind(member, central_version_made_by, central_external_attributes)?;
@@ -3895,6 +3929,8 @@ fn try_clone_pending_member(member: &IrMember) -> Result<IrMember, RecordError> 
         kind: member.kind,
         method: member.method,
         flags: member.flags,
+        creator_system: member.creator_system,
+        external_attributes: member.external_attributes,
         declared_crc: member.declared_crc,
         declared_comp_size: member.declared_comp_size,
         declared_uncomp_size: member.declared_uncomp_size,
@@ -5079,7 +5115,7 @@ mod tests {
         completion_frame_sha256: Option<String>,
     }
 
-    #[derive(Debug, serde::Deserialize)]
+    #[derive(Debug, serde::Deserialize, serde::Serialize)]
     #[serde(deny_unknown_fields)]
     struct ShadowManifest {
         schema: String,
@@ -5132,6 +5168,18 @@ mod tests {
     struct CompletionArtifact {
         plan: ValidatedPlanningRecord,
         bytes: Vec<u8>,
+    }
+
+    fn assert_historical_shadow_semantics(historical: &ShadowEvidence, current: &ShadowEvidence) {
+        let mut normalized = current.clone();
+        normalized.plan_id.clone_from(&historical.plan_id);
+        normalized
+            .planning_frame_sha256
+            .clone_from(&historical.planning_frame_sha256);
+        normalized
+            .completion_frame_sha256
+            .clone_from(&historical.completion_frame_sha256);
+        assert_eq!(historical, &normalized);
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -6092,7 +6140,10 @@ mod tests {
             manifest.operation_ids,
             vec![hex_bytes(&[0x41; 16]), hex_bytes(&[0x52; 16])]
         );
-        assert_eq!(manifest.cases, cases);
+        assert_eq!(manifest.cases.len(), cases.len());
+        for (historical, current) in manifest.cases.iter().zip(&cases) {
+            assert_historical_shadow_semantics(historical, current);
+        }
     }
 
     #[test]
@@ -6474,11 +6525,15 @@ mod tests {
             "9243570b35667aaf9142483d823cb676391e8ba4a90b3594928533a0139b1967"
         );
         let manifest: ShadowManifestV2 = serde_json::from_str(manifest_json).unwrap();
-        if manifest != expected {
-            panic!(
-                "semantic-shadow-v2.json differs from generated evidence:\n{}",
-                serde_json::to_string_pretty(&expected).unwrap()
-            );
+        assert_eq!(manifest.schema, expected.schema);
+        assert_eq!(manifest.predecessor, expected.predecessor);
+        assert_eq!(manifest.operation_ids, expected.operation_ids);
+        assert_eq!(manifest.cases.len(), expected.cases.len());
+        for (historical, current) in manifest.cases.iter().zip(&expected.cases) {
+            assert_eq!(historical.oracles, current.oracles);
+            assert_eq!(historical.backend, current.backend);
+            assert_eq!(historical.parity_group, current.parity_group);
+            assert_historical_shadow_semantics(&historical.evidence, &current.evidence);
         }
         assert_eq!(
             manifest_json,
@@ -6508,6 +6563,67 @@ mod tests {
         ] {
             assert!(serde_json::from_str::<ShadowManifestV2>(&unknown).is_err());
         }
+    }
+
+    #[test]
+    fn semantic_wire_v2_round_trips_source_bound_container_facts() {
+        let mut bytes = make_zip(&[("executable.py", b"print('verified')\n")]);
+        let central = signature_offset(&bytes, [0x50, 0x4b, 0x01, 0x02]);
+        put_u16(&mut bytes, central + 4, (3_u16 << 8) | 20);
+        put_u32(&mut bytes, central + 38, 0o100755_u32 << 16);
+
+        let policy = Policy::default_v1();
+        let context =
+            PlanningContext::compile(&policy, ZipInterpretationProfile::WheelUtf8V1).unwrap();
+        let ready = match plan_source(
+            &Source::Bytes {
+                path: Some("semantic-wire-v2.zip"),
+                data: &bytes,
+            },
+            context,
+        )
+        .unwrap()
+        {
+            PlanDecision::Ready(ready) => ready,
+            PlanDecision::Terminal(terminal) => {
+                panic!("wire-v2 fixture reached terminal planning: {terminal:?}")
+            }
+        };
+        let (snapshot, pending, findings, context) = ready.into_parts();
+        assert!(findings.is_empty());
+        assert_eq!(pending.members[0].creator_system, 3);
+        assert_eq!(pending.members[0].external_attributes, 0o100755_u32 << 16);
+
+        let binding = binding_for_planned(&snapshot, &context, RequestedEffect::Inspect);
+        let frame = encode_planning(&ready_plan_with_findings(
+            binding.clone(),
+            pending,
+            findings,
+        ))
+        .unwrap();
+        assert_eq!(u16::from_le_bytes([frame[8], frame[9]]), VERSION);
+        assert_eq!(frame.len(), 436);
+        assert_eq!(
+            bytes_digest(&frame),
+            "b7f7f8bd068b3392799b8abff78a689d61118e8c9377bac0f3a7d17b8c471ea3"
+        );
+
+        let plan = decode_planning(&frame, &binding, &snapshot).unwrap();
+        let facts = plan.record.ir.as_ref().unwrap().members[0].container_facts();
+        assert_eq!(facts.creator_system, 3);
+        assert_eq!(facts.external_attributes, 0o100755_u32 << 16);
+        assert_eq!(facts.unix_mode(), Some(0o100755));
+        assert!(facts.pypa_installer_0_7_executable());
+
+        let mut forged = plan.record.clone();
+        forged.ir.as_mut().unwrap().members[0].creator_system = 0;
+        let forged_frame = encode_planning(&forged).unwrap();
+        assert_eq!(
+            decode_planning(&forged_frame, &binding, &snapshot)
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::InvalidSemanticState
+        );
     }
 
     #[test]
@@ -7082,11 +7198,11 @@ mod tests {
         let completion_digest: [u8; 32] = Sha256::digest(completion_bytes).into();
         assert_eq!(
             hex_32(&plan.plan_id),
-            "7f4c9126813bbb6e89350e455081bf8a118ec2915163f661a5ed498bfabd9c3f"
+            "29479161b3f063c5127184c4a207ae9eaa117a213ac57649106be0c84a280737"
         );
         assert_eq!(
             hex_32(&completion_digest),
-            "7ff94f472a8e9355b2a13a3ab6e0cd428adec5391a81fb7ee9e538f4f6d5a59a"
+            "7d757e89451355b90243ecd3d4b447dec705d13c86c0baec6b31e4c9ac42c10b"
         );
     }
 

@@ -7,8 +7,8 @@ Set-StrictMode -Version Latest
 $workspace = Split-Path -Parent $PSScriptRoot
 $expected = [ordered]@{
     'x86_64-unknown-linux-gnu' = [pscustomobject]@{
-        Components = 59
-        Notices = 12
+        Components = 62
+        Notices = 13
         Present = @(
             'linux-raw-sys 0.12.1',
             'rustix-linux-procfs 0.1.1',
@@ -29,14 +29,14 @@ $expected = [ordered]@{
         )
     }
     'aarch64-apple-darwin' = [pscustomobject]@{
-        Components = 53
-        Notices = 9
+        Components = 56
+        Notices = 10
         Present = @('errno 0.3.14', 'rustix 1.1.4', 'libc 0.2.189')
         Absent = @('linux-raw-sys 0.12.1', 'windows-sys 0.61.2', 'once_cell 1.21.4')
     }
     'x86_64-pc-windows-msvc' = [pscustomobject]@{
-        Components = 61
-        Notices = 8
+        Components = 64
+        Notices = 9
         Present = @('windows-sys 0.61.2', 'winx 0.36.4', 'once_cell_polyfill 1.70.2')
         Absent = @('rustix 1.1.4', 'libc 0.2.189', 'errno 0.3.14')
     }
@@ -94,7 +94,14 @@ try {
             throw "$committedPath contains duplicate components"
         }
 
-        foreach ($requiredEntry in @('strsim 0.11.1', 'zlib-rs 0.6.7', 'zmij 1.0.23') +
+        foreach ($requiredEntry in @(
+                'strsim 0.11.1',
+                'tinyvec 1.12.0',
+                'tinyvec_macros 0.1.1',
+                'unicode-normalization 0.1.25',
+                'zlib-rs 0.6.7',
+                'zmij 1.0.23'
+            ) +
             $expected[$target].Present) {
             if (-not $licenseText.Contains($requiredEntry, [StringComparison]::Ordinal)) {
                 throw "$committedPath is missing required component $requiredEntry"

@@ -23,8 +23,8 @@ $ExpectedFuzzJobs = @(
 )
 $ExpectedCiJobs = @(
     'Format, lint, test, and docs'
-    'Test on windows-latest'
-    'Test on macos-latest'
+    'Test on windows-2022'
+    'Test on macos-15'
     'ZipDiff 14-class gate'
     'Supply chain'
     'Real-kernel Landlock ABI 2 floor'
@@ -32,9 +32,9 @@ $ExpectedCiJobs = @(
 $ExpectedChecks = @('Required CI')
 $ExpectedReleaseJobs = @(
     'Validate release tag'
-    'Build and test on ubuntu-latest'
-    'Build and test on windows-latest'
-    'Build and test on macos-latest'
+    'Build and test on ubuntu-24.04'
+    'Build and test on windows-2022'
+    'Build and test on macos-15'
     'Attest and stage prerelease draft'
 )
 $Workspace = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))

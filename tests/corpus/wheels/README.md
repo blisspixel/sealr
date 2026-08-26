@@ -22,26 +22,37 @@ The analyzer separately caps the manifest at 1 MiB, each cached-artifact read at
 From the repository root:
 
 ```powershell
-cargo run --locked -p sealr-wheel-lab -- validate-manifest tests/corpus/wheels/manifest.json
+cargo run --locked -p sealr-wheel-lab --bin sealr-wheel-lab -- validate-manifest tests/corpus/wheels/manifest.json
 pwsh -NoLogo -NoProfile -File scripts/acquire_wheel_corpus.ps1
-cargo run --locked -p sealr-wheel-lab -- analyze `
+cargo run --locked -p sealr-wheel-lab --bin sealr-wheel-lab -- analyze `
   tests/corpus/wheels/manifest.json `
   .research/wheels `
   tests/corpus/wheels/report.json `
   docs/wheel-compatibility-pilot.md `
   --worker-manifest /absolute/path/to/sealr-worker.manifest
-cargo run --locked -p sealr-wheel-lab -- check `
+cargo run --locked -p sealr-wheel-lab --bin sealr-wheel-lab -- check `
   tests/corpus/wheels/manifest.json `
   .research/wheels `
   tests/corpus/wheels/report.json `
   docs/wheel-compatibility-pilot.md `
   --worker-manifest /absolute/path/to/sealr-worker.manifest
-cargo run --locked -p sealr-wheel-lab -- verify-report `
+cargo run --locked -p sealr-wheel-lab --bin sealr-wheel-lab -- verify-report `
   tests/corpus/wheels/manifest.json `
   tests/corpus/wheels/report.json `
   docs/wheel-compatibility-pilot.md
+cargo run --locked -p sealr-wheel-lab --bin wheel_inventory_v2 -- analyze `
+  tests/corpus/wheels/manifest.json `
+  .research/wheels `
+  tests/corpus/wheels/report-v2.json `
+  docs/wheel-compatibility-v2.md
+cargo run --locked -p sealr-wheel-lab --bin wheel_inventory_v2 -- verify `
+  tests/corpus/wheels/manifest.json `
+  tests/corpus/wheels/report-v2.json `
+  docs/wheel-compatibility-v2.md
 ```
 
 The analyzer requires the exact production-helper manifest and uses only Sealr's public fail-closed `apply_supervised` outcome and read-only `ArchiveIR`. It does not call Python `zipfile`, an external extractor, another ZIP parser, or the in-process fallback. Rejected artifacts are not reopened through a fallback parser, so feature counts are available only when current interpretation produced an IR.
 
 The committed report binds the analyzer revision plus exact manifest, interpretation-profile, and default-policy digests. It records current admission results, affected-artifact and finding-occurrence counts, structured denial details, methods, general-purpose flags, extra fields by site and disposition, normalization actions, `.dist-info` path candidates, candidate metadata basenames, and per-artifact structural totals. The offline `verify-report` command checks those bindings, internal rollups, canonical JSON, and Markdown rendering without raw wheels. It does not re-execute corpus analysis or validate wheel metadata, `RECORD`, relocation, target compatibility, or installation semantics.
+
+The successor `report-v2.json` is a separate, predecessor-bound semantic inventory. It applies the exact non-shipping wheel UTF-8 profile, consumes only `VerifiedArchive`, and records wheel and core metadata, producers, expanded filename tags, `.data` scheme use, Unicode paths, creator systems, PyPA installer 0.7.0 executable facts, the four-way research outcome, and investigated rejection clusters. It never overwrites the v1 structural pilot and never falls back to another ZIP reader.

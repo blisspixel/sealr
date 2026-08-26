@@ -2,7 +2,7 @@
 
 Status: implemented as a non-published, zero-dependency codec in `sealr-worker-protocol`. The protocol is preparation for the Alpha.6 supervisor-worker boundary. It does not start a worker, transfer an operating-system handle, or provide process isolation by itself.
 
-The Alpha.6 [private semantic-record implementation](semantic-record.md) is a separate internal format with independent `SEALRSEM` magic. The supported Linux supervisor uses it without revising, extending, or reinterpreting protocol v1. Deterministic tests reject cross-decoding between semantic planning and completion records; protocol v1 golden and fuzz surfaces remain unchanged.
+The [private semantic-record implementation](semantic-record.md) is a separate internal format with independent `SEALRSEM` magic. The supported Linux supervisor now uses semantic-record version 2 to carry verified ZIP creator-system and external-attribute evidence. This does not revise or reinterpret the authenticated `SLRAB001` worker protocol v1. Deterministic tests reject cross-decoding between semantic planning and completion records; protocol v1 golden and fuzz surfaces remain unchanged.
 
 The protocol has one narrow purpose: carry a bounded operation description and bounded semantic result while the transport transfers authority separately. Archive bytes never appear in a control frame. A transport implementation is conforming only when it associates the declared capability slots with the exact out-of-band handles received for that frame.
 

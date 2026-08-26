@@ -4,14 +4,14 @@
 
 ## Current profiles
 
-Sealr applies one strict ZIP32 interpretation:
+Sealr exposes three separately identified ZIP32 interpretations. The compatibility default and strict ASCII v2 profile reject non-ASCII names. The repository-only wheel research profile accepts only strict UTF-8 NFC names and does not change the default. All three share these structural rules:
 
 - central-directory-first structure discovery;
 - exact EOCD, central header, local header, and data-descriptor agreement;
 - no hidden, overlapping, prefixed, trailing, ZIP64, spanned, encrypted, or recovery-parsed structure;
 - methods 0 and 8 only;
 - exactly one raw DEFLATE stream consuming every declared compressed byte;
-- strict ASCII path subset until canonical CP437 and Unicode rules exist;
+- profile-specific ASCII or strict UTF-8 NFC path rules, with no CP437 fallback;
 - no links, devices, nested extraction, or archive mode restoration.
 
 The [API contract](api.md), [safety specification](safety.md), and [finding registry](findings.md) are normative for current behavior.
@@ -38,10 +38,10 @@ Formats are not added as checkboxes. Each needs:
 
 ## Wheel profiles are two layers
 
-The planned wheel work does not turn the generic ZIP policy into a package installer.
+The repository-only wheel work does not turn the generic ZIP policy into a package installer.
 
-1. A wheel-oriented ZIP interpretation profile defines the accepted container language. It can require strict UTF-8 member names, reject legacy CP437 and alternate Unicode-name extras, and use an exhaustive flag and extra-field table without waiting for a general legacy-name profile.
-2. The `python-wheel.v1` consumer profile binds the exact artifact filename, validates verified `WHEEL`, `METADATA`, and `RECORD` members, and produces a scheme-relative installation plan.
+1. `sealr.profile.zip.wheel-utf8.v1` defines the accepted research container language. It requires strict UTF-8 NFC member names, rejects legacy CP437 and alternate Unicode-name extras, and uses exhaustive flag and extra-field tables without waiting for a general legacy-name profile.
+2. The `python-wheel.v1-research` consumer profile binds the exact artifact filename, validates verified `WHEEL`, `METADATA`, and `RECORD` members, and produces a scheme-relative installation plan.
 
 The first layer constructs one archive tree. The second assigns Python packaging meaning to that tree. Neither may reparse the source. The detailed candidate rules and corpus plan are in the [Python wheel profile draft](profiles/python-wheel-v1.md).
 
@@ -58,8 +58,8 @@ The first layer constructs one archive tree. The second assigns Python packaging
 | TAR plus PAX and GNU name handling | Phase 1 | ZIP trust gate and codec adapters exist so TAR wrappers reuse them |
 | gzip, bzip2, xz, and zstd wrappers | Phase 1 with TAR | Exact stream, window, metadata, and cancellation semantics via the ZIP codec adapters |
 | ZIP64 | Deferred and consumer-driven | A named consumer demonstrates compatibility need and receives new offset, size, and corpus gates |
-| Wheel-oriented UTF-8 ZIP profile | Phase 0.1 laboratory, not current support | Exact UTF-8 path rules, exhaustive ZIP feature table, hostile fixtures, and benign compatibility report |
-| Python wheel consumer profile | Phase 0.2, first canonical consumer | Verified-member API plus wheel metadata, `RECORD`, artifact identity, and scheme-relative install-plan rules |
+| Wheel-oriented UTF-8 ZIP profile | Repository laboratory implemented, not current support | Exact UTF-8 path rules, exhaustive ZIP feature table, hostile fixtures, and benign compatibility report |
+| Python wheel consumer profile | Repository research implemented; supported promotion remains Phase 0.2 | Verified-member API plus wheel metadata, `RECORD`, artifact identity, scheme-relative install-plan rules, and external bridge |
 | JAR, APK, OCI, Office, and other ZIP consumers | Later consumer profiles | Signature, relocation, layer, or document semantics specified independently |
 | 7z and other archive families | Deliberately deferred | Concrete consumer, maintained parser strategy, and equivalent assurance evidence |
 | Encrypted or spanned archives | Refused in the current direction | Separate key, volume, and streaming trust models would be required |

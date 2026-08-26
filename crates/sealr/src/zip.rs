@@ -39,6 +39,8 @@ pub struct ZipMember {
     pub name: String,
     pub method: u16,
     pub flags: u16,
+    pub creator_system: u8,
+    pub external_attributes: u32,
     pub crc: u32,
     pub comp_size: u64,
     pub uncomp_size: u64,
@@ -380,6 +382,8 @@ pub fn parse_zip_with_profile(
             name,
             method,
             flags,
+            creator_system: (version_made_by >> 8) as u8,
+            external_attributes,
             crc,
             comp_size: payload_len,
             uncomp_size: uncomp as u64,
@@ -484,7 +488,10 @@ fn classify_extra_fields(
             )
             .on(String::from_utf8_lossy(name)));
         }
-        if profile == ZipInterpretationProfile::StrictAsciiV2 {
+        if matches!(
+            profile,
+            ZipInterpretationProfile::StrictAsciiV2 | ZipInterpretationProfile::WheelUtf8V1
+        ) {
             return Err(Finding::error(
                 FindingCode::ZipExtra,
                 format!(
@@ -532,9 +539,16 @@ fn validate_general_purpose_flags(
     profile: ZipInterpretationProfile,
     name: &[u8],
 ) -> Result<(), Finding> {
-    if profile == ZipInterpretationProfile::StrictAsciiV2 {
-        const ALLOWED: u16 = 1 << 3;
-        let denied = flags & !ALLOWED;
+    if matches!(
+        profile,
+        ZipInterpretationProfile::StrictAsciiV2 | ZipInterpretationProfile::WheelUtf8V1
+    ) {
+        let allowed = match profile {
+            ZipInterpretationProfile::StrictAsciiV2 => 1 << 3,
+            ZipInterpretationProfile::WheelUtf8V1 => 1 << 11,
+            ZipInterpretationProfile::StrictAsciiV1 => unreachable!(),
+        };
+        let denied = flags & !allowed;
         if denied != 0 {
             return Err(Finding::error(
                 FindingCode::ZipFlags,
@@ -685,6 +699,21 @@ fn decode_name_for_profile(
             FindingCode::ZipEncoding,
             format!("non-ASCII member name is denied by {}", profile.id()),
         ));
+    }
+    if profile == ZipInterpretationProfile::WheelUtf8V1 {
+        let name = std::str::from_utf8(bytes).map_err(|_| {
+            Finding::error(
+                FindingCode::ZipEncoding,
+                "wheel member name is not valid UTF-8",
+            )
+        })?;
+        if !bytes.is_ascii() && (flags & (1 << 11)) == 0 {
+            return Err(Finding::error(
+                FindingCode::ZipEncoding,
+                "non-ASCII wheel member name lacks general-purpose UTF-8 bit 11",
+            ));
+        }
+        return Ok(name.to_owned());
     }
     if (flags & (1 << 11)) != 0 {
         return std::str::from_utf8(bytes).map(str::to_owned).map_err(|_| {
@@ -1045,6 +1074,68 @@ mod tests {
                 flags == 0 || flags == 0x0008,
                 "unexpected disposition for flag word 0x{flags:04x}"
             );
+        }
+    }
+
+    #[test]
+    fn wheel_utf8_v1_flag_language_is_exhaustive() {
+        for flags in 0..=u16::MAX {
+            let accepted = validate_general_purpose_flags(
+                flags,
+                ZipInterpretationProfile::WheelUtf8V1,
+                b"member",
+            )
+            .is_ok();
+            assert_eq!(
+                accepted,
+                flags == 0 || flags == 0x0800,
+                "unexpected disposition for flag word 0x{flags:04x}"
+            );
+        }
+    }
+
+    #[test]
+    fn wheel_utf8_v1_name_language_is_exact() {
+        assert_eq!(
+            decode_name_for_profile(b"ascii", 0, ZipInterpretationProfile::WheelUtf8V1).unwrap(),
+            "ascii"
+        );
+        assert_eq!(
+            decode_name_for_profile(
+                "caf\u{e9}".as_bytes(),
+                0x0800,
+                ZipInterpretationProfile::WheelUtf8V1,
+            )
+            .unwrap(),
+            "caf\u{e9}"
+        );
+        assert!(decode_name_for_profile(
+            "caf\u{e9}".as_bytes(),
+            0,
+            ZipInterpretationProfile::WheelUtf8V1,
+        )
+        .is_err());
+        assert!(
+            decode_name_for_profile(&[0xff], 0x0800, ZipInterpretationProfile::WheelUtf8V1,)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn wheel_utf8_v1_extra_field_language_is_exhaustive() {
+        for id in 0..=u16::MAX {
+            let [lo, hi] = id.to_le_bytes();
+            let field = [lo, hi, 0, 0];
+            let finding = classify_extra_fields(
+                &field,
+                0,
+                ExtraSite::Local,
+                "local header",
+                b"member",
+                ZipInterpretationProfile::WheelUtf8V1,
+            )
+            .expect_err("wheel UTF-8 v1 admitted an extra field");
+            assert_eq!(finding.code, FindingCode::ZipExtra);
         }
     }
 

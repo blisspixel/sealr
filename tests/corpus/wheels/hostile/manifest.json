@@ -1,0 +1,135 @@
+{
+  "schema": "sealr.hostile-wheel-corpus.v1",
+  "cases": [
+    {
+      "id": "valid-control",
+      "filename": "valid-control.whl",
+      "outer_filename": "demo-1.0-py3-none-any.whl",
+      "mutation": "unmodified control",
+      "sha256": "38c4e955004c08f8cc5bb1974413787b68391fb4d469491df1e65a941756ff41",
+      "bytes": 851,
+      "status": "admitted",
+      "finding": null
+    },
+    {
+      "id": "record-wrong-hash",
+      "filename": "record-wrong-hash.whl",
+      "outer_filename": "demo-1.0-py3-none-any.whl",
+      "mutation": "replace one canonical RECORD digest",
+      "sha256": "86156e78e122bce550af37aaf91c7b01d823845ba4b1c36ac4a5560ef5db1412",
+      "bytes": 819,
+      "status": "denied",
+      "finding": "wheel.record-hash-mismatch"
+    },
+    {
+      "id": "record-wrong-size",
+      "filename": "record-wrong-size.whl",
+      "outer_filename": "demo-1.0-py3-none-any.whl",
+      "mutation": "increase one RECORD size",
+      "sha256": "099b460ea01ce89af630ec14bb8a92179e1ee81b0eb57a1f853cc15c656cc4fe",
+      "bytes": 851,
+      "status": "denied",
+      "finding": "wheel.record-size-mismatch"
+    },
+    {
+      "id": "record-missing-member",
+      "filename": "record-missing-member.whl",
+      "outer_filename": "demo-1.0-py3-none-any.whl",
+      "mutation": "remove one member row",
+      "sha256": "e6e53e944e5b6409fd5a84c15dd79ebd491c09a05f6684aedb2da6d191ca03d5",
+      "bytes": 799,
+      "status": "denied",
+      "finding": "wheel.record-member-missing"
+    },
+    {
+      "id": "record-phantom",
+      "filename": "record-phantom.whl",
+      "outer_filename": "demo-1.0-py3-none-any.whl",
+      "mutation": "append a row for an absent member",
+      "sha256": "7ca3250a33eec3e32aab6330366d697eef08c258ee8b9a23fe906ea2d8580ea5",
+      "bytes": 865,
+      "status": "denied",
+      "finding": "wheel.record-phantom"
+    },
+    {
+      "id": "record-duplicate",
+      "filename": "record-duplicate.whl",
+      "outer_filename": "demo-1.0-py3-none-any.whl",
+      "mutation": "append a duplicate row",
+      "sha256": "2ea1a5d3db9d454f3517217498cc122748f202ea0f8b35f5c9c4bcadc44bee6c",
+      "bytes": 856,
+      "status": "denied",
+      "finding": "wheel.record-duplicate"
+    },
+    {
+      "id": "relocation-collision",
+      "filename": "relocation-collision.whl",
+      "outer_filename": "demo-1.0-py3-none-any.whl",
+      "mutation": "map root and .data members to one target",
+      "sha256": "d1210d75a899ee9136fd54056af2d56360bcad5af49ce6df968ec7537c7594a4",
+      "bytes": 1198,
+      "status": "denied",
+      "finding": "wheel.relocation-collision"
+    },
+    {
+      "id": "generated-target",
+      "filename": "generated-target.whl",
+      "outer_filename": "demo-1.0-py3-none-any.whl",
+      "mutation": "unsafe reserved console-script target",
+      "sha256": "c513dd1f349bc4ff02788375862e54402acf6a3604e3f4b332f1685262413be7",
+      "bytes": 1082,
+      "status": "denied",
+      "finding": "wheel.generated-target-name"
+    },
+    {
+      "id": "metadata-disagreement",
+      "filename": "metadata-disagreement.whl",
+      "outer_filename": "demo-1.0-py3-none-any.whl",
+      "mutation": "METADATA Name disagrees with the filename",
+      "sha256": "61d4d96b864a2148ec03acf4c83b14fa346b6282e4cc59812036a2fd8320e39b",
+      "bytes": 853,
+      "status": "denied",
+      "finding": "wheel.filename-metadata-disagreement"
+    },
+    {
+      "id": "multiple-dist-info",
+      "filename": "multiple-dist-info.whl",
+      "outer_filename": "demo-1.0-py3-none-any.whl",
+      "mutation": "add a second top-level dist-info root",
+      "sha256": "29289f67dfa95feacba594343f55de3e84ad03b8305655599cf17995b37e1279",
+      "bytes": 1026,
+      "status": "denied",
+      "finding": "wheel.dist-info-count"
+    },
+    {
+      "id": "non-nfc-path",
+      "filename": "non-nfc-path.whl",
+      "outer_filename": "demo-1.0-py3-none-any.whl",
+      "mutation": "add a decomposed Unicode member path",
+      "sha256": "ae69ff5b2c2e1a51c4232b3fe2fb662fbb09601ea4d7be6b3392309e86ed766f",
+      "bytes": 1015,
+      "status": "denied",
+      "finding": "path.unicode"
+    },
+    {
+      "id": "unknown-data-scheme",
+      "filename": "unknown-data-scheme.whl",
+      "outer_filename": "demo-1.0-py3-none-any.whl",
+      "mutation": "add an unknown .data scheme key",
+      "sha256": "69bb76929f1a37f13f62eecf75fb06dbb1d6beebc4e41e350d7ed3a70c250fec",
+      "bytes": 1048,
+      "status": "denied",
+      "finding": "wheel.data-scheme"
+    },
+    {
+      "id": "script-rewrite-control",
+      "filename": "script-rewrite-control.whl",
+      "outer_filename": "demo-1.0-py3-none-any.whl",
+      "mutation": "executable #!python script relocation",
+      "sha256": "fe6a35df30adc5747740da97f1e3161b15e0d6a5bfc5d5884caa19afa013988f",
+      "bytes": 1071,
+      "status": "admitted",
+      "finding": null
+    }
+  ]
+}

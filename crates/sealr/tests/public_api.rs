@@ -3,10 +3,10 @@
 use std::io::{Cursor, Write};
 
 use sealr::{
-    apply, apply_with_options, ApplyOptions, EnvMeta, MaterializationMeta, MemberReadErrorKind,
-    Outcome, OutcomeIdentities, Policy, PolicyMeta, Receipt, Request, RetentionPlan,
-    RetentionStatus, SnapshotKind, Source, SourceMeta, ToolMeta, VerifiedArchive, View,
-    ZipInterpretationProfile, ZIP_STRICT_ASCII_V2,
+    apply, apply_with_options, ApplyOptions, EnvMeta, MaterializationMeta, MemberContainerFacts,
+    MemberReadErrorKind, Outcome, OutcomeIdentities, Policy, PolicyMeta, Receipt, Request,
+    RetentionPlan, RetentionStatus, SnapshotKind, Source, SourceMeta, ToolMeta, VerifiedArchive,
+    View, ZipInterpretationProfile, ZIP_STRICT_ASCII_V2, ZIP_WHEEL_UTF8_V1,
 };
 #[cfg(not(target_os = "linux"))]
 use sealr::{LinuxWorker, SupervisionErrorKind};
@@ -99,6 +99,33 @@ fn downstream_callers_can_select_the_closed_strict_profile() {
         outcome.receipt.identities.interpretation.id,
         ZIP_STRICT_ASCII_V2
     );
+}
+
+#[test]
+fn downstream_callers_can_name_research_wheel_container_facts() {
+    let bytes = member_zip();
+    let policy = Policy::default_v1();
+    let options =
+        ApplyOptions::new().with_interpretation_profile(ZipInterpretationProfile::WheelUtf8V1);
+    let outcome = apply_with_options(
+        Request {
+            source: Source::Bytes {
+                path: Some("example.whl"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: None,
+        },
+        &options,
+    );
+
+    assert!(!outcome.rejected(), "{:?}", outcome.view.findings);
+    assert_eq!(outcome.archive_ir().unwrap().profile(), ZIP_WHEEL_UTF8_V1);
+    let facts: MemberContainerFacts = outcome.archive_ir().unwrap().members()[0].container_facts();
+    let _: u8 = facts.creator_system;
+    let _: u32 = facts.external_attributes;
+    let _: Option<u16> = facts.unix_mode();
+    let _: bool = facts.pypa_installer_0_7_executable();
 }
 
 #[test]

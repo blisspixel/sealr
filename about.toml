@@ -14,4 +14,6 @@ targets = [
 ]
 
 ignore-dev-dependencies = true
-private = { ignore = true }
+# Exclude first-party workspace packages, including the crates.io-allowlisted
+# sealr crate, from release executable third-party license closures.
+private = { ignore = true, registries = ["crates-io"] }

@@ -156,6 +156,49 @@ if (-not $releaseWorkflow.Contains('            "Real-kernel Landlock ABI 2 floo
     throw 'Release verification does not require the real-kernel promotion job'
 }
 
+$distributionContract = Get-Content -Raw -LiteralPath (Join-Path $workspace 'docs/distribution-contract.md')
+$nativeFloorContract = Get-Content -Raw -LiteralPath (Join-Path $workspace 'tests/package-contract/native.json')
+foreach ($term in @(
+    'Only the `sealr` library crate is allowlisted',
+    '`cargo package --list`',
+    '`ubuntu-24.04`',
+    '`macos-15`',
+    '`windows-2022`',
+    '`MACOSX_DEPLOYMENT_TARGET=15.0`',
+    'patch releases never raise the MSRV'
+)) {
+    if (-not $distributionContract.Contains($term, [StringComparison]::Ordinal)) {
+        throw "docs/distribution-contract.md is missing its exact support promise: $term"
+    }
+}
+foreach ($term in @(
+    '"schema": "sealr.native-package-floor.v1"',
+    '"runner": "ubuntu-24.04"',
+    '"runner": "macos-15"',
+    '"runner": "windows-2022"'
+)) {
+    if (-not $nativeFloorContract.Contains($term, [StringComparison]::Ordinal)) {
+        throw "native package floor contract is missing its exact declaration: $term"
+    }
+}
+$ciDistributionWorkflow = Get-Content -Raw -LiteralPath (Join-Path $workspace '.github/workflows/ci.yml')
+foreach ($workflow in @(
+    @{ Name = 'CI'; Text = $ciDistributionWorkflow }
+    @{ Name = 'release'; Text = $releaseWorkflow }
+)) {
+    foreach ($term in @(
+        'MACOSX_DEPLOYMENT_TARGET: "15.0"',
+        'scripts/verify_native_floor.ps1'
+    )) {
+        if (-not $workflow.Text.Contains($term, [StringComparison]::Ordinal)) {
+            throw "The $($workflow.Name) workflow is missing its native floor contract: $term"
+        }
+    }
+}
+if (-not $ciDistributionWorkflow.Contains('scripts/verify_crate_package.ps1', [StringComparison]::Ordinal)) {
+    throw 'Required CI does not enforce the exact source crate package contract'
+}
+
 $workflowTitleTemplate = [regex]::Match(
     $releaseWorkflow,
     '(?m)^\s*release_title="(?<value>[^"]+)"\s*$'
@@ -225,11 +268,22 @@ $semanticPeakCommand = @'
 cargo test --locked --release -p sealr --lib semantic_record::peak_live::completion_reconstruction_peak_live_is_bounded -- --ignored --exact --nocapture --test-threads=1
 '@.Trim()
 foreach ($job in @(
-    @{ Name = 'quality'; Text = $qualityJob; Runner = 'runs-on: ubuntu-latest' }
-    @{ Name = 'platform'; Text = $platformJob; Runner = 'os: [macos-latest, windows-latest]' }
+    @{
+        Name = 'quality'
+        Text = $qualityJob
+        Runner = 'runs-on: ubuntu-24.04'
+        Floor = 'scripts/verify_native_floor.ps1 -ExpectedTarget x86_64-unknown-linux-gnu'
+    }
+    @{
+        Name = 'platform'
+        Text = $platformJob
+        Runner = 'os: [macos-15, windows-2022]'
+        Floor = 'scripts/verify_native_floor.ps1 -ExpectedTarget $target'
+    }
 )) {
     $normalizedJob = [regex]::Replace($job.Text, '\s+', ' ').Trim()
     if (-not $job.Text.Contains($job.Runner, [StringComparison]::Ordinal) -or
+        -not $job.Text.Contains($job.Floor, [StringComparison]::Ordinal) -or
         ([regex]::Matches($job.Text, '(?m)^\s*- name: Measure near-limit semantic completion heap\s*$')).Count -ne 1 -or
         ([regex]::Matches($normalizedJob, [regex]::Escape($semanticPeakCommand))).Count -ne 1) {
         throw "The $($job.Name) CI job does not contain the exact required semantic peak-live probe"
@@ -239,7 +293,7 @@ foreach ($job in @(
 $kernelFloorJob = $ciWorkflow.Substring($kernelFloorStart, $requiredStart - $kernelFloorStart)
 foreach ($fragment in @(
     '    name: Real-kernel Landlock ABI 2 floor',
-    '    runs-on: ubuntu-latest',
+    '    runs-on: ubuntu-24.04',
     '    timeout-minutes: 15',
     'sudo apt-get install --yes --no-install-recommends cpio qemu-system-x86',
     'run: bash scripts/verify_kernel_floor.sh'

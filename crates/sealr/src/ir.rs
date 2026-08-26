@@ -7,6 +7,7 @@ use crate::zip::ZipMember;
 pub const ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.v1";
 pub const ZIP_STRICT_ASCII_V1: &str = "sealr.profile.zip.strict-ascii.v1";
 pub const ZIP_STRICT_ASCII_V2: &str = "sealr.profile.zip.strict-ascii.v2";
+pub const ZIP_WHEEL_UTF8_V1: &str = "sealr.profile.zip.wheel-utf8.v1";
 
 const DENIED_EXTRA_ZIP64: u16 = 0x0001;
 const DENIED_EXTRA_UNICODE_PATH: u16 = 0x7075;
@@ -17,12 +18,16 @@ const DENIED_EXTRA_UNICODE_PATH: u16 = 0x7075;
 /// unknown flag bits and records unknown extra fields as ignored. New callers
 /// that need a closed interpretation contract should select `StrictAsciiV2`,
 /// which permits only flag bit 3 and denies every extra field.
+/// `WheelUtf8V1` is a closed, research-only wheel container language. It
+/// permits only the UTF-8 flag, requires that flag for non-ASCII names, denies
+/// data descriptors and every extra field, and requires NFC paths.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ZipInterpretationProfile {
     #[default]
     StrictAsciiV1,
     StrictAsciiV2,
+    WheelUtf8V1,
 }
 
 impl ZipInterpretationProfile {
@@ -30,6 +35,7 @@ impl ZipInterpretationProfile {
         match self {
             Self::StrictAsciiV1 => ZIP_STRICT_ASCII_V1,
             Self::StrictAsciiV2 => ZIP_STRICT_ASCII_V2,
+            Self::WheelUtf8V1 => ZIP_WHEEL_UTF8_V1,
         }
     }
 
@@ -37,6 +43,7 @@ impl ZipInterpretationProfile {
         match self {
             Self::StrictAsciiV1 => zip_strict_ascii_v1_digest(),
             Self::StrictAsciiV2 => zip_strict_ascii_v2_digest(),
+            Self::WheelUtf8V1 => zip_wheel_utf8_v1_digest(),
         }
     }
 }
@@ -120,6 +127,31 @@ impl MemberSourceRanges {
 pub enum NormalizationAction {
     StripDirectoryTrailingSlash,
     DropDotComponent { component_index: u32 },
+}
+
+/// Read-only central-directory facts bound to one verified member.
+///
+/// These facts are intentionally outside sealrTreeV1. Adding them does not
+/// change Alpha.6 layout or content roots. Consumer identities that interpret
+/// mode bits must bind their derived disposition separately.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct MemberContainerFacts {
+    pub creator_system: u8,
+    pub external_attributes: u32,
+}
+
+impl MemberContainerFacts {
+    /// Unix mode when the ZIP creator system explicitly identifies Unix.
+    pub fn unix_mode(self) -> Option<u16> {
+        (self.creator_system == 3).then_some((self.external_attributes >> 16) as u16)
+    }
+
+    /// Executable disposition used by PyPA installer 0.7.0 WheelFile.
+    pub fn pypa_installer_0_7_executable(self) -> bool {
+        let mode = (self.external_attributes >> 16) as u16;
+        mode & 0o170000 == 0o100000 && mode & 0o111 != 0
+    }
 }
 
 /// Hashed description of the current ZIP interpretation. The digest covers the
@@ -291,12 +323,148 @@ fn zip_strict_ascii_v2_profile() -> ZipStrictAsciiV2Profile {
     }
 }
 
+#[derive(Clone, Debug, Serialize)]
+struct ZipWheelUtf8V1Profile {
+    schema: &'static str,
+    status: &'static str,
+    format: &'static str,
+    methods: [u16; 2],
+    general_purpose_bits: [GeneralPurposeBitRule; 16],
+    extra_fields_semantic: [u16; 0],
+    extra_fields_permitted_nonsemantic: [u16; 0],
+    extra_fields_other: &'static str,
+    names: &'static str,
+    normalization: &'static str,
+    case_collision: &'static str,
+    directories: &'static str,
+    redundant_metadata: &'static str,
+}
+
+fn zip_wheel_utf8_v1_profile() -> ZipWheelUtf8V1Profile {
+    ZipWheelUtf8V1Profile {
+        schema: ZIP_WHEEL_UTF8_V1,
+        status: "nonshipping-research",
+        format: "zip32",
+        methods: [0, 8],
+        general_purpose_bits: [
+            GeneralPurposeBitRule {
+                bit: 0,
+                mask: 0x0001,
+                disposition: "denied",
+                meaning: "traditional-encryption",
+            },
+            GeneralPurposeBitRule {
+                bit: 1,
+                mask: 0x0002,
+                disposition: "denied",
+                meaning: "method-dependent-option-1",
+            },
+            GeneralPurposeBitRule {
+                bit: 2,
+                mask: 0x0004,
+                disposition: "denied",
+                meaning: "method-dependent-option-2",
+            },
+            GeneralPurposeBitRule {
+                bit: 3,
+                mask: 0x0008,
+                disposition: "denied",
+                meaning: "data-descriptor",
+            },
+            GeneralPurposeBitRule {
+                bit: 4,
+                mask: 0x0010,
+                disposition: "denied",
+                meaning: "enhanced-deflating",
+            },
+            GeneralPurposeBitRule {
+                bit: 5,
+                mask: 0x0020,
+                disposition: "denied",
+                meaning: "compressed-patched-data",
+            },
+            GeneralPurposeBitRule {
+                bit: 6,
+                mask: 0x0040,
+                disposition: "denied",
+                meaning: "strong-encryption",
+            },
+            GeneralPurposeBitRule {
+                bit: 7,
+                mask: 0x0080,
+                disposition: "denied",
+                meaning: "unused",
+            },
+            GeneralPurposeBitRule {
+                bit: 8,
+                mask: 0x0100,
+                disposition: "denied",
+                meaning: "unused",
+            },
+            GeneralPurposeBitRule {
+                bit: 9,
+                mask: 0x0200,
+                disposition: "denied",
+                meaning: "unused",
+            },
+            GeneralPurposeBitRule {
+                bit: 10,
+                mask: 0x0400,
+                disposition: "denied",
+                meaning: "unused",
+            },
+            GeneralPurposeBitRule {
+                bit: 11,
+                mask: 0x0800,
+                disposition: "semantic",
+                meaning: "utf8-name",
+            },
+            GeneralPurposeBitRule {
+                bit: 12,
+                mask: 0x1000,
+                disposition: "denied",
+                meaning: "reserved-enhanced-compression",
+            },
+            GeneralPurposeBitRule {
+                bit: 13,
+                mask: 0x2000,
+                disposition: "denied",
+                meaning: "masked-local-header",
+            },
+            GeneralPurposeBitRule {
+                bit: 14,
+                mask: 0x4000,
+                disposition: "denied",
+                meaning: "alternate-streams",
+            },
+            GeneralPurposeBitRule {
+                bit: 15,
+                mask: 0x8000,
+                disposition: "denied",
+                meaning: "reserved",
+            },
+        ],
+        extra_fields_semantic: [],
+        extra_fields_permitted_nonsemantic: [],
+        extra_fields_other: "denied",
+        names: "strict-utf8-nonascii-requires-bit11",
+        normalization: "nfc-no-dot-component",
+        case_collision: "rust-1.98-lowercase-then-nfc",
+        directories: "trailing-slash-store-empty-crc32-zero",
+        redundant_metadata: "exact-lfh-cdh-no-descriptor",
+    }
+}
+
 pub fn zip_strict_ascii_v1_digest() -> String {
     hex_sha256(&zip_strict_ascii_v1_canonical_bytes())
 }
 
 pub fn zip_strict_ascii_v2_digest() -> String {
     hex_sha256(&zip_strict_ascii_v2_canonical_bytes())
+}
+
+pub fn zip_wheel_utf8_v1_digest() -> String {
+    hex_sha256(&zip_wheel_utf8_v1_canonical_bytes())
 }
 
 /// Canonical JSON bytes hashed by the v1 interpretation identity.
@@ -307,6 +475,11 @@ pub fn zip_strict_ascii_v1_canonical_bytes() -> Vec<u8> {
 /// Canonical JSON bytes hashed by the v2 interpretation identity.
 pub fn zip_strict_ascii_v2_canonical_bytes() -> Vec<u8> {
     serde_json::to_vec(&zip_strict_ascii_v2_profile()).expect("profile serializes")
+}
+
+/// Canonical JSON bytes hashed by the research wheel UTF-8 interpretation.
+pub fn zip_wheel_utf8_v1_canonical_bytes() -> Vec<u8> {
+    serde_json::to_vec(&zip_wheel_utf8_v1_profile()).expect("profile serializes")
 }
 
 pub fn is_denied_extra_id(id: u16) -> bool {
@@ -324,6 +497,10 @@ pub struct IrMember {
     pub kind: MemberKind,
     pub method: u16,
     pub flags: u16,
+    #[serde(skip)]
+    pub(crate) creator_system: u8,
+    #[serde(skip)]
+    pub(crate) external_attributes: u32,
     pub declared_crc: u32,
     pub declared_comp_size: u64,
     pub declared_uncomp_size: u64,
@@ -355,6 +532,8 @@ impl IrMember {
             kind,
             method: zip.method,
             flags: zip.flags,
+            creator_system: zip.creator_system,
+            external_attributes: zip.external_attributes,
             declared_crc: zip.crc,
             declared_comp_size: zip.comp_size,
             declared_uncomp_size: zip.uncomp_size,
@@ -386,6 +565,13 @@ impl IrMember {
         self.verification = MemberVerification::Failed {
             cause: cause.to_owned(),
         };
+    }
+
+    pub fn container_facts(&self) -> MemberContainerFacts {
+        MemberContainerFacts {
+            creator_system: self.creator_system,
+            external_attributes: self.external_attributes,
+        }
     }
 }
 
