@@ -7,10 +7,26 @@ Set-StrictMode -Version Latest
 $workspace = Split-Path -Parent $PSScriptRoot
 $expected = [ordered]@{
     'x86_64-unknown-linux-gnu' = [pscustomobject]@{
-        Components = 55
-        Notices = 11
-        Present = @('linux-raw-sys 0.12.1', 'rustix-linux-procfs 0.1.1', 'once_cell 1.21.4')
-        Absent = @('errno 0.3.14', 'windows-sys 0.61.2', 'once_cell_polyfill 1.70.2')
+        Components = 59
+        Notices = 12
+        Present = @(
+            'linux-raw-sys 0.12.1',
+            'rustix-linux-procfs 0.1.1',
+            'once_cell 1.21.4',
+            'landlock 0.4.7',
+            'enumflags2 0.7.12',
+            'enumflags2_derive 0.7.12',
+            'syn 2.0.119'
+        )
+        Absent = @(
+            'errno 0.3.14',
+            'windows-sys 0.61.2',
+            'once_cell_polyfill 1.70.2',
+            'zip 8.6.0',
+            'zopfli 0.8.3',
+            'bumpalo 3.20.3',
+            'typed-path 0.12.3'
+        )
     }
     'aarch64-apple-darwin' = [pscustomobject]@{
         Components = 53

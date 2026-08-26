@@ -24,6 +24,7 @@ Start with the [README](../README.md) for the published Alpha.5 boundary and a s
 | [Strict ASCII ZIP32 profile v2](profiles/zip-strict-ascii-v2.md) | Executable exhaustive flag and extra-field interpretation contract |
 | [Differentials](differentials.md) | Single-interpretation rules and the ZipDiff corpus |
 | [Reduced-authority execution](sandbox.md) | Supervisor and worker design |
+| [Linux helper packaging](helper-packaging.md) | Fixed archive placement, manifest, license closure, and extracted-artifact verification |
 | [Finding registry](findings.md) | Stable machine finding codes |
 | [Worker protocol v1](worker-protocol.md) | Bounded control frames, capability slots, decoder rules, and fuzz evidence |
 | [Alpha.6 semantic ownership](decisions/0001-alpha6-semantic-ownership.md) | Accepted private record experiment and provisional public capability gates |
