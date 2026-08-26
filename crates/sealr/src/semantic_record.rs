@@ -4113,7 +4113,10 @@ mod fuzzing {
     use std::sync::OnceLock;
 
     use super::*;
-    use crate::apply::{apply_with_options, ApplyOptions, Request, Source};
+    use crate::apply::{
+        apply_with_options, plan_source, ApplyOptions, PlanDecision, PlanningContext, Request,
+        Source,
+    };
     use crate::policy::Policy;
 
     struct FuzzContext {
@@ -4230,12 +4233,27 @@ mod fuzzing {
         let policy = Policy::default_v1();
         let controls = policy.compile().expect("default policy compiles");
         let options = ApplyOptions::new().with_interpretation_profile(profile);
+        let operation_source = Source::Bytes {
+            path: Some("semantic-record-fuzz.zip"),
+            data: &source,
+        };
+        let planning_context =
+            PlanningContext::compile(&policy, profile).expect("fuzz fixture policy compiles");
+        let ready = match plan_source(&operation_source, planning_context)
+            .expect("fuzz fixture source snapshots")
+        {
+            PlanDecision::Ready(ready) => ready,
+            PlanDecision::Terminal(terminal) => {
+                panic!("valid fuzz fixture reached terminal planning: {terminal:?}")
+            }
+        };
+        let (planning_snapshot, pending, planning_findings, planning_context) = ready.into_parts();
+        assert!(planning_findings.is_empty());
+        assert_eq!(planning_context.controls(), controls);
+        assert_eq!(planning_context.profile(), profile);
         let outcome = apply_with_options(
             Request {
-                source: Source::Bytes {
-                    path: Some("semantic-record-fuzz.zip"),
-                    data: &source,
-                },
+                source: operation_source,
                 policy: &policy,
                 dest: None,
             },
@@ -4247,14 +4265,6 @@ mod fuzzing {
             .archive_ir()
             .expect("valid fuzz fixture has IR")
             .clone();
-        let mut pending = completed.clone();
-        for member in &mut pending.members {
-            member.actual_uncomp_size = None;
-            member.actual_crc = None;
-            member.content_sha256 = None;
-            member.verification = MemberVerification::Pending;
-        }
-        let source_sha256: [u8; 32] = Sha256::digest(&source).into();
         let requested_effect = if materialize {
             RequestedEffect::Materialize
         } else {
@@ -4262,18 +4272,26 @@ mod fuzzing {
         };
         let binding = InvocationBinding {
             operation_id: if materialize { [0x52; 16] } else { [0x41; 16] },
-            source_len: source.len() as u64,
-            source_sha256,
-            profile,
-            profile_sha256: parse_hex_32(&profile.digest()).expect("profile digest is valid"),
-            policy_id: policy.id.clone(),
-            policy_sha256: parse_hex_32(&policy.digest_hex()).expect("policy digest is valid"),
-            budget: controls.budget,
-            target: controls.target,
-            consumer: controls.consumer,
+            source_len: planning_snapshot.len(),
+            source_sha256: parse_hex_32(
+                planning_snapshot
+                    .digest()
+                    .sha256()
+                    .expect("planned snapshot has a digest"),
+            )
+            .expect("source digest is valid"),
+            profile: planning_context.profile(),
+            profile_sha256: parse_hex_32(&planning_context.profile().digest())
+                .expect("profile digest is valid"),
+            policy_id: planning_context.policy_id().to_owned(),
+            policy_sha256: parse_hex_32(planning_context.policy_sha256())
+                .expect("policy digest is valid"),
+            budget: planning_context.controls().budget,
+            target: planning_context.controls().target,
+            consumer: planning_context.controls().consumer,
             requested_effect,
             target_sha256: materialize.then_some([0x54; 32]),
-            member_sync: controls.effect.member_sync,
+            member_sync: planning_context.controls().effect.member_sync,
             retention: if materialize {
                 RetentionBinding::Plan {
                     paths: vec!["a.txt".into(), "nested/b.txt".into()],
@@ -4288,7 +4306,7 @@ mod fuzzing {
             binding: binding.clone(),
             disposition: PlanningDisposition::ReadyForVerification,
             ir: Some(pending),
-            findings: Vec::new(),
+            findings: planning_findings,
         };
         let planning_bytes = encode_planning(&record).expect("reference plan encodes");
         let pending_ir_json = serde_json::to_vec(record.ir.as_ref().unwrap()).unwrap();
@@ -4309,9 +4327,8 @@ mod fuzzing {
             ],
         };
         let terminal_bytes = encode_planning(&terminal).expect("reference terminal encodes");
-        let snapshot = SourceSnapshot::borrowed(None, &source);
-        let planning =
-            decode_planning(&planning_bytes, &binding, &snapshot).expect("reference plan decodes");
+        let planning = decode_planning(&planning_bytes, &binding, &planning_snapshot)
+            .expect("reference plan decodes");
         let completion = CompletionRecord {
             operation_id: binding.operation_id,
             request_id: planning.request_id,
@@ -4477,10 +4494,11 @@ mod tests {
 
     use super::*;
     use crate::apply::{
-        apply_with_options, capture_next_planning_boundary, ApplyOptions, Outcome, Request, Source,
+        apply_with_options, plan_source, ApplyOptions, Outcome, PlanDecision, PlanningContext,
+        Request, Source,
     };
     use crate::outcome::EffectStatus;
-    use crate::policy::Policy;
+    use crate::policy::{hex_sha256, Policy};
     use crate::snapshot::{
         inject_read_failure, reset_test_read_ranges, test_read_failure_is_armed, test_read_ranges,
     };
@@ -4750,13 +4768,29 @@ mod tests {
     ) -> (InvocationBinding, ArchiveIR, ArchiveIR) {
         let controls = policy.compile().unwrap();
         let options = ApplyOptions::new().with_interpretation_profile(profile);
-        let capture = capture_next_planning_boundary();
+        let source = Source::Bytes {
+            path: Some("semantic-record.zip"),
+            data: bytes,
+        };
+        let verify_calls_before = verify_payload_calls();
+        let planning_context = PlanningContext::compile(policy, profile).unwrap();
+        let ready = match plan_source(&source, planning_context).unwrap() {
+            PlanDecision::Ready(ready) => ready,
+            PlanDecision::Terminal(terminal) => {
+                panic!("reference source reached terminal planning: {terminal:?}")
+            }
+        };
+        assert_eq!(verify_payload_calls(), verify_calls_before);
+        let (snapshot, pending, planning_findings, planning_context) = ready.into_parts();
+        assert!(planning_findings.is_empty());
+        assert_eq!(planning_context.controls(), controls);
+        assert_eq!(planning_context.profile(), profile);
+        assert_eq!(planning_context.policy_id(), policy.id);
+        assert_eq!(planning_context.policy_sha256(), policy.digest_hex());
+        let binding = binding_for_planned(&snapshot, &planning_context, RequestedEffect::Inspect);
         let outcome = apply_with_options(
             Request {
-                source: Source::Bytes {
-                    path: Some("semantic-record.zip"),
-                    data: bytes,
-                },
+                source,
                 policy,
                 dest: None,
             },
@@ -4765,33 +4799,23 @@ mod tests {
         assert_eq!(outcome.admission, AdmissionStatus::Admitted);
         assert_eq!(outcome.verification, VerificationStatus::Complete);
         let completed = outcome.archive_ir().unwrap().clone();
-        let pending = capture.take().expect("apply reached the planning boundary");
-        let source_sha256: [u8; 32] = Sha256::digest(bytes).into();
-        let binding = InvocationBinding {
-            operation_id: [0x41; 16],
-            source_len: bytes.len() as u64,
-            source_sha256,
-            profile,
-            profile_sha256: parse_hex_32(&profile.digest()).unwrap(),
-            policy_id: policy.id.clone(),
-            policy_sha256: parse_hex_32(&policy.digest_hex()).unwrap(),
-            budget: controls.budget,
-            target: controls.target,
-            consumer: controls.consumer,
-            requested_effect: RequestedEffect::Inspect,
-            target_sha256: None,
-            member_sync: controls.effect.member_sync,
-            retention: RetentionBinding::None,
-        };
         (binding, pending, completed)
     }
 
     fn ready_plan(binding: InvocationBinding, ir: ArchiveIR) -> PlanningRecord {
+        ready_plan_with_findings(binding, ir, Vec::new())
+    }
+
+    fn ready_plan_with_findings(
+        binding: InvocationBinding,
+        ir: ArchiveIR,
+        findings: Vec<Finding>,
+    ) -> PlanningRecord {
         PlanningRecord {
             binding,
             disposition: PlanningDisposition::ReadyForVerification,
             ir: Some(ir),
-            findings: Vec::new(),
+            findings,
         }
     }
 
@@ -4857,6 +4881,39 @@ mod tests {
             profile_sha256: parse_hex_32(&profile.digest()).unwrap(),
             policy_id: policy.id.clone(),
             policy_sha256: parse_hex_32(&policy.digest_hex()).unwrap(),
+            budget: controls.budget,
+            target: controls.target,
+            consumer: controls.consumer,
+            requested_effect,
+            target_sha256: (requested_effect == RequestedEffect::Materialize).then_some([0x54; 32]),
+            member_sync: controls.effect.member_sync,
+            retention: RetentionBinding::None,
+        }
+    }
+
+    fn binding_for_planned(
+        snapshot: &SourceSnapshot<'_>,
+        context: &PlanningContext,
+        requested_effect: RequestedEffect,
+    ) -> InvocationBinding {
+        let controls = context.controls();
+        InvocationBinding {
+            operation_id: match requested_effect {
+                RequestedEffect::Inspect => [0x41; 16],
+                RequestedEffect::Materialize => [0x52; 16],
+            },
+            source_len: snapshot.len(),
+            source_sha256: parse_hex_32(
+                snapshot
+                    .digest()
+                    .sha256()
+                    .expect("planned snapshots always have a digest"),
+            )
+            .unwrap(),
+            profile: context.profile(),
+            profile_sha256: parse_hex_32(&context.profile().digest()).unwrap(),
+            policy_id: context.policy_id().to_owned(),
+            policy_sha256: parse_hex_32(context.policy_sha256()).unwrap(),
             budget: controls.budget,
             target: controls.target,
             consumer: controls.consumer,
@@ -5173,11 +5230,27 @@ mod tests {
         expected_completeness: ViewCompleteness,
         finding_code: Option<FindingCode>,
     ) -> (ShadowEvidence, CompletionArtifact) {
-        let binding = binding_for(bytes, profile, policy, RequestedEffect::Inspect);
+        let controls = policy.compile().unwrap();
         let mut source_file = (backend == ShadowBackend::PrivateFile)
             .then(|| TempShadowFile::new(&format!("{name}-source.zip"), bytes));
+        let planning_path = source_file.as_ref().map(|file| file.path().to_owned());
+        let planning_source = match backend {
+            ShadowBackend::MemoryBorrowed => Source::Bytes {
+                path: Some("semantic-shadow-v2.zip"),
+                data: bytes,
+            },
+            ShadowBackend::PrivateFile => Source::Path(planning_path.as_deref().unwrap()),
+        };
+        let verify_calls_before = verify_payload_calls();
+        let planning_context = PlanningContext::compile(policy, profile).unwrap();
+        let ready = match plan_source(&planning_source, planning_context).unwrap() {
+            PlanDecision::Ready(ready) => ready,
+            PlanDecision::Terminal(terminal) => {
+                panic!("{name} reached terminal planning: {terminal:?}")
+            }
+        };
+        assert_eq!(verify_payload_calls(), verify_calls_before, "{name}");
 
-        let capture = capture_next_planning_boundary();
         let outcome = match backend {
             ShadowBackend::MemoryBorrowed => apply_with_options(
                 Request {
@@ -5207,7 +5280,6 @@ mod tests {
             },
             "{name}"
         );
-        let pending = capture.take().expect("case reached the planning boundary");
         assert_outcome(
             name,
             &outcome,
@@ -5219,24 +5291,28 @@ mod tests {
             finding_code,
         );
 
-        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending.clone())).unwrap();
-        let execution_snapshot = match backend {
-            ShadowBackend::MemoryBorrowed => SourceSnapshot::borrowed(None, bytes),
-            ShadowBackend::PrivateFile => SourceSnapshot::private_file_from_path(
-                source_file.as_ref().unwrap().path(),
-                None,
-                binding.budget.max_archive_bytes,
-            )
-            .unwrap(),
-        };
         if let Some(file) = &mut source_file {
             file.remove();
         }
+        let (execution_snapshot, pending, planning_findings, planning_context) = ready.into_parts();
+        assert_eq!(planning_context.controls(), controls, "{name}");
+        let binding = binding_for_planned(
+            &execution_snapshot,
+            &planning_context,
+            RequestedEffect::Inspect,
+        );
+        let expected_planning_findings = planning_findings.clone();
+        let plan_bytes = encode_planning(&ready_plan_with_findings(
+            binding.clone(),
+            pending.clone(),
+            planning_findings,
+        ))
+        .unwrap();
         let plan = decode_planning(&plan_bytes, &binding, &execution_snapshot).unwrap();
         let correlation_plan = decode_plan(&plan_bytes, &binding, bytes).unwrap();
         assert_eq!(encode_planning(&plan.record).unwrap(), plan_bytes, "{name}");
         assert_eq!(plan.record.binding, binding, "{name}");
-        assert!(plan.record.findings.is_empty(), "{name}");
+        assert_eq!(plan.record.findings, expected_planning_findings, "{name}");
         assert_ir_eq(plan.record.ir.as_ref().unwrap(), &pending);
         assert_eq!(plan.request_id, request_id(&binding).unwrap(), "{name}");
         assert_eq!(plan.plan_id, plan_id(&plan_bytes), "{name}");
@@ -5292,20 +5368,28 @@ mod tests {
         phase: StoppingPhase,
         finding_code: FindingCode,
     ) -> (ShadowEvidence, ValidatedPlanningRecord) {
-        let binding = binding_for(bytes, profile, policy, RequestedEffect::Inspect);
-        let capture = capture_next_planning_boundary();
+        let source = Source::Bytes {
+            path: Some("semantic-shadow-v2-terminal.bin"),
+            data: bytes,
+        };
+        let verify_calls_before = verify_payload_calls();
+        let planning_context = PlanningContext::compile(policy, profile).unwrap();
+        let terminal = match plan_source(&source, planning_context).unwrap() {
+            PlanDecision::Terminal(terminal) => terminal,
+            PlanDecision::Ready(ready) => panic!("{name} unexpectedly reached Ready: {ready:?}"),
+        };
+        assert_eq!(verify_payload_calls(), verify_calls_before, "{name}");
         let outcome = apply_with_options(
             Request {
-                source: Source::Bytes {
-                    path: Some("semantic-shadow-v2-terminal.bin"),
-                    data: bytes,
-                },
+                source,
                 policy,
                 dest: None,
             },
             &ApplyOptions::new().with_interpretation_profile(profile),
         );
-        assert!(capture.take().is_none(), "{name}");
+        let (snapshot, magic, planning_ir, planning_findings, planning_axes, planning_context) =
+            terminal.into_parts();
+        let binding = binding_for_planned(&snapshot, &planning_context, RequestedEffect::Inspect);
         let completeness = ViewCompleteness::Partial {
             phase,
             cause: finding_code.as_str().to_owned(),
@@ -5320,20 +5404,34 @@ mod tests {
             completeness.clone(),
             Some(finding_code),
         );
+        assert_eq!(magic, outcome.view.source.magic, "{name}");
+        assert_eq!(
+            planning_axes.interpretation, outcome.interpretation,
+            "{name}"
+        );
+        assert_eq!(planning_axes.admission, outcome.admission, "{name}");
+        assert_eq!(planning_axes.verification, outcome.verification, "{name}");
+        assert_eq!(planning_axes.effect, outcome.effect, "{name}");
+        assert_eq!(
+            planning_axes.view_completeness, outcome.view_completeness,
+            "{name}"
+        );
+        assert_eq!(planning_findings, outcome.view.findings, "{name}");
+        assert!(planning_ir.is_none(), "{name}");
         assert!(outcome.archive_ir().is_none(), "{name}");
         let record = PlanningRecord {
             binding: binding.clone(),
             disposition: PlanningDisposition::Terminal(TerminalPlanningAxes {
-                interpretation,
-                admission,
+                interpretation: planning_axes.interpretation,
+                admission: planning_axes.admission,
                 verification: VerificationStatus::StructureOnly,
-                view_completeness: completeness,
+                view_completeness: planning_axes.view_completeness,
             }),
             ir: None,
-            findings: outcome.view.findings.clone(),
+            findings: planning_findings,
         };
         let record_bytes = encode_planning(&record).unwrap();
-        let plan = decode_plan(&record_bytes, &binding, bytes).unwrap();
+        let plan = decode_planning(&record_bytes, &binding, &snapshot).unwrap();
         assert_eq!(
             encode_planning(&plan.record).unwrap(),
             record_bytes,
@@ -5488,26 +5586,118 @@ mod tests {
         std::env::temp_dir().join(format!("sealr-semantic-shadow-{label}-{suffix}"))
     }
 
+    #[test]
+    fn shared_planner_is_plan_only_and_owns_the_exact_snapshot() {
+        let bytes = make_zip_with_method(
+            &[("planned.txt", b"planned".as_slice())],
+            CompressionMethod::Deflated,
+        );
+        let policy = Policy::default_v1();
+        let controls = policy.compile().unwrap();
+        let profile = ZipInterpretationProfile::StrictAsciiV2;
+        let mut caller_file = TempShadowFile::new("shared-plan-source.zip", &bytes);
+        let caller_path = caller_file.path().to_owned();
+        let source = Source::Path(&caller_path);
+
+        crate::zip::reset_parse_calls();
+        reset_verify_payload_calls();
+        let planning_context = PlanningContext::compile(&policy, profile).unwrap();
+        let ready = match plan_source(&source, planning_context).unwrap() {
+            PlanDecision::Ready(ready) => ready,
+            PlanDecision::Terminal(terminal) => {
+                panic!("valid shared-plan fixture reached terminal planning: {terminal:?}")
+            }
+        };
+        assert_eq!(crate::zip::parse_calls(), 1);
+        assert_eq!(verify_payload_calls(), 0);
+
+        caller_file.remove();
+        assert!(!caller_path.exists());
+        let (snapshot, pending, planning_findings, context) = ready.into_parts();
+        assert_eq!(snapshot.kind(), crate::snapshot::SnapshotKind::PrivateFile);
+        assert_eq!(snapshot.len(), bytes.len() as u64);
+        assert_eq!(
+            snapshot.digest().sha256(),
+            Some(hex_sha256(&bytes).as_str())
+        );
+        assert!(planning_findings.is_empty());
+        assert_eq!(context.controls(), controls);
+        assert_eq!(context.profile(), profile);
+        assert!(pending
+            .members
+            .iter()
+            .all(|member| matches!(member.verification, MemberVerification::Pending)));
+
+        let binding = binding_for_planned(&snapshot, &context, RequestedEffect::Inspect);
+        let planning_bytes = encode_planning(&ready_plan_with_findings(
+            binding.clone(),
+            pending,
+            planning_findings,
+        ))
+        .unwrap();
+        let validated = decode_planning(&planning_bytes, &binding, &snapshot).unwrap();
+        crate::zip::reset_parse_calls();
+        reset_verify_payload_calls();
+        let executed = validated
+            .bind_inspect_execution(snapshot)
+            .unwrap()
+            .execute()
+            .unwrap();
+        assert_eq!(crate::zip::parse_calls(), 0);
+        assert_eq!(verify_payload_calls(), 1);
+        assert_eq!(
+            decode_completion(executed.completion(), executed.planning())
+                .unwrap()
+                .verification,
+            VerificationStatus::Complete
+        );
+
+        let mut one_under = policy.clone();
+        one_under.max_archive_bytes = bytes.len() as u64 - 1;
+        crate::zip::reset_parse_calls();
+        reset_verify_payload_calls();
+        assert!(plan_source(
+            &Source::Bytes {
+                path: Some("one-over-cap.zip"),
+                data: &bytes,
+            },
+            PlanningContext::compile(&one_under, profile).unwrap(),
+        )
+        .is_err());
+        assert_eq!(crate::zip::parse_calls(), 0);
+        assert_eq!(verify_payload_calls(), 0);
+    }
+
     fn run_setup_failure_shadow(bytes: &[u8], policy: &Policy) -> ShadowEvidence {
         let name = "setup-failure";
         let profile = ZipInterpretationProfile::StrictAsciiV1;
-        let binding = binding_for(bytes, profile, policy, RequestedEffect::Materialize);
+        let source = Source::Bytes {
+            path: Some("semantic-shadow-setup.zip"),
+            data: bytes,
+        };
+        let verify_calls_before = verify_payload_calls();
+        let planning_context = PlanningContext::compile(policy, profile).unwrap();
+        let ready = match plan_source(&source, planning_context).unwrap() {
+            PlanDecision::Ready(ready) => ready,
+            PlanDecision::Terminal(terminal) => {
+                panic!("setup fixture reached terminal planning: {terminal:?}")
+            }
+        };
+        assert_eq!(verify_payload_calls(), verify_calls_before);
+        let (snapshot, pending, planning_findings, planning_context) = ready.into_parts();
+        let binding =
+            binding_for_planned(&snapshot, &planning_context, RequestedEffect::Materialize);
         let destination = temp_shadow_dest("existing");
         fs::create_dir(&destination).unwrap();
         fs::write(destination.join("sentinel.txt"), b"unchanged").unwrap();
-        let capture = capture_next_planning_boundary();
         let outcome = apply_with_options(
             Request {
-                source: Source::Bytes {
-                    path: Some("semantic-shadow-setup.zip"),
-                    data: bytes,
-                },
+                source,
                 policy,
                 dest: Some(&destination),
             },
             &ApplyOptions::new().with_interpretation_profile(profile),
         );
-        let pending = capture.take().expect("setup case reached planning");
         let completeness = ViewCompleteness::Partial {
             phase: StoppingPhase::Effect,
             cause: FindingCode::MaterializeExists.as_str().to_owned(),
@@ -5527,7 +5717,12 @@ mod tests {
             fs::read(destination.join("sentinel.txt")).unwrap(),
             b"unchanged"
         );
-        let plan_bytes = encode_planning(&ready_plan(binding.clone(), pending.clone())).unwrap();
+        let plan_bytes = encode_planning(&ready_plan_with_findings(
+            binding.clone(),
+            pending.clone(),
+            planning_findings,
+        ))
+        .unwrap();
         let plan = decode_plan(&plan_bytes, &binding, bytes).unwrap();
         assert_eq!(encode_planning(&plan.record).unwrap(), plan_bytes);
         let finding = outcome
@@ -6265,7 +6460,8 @@ mod tests {
         for (profile, bytes, expected_payloads) in cases {
             crate::zip::reset_parse_calls();
             let (binding, pending, completed) = reference(&bytes, profile);
-            assert_eq!(crate::zip::parse_calls(), 1);
+            let parse_calls_before_execution = crate::zip::parse_calls();
+            assert_eq!(parse_calls_before_execution, 2);
             let plan_bytes =
                 encode_planning(&ready_plan(binding.clone(), pending.clone())).unwrap();
             let plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
@@ -6279,7 +6475,7 @@ mod tests {
 
             let executed = bound.execute().unwrap();
 
-            assert_eq!(crate::zip::parse_calls(), 1);
+            assert_eq!(crate::zip::parse_calls(), parse_calls_before_execution);
             assert_eq!(verify_payload_calls(), expected_payloads);
             let payload_ranges: Vec<_> = pending
                 .members
@@ -6592,14 +6788,35 @@ mod tests {
             assert_ir_eq(&decoded.ir, &completed);
         };
         let deny_one_under = |bytes: &[u8], policy: &Policy, expected: FindingCode| {
-            let capture = capture_next_planning_boundary();
             reset_verify_payload_calls();
+            let source = Source::Bytes {
+                path: Some("semantic-budget-boundary.zip"),
+                data: bytes,
+            };
+            let planning_context =
+                PlanningContext::compile(policy, ZipInterpretationProfile::StrictAsciiV1).unwrap();
+            let terminal = match plan_source(&source, planning_context).unwrap() {
+                PlanDecision::Terminal(terminal) => terminal,
+                PlanDecision::Ready(ready) => {
+                    panic!("one-under fixture unexpectedly reached Ready: {ready:?}")
+                }
+            };
+            let (_snapshot, _magic, ir, findings, axes, _context) = terminal.into_parts();
+            assert!(ir.is_none());
+            assert_eq!(axes.admission, AdmissionStatus::Denied);
+            assert_eq!(axes.verification, VerificationStatus::StructureOnly);
+            assert_eq!(
+                findings
+                    .iter()
+                    .find(|finding| finding.severity == Severity::Error)
+                    .unwrap()
+                    .code,
+                expected
+            );
+            assert_eq!(verify_payload_calls(), 0);
             let outcome = apply_with_options(
                 Request {
-                    source: Source::Bytes {
-                        path: Some("semantic-budget-boundary.zip"),
-                        data: bytes,
-                    },
+                    source,
                     policy,
                     dest: None,
                 },
@@ -6618,7 +6835,6 @@ mod tests {
                     .code,
                 expected
             );
-            assert!(capture.take().is_none());
             assert_eq!(verify_payload_calls(), 0);
         };
 
