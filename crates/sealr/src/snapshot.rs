@@ -5,6 +5,9 @@ use std::fs::{File, Metadata, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::Path;
 
+#[cfg(feature = "__internal-worker-lab")]
+use std::io::{Seek, SeekFrom};
+
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::fs::OpenOptions as CapOpenOptions;
 use serde::Serialize;
@@ -226,6 +229,64 @@ impl<'a> SourceSnapshot<'a> {
             len,
             digest,
         }
+    }
+
+    #[cfg(feature = "__internal-worker-lab")]
+    pub(crate) fn worker_lab_from_file(
+        mut file: File,
+        path: Option<String>,
+        expected_len: u64,
+        max_archive_bytes: u64,
+    ) -> Result<SourceSnapshot<'static>, Finding> {
+        let metadata = file.metadata().map_err(|error| {
+            Finding::error(
+                FindingCode::SourceIo,
+                format!("read worker source metadata: {error}"),
+            )
+        })?;
+        if !metadata.is_file() {
+            return Err(Finding::error(
+                FindingCode::SourceIo,
+                "worker source descriptor is not a regular file",
+            ));
+        }
+        if metadata.len() != expected_len {
+            return Err(Finding::error(
+                FindingCode::SourceIo,
+                format!(
+                    "worker source length is {}; expected {expected_len}",
+                    metadata.len()
+                ),
+            ));
+        }
+        file.seek(SeekFrom::Start(0)).map_err(|error| {
+            Finding::error(
+                FindingCode::SourceIo,
+                format!("seek worker source before hashing: {error}"),
+            )
+        })?;
+        let (len, sha256) = copy_bounded(&mut file, &mut io::sink(), max_archive_bytes)?;
+        if len != expected_len {
+            return Err(Finding::error(
+                FindingCode::SourceIo,
+                format!("worker source read {len} bytes; expected {expected_len}"),
+            ));
+        }
+        file.seek(SeekFrom::Start(0)).map_err(|error| {
+            Finding::error(
+                FindingCode::SourceIo,
+                format!("rewind worker source after hashing: {error}"),
+            )
+        })?;
+        Ok(SourceSnapshot {
+            path,
+            backing: SnapshotBacking::PrivateFile(PrivateFileSnapshot {
+                file: Some(file),
+                directory: None,
+            }),
+            len,
+            digest: SourceDigest::available(sha256),
+        })
     }
 
     /// Open a path once and copy its exact, bounded contents into a private

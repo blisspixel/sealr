@@ -528,8 +528,10 @@ dependencies = [
  "landlock",
  "libc",
  "rustix",
+ "sealr",
  "sha2",
  "thiserror",
+ "zip",
 ]
 
 [[package]]

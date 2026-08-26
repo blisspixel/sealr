@@ -1,5 +1,7 @@
 //! Feature-gated bridge for the repository-only Linux worker lab.
 
+use std::fs::File;
+
 use super::{
     decode_completion, decode_planning, encode_planning, parse_hex_32, InvocationBinding,
     PlanningDisposition, PlanningRecord, RequestedEffect, RetentionBinding,
@@ -9,6 +11,19 @@ use crate::ir::{MemberVerification, ZipInterpretationProfile};
 use crate::outcome::VerificationStatus;
 use crate::policy::Policy;
 use crate::snapshot::SourceSnapshot;
+
+/// A canonical planning record bound to the exact worker source descriptor.
+#[derive(Debug)]
+pub struct ValidatedInspectOperation {
+    planning: super::ValidatedPlanningRecord,
+    snapshot: SourceSnapshot<'static>,
+}
+
+/// Completed execution that retains the exact source through observation.
+#[derive(Debug)]
+pub struct ExecutedInspectOperation {
+    executed: super::executor::ExecutedInspectPlan<'static>,
+}
 
 /// Bounded semantic result observed by the repository worker lab.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -48,24 +63,25 @@ pub fn plan_inspect(source: &[u8], operation_id: [u8; 16]) -> Result<Vec<u8>, St
     .map_err(debug_error)
 }
 
-/// Validate one canonical plan against the exact source and execute only its
-/// planned payload ranges, returning a canonical completion record.
-pub fn execute_inspect(
-    source: &[u8],
+/// Validate one canonical plan against the exact read-only source descriptor.
+pub fn validate_inspect(
+    source: File,
+    source_len: u64,
     operation_id: [u8; 16],
     planning: &[u8],
-) -> Result<Vec<u8>, String> {
+) -> Result<ValidatedInspectOperation, String> {
     let policy = Policy::default_v1();
     let context = context(&policy)?;
-    let snapshot = SourceSnapshot::borrowed(Some("worker-lab.zip".into()), source);
+    let snapshot = SourceSnapshot::worker_lab_from_file(
+        source,
+        Some("worker-lab.zip".into()),
+        source_len,
+        context.controls().budget.max_archive_bytes,
+    )
+    .map_err(debug_error)?;
     let binding = inspect_binding(&snapshot, &context, operation_id)?;
     let planning = decode_planning(planning, &binding, &snapshot).map_err(debug_error)?;
-    planning
-        .bind_inspect_execution(snapshot)
-        .map_err(debug_error)?
-        .execute()
-        .map(|executed| executed.completion().to_vec())
-        .map_err(debug_error)
+    Ok(ValidatedInspectOperation { planning, snapshot })
 }
 
 /// Validate a worker completion as a canonical, plan-bound proposal. This does
@@ -82,17 +98,7 @@ pub fn validate_inspect_completion(
     let binding = inspect_binding(&snapshot, &context, operation_id)?;
     let planning = decode_planning(planning, &binding, &snapshot).map_err(debug_error)?;
     let proposal = decode_completion(completion, &planning).map_err(debug_error)?;
-    let verified_members = proposal
-        .ir
-        .members
-        .iter()
-        .filter(|member| matches!(member.verification, MemberVerification::Verified))
-        .count() as u64;
-    Ok(InspectCompletionEvidence {
-        complete: proposal.verification == VerificationStatus::Complete,
-        member_count: proposal.ir.members.len() as u64,
-        verified_members,
-    })
+    Ok(completion_evidence(proposal))
 }
 
 fn context(policy: &Policy) -> Result<PlanningContext, String> {
@@ -138,9 +144,61 @@ fn debug_error(error: impl std::fmt::Debug) -> String {
     format!("{error:?}")
 }
 
+impl ValidatedInspectOperation {
+    /// Read the existing authority probe byte through the bound snapshot.
+    pub fn source_probe(&self) -> Result<u8, String> {
+        let mut byte = [0_u8; 1];
+        self.snapshot
+            .read_exact_at(0, &mut byte)
+            .map_err(debug_error)?;
+        Ok(byte[0])
+    }
+
+    /// Consume the validated plan and execute only its planned payload ranges.
+    pub fn execute(self) -> Result<ExecutedInspectOperation, String> {
+        let executed = self
+            .planning
+            .bind_inspect_execution(self.snapshot)
+            .map_err(debug_error)?
+            .execute()
+            .map_err(debug_error)?;
+        Ok(ExecutedInspectOperation { executed })
+    }
+}
+
+impl ExecutedInspectOperation {
+    /// Return the canonical semantic completion bytes.
+    pub fn completion(&self) -> &[u8] {
+        self.executed.completion()
+    }
+
+    /// Revalidate the generated completion against its retained planning state.
+    pub fn evidence(&self) -> Result<InspectCompletionEvidence, String> {
+        let proposal = decode_completion(self.executed.completion(), self.executed.planning())
+            .map_err(debug_error)?;
+        Ok(completion_evidence(proposal))
+    }
+}
+
+fn completion_evidence(proposal: super::BoundCompletionProposal) -> InspectCompletionEvidence {
+    let verified_members = proposal
+        .ir
+        .members
+        .iter()
+        .filter(|member| matches!(member.verification, MemberVerification::Verified))
+        .count() as u64;
+    InspectCompletionEvidence {
+        complete: proposal.verification == VerificationStatus::Complete,
+        member_count: proposal.ir.members.len() as u64,
+        verified_members,
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::fs::{self, OpenOptions};
     use std::io::{Cursor, Write};
+    use std::path::PathBuf;
 
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
@@ -161,6 +219,21 @@ mod tests {
         cursor.into_inner()
     }
 
+    fn source_file(source: &[u8]) -> (File, PathBuf) {
+        let mut random = [0_u8; 12];
+        getrandom::fill(&mut random).unwrap();
+        let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let path = std::env::temp_dir().join(format!("sealr-worker-lab-{suffix}.zip"));
+        let mut writer = OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+            .unwrap();
+        writer.write_all(source).unwrap();
+        drop(writer);
+        (File::open(&path).unwrap(), path)
+    }
+
     #[test]
     fn bridge_executes_real_plan_without_structural_reparse() {
         let source = source();
@@ -169,12 +242,15 @@ mod tests {
 
         crate::zip::reset_parse_calls();
         crate::verification::reset_verify_payload_calls();
-        let completion = execute_inspect(&source, operation_id, &planning).unwrap();
+        let (file, path) = source_file(&source);
+        let operation =
+            validate_inspect(file, source.len() as u64, operation_id, &planning).unwrap();
+        assert_eq!(operation.source_probe().unwrap(), source[0]);
+        let executed = operation.execute().unwrap();
         assert_eq!(crate::zip::parse_calls(), 0);
         assert_eq!(crate::verification::verify_payload_calls(), 1);
 
-        let evidence =
-            validate_inspect_completion(&source, operation_id, &planning, &completion).unwrap();
+        let evidence = executed.evidence().unwrap();
         assert_eq!(
             evidence,
             InspectCompletionEvidence {
@@ -184,6 +260,10 @@ mod tests {
             }
         );
         assert_eq!(crate::zip::parse_calls(), 0);
+        validate_inspect_completion(&source, operation_id, &planning, executed.completion())
+            .unwrap();
+        drop(executed);
+        fs::remove_file(path).unwrap();
     }
 
     #[test]
@@ -191,10 +271,14 @@ mod tests {
         let source = source();
         let operation_id = [0x41; 16];
         let planning = plan_inspect(&source, operation_id).unwrap();
-        assert!(execute_inspect(&source, [0x42; 16], &planning).is_err());
+        let (file, path) = source_file(&source);
+        assert!(validate_inspect(file, source.len() as u64, [0x42; 16], &planning).is_err());
+        fs::remove_file(path).unwrap();
 
         let mut drifted = source;
         drifted[0] ^= 1;
-        assert!(execute_inspect(&drifted, operation_id, &planning).is_err());
+        let (file, path) = source_file(&drifted);
+        assert!(validate_inspect(file, drifted.len() as u64, operation_id, &planning).is_err());
+        fs::remove_file(path).unwrap();
     }
 }

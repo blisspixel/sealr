@@ -15,20 +15,54 @@ use rustix::net::{AddressFamily, SocketFlags, SocketType};
 use rustix::process::{PidfdFlags, Signal};
 use std::cell::Cell;
 use std::fs::{self, File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Cursor, Read, Write};
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt, PermissionsExt};
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipWriter};
 
-const SOURCE_BYTES: &[u8] = b"sealr authority bootstrap probe";
+const SOURCE_MEMBER_COUNT: u64 = 2;
 const STRESS_CASES: usize = 44;
 const STRESS_ITERATIONS: usize = 500;
 const AUTHORITY_EPOCH_TIMEOUT: Duration = Duration::from_secs(1);
 const CHILD_EXIT_TIMEOUT: Duration = Duration::from_secs(1);
 const KILL_REAP_TIMEOUT: Duration = Duration::from_secs(1);
+
+fn source_bytes() -> &'static [u8] {
+    static SOURCE: OnceLock<Vec<u8>> = OnceLock::new();
+    SOURCE
+        .get_or_init(|| {
+            let mut writer = ZipWriter::new(Cursor::new(Vec::new()));
+            let stored = SimpleFileOptions::default()
+                .compression_method(CompressionMethod::Stored)
+                .last_modified_time(zip::DateTime::default());
+            writer
+                .start_file("stored.txt", stored)
+                .expect("worker-lab stored member starts");
+            writer
+                .write_all(b"stored payload")
+                .expect("worker-lab stored payload writes");
+            let deflated = SimpleFileOptions::default()
+                .compression_method(CompressionMethod::Deflated)
+                .last_modified_time(zip::DateTime::default());
+            writer
+                .start_file("deflated.txt", deflated)
+                .expect("worker-lab deflated member starts");
+            writer
+                .write_all(b"deflated payload")
+                .expect("worker-lab deflated payload writes");
+            writer
+                .finish()
+                .expect("worker-lab archive finishes")
+                .into_inner()
+        })
+        .as_slice()
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum AuthorityEpoch {
@@ -130,7 +164,7 @@ pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
     run_timeout_reap()?;
     run_repeated_stress()?;
     println!(
-        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 22 crash barriers, 11 authority-epoch stalls, 500 bounded stress iterations, and bounded reap passed"
+        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 22 crash barriers, 11 authority-epoch stalls, 500 bounded stress iterations, and bounded reap passed"
     );
     Ok(())
 }
@@ -160,7 +194,7 @@ fn run_success(with_stage: bool) -> Result<(), Box<dyn std::error::Error>> {
     let validation = (|| -> Result<(), Box<dyn std::error::Error>> {
         if result.values
             != [
-                u64::from(SOURCE_BYTES[0]),
+                u64::from(source_bytes()[0]),
                 libc::EACCES as u64,
                 u64::from(with_stage),
                 0,
@@ -836,11 +870,15 @@ fn exchange_active(
         return finish_observed_crash(control, child, operation_id, FaultPoint::Accepted);
     }
 
-    let expected_planning_payload = sealed::planning_payload(operation_id, source_values);
+    let expected_planning_payload = sealr::__worker_lab::plan_inspect(source_bytes(), operation_id)
+        .map_err(|error| io::Error::other(format!("planning worker semantic record: {error}")))?;
     let sent_planning_payload = if mutation == CaseMutation::WrongPlanBinding {
-        sealed::planning_payload(changed_operation_id(operation_id), source_values)
+        sealr::__worker_lab::plan_inspect(source_bytes(), changed_operation_id(operation_id))
+            .map_err(|error| {
+                io::Error::other(format!("planning mismatched semantic record: {error}"))
+            })?
     } else {
-        expected_planning_payload
+        expected_planning_payload.clone()
     };
     let plan_role = if mutation == CaseMutation::WrongPlanRole {
         BlobRole::Completion
@@ -865,7 +903,6 @@ fn exchange_active(
         None
     } else {
         let validated = sealed::validate(&plan_descriptor, BlobRole::Planning, plan_total_len)?;
-        sealed::validate_planning_payload(validated.bytes(), operation_id, source_values)?;
         Some(validated)
     };
     let mut plan_frame = Frame::new(Kind::Plan, operation_id);
@@ -960,15 +997,6 @@ fn exchange_active(
         u64::from(fixture.stage.is_some()),
         0,
     ];
-    sealed::validate_completion_payload(
-        completion.bytes(),
-        operation_id,
-        validated_plan
-            .as_ref()
-            .expect("accepted plan was validated by the supervisor")
-            .sha256(),
-        completion_values,
-    )?;
     observe_completed_child(
         child.pid(),
         &first_response,
@@ -981,7 +1009,6 @@ fn exchange_active(
         &completion_descriptor,
         &fixture.outside_sentinel,
     )?;
-    result.values = completion_values;
     if mode == ChildMode::ExitAt(FaultPoint::Result) {
         return finish_observed_crash(control, child, operation_id, FaultPoint::Result);
     }
@@ -998,6 +1025,26 @@ fn exchange_active(
     if !status.success() {
         return Err(io::Error::other(format!("worker exited unsuccessfully: {status}")).into());
     }
+    let semantic_evidence = sealr::__worker_lab::validate_inspect_completion(
+        source_bytes(),
+        operation_id,
+        validated_plan
+            .as_ref()
+            .expect("accepted plan was validated by the supervisor")
+            .bytes(),
+        completion.bytes(),
+    )
+    .map_err(|error| io::Error::other(format!("validating semantic completion: {error}")))?;
+    if !semantic_evidence.complete
+        || semantic_evidence.member_count != SOURCE_MEMBER_COUNT
+        || semantic_evidence.verified_members != SOURCE_MEMBER_COUNT
+    {
+        return Err(io::Error::other(format!(
+            "semantic completion evidence is incomplete: {semantic_evidence:?}"
+        ))
+        .into());
+    }
+    result.values = completion_values;
     Ok(ExchangeOutcome::Complete(result))
 }
 
@@ -1484,7 +1531,7 @@ impl Fixture {
             .create_new(true)
             .mode(0o600)
             .open(&source_path)?;
-        source_writer.write_all(SOURCE_BYTES)?;
+        source_writer.write_all(source_bytes())?;
         drop(source_writer);
         let source = OpenOptions::new()
             .read(true)
@@ -1567,9 +1614,9 @@ impl Fixture {
                 "source descriptor identity changed during worker execution",
             ));
         }
-        let mut source = vec![0_u8; SOURCE_BYTES.len()];
+        let mut source = vec![0_u8; source_bytes().len()];
         let source_read = rustix::io::pread(&self.source, &mut source, 0)?;
-        if source_read != source.len() || source != SOURCE_BYTES {
+        if source_read != source.len() || source != source_bytes() {
             return Err(io::Error::other("source changed during worker execution"));
         }
 

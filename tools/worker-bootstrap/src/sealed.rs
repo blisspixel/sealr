@@ -13,10 +13,6 @@ const REQUIRED_SEALS: SealFlags = SealFlags::SEAL
     .union(SealFlags::SHRINK)
     .union(SealFlags::GROW)
     .union(SealFlags::WRITE);
-const PLANNING_MAGIC: [u8; 8] = *b"SLRPLN01";
-const COMPLETION_MAGIC: [u8; 8] = *b"SLRCMP01";
-const PLANNING_PAYLOAD_LEN: usize = 56;
-const COMPLETION_PAYLOAD_LEN: usize = 88;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u8)]
@@ -37,16 +33,11 @@ impl BlobRole {
 #[derive(Debug)]
 pub(crate) struct ValidatedBlob {
     bytes: Vec<u8>,
-    sha256: [u8; 32],
 }
 
 impl ValidatedBlob {
     pub(crate) fn bytes(&self) -> &[u8] {
         &self.bytes
-    }
-
-    pub(crate) fn sha256(&self) -> [u8; 32] {
-        self.sha256
     }
 }
 
@@ -153,7 +144,7 @@ pub(crate) fn validate(
     if header[20..52] != sha256 {
         return Err(BlobError::Digest);
     }
-    Ok(ValidatedBlob { bytes, sha256 })
+    Ok(ValidatedBlob { bytes })
 }
 
 pub(crate) const fn total_len(payload_len: usize) -> Option<u64> {
@@ -161,61 +152,6 @@ pub(crate) const fn total_len(payload_len: usize) -> Option<u64> {
         return None;
     }
     (HEADER_LEN as u64).checked_add(payload_len as u64)
-}
-
-pub(crate) fn planning_payload(
-    operation_id: [u8; 16],
-    source_identity: [u64; 4],
-) -> [u8; PLANNING_PAYLOAD_LEN] {
-    let mut payload = [0_u8; PLANNING_PAYLOAD_LEN];
-    payload[..8].copy_from_slice(&PLANNING_MAGIC);
-    payload[8..24].copy_from_slice(&operation_id);
-    encode_values(&mut payload[24..], source_identity);
-    payload
-}
-
-pub(crate) fn validate_planning_payload(
-    payload: &[u8],
-    operation_id: [u8; 16],
-    source_identity: [u64; 4],
-) -> Result<(), BlobError> {
-    if payload != planning_payload(operation_id, source_identity) {
-        return Err(BlobError::PlanningBinding);
-    }
-    Ok(())
-}
-
-pub(crate) fn completion_payload(
-    operation_id: [u8; 16],
-    planning_sha256: [u8; 32],
-    result_values: [u64; 4],
-) -> [u8; COMPLETION_PAYLOAD_LEN] {
-    let mut payload = [0_u8; COMPLETION_PAYLOAD_LEN];
-    payload[..8].copy_from_slice(&COMPLETION_MAGIC);
-    payload[8..24].copy_from_slice(&operation_id);
-    payload[24..56].copy_from_slice(&planning_sha256);
-    encode_values(&mut payload[56..], result_values);
-    payload
-}
-
-pub(crate) fn validate_completion_payload(
-    payload: &[u8],
-    operation_id: [u8; 16],
-    planning_sha256: [u8; 32],
-    result_values: [u64; 4],
-) -> Result<(), BlobError> {
-    if payload != completion_payload(operation_id, planning_sha256, result_values) {
-        return Err(BlobError::CompletionBinding);
-    }
-    Ok(())
-}
-
-fn encode_values(output: &mut [u8], values: [u64; 4]) {
-    debug_assert_eq!(output.len(), 32);
-    for (index, value) in values.into_iter().enumerate() {
-        let start = index * 8;
-        output[start..start + 8].copy_from_slice(&value.to_le_bytes());
-    }
 }
 
 fn encode_header(role: BlobRole, payload: &[u8]) -> Result<[u8; HEADER_LEN], BlobError> {
@@ -303,10 +239,6 @@ pub(crate) enum BlobError {
     Allocation,
     #[error("sealed blob payload digest is invalid")]
     Digest,
-    #[error("sealed planning payload does not match its operation and source binding")]
-    PlanningBinding,
-    #[error("sealed completion payload does not match its operation, plan, and result binding")]
-    CompletionBinding,
     #[error("sealed blob write returned zero")]
     WriteZero,
     #[error("sealed blob ended before its declared length")]
@@ -338,8 +270,6 @@ mod tests {
             let fd = create(role, payload).unwrap();
             let validated = validate(&fd, role, total_len(payload.len()).unwrap()).unwrap();
             assert_eq!(validated.bytes(), payload);
-            let expected_sha256: [u8; 32] = Sha256::digest(payload).into();
-            assert_eq!(validated.sha256(), expected_sha256);
         }
     }
 
@@ -442,26 +372,5 @@ mod tests {
             Err(BlobError::Reserved)
         ));
         assert_eq!(total_len(MAX_PAYLOAD_LEN + 1), None);
-    }
-
-    #[test]
-    fn handoff_payloads_bind_operation_source_plan_and_result() {
-        let operation_id = [0x41; 16];
-        let source_identity = [1, 2, 3, 0];
-        let planning = planning_payload(operation_id, source_identity);
-        validate_planning_payload(&planning, operation_id, source_identity).unwrap();
-        assert!(matches!(
-            validate_planning_payload(&planning, [0x42; 16], source_identity),
-            Err(BlobError::PlanningBinding)
-        ));
-
-        let plan_sha256: [u8; 32] = Sha256::digest(planning).into();
-        let values = [7, 8, 9, 0];
-        let completion = completion_payload(operation_id, plan_sha256, values);
-        validate_completion_payload(&completion, operation_id, plan_sha256, values).unwrap();
-        assert!(matches!(
-            validate_completion_payload(&completion, operation_id, [0; 32], values),
-            Err(BlobError::CompletionBinding)
-        ));
     }
 }

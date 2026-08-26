@@ -16,6 +16,7 @@ use rustix::fs::{FileType, Mode, OFlags};
 use rustix::io::FdFlags;
 use rustix::process::{Pid, Signal};
 use std::ffi::OsString;
+use std::fs::File;
 use std::io;
 
 const PHASE_BOOTSTRAP: u64 = 1;
@@ -240,8 +241,18 @@ fn run(
                 format!("validating sealed plan failed: {error}"),
             )
         })?;
-    sealed::validate_planning_payload(plan.bytes(), operation_id, source_frame.values)
-        .map_err(|error| protocol(PHASE_PLAN, format!("binding sealed plan failed: {error}")))?;
+    let validated_operation = sealr::__worker_lab::validate_inspect(
+        File::from(source),
+        source_frame.values[0],
+        operation_id,
+        plan.bytes(),
+    )
+    .map_err(|error| {
+        protocol(
+            PHASE_PLAN,
+            format!("validating semantic plan failed: {error}"),
+        )
+    })?;
     mode.exit_at(FaultPoint::PlanValidation);
     mode.stall_at(StallPoint::PlanAcceptance);
 
@@ -269,24 +280,42 @@ fn run(
     }
     mode.exit_at(FaultPoint::Proceed);
 
-    let source_byte = read_source_probe(&source)?;
+    let source_byte = validated_operation
+        .source_probe()
+        .map_err(|error| protocol(PHASE_PROBE, format!("reading source probe failed: {error}")))?;
     mode.exit_at(FaultPoint::SourceProbe);
     let outside_errno = verify_outside_denied(stage.as_ref())?;
     mode.exit_at(FaultPoint::OutsideDenial);
-    let stage_created = if let Some(stage) = &stage {
+    if let Some(stage) = &stage {
         create_stage_probe(stage)?;
         mode.exit_at(FaultPoint::StageCreate);
-        1
-    } else {
-        0
-    };
+    }
     mode.stall_at(StallPoint::ProbeExecution);
 
-    let completion_values = [u64::from(source_byte), outside_errno, stage_created, 0];
-    let completion_payload =
-        sealed::completion_payload(operation_id, plan.sha256(), completion_values);
+    let executed_operation = validated_operation.execute().map_err(|error| {
+        protocol(
+            PHASE_PROBE,
+            format!("executing validated semantic plan failed: {error}"),
+        )
+    })?;
+    let semantic_evidence = executed_operation.evidence().map_err(|error| {
+        protocol(
+            PHASE_PROBE,
+            format!("revalidating semantic completion failed: {error}"),
+        )
+    })?;
+    if !semantic_evidence.complete
+        || semantic_evidence.member_count != 2
+        || semantic_evidence.verified_members != 2
+    {
+        return Err(protocol(
+            PHASE_PROBE,
+            format!("semantic completion is incomplete: {semantic_evidence:?}"),
+        ));
+    }
+    let completion_payload = executed_operation.completion();
     let completion_descriptor =
-        sealed::create(BlobRole::Completion, &completion_payload).map_err(|error| {
+        sealed::create(BlobRole::Completion, completion_payload).map_err(|error| {
             protocol(
                 PHASE_PROBE,
                 format!("sealing completion payload failed: {error}"),
@@ -305,18 +334,12 @@ fn run(
             format!("revalidating sealed completion failed: {error}"),
         )
     })?;
-    sealed::validate_completion_payload(
-        validated_completion.bytes(),
-        operation_id,
-        plan.sha256(),
-        completion_values,
-    )
-    .map_err(|error| {
-        protocol(
+    if validated_completion.bytes() != completion_payload {
+        return Err(protocol(
             PHASE_PROBE,
-            format!("binding sealed completion failed: {error}"),
-        )
-    })?;
+            "sealed completion bytes differ after validation",
+        ));
+    }
     mode.exit_at(FaultPoint::CompletionSeal);
 
     let mut result = Frame::new(Kind::Result, operation_id);
@@ -338,6 +361,7 @@ fn run(
     if ack.flags != 0 || ack.values != [0; 4] || !descriptors.is_empty() {
         return Err(protocol(PHASE_EXIT, "exit acknowledgement is not empty"));
     }
+    drop(executed_operation);
     mode.exit_at(FaultPoint::ExitAck);
     mode.stall_at(StallPoint::ExitCompletion);
     Ok(())
@@ -429,16 +453,6 @@ fn validate_source(
         }
     }
     Ok(())
-}
-
-fn read_source_probe(source: &OwnedFd) -> Result<u8, WorkerFailure> {
-    let mut byte = [0_u8; 1];
-    let read = rustix::io::pread(source, &mut byte, 0)
-        .map_err(|error| probe(format!("post-restriction source read failed: {error}")))?;
-    if read != 1 {
-        return Err(probe("source probe did not read exactly one byte"));
-    }
-    Ok(byte[0])
 }
 
 fn probe_landlock_abi(mode: ChildMode) -> Result<u64, WorkerFailure> {
