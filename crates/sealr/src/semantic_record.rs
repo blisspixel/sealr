@@ -33,6 +33,7 @@ const VERSION: u16 = 1;
 const HEADER_BYTES: usize = 16;
 const KIND_PLANNING: u8 = 1;
 const KIND_COMPLETION: u8 = 2;
+const KIND_RETAINED_CONTENT: u8 = 3;
 const MAX_RECORD_BYTES: usize = 64 * 1024 * 1024;
 const MAX_MEMBERS: usize = 65_535;
 const MAX_FINDINGS: usize = 65_535;
@@ -50,6 +51,7 @@ const PLAN_DOMAIN: &[u8] = b"sealr.semantic-plan.experimental.v1\0";
 mod executor;
 #[cfg(test)]
 mod peak_live;
+mod retained_content;
 #[cfg(feature = "__internal-worker-lab")]
 pub mod worker_lab;
 
@@ -591,6 +593,20 @@ impl<'a> Cursor<'a> {
     }
 
     fn bytes(&mut self, max: usize, detail: &'static str) -> Result<Vec<u8>, RecordError> {
+        let source = self.bytes_ref(max, detail)?;
+        let mut value = Vec::new();
+        value.try_reserve_exact(source.len()).map_err(|_| {
+            RecordError::new(
+                RecordErrorKind::AllocationFailed,
+                self.pos.saturating_sub(source.len()),
+                "bounded byte allocation failed",
+            )
+        })?;
+        value.extend_from_slice(source);
+        Ok(value)
+    }
+
+    fn bytes_ref(&mut self, max: usize, detail: &'static str) -> Result<&'a [u8], RecordError> {
         let len = self.u32()? as usize;
         if len > max {
             return Err(RecordError::new(
@@ -599,17 +615,7 @@ impl<'a> Cursor<'a> {
                 detail,
             ));
         }
-        let source = self.take(len)?;
-        let mut value = Vec::new();
-        value.try_reserve_exact(len).map_err(|_| {
-            RecordError::new(
-                RecordErrorKind::AllocationFailed,
-                self.pos.saturating_sub(len),
-                "bounded byte allocation failed",
-            )
-        })?;
-        value.extend_from_slice(source);
-        Ok(value)
+        self.take(len)
     }
 
     fn string(&mut self, max: usize, detail: &'static str) -> Result<String, RecordError> {
@@ -6599,12 +6605,23 @@ mod tests {
         let retention_bytes =
             encode_planning(&ready_plan(retention_binding.clone(), pending.clone())).unwrap();
         let retention_plan = decode_plan(&retention_bytes, &retention_binding, &bytes).unwrap();
+        let retention_execution = retention_plan
+            .bind_inspect_execution(SourceSnapshot::borrowed(None, &bytes))
+            .unwrap()
+            .execute()
+            .unwrap();
         assert_eq!(
-            retention_plan
-                .bind_inspect_execution(SourceSnapshot::borrowed(None, &bytes))
-                .unwrap_err()
-                .kind,
-            RecordErrorKind::PhaseMismatch
+            retained_content::validate(
+                retention_execution.planning(),
+                retention_execution.completion(),
+                retention_execution.retained_content(),
+            )
+            .unwrap(),
+            retained_content::RetainedContentEvidence {
+                requested_paths: 0,
+                retained_members: 0,
+                retained_bytes: 0,
+            }
         );
 
         let terminal_record = PlanningRecord {

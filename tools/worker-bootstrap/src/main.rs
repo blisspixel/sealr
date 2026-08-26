@@ -17,6 +17,14 @@ mod worker;
 #[cfg(target_os = "linux")]
 const CHILD_MARKER: &str = "__sealr_worker_bootstrap_child_v1";
 
+#[cfg(target_os = "linux")]
+fn semantic_retention_request() -> Result<sealr::__worker_lab::InspectRetentionRequest, String> {
+    let mut request = sealr::__worker_lab::InspectRetentionRequest::new(64, 64);
+    request.add_path("deflated.txt")?;
+    request.add_path("stored.txt")?;
+    Ok(request)
+}
+
 fn main() {
     let args: Vec<_> = std::env::args_os().skip(1).collect();
 

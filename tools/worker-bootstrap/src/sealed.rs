@@ -19,6 +19,7 @@ const REQUIRED_SEALS: SealFlags = SealFlags::SEAL
 pub(crate) enum BlobRole {
     Planning = 1,
     Completion = 2,
+    RetainedContent = 3,
 }
 
 impl BlobRole {
@@ -26,6 +27,7 @@ impl BlobRole {
         match self {
             Self::Planning => "sealr-planning",
             Self::Completion => "sealr-completion",
+            Self::RetainedContent => "sealr-retained-content",
         }
     }
 }
@@ -265,7 +267,11 @@ mod tests {
 
     #[test]
     fn sealed_blob_round_trips_both_roles() {
-        for role in [BlobRole::Planning, BlobRole::Completion] {
+        for role in [
+            BlobRole::Planning,
+            BlobRole::Completion,
+            BlobRole::RetainedContent,
+        ] {
             let payload = b"bound semantic handoff";
             let fd = create(role, payload).unwrap();
             let validated = validate(&fd, role, total_len(payload.len()).unwrap()).unwrap();

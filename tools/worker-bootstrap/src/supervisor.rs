@@ -27,6 +27,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
 const SOURCE_MEMBER_COUNT: u64 = 2;
+const SOURCE_RETAINED_BYTES: u64 = 30;
 const STRESS_CASES: usize = 44;
 const STRESS_ITERATIONS: usize = 500;
 const AUTHORITY_EPOCH_TIMEOUT: Duration = Duration::from_secs(1);
@@ -164,7 +165,7 @@ pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
     run_timeout_reap()?;
     run_repeated_stress()?;
     println!(
-        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 1 supervisor content replay, 22 crash barriers, 11 authority-epoch stalls, 500 bounded stress iterations, and bounded reap passed"
+        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 1 supervisor content replay, 1 immutable original-pass retention transfer, 22 crash barriers, 11 authority-epoch stalls, 500 bounded stress iterations, and bounded reap passed"
     );
     Ok(())
 }
@@ -197,7 +198,7 @@ fn run_success(with_stage: bool) -> Result<(), Box<dyn std::error::Error>> {
                 u64::from(source_bytes()[0]),
                 libc::EACCES as u64,
                 u64::from(with_stage),
-                0,
+                SOURCE_RETAINED_BYTES,
             ]
         {
             return Err(io::Error::other("worker probe evidence is inconsistent").into());
@@ -870,13 +871,22 @@ fn exchange_active(
         return finish_observed_crash(control, child, operation_id, FaultPoint::Accepted);
     }
 
-    let expected_planning_payload = sealr::__worker_lab::plan_inspect(source_bytes(), operation_id)
-        .map_err(|error| io::Error::other(format!("planning worker semantic record: {error}")))?;
-    let sent_planning_payload = if mutation == CaseMutation::WrongPlanBinding {
-        sealr::__worker_lab::plan_inspect(source_bytes(), changed_operation_id(operation_id))
+    let retention = crate::semantic_retention_request()
+        .map_err(|error| io::Error::other(format!("building retention request: {error}")))?;
+    let expected_planning_payload =
+        sealr::__worker_lab::plan_inspect_retaining(source_bytes(), operation_id, &retention)
             .map_err(|error| {
-                io::Error::other(format!("planning mismatched semantic record: {error}"))
-            })?
+                io::Error::other(format!("planning worker semantic record: {error}"))
+            })?;
+    let sent_planning_payload = if mutation == CaseMutation::WrongPlanBinding {
+        sealr::__worker_lab::plan_inspect_retaining(
+            source_bytes(),
+            changed_operation_id(operation_id),
+            &retention,
+        )
+        .map_err(|error| {
+            io::Error::other(format!("planning mismatched semantic record: {error}"))
+        })?
     } else {
         expected_planning_payload.clone()
     };
@@ -963,7 +973,7 @@ fn exchange_active(
     })?;
     let (mut result, mut descriptors) = expect_crash_transport(
         transport_until(control, child, probe_deadline, libc::POLLIN, || {
-            receive_packet(control, Some(1))
+            receive_packet(control, Some(2))
         }),
         mode,
         &[
@@ -979,10 +989,18 @@ fn exchange_active(
         || result.operation_id != operation_id
         || result.flags != bootstrap.flags
         || result.values[0] == 0
-        || result.values[3] > i32::MAX as u64
+        || result.values[1] == 0
+        || result.values[2] & 0xffff_ffff == 0
+        || result.values[2] & 0xffff_ffff > i32::MAX as u64
+        || result.values[2] >> 32 == 0
+        || result.values[2] >> 32 > i32::MAX as u64
+        || result.values[3] >> 40 != 0
     {
         return Err(io::Error::other("worker result is inconsistent").into());
     }
+    let retained_descriptor = descriptors
+        .pop()
+        .expect("retained descriptor count was validated by the transport");
     let completion_descriptor = descriptors
         .pop()
         .expect("completion descriptor count was validated by the transport");
@@ -991,11 +1009,18 @@ fn exchange_active(
         BlobRole::Completion,
         result.values[0],
     )?;
-    let completion_values = [
+    let retained = sealed::validate(
+        &retained_descriptor,
+        BlobRole::RetainedContent,
         result.values[1],
-        result.values[2],
+    )?;
+    let source_byte = result.values[3] & 0xff;
+    let outside_errno = (result.values[3] >> 8) & 0xffff_ffff;
+    let completion_values = [
+        source_byte,
+        outside_errno,
         u64::from(fixture.stage.is_some()),
-        0,
+        SOURCE_RETAINED_BYTES,
     ];
     observe_completed_child(
         child.pid(),
@@ -1007,6 +1032,7 @@ fn exchange_active(
         source_descriptor,
         &plan_descriptor,
         &completion_descriptor,
+        &retained_descriptor,
         &fixture.outside_sentinel,
     )?;
     if mode == ChildMode::ExitAt(FaultPoint::Result) {
@@ -1025,23 +1051,35 @@ fn exchange_active(
     if !status.success() {
         return Err(io::Error::other(format!("worker exited unsuccessfully: {status}")).into());
     }
-    let semantic_evidence = sealr::__worker_lab::authorize_inspect_completion(
-        source_descriptor.try_clone()?,
-        source_values[0],
-        operation_id,
-        validated_plan
-            .as_ref()
-            .expect("accepted plan was validated by the supervisor")
-            .bytes(),
-        completion.bytes(),
-    )
-    .map_err(|error| io::Error::other(format!("authorizing semantic completion: {error}")))?;
+    let (semantic_evidence, retention_evidence) =
+        sealr::__worker_lab::authorize_inspect_retained_execution(
+            source_descriptor.try_clone()?,
+            source_values[0],
+            operation_id,
+            validated_plan
+                .as_ref()
+                .expect("accepted plan was validated by the supervisor")
+                .bytes(),
+            completion.bytes(),
+            retained.bytes(),
+            &retention,
+        )
+        .map_err(|error| io::Error::other(format!("authorizing semantic execution: {error}")))?;
     if !semantic_evidence.complete
         || semantic_evidence.member_count != SOURCE_MEMBER_COUNT
         || semantic_evidence.verified_members != SOURCE_MEMBER_COUNT
     {
         return Err(io::Error::other(format!(
             "semantic completion evidence is incomplete: {semantic_evidence:?}"
+        ))
+        .into());
+    }
+    if retention_evidence.requested_paths != 2
+        || retention_evidence.retained_members != 2
+        || retention_evidence.retained_bytes != SOURCE_RETAINED_BYTES
+    {
+        return Err(io::Error::other(format!(
+            "retained-content evidence is incomplete: {retention_evidence:?}"
         ))
         .into());
     }
@@ -1283,13 +1321,15 @@ fn observe_completed_child(
     source: &File,
     plan: &OwnedFd,
     completion: &OwnedFd,
+    retained_content: &OwnedFd,
     inherited_sentinel: &File,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let proc_root = PathBuf::from(format!("/proc/{pid}"));
     let source_fd = i32::try_from(source_accepted.values[3])?;
     let plan_fd = i32::try_from(plan_accepted.values[1])?;
-    let completion_fd = i32::try_from(result.values[3])?;
-    let mut expected = vec![0, 1, 2, source_fd, plan_fd, completion_fd];
+    let completion_fd = i32::try_from(result.values[2] & 0xffff_ffff)?;
+    let retained_fd = i32::try_from(result.values[2] >> 32)?;
+    let mut expected = vec![0, 1, 2, source_fd, plan_fd, completion_fd, retained_fd];
     if ready.values[3] != u64::MAX {
         expected.push(i32::try_from(ready.values[3])?);
     }
@@ -1307,6 +1347,7 @@ fn observe_completed_child(
         (source_fd, source.as_fd()),
         (plan_fd, plan.as_fd()),
         (completion_fd, completion.as_fd()),
+        (retained_fd, retained_content.as_fd()),
     ] {
         verify_same_object(&proc_root, descriptor, retained)?;
         verify_access_mode(&proc_root, descriptor, retained)?;
