@@ -28,18 +28,20 @@ cargo run --locked -p sealr-wheel-lab -- analyze `
   tests/corpus/wheels/manifest.json `
   .research/wheels `
   tests/corpus/wheels/report.json `
-  docs/wheel-compatibility-pilot.md
+  docs/wheel-compatibility-pilot.md `
+  --worker-manifest /absolute/path/to/sealr-worker.manifest
 cargo run --locked -p sealr-wheel-lab -- check `
   tests/corpus/wheels/manifest.json `
   .research/wheels `
   tests/corpus/wheels/report.json `
-  docs/wheel-compatibility-pilot.md
+  docs/wheel-compatibility-pilot.md `
+  --worker-manifest /absolute/path/to/sealr-worker.manifest
 cargo run --locked -p sealr-wheel-lab -- verify-report `
   tests/corpus/wheels/manifest.json `
   tests/corpus/wheels/report.json `
   docs/wheel-compatibility-pilot.md
 ```
 
-The analyzer uses only Sealr's public `apply` outcome and read-only `ArchiveIR`. It does not call Python `zipfile`, an external extractor, or another ZIP parser. Rejected artifacts are not reopened through a fallback parser, so feature counts are available only when current interpretation produced an IR.
+The analyzer requires the exact production-helper manifest and uses only Sealr's public fail-closed `apply_supervised` outcome and read-only `ArchiveIR`. It does not call Python `zipfile`, an external extractor, another ZIP parser, or the in-process fallback. Rejected artifacts are not reopened through a fallback parser, so feature counts are available only when current interpretation produced an IR.
 
 The committed report binds the analyzer revision plus exact manifest, interpretation-profile, and default-policy digests. It records current admission results, affected-artifact and finding-occurrence counts, structured denial details, methods, general-purpose flags, extra fields by site and disposition, normalization actions, `.dist-info` path candidates, candidate metadata basenames, and per-artifact structural totals. The offline `verify-report` command checks those bindings, internal rollups, canonical JSON, and Markdown rendering without raw wheels. It does not re-execute corpus analysis or validate wheel metadata, `RECORD`, relocation, target compatibility, or installation semantics.

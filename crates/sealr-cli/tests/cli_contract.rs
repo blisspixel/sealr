@@ -158,6 +158,7 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert!(help_text.contains("Usage: sealr"));
     assert!(help_text.contains("<ARCHIVE>"));
     assert!(help_text.contains("--dest <DEST>"));
+    assert!(help_text.contains("--worker-manifest <ABSOLUTE_PATH>"));
     assert!(help_text.contains("--version"));
 
     let version = sealr_text(&["--version"]);
@@ -167,6 +168,22 @@ fn help_and_version_use_stdout_and_exit_zero() {
         String::from_utf8(version.stdout).expect("version should be UTF-8"),
         format!("sealr {}\n", env!("CARGO_PKG_VERSION"))
     );
+}
+
+#[test]
+fn selected_supervision_failure_has_no_in_process_fallback() {
+    let (run, fixtures) = fixture_set("supervision-failure");
+    let missing_manifest = run.path.join("sealr-worker.manifest");
+    let output = sealr(&[
+        Path::new("--worker-manifest"),
+        &missing_manifest,
+        &fixtures.allowed,
+    ]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8(output.stderr).expect("diagnostic should be UTF-8");
+    assert!(stderr.contains("sealr: supervised execution failed:"));
 }
 
 #[test]

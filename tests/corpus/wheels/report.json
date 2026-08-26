@@ -3,7 +3,7 @@
   "manifest_sha256": "71ec8026d04d6fdde9fa58fa9f3b84acd54c3a82b5f0a13bd1aff1b6ab4419a5",
   "query_date": "2026-08-22",
   "selection_method": "Stratified pilot of 20 named projects: eight universal wheels and four artifacts from each of Linux x86_64, Windows x86_64, and macOS. For each project, use the current non-yanked release returned by the PyPI JSON API on the query date and the lexicographically first exact universal or CPython 3.12 platform match; cryptography and psutil use compatible abi3 wheels. Projects were chosen to exercise packaging tools, pure libraries, native extensions, and large scientific artifacts. This is judgmental coverage, not a representative sample.",
-  "analyzer_revision": "sealr-wheel-lab.v2",
+  "analyzer_revision": "sealr-wheel-lab.v3",
   "interpretation_profile": "sealr.profile.zip.strict-ascii.v2",
   "interpretation_profile_sha256": "384dceb8623a2b32d430034fefda2a9498439927285952c10a60c9f6caa51d45",
   "policy": "sealr:policy/default/v1",

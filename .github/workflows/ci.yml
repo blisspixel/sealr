@@ -141,6 +141,11 @@ jobs:
       - name: Build optimized workspace
         run: cargo build --locked --release --workspace --all-features
 
+      - name: Build extracted-package consumer
+        run: |
+          cargo package --locked -p sealr
+          cargo build --locked --release --manifest-path tests/packaged-consumer/Cargo.toml
+
       - name: Verify native release package contract
         shell: pwsh
         run: |
@@ -159,7 +164,9 @@ jobs:
             -ArchivePath $archive `
             -Version $versions[0] `
             -TargetTriple x86_64-unknown-linux-gnu `
-            -LabBinary target/release/sealr-worker-bootstrap-lab
+            -LabBinary target/release/sealr-worker-bootstrap-lab `
+            -WheelLabBinary target/release/sealr-wheel-lab `
+            -PackagedConsumerBinary tests/packaged-consumer/target/release/sealr-packaged-consumer
 
       - name: Verify README walkthrough
         shell: pwsh
@@ -172,11 +179,6 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
         run: cargo doc --locked -p sealr -p sealr-worker-protocol --all-features --no-deps
-
-      - name: Verify packaged library and downstream API
-        run: |
-          cargo package --locked -p sealr
-          cargo run --locked --manifest-path tests/packaged-consumer/Cargo.toml
 
   platform:
     name: Test on ${{ matrix.os }}

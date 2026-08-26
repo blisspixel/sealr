@@ -1,6 +1,7 @@
 # Usage
 
-The current CLI is a thin facade over `sealr::apply()`.
+The current CLI is a thin facade over the ordinary in-process API or the
+explicit fail-closed Linux supervisor.
 
 ## Inspect
 
@@ -19,6 +20,23 @@ cargo run --locked -p sealr-cli -- path/to/archive.zip --dest ./new-output
 The destination must not exist, and its parent must already exist. On Linux and macOS, the parent must have a trusted owner and either deny group and other writes or use trusted sticky-directory semantics. macOS extended ACLs fail closed. Windows requires a non-remote, writable NTFS parent with persistent ACLs and creates the stage with a protected effective-TokenUser-only DACL. sealr creates a random hidden stage beside the destination, retains it as a directory capability, and resolves every validated member component through no-follow directory handles. It publishes with the platform's native no-replace operation only after every member passes policy, expansion limits, CRC32 verification, and SHA-256 calculation.
 
 On a normal rejection, the final destination does not appear. sealr attempts cleanup and retries once after failure, then records the final result. Setup failure after stage creation uses retained-handle cleanup first and a parent-relative retry. A killed process or two failed attempts can leave a hidden `.sealr-stage-*` directory; authenticated crash recovery is planned.
+
+## Supervised Linux execution
+
+The Linux native archive includes one authenticated helper and exact manifest.
+Select it explicitly with an absolute path:
+
+```text
+sealr path/to/archive.zip \
+  --worker-manifest /opt/sealr/libexec/sealr/sealr-worker.manifest
+```
+
+The CLI bounds and validates the fixed-name manifest, release version, helper
+target, bootstrap ABI, byte length, and lowercase SHA-256, then selects only
+the sibling `sealr-worker`. It does not search `PATH`. A selected worker must
+establish the complete supervised boundary or the command exits unsuccessfully
+without invoking the in-process payload path. macOS and Windows return
+isolation unavailable if this option is selected.
 
 ## Output contract
 
@@ -55,6 +73,7 @@ Receipts are currently unsigned and the kernel jail is unavailable.
 | `0` | The archive was admitted. `wrote` says whether a destination was committed. |
 | `2` | The archive was not admitted (denied, malformed, unsupported, or indeterminate). View and receipt are still emitted. |
 | `3` | The archive was admitted but the requested destination effect failed. View and receipt still record `admission: admitted`. |
+| `1` | The selected supervised boundary failed, or a view or receipt stream could not be written. |
 | Clap default | Command-line syntax or argument error. |
 
 Source open and read failures currently become a structured rejection and therefore exit `2`. Receipts mark those failures as `interpretation: indeterminate` with an unavailable source digest. An admitted archive whose destination cannot be published exits `3`. The compatibility `verdict` remains `rejected` on that path so older adapters keep working.
@@ -68,12 +87,13 @@ Arguments:
   <ARCHIVE>  Archive file
 
 Options:
-      --dest <DEST>  Materialize into a new directory below an existing parent
-  -h, --help         Print help
-  -V, --version      Print version
+      --dest <DEST>                      Materialize into a new directory below an existing parent
+      --worker-manifest <ABSOLUTE_PATH>  Use the exact packaged Linux worker bound by this manifest
+  -h, --help                             Print help
+  -V, --version                          Print version
 ```
 
-Policy files, JSONL output, receipt paths, mounts, folder scans, force replacement, backend selection, and signing are roadmap items. They are not accepted flags today.
+Policy files, JSONL output, receipt paths, mounts, folder scans, force replacement, other isolation backends, and signing are roadmap items. They are not accepted flags today.
 
 ## Target CLI experience
 

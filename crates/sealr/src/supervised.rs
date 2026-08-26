@@ -1,7 +1,14 @@
 //! Fail-closed authenticated Linux worker execution.
 
 use std::fmt;
+#[cfg(target_os = "linux")]
+use std::fs::File;
+#[cfg(target_os = "linux")]
+use std::io::Read;
 use std::path::Path;
+
+#[cfg(target_os = "linux")]
+use serde::Deserialize;
 
 use crate::{ApplyOptions, Outcome, Policy, Request, Source};
 
@@ -188,6 +195,31 @@ impl LinuxWorker {
         }
     }
 
+    /// Authenticate and retain the helper bound by a packaged-worker manifest.
+    ///
+    /// The manifest path must be absolute and end in the fixed
+    /// `sealr-worker.manifest` name. The bounded, exact-field manifest must
+    /// describe this crate version, the production helper target, and the
+    /// current bootstrap ABI. The helper is selected only as the sibling
+    /// `sealr-worker` file and is then authenticated through [`Self::load`].
+    /// Neither the manifest nor the helper is searched for through `PATH`.
+    pub fn load_from_manifest(manifest_path: &Path) -> Result<Self, SupervisionError> {
+        #[cfg(target_os = "linux")]
+        {
+            let identity = read_worker_manifest(manifest_path)?;
+            Self::load(&identity.helper_path, identity.byte_len, &identity.sha256)
+        }
+
+        #[cfg(not(target_os = "linux"))]
+        {
+            let _ = manifest_path;
+            Err(SupervisionError::new(
+                SupervisionErrorKind::IsolationUnavailable,
+                "authenticated worker execution is supported only on Linux",
+            ))
+        }
+    }
+
     /// Return the authenticated helper digest as lowercase hexadecimal.
     pub fn digest_hex(&self) -> String {
         #[cfg(target_os = "linux")]
@@ -215,6 +247,221 @@ impl LinuxWorker {
     /// Return whether the authenticated helper has no bytes.
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+}
+
+#[cfg(target_os = "linux")]
+const WORKER_MANIFEST_NAME: &str = "sealr-worker.manifest";
+#[cfg(target_os = "linux")]
+const WORKER_HELPER_NAME: &str = "sealr-worker";
+#[cfg(target_os = "linux")]
+const WORKER_MANIFEST_SCHEMA: &str = "sealr.worker-artifact.v1";
+#[cfg(target_os = "linux")]
+const WORKER_HELPER_TARGET: &str = "x86_64-unknown-linux-musl";
+#[cfg(target_os = "linux")]
+const MAX_WORKER_MANIFEST_BYTES: u64 = 4 * 1024;
+#[cfg(target_os = "linux")]
+const MAX_WORKER_HELPER_BYTES: u64 = 64 * 1024 * 1024;
+
+#[cfg(target_os = "linux")]
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct WorkerManifest {
+    schema: String,
+    release_version: String,
+    target: String,
+    bootstrap_abi: u64,
+    byte_len: u64,
+    sha256: String,
+}
+
+#[cfg(target_os = "linux")]
+struct WorkerIdentity {
+    helper_path: std::path::PathBuf,
+    byte_len: u64,
+    sha256: String,
+}
+
+#[cfg(target_os = "linux")]
+fn read_worker_manifest(manifest_path: &Path) -> Result<WorkerIdentity, SupervisionError> {
+    if !manifest_path.is_absolute() {
+        return helper_artifact_error("worker manifest path must be absolute");
+    }
+    if manifest_path.file_name().and_then(|name| name.to_str()) != Some(WORKER_MANIFEST_NAME) {
+        return helper_artifact_error(format!(
+            "worker manifest must use the fixed {WORKER_MANIFEST_NAME} name"
+        ));
+    }
+
+    let mut file = File::open(manifest_path).map_err(|error| {
+        SupervisionError::new(
+            SupervisionErrorKind::HelperArtifact,
+            format!("worker manifest open failed: {error}"),
+        )
+    })?;
+    let metadata = file.metadata().map_err(|error| {
+        SupervisionError::new(
+            SupervisionErrorKind::HelperArtifact,
+            format!("worker manifest metadata failed: {error}"),
+        )
+    })?;
+    if !metadata.is_file() {
+        return helper_artifact_error("worker manifest is not a regular file");
+    }
+    if metadata.len() == 0 || metadata.len() > MAX_WORKER_MANIFEST_BYTES {
+        return helper_artifact_error(format!(
+            "worker manifest length must be in 1..={MAX_WORKER_MANIFEST_BYTES} bytes"
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.by_ref()
+        .take(MAX_WORKER_MANIFEST_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| {
+            SupervisionError::new(
+                SupervisionErrorKind::HelperArtifact,
+                format!("worker manifest read failed: {error}"),
+            )
+        })?;
+    if bytes.len() as u64 != metadata.len() {
+        return helper_artifact_error("worker manifest changed while it was read");
+    }
+    parse_worker_manifest(manifest_path, &bytes)
+}
+
+#[cfg(target_os = "linux")]
+fn parse_worker_manifest(
+    manifest_path: &Path,
+    bytes: &[u8],
+) -> Result<WorkerIdentity, SupervisionError> {
+    if bytes.starts_with(&[0xef, 0xbb, 0xbf])
+        || bytes.contains(&b'\r')
+        || bytes.last() != Some(&b'\n')
+    {
+        return helper_artifact_error(
+            "worker manifest must be BOM-free UTF-8 with LF line endings and a final newline",
+        );
+    }
+    let manifest: WorkerManifest = serde_json::from_slice(bytes).map_err(|error| {
+        SupervisionError::new(
+            SupervisionErrorKind::HelperArtifact,
+            format!("worker manifest JSON rejected: {error}"),
+        )
+    })?;
+    if manifest.schema != WORKER_MANIFEST_SCHEMA {
+        return helper_artifact_error("worker manifest schema is unsupported");
+    }
+    if manifest.release_version != env!("CARGO_PKG_VERSION") {
+        return helper_artifact_error(format!(
+            "worker manifest release version does not match {}",
+            env!("CARGO_PKG_VERSION")
+        ));
+    }
+    if manifest.target != WORKER_HELPER_TARGET || !cfg!(target_arch = "x86_64") {
+        return helper_artifact_error(
+            "worker manifest does not select the supported x86_64 Linux helper target",
+        );
+    }
+    if manifest.bootstrap_abi != crate::worker_protocol::HELPER_BOOTSTRAP_ABI {
+        return helper_artifact_error("worker manifest bootstrap ABI is unsupported");
+    }
+    if manifest.byte_len == 0 || manifest.byte_len > MAX_WORKER_HELPER_BYTES {
+        return helper_artifact_error(format!(
+            "worker manifest helper length must be in 1..={MAX_WORKER_HELPER_BYTES} bytes"
+        ));
+    }
+    crate::worker_protocol::helper::parse_digest(&manifest.sha256).map_err(|error| {
+        SupervisionError::new(SupervisionErrorKind::HelperArtifact, error.to_string())
+    })?;
+    let parent = manifest_path.parent().ok_or_else(|| {
+        SupervisionError::new(
+            SupervisionErrorKind::HelperArtifact,
+            "worker manifest has no parent directory",
+        )
+    })?;
+    Ok(WorkerIdentity {
+        helper_path: parent.join(WORKER_HELPER_NAME),
+        byte_len: manifest.byte_len,
+        sha256: manifest.sha256,
+    })
+}
+
+#[cfg(target_os = "linux")]
+fn helper_artifact_error<T>(detail: impl Into<String>) -> Result<T, SupervisionError> {
+    Err(SupervisionError::new(
+        SupervisionErrorKind::HelperArtifact,
+        detail,
+    ))
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod manifest_tests {
+    use super::*;
+
+    fn manifest(extra: &str) -> Vec<u8> {
+        format!(
+            concat!(
+                "{{\n",
+                "  \"schema\": \"sealr.worker-artifact.v1\",\n",
+                "  \"release_version\": \"{}\",\n",
+                "  \"target\": \"x86_64-unknown-linux-musl\",\n",
+                "  \"bootstrap_abi\": 1,\n",
+                "  \"byte_len\": 17,\n",
+                "  \"sha256\": \"{}\"{}\n",
+                "}}\n"
+            ),
+            env!("CARGO_PKG_VERSION"),
+            "01".repeat(32),
+            extra
+        )
+        .into_bytes()
+    }
+
+    #[test]
+    fn packaged_manifest_selects_only_its_fixed_sibling() {
+        let path = Path::new("/opt/sealr/libexec/sealr/sealr-worker.manifest");
+        let identity = parse_worker_manifest(path, &manifest("")).unwrap();
+        assert_eq!(
+            identity.helper_path,
+            Path::new("/opt/sealr/libexec/sealr/sealr-worker")
+        );
+        assert_eq!(identity.byte_len, 17);
+        assert_eq!(identity.sha256, "01".repeat(32));
+    }
+
+    #[test]
+    fn packaged_manifest_rejects_unknown_fields_and_noncanonical_lines() {
+        let path = Path::new("/opt/sealr/libexec/sealr/sealr-worker.manifest");
+        let unknown = parse_worker_manifest(path, &manifest(",\n  \"extra\": true"))
+            .expect_err("unknown fields must be rejected");
+        assert_eq!(unknown.kind(), SupervisionErrorKind::HelperArtifact);
+
+        let mut crlf = manifest("");
+        crlf.insert(1, b'\r');
+        assert!(parse_worker_manifest(path, &crlf).is_err());
+
+        let mut no_newline = manifest("");
+        no_newline.pop();
+        assert!(parse_worker_manifest(path, &no_newline).is_err());
+    }
+
+    #[test]
+    fn packaged_manifest_rejects_identity_drift() {
+        let path = Path::new("/opt/sealr/libexec/sealr/sealr-worker.manifest");
+        let wrong_version = String::from_utf8(manifest(""))
+            .unwrap()
+            .replace(env!("CARGO_PKG_VERSION"), "0.1.0-alpha.999");
+        assert!(parse_worker_manifest(path, wrong_version.as_bytes()).is_err());
+
+        let uppercase_digest = String::from_utf8(manifest(""))
+            .unwrap()
+            .replace(&"01".repeat(32), &"AB".repeat(32));
+        assert!(parse_worker_manifest(path, uppercase_digest.as_bytes()).is_err());
+
+        let zero_length = String::from_utf8(manifest(""))
+            .unwrap()
+            .replace("\"byte_len\": 17", "\"byte_len\": 0");
+        assert!(parse_worker_manifest(path, zero_length.as_bytes()).is_err());
     }
 }
 

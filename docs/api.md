@@ -216,7 +216,7 @@ let metadata = archive.read_member("package.dist-info/METADATA", 256 * 1024)?;
 
 This path does not reopen the caller path or parse ZIP structure again. Without an explicit retention request, the current implementation opens a range-limited reader over the recorded payload, re-inflates a selected Deflate member, and revalidates it for each call. A path outcome reads from its retained private file; a byte outcome reads from the process-owned copy created when the capability outlives the caller borrow. The next section describes the opt-in path that avoids this repeated work for a small, known member set.
 
-The first worker integration preserves these observable contracts through explicit Linux-only entry points. `LinuxWorker::load` authenticates one exact helper artifact from an absolute path, length, and SHA-256. `apply_supervised` accepts the ordinary `Request` and supports both inspect and materialize; `inspect_supervised` is the inspect-only convenience. They use the same planner, policy controls, outcome axes, retention plan, materialization core, and `VerifiedArchive` surface as in-process execution while returning typed infrastructure errors when they cannot establish or complete isolation. They never fall back to in-process verification. The semantic worker consumes the actual plan profile, policy, budget, target, consumer, effect, target identity, and retention and does not structurally reparse the ZIP. The supervisor reconstructs complete or stopped outcome state only after worker exit, reap, and exact source-derived agreement. For materialization, it also retains the destination parent and final name, audits the exact stage after reap, and alone publishes with no replacement. CLI activation remains open.
+The first worker integration preserves these observable contracts through explicit Linux-only entry points. `LinuxWorker::load` authenticates one exact helper artifact from an absolute path, length, and SHA-256. `LinuxWorker::load_from_manifest` applies the fixed package manifest contract and then uses that same authenticator. `apply_supervised` accepts the ordinary `Request` and supports both inspect and materialize; `inspect_supervised` is the inspect-only convenience. They use the same planner, policy controls, outcome axes, retention plan, materialization core, and `VerifiedArchive` surface as in-process execution while returning typed infrastructure errors when they cannot establish or complete isolation. They never fall back to in-process verification. The semantic worker consumes the actual plan profile, policy, budget, target, consumer, effect, target identity, and retention and does not structurally reparse the ZIP. The supervisor reconstructs complete or stopped outcome state only after worker exit, reap, and exact source-derived agreement. For materialization, it also retains the destination parent and final name, audits the exact stage after reap, and alone publishes with no replacement. The CLI, wheel analyzer, and extracted-package fixture select this same boundary through the manifest-backed loader.
 
 ### Explicit supervised Linux execution
 
@@ -224,11 +224,9 @@ The first worker integration preserves these observable contracts through explic
 use std::path::Path;
 use sealr::{apply_supervised, ApplyOptions, LinuxWorker, Policy, Request, Source};
 
-let worker = LinuxWorker::load(
-    Path::new("/opt/sealr/libexec/sealr/sealr-worker"),
-    1_234_567,
-    "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-)?;
+let worker = LinuxWorker::load_from_manifest(Path::new(
+    "/opt/sealr/libexec/sealr/sealr-worker.manifest",
+))?;
 let bytes = std::fs::read("input.zip")?;
 let policy = Policy::default_v1();
 let destination = Path::new("verified-tree");
@@ -244,7 +242,7 @@ let outcome = apply_supervised(
 # Ok::<(), Box<dyn std::error::Error>>(())
 ```
 
-The helper path is never discovered through `PATH`; packaged callers read its exact location and identity from the fixed Linux package contract. Successful worker execution records `kernel_jail: landlock-abi3+seccomp-v1`. Structural rejection or destination setup failure before worker entry records `not-entered`. On non-Linux targets, worker loading and supervised execution return `IsolationUnavailable`.
+The helper path is never discovered through `PATH`. Manifest loading requires an absolute path named `sealr-worker.manifest`, reads at most 4 KiB, rejects a BOM, CR line endings, a missing final LF, unknown JSON fields, release, target, ABI, length, or digest drift, and selects only `sealr-worker` beside that manifest. Callers that already possess separately authenticated identity metadata may use `LinuxWorker::load` directly. Successful worker execution records `kernel_jail: landlock-abi3+seccomp-v1`. Structural rejection or destination setup failure before worker entry records `not-entered`. On non-Linux targets, worker loading and supervised execution return `IsolationUnavailable`.
 
 Archive denial, malformed input, quota stops, destination setup or publication failure, and canonically stopped payload verification remain ordinary `Outcome` values. `SupervisionErrorKind` is reserved for helper identity, spawn, authentication, restriction, protocol, timeout, worker-exit, reap, final cleanup, source-authority, integrity-boundary, and internal failures. This separation prevents an isolation failure from being mistaken for an archive finding or compatibility verdict.
 
