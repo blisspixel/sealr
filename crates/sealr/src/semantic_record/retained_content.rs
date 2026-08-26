@@ -93,6 +93,37 @@ pub(super) fn validate(
     completion: &[u8],
     input: &[u8],
 ) -> Result<RetainedContentEvidence, RecordError> {
+    decode_inner(planning, completion, input, false).map(|(_, evidence)| evidence)
+}
+
+pub(super) fn decode(
+    planning: &ValidatedPlanningRecord,
+    completion: &[u8],
+    input: &[u8],
+) -> Result<(RetentionBuild, RetainedContentEvidence), RecordError> {
+    let (entries, evidence) = decode_inner(planning, completion, input, true)?;
+    let entries = entries.ok_or_else(|| {
+        RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "retained-content reconstruction did not produce entries",
+        )
+    })?;
+    Ok((RetentionBuild::from_entries(entries), evidence))
+}
+
+fn decode_inner(
+    planning: &ValidatedPlanningRecord,
+    completion: &[u8],
+    input: &[u8],
+    reconstruct: bool,
+) -> Result<
+    (
+        Option<BTreeMap<String, RetentionEntry>>,
+        RetainedContentEvidence,
+    ),
+    RecordError,
+> {
     let proposal = decode_completion(completion, planning)?;
     let plan = retention_plan(&planning.record.binding.retention)?;
     let expected = RetentionBuild::plan(
@@ -141,6 +172,7 @@ pub(super) fn validate(
 
     let mut retained_members = 0_u64;
     let mut retained_bytes = 0_u64;
+    let mut decoded = reconstruct.then(BTreeMap::new);
     for ((expected_path, expected_entry), index) in expected.iter().zip(0..count) {
         let path = cursor.string(
             MAX_RETENTION_PATH_BYTES,
@@ -166,6 +198,10 @@ pub(super) fn validate(
             "retained-content member exceeds the transfer bound",
         )?;
         validate_entry(expected_path, expected_entry, status, bytes, &proposal.ir)?;
+        if let Some(decoded) = &mut decoded {
+            let decoded_entry = decode_entry(status, bytes, cursor.offset())?;
+            decoded.insert(path, decoded_entry);
+        }
         if status == STATUS_RETAINED {
             retained_members = retained_members.checked_add(1).ok_or_else(|| {
                 RecordError::new(
@@ -199,10 +235,44 @@ pub(super) fn validate(
             "retained-content aggregate exceeds its bound",
         ));
     }
-    Ok(RetainedContentEvidence {
-        requested_paths: count as u64,
-        retained_members,
-        retained_bytes,
+    Ok((
+        decoded,
+        RetainedContentEvidence {
+            requested_paths: count as u64,
+            retained_members,
+            retained_bytes,
+        },
+    ))
+}
+
+fn decode_entry(status: u8, bytes: &[u8], offset: usize) -> Result<RetentionEntry, RecordError> {
+    Ok(match status {
+        STATUS_RETAINED => {
+            let mut retained = Vec::new();
+            retained.try_reserve_exact(bytes.len()).map_err(|_| {
+                RecordError::new(
+                    RecordErrorKind::AllocationFailed,
+                    offset,
+                    "bounded retained-content allocation failed",
+                )
+            })?;
+            retained.extend_from_slice(bytes);
+            RetentionEntry::Retained(retained)
+        }
+        STATUS_NOT_FOUND => RetentionEntry::NotFound,
+        STATUS_NOT_FILE => RetentionEntry::NotFile,
+        STATUS_MEMBER_LIMIT => RetentionEntry::MemberLimitExceeded,
+        STATUS_TOTAL_LIMIT => RetentionEntry::TotalLimitExceeded,
+        STATUS_PLATFORM_LIMIT => RetentionEntry::PlatformLimit,
+        STATUS_ALLOCATION_FAILED => RetentionEntry::AllocationFailed,
+        STATUS_INTEGRITY_MISMATCH => RetentionEntry::IntegrityMismatch,
+        _ => {
+            return Err(RecordError::new(
+                RecordErrorKind::InvalidEnum,
+                offset,
+                "retained-content status tag is invalid",
+            ));
+        }
     })
 }
 

@@ -28,12 +28,11 @@ struct ReapedWriter {
     completion_len: u64,
     retained: OwnedFd,
     retained_len: u64,
-    retention: sealr::__worker_lab::InspectRetentionRequest,
 }
 
 struct AuthorizedWriter {
     stage: sealr::__worker_lab::WorkerLabStage,
-    manifest: sealr::__worker_lab::AuthorizedStageManifest,
+    execution: sealr::__worker_runtime::AuthorizedExecution,
 }
 
 struct AuditedWriter {
@@ -79,20 +78,18 @@ impl ReapedWriter {
             sealed::validate(&self.completion, BlobRole::Completion, self.completion_len)?;
         let retained =
             sealed::validate(&self.retained, BlobRole::RetainedContent, self.retained_len)?;
-        let (manifest, retention_evidence) =
-            sealr::__worker_lab::authorize_materialize_retained_execution(
-                source.try_clone()?,
-                source_len,
-                operation_id,
-                &self.planning,
-                completion.bytes(),
-                retained.bytes(),
-                &self.retention,
-            )
-            .map_err(|error| {
-                io::Error::other(format!("authorizing materialized stage: {error}"))
-            })?;
-        let evidence = manifest.evidence();
+        let execution = sealr::__worker_runtime::authorize_execution(
+            source.try_clone()?,
+            source_len,
+            operation_id,
+            &self.planning,
+            completion.bytes(),
+            retained.bytes(),
+            sealr::__worker_runtime::OperationKind::Materialize,
+        )
+        .map_err(|error| io::Error::other(format!("authorizing materialized stage: {error}")))?;
+        let evidence = execution.completion_evidence();
+        let retention_evidence = execution.retention_evidence();
         if !evidence.complete
             || evidence.member_count != SOURCE_MEMBER_COUNT
             || evidence.verified_members != SOURCE_MEMBER_COUNT
@@ -113,7 +110,7 @@ impl ReapedWriter {
         }
         Ok(AuthorizedWriter {
             stage: self.stage,
-            manifest,
+            execution,
         })
     }
 }
@@ -122,7 +119,7 @@ impl AuthorizedWriter {
     fn audit(self) -> Result<AuditedWriter, Box<dyn std::error::Error>> {
         let stage = self
             .stage
-            .audit(&self.manifest)
+            .audit_runtime(&self.execution)
             .map_err(|error| io::Error::other(format!("auditing materialized stage: {error}")))?;
         Ok(AuditedWriter { stage })
     }
@@ -514,7 +511,6 @@ fn run_case(
         completion_len: result.values[0],
         retained: retained_descriptor,
         retained_len: result.values[1],
-        retention,
     };
     drop(active);
 

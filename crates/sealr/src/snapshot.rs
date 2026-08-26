@@ -5,7 +5,7 @@ use std::fs::{File, Metadata, OpenOptions};
 use std::io::{self, Read, Write};
 use std::path::Path;
 
-#[cfg(feature = "__internal-worker-lab")]
+#[cfg(any(target_os = "linux", feature = "__internal-worker-lab"))]
 use std::io::{Seek, SeekFrom};
 
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
@@ -231,8 +231,8 @@ impl<'a> SourceSnapshot<'a> {
         }
     }
 
-    #[cfg(feature = "__internal-worker-lab")]
-    pub(crate) fn worker_lab_from_file(
+    #[cfg(any(target_os = "linux", feature = "__internal-worker-lab"))]
+    pub(crate) fn from_worker_file(
         mut file: File,
         path: Option<String>,
         expected_len: u64,

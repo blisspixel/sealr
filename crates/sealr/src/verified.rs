@@ -223,6 +223,10 @@ pub(crate) struct RetentionBuild {
 }
 
 impl RetentionBuild {
+    pub(crate) fn from_entries(entries: BTreeMap<String, RetentionEntry>) -> Self {
+        Self { entries }
+    }
+
     pub(crate) fn plan(plan: Option<&RetentionPlan>, ir: &ArchiveIR) -> Self {
         let Some(plan) = plan else {
             return Self {

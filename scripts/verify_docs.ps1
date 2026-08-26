@@ -250,6 +250,7 @@ $semanticRecordDoc = Get-Content -Raw -LiteralPath (Join-Path $workspace 'docs/s
 foreach ($term in @(
     'same verifier calls that write the corresponding stage files',
     'byte-for-byte canonical equality for both outputs',
+    'Self-bound generic worker adapter',
     'public outcome and hidden `VerifiedArchive` backend integration'
 )) {
     if (-not $semanticRecordDoc.Contains($term, [StringComparison]::Ordinal)) {

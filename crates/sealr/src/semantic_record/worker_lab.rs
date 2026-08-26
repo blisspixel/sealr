@@ -285,7 +285,7 @@ fn validate_materialize_with_retention(
 ) -> Result<ValidatedMaterializeOperation, String> {
     let policy = Policy::default_v1();
     let context = context(&policy)?;
-    let snapshot = SourceSnapshot::worker_lab_from_file(
+    let snapshot = SourceSnapshot::from_worker_file(
         source,
         Some("worker-lab.zip".into()),
         source_len,
@@ -317,7 +317,7 @@ fn validate_inspect_with_retention(
 ) -> Result<ValidatedInspectOperation, String> {
     let policy = Policy::default_v1();
     let context = context(&policy)?;
-    let snapshot = SourceSnapshot::worker_lab_from_file(
+    let snapshot = SourceSnapshot::from_worker_file(
         source,
         Some("worker-lab.zip".into()),
         source_len,
@@ -389,7 +389,7 @@ pub fn validate_inspect_member_read(
 ) -> Result<ValidatedInspectMemberRead, String> {
     let policy = Policy::default_v1();
     let context = context(&policy)?;
-    let snapshot = SourceSnapshot::worker_lab_from_file(
+    let snapshot = SourceSnapshot::from_worker_file(
         source,
         Some("worker-lab-read.zip".into()),
         source_len,
@@ -506,7 +506,7 @@ pub fn authorize_inspect_retained_execution(
 ) -> Result<(InspectCompletionEvidence, InspectRetentionEvidence), String> {
     let policy = Policy::default_v1();
     let context = context(&policy)?;
-    let snapshot = SourceSnapshot::worker_lab_from_file(
+    let snapshot = SourceSnapshot::from_worker_file(
         source,
         Some("worker-lab-supervisor.zip".into()),
         source_len,
@@ -555,7 +555,7 @@ pub fn authorize_inspect_completion(
 ) -> Result<InspectCompletionEvidence, String> {
     let policy = Policy::default_v1();
     let context = context(&policy)?;
-    let snapshot = SourceSnapshot::worker_lab_from_file(
+    let snapshot = SourceSnapshot::from_worker_file(
         source,
         Some("worker-lab-supervisor.zip".into()),
         source_len,
@@ -642,7 +642,7 @@ fn authorize_materialize_with_retention(
 ) -> Result<(AuthorizedStageManifest, InspectRetentionEvidence), String> {
     let policy = Policy::default_v1();
     let context = context(&policy)?;
-    let snapshot = SourceSnapshot::worker_lab_from_file(
+    let snapshot = SourceSnapshot::from_worker_file(
         source,
         Some("worker-lab-supervisor.zip".into()),
         source_len,
@@ -710,6 +710,20 @@ impl WorkerLabStage {
     ) -> Result<AuditedWorkerLabStage, String> {
         self.materializer
             .audit_against(&manifest.ir)
+            .map_err(debug_error)?;
+        Ok(AuditedWorkerLabStage {
+            materializer: self.materializer,
+        })
+    }
+
+    /// Consume a reaped stage and audit it against generic source-derived
+    /// worker-runtime authority.
+    pub fn audit_runtime(
+        self,
+        execution: &super::worker_runtime::AuthorizedExecution,
+    ) -> Result<AuditedWorkerLabStage, String> {
+        self.materializer
+            .audit_against(execution.archive_ir())
             .map_err(debug_error)?;
         Ok(AuditedWorkerLabStage {
             materializer: self.materializer,
