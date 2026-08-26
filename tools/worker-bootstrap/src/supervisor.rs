@@ -23,6 +23,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const SOURCE_BYTES: &[u8] = b"sealr authority bootstrap probe";
+const STRESS_CASES: usize = 36;
+const STRESS_ITERATIONS: usize = 500;
 const AUTHORITY_EPOCH_TIMEOUT: Duration = Duration::from_secs(1);
 const CHILD_EXIT_TIMEOUT: Duration = Duration::from_secs(1);
 const KILL_REAP_TIMEOUT: Duration = Duration::from_secs(1);
@@ -118,8 +120,9 @@ pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
         run_stall_epoch(point)?;
     }
     run_timeout_reap()?;
+    run_repeated_stress()?;
     println!(
-        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 18 crash barriers, 9 authority-epoch stalls, and bounded reap passed"
+        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 18 crash barriers, 9 authority-epoch stalls, 500 bounded stress iterations, and bounded reap passed"
     );
     Ok(())
 }
@@ -341,10 +344,108 @@ fn run_stall_epoch(point: StallPoint) -> Result<(), Box<dyn std::error::Error>> 
     finish_fixture(&fixture, result)
 }
 
+fn run_repeated_stress() -> Result<(), Box<dyn std::error::Error>> {
+    require_no_supervisor_children("before repeated stress")?;
+    let expected_descriptors = supervisor_descriptor_count()?;
+    for iteration in 0..STRESS_ITERATIONS {
+        let case = iteration % STRESS_CASES;
+        if let Err(error) = run_stress_case(case) {
+            return Err(io::Error::other(format!(
+                "worker stress iteration {iteration}, case {case} failed: {error}"
+            ))
+            .into());
+        }
+        require_no_supervisor_children(&format!("after stress iteration {iteration}"))?;
+        let descriptors = supervisor_descriptor_count()?;
+        if descriptors != expected_descriptors {
+            return Err(io::Error::other(format!(
+                "supervisor descriptor count changed from {expected_descriptors} to {descriptors} after stress iteration {iteration}"
+            ))
+            .into());
+        }
+    }
+    Ok(())
+}
+
+fn run_stress_case(case: usize) -> Result<(), Box<dyn std::error::Error>> {
+    const DESCRIPTOR_CASES: [(CaseMutation, u64); 7] = [
+        (CaseMutation::WritableSource, 4),
+        (CaseMutation::WrongSourceLength, 4),
+        (CaseMutation::FileAsStage, 2),
+        (CaseMutation::WrongStageIdentity, 2),
+        (CaseMutation::MissingStageDescriptor, 2),
+        (CaseMutation::ExtraInspectDescriptor, 2),
+        (CaseMutation::DirectoryAsSource, 4),
+    ];
+    const PROTOCOL_CASES: [CaseMutation; 2] = [
+        CaseMutation::ExtraSourceDescriptor,
+        CaseMutation::WrongSourceOperation,
+    ];
+    const RESTRICTION_CASES: [ChildMode; 3] = [
+        ChildMode::InsufficientLandlockAbi,
+        ChildMode::RestrictionProbeFailure,
+        ChildMode::SeccompInstallationFailure,
+    ];
+
+    match case {
+        0 => run_success(false),
+        1 => run_success(true),
+        2..=8 => {
+            let (mutation, phase) = DESCRIPTOR_CASES[case - 2];
+            run_rejection(mutation, phase)
+        }
+        9..=10 => run_protocol_rejection(PROTOCOL_CASES[case - 9], 4),
+        11..=13 => run_restriction_rejection(RESTRICTION_CASES[case - 11]),
+        14 => run_transport_rejection(CaseMutation::ShortSource, DETAIL_SHORT_FRAME),
+        15 => run_transport_rejection(CaseMutation::LongSource, DETAIL_DATA_TRUNCATED),
+        16 => run_transport_rejection(
+            CaseMutation::TruncatedSourceControl,
+            DETAIL_CONTROL_TRUNCATED,
+        ),
+        17 => run_transport_rejection_with_mode(
+            CaseMutation::None,
+            ChildMode::UnknownAncillary,
+            DETAIL_ANCILLARY_UNKNOWN,
+        ),
+        18..=35 => run_crash_barrier(FaultPoint::ALL[case - 18]),
+        _ => Err(io::Error::other("worker stress case is outside its closed domain").into()),
+    }
+}
+
+fn require_no_supervisor_children(context: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let children = fs::read_to_string(format!("/proc/self/task/{}/children", std::process::id()))?;
+    if !children.trim().is_empty() {
+        return Err(io::Error::other(format!(
+            "supervisor has surviving child PIDs {children:?} {context}"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+fn supervisor_descriptor_count() -> io::Result<usize> {
+    fs::read_dir("/proc/self/fd")?.try_fold(0_usize, |count, entry| {
+        entry?;
+        count
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("supervisor descriptor count overflowed"))
+    })
+}
+
 fn finish_fixture<T>(
     fixture: &Fixture,
     result: Result<T, Box<dyn std::error::Error>>,
 ) -> Result<T, Box<dyn std::error::Error>> {
+    let retained = fixture.verify_retained_authority_state();
+    let result = match (result, retained) {
+        (Ok(value), Ok(())) => Ok(value),
+        (Err(error), Ok(())) => Err(error),
+        (Ok(_), Err(retained)) => Err(retained.into()),
+        (Err(error), Err(retained)) => Err(io::Error::other(format!(
+            "{error}; retained authority verification also failed: {retained}"
+        ))
+        .into()),
+    };
     match (result, fixture.cleanup()) {
         (Ok(value), Ok(())) => Ok(value),
         (Err(error), Ok(())) => Err(error),
@@ -1216,27 +1317,30 @@ impl Fixture {
         Ok(())
     }
 
-    fn verify_authority_state(&self, expect_stage_probe: bool) -> io::Result<()> {
+    fn verify_retained_authority_state(&self) -> io::Result<()> {
         if source_identity(&self.source)? != self.source_identity {
             return Err(io::Error::other(
-                "source descriptor identity changed during injected worker failure",
+                "source descriptor identity changed during worker execution",
             ));
         }
         let mut source = vec![0_u8; SOURCE_BYTES.len()];
         let source_read = rustix::io::pread(&self.source, &mut source, 0)?;
         if source_read != source.len() || source != SOURCE_BYTES {
-            return Err(io::Error::other(
-                "source changed during injected worker failure",
-            ));
+            return Err(io::Error::other("source changed during worker execution"));
         }
 
         let mut sentinel = [0_u8; 7];
         let sentinel_read = rustix::io::pread(&self.outside_sentinel, &mut sentinel, 0)?;
         if sentinel_read != sentinel.len() || &sentinel != b"outside" {
             return Err(io::Error::other(
-                "outside sentinel changed during injected worker failure",
+                "outside sentinel changed during worker execution",
             ));
         }
+        Ok(())
+    }
+
+    fn verify_authority_state(&self, expect_stage_probe: bool) -> io::Result<()> {
+        self.verify_retained_authority_state()?;
 
         let stage = self
             .stage
@@ -1605,5 +1709,17 @@ mod tests {
             .poll_timeout_ms()
             .expect("new deadline remains live");
         assert!((1..=1_000).contains(&live));
+    }
+
+    #[test]
+    fn stress_campaign_repeats_every_closed_case() {
+        let mut counts = [0_usize; STRESS_CASES];
+        for iteration in 0..STRESS_ITERATIONS {
+            counts[iteration % STRESS_CASES] += 1;
+        }
+
+        assert_eq!(counts.iter().sum::<usize>(), STRESS_ITERATIONS);
+        assert_eq!(counts.iter().copied().min(), Some(13));
+        assert_eq!(counts.iter().copied().max(), Some(14));
     }
 }
