@@ -3,7 +3,7 @@ use crate::frame::{Frame, Kind};
 use crate::linux::{
     close_inherited_authority, configure_timeout, receive_packet, send_packet,
     ERROR_AUTHORITY_CLOSE, ERROR_DESCRIPTOR, ERROR_PROBE, ERROR_PROTOCOL, ERROR_RESTRICTION,
-    FLAG_MEMBER_READ, FLAG_STAGE, READY_FLAGS,
+    FLAG_MATERIALIZE, FLAG_MEMBER_READ, FLAG_STAGE, READY_FLAGS,
 };
 use crate::sealed::{self, BlobRole};
 use crate::seccomp;
@@ -28,6 +28,74 @@ const PHASE_EXIT: u64 = 6;
 const PHASE_PLAN: u64 = 7;
 const PHASE_MEMBER_READ: u64 = 8;
 const SOURCE_RETAINED_BYTES: u64 = 30;
+
+enum ValidatedOperation {
+    Inspect(sealr::__worker_lab::ValidatedInspectOperation),
+    Materialize(sealr::__worker_lab::ValidatedMaterializeOperation),
+}
+
+enum ExecutedOperation {
+    Inspect(sealr::__worker_lab::ExecutedInspectOperation),
+    Materialize(sealr::__worker_lab::ExecutedMaterializeOperation),
+}
+
+impl ValidatedOperation {
+    fn source_probe(&self) -> Result<u8, String> {
+        match self {
+            Self::Inspect(operation) => operation.source_probe(),
+            Self::Materialize(operation) => operation.source_probe(),
+        }
+    }
+
+    fn execute(self, stage: Option<OwnedFd>) -> Result<ExecutedOperation, String> {
+        match self {
+            Self::Inspect(operation) => {
+                drop(stage);
+                operation.execute().map(ExecutedOperation::Inspect)
+            }
+            Self::Materialize(operation) => {
+                let stage = stage.ok_or_else(|| {
+                    "validated materialization operation lost its stage authority".to_owned()
+                })?;
+                operation
+                    .execute_into(File::from(stage))
+                    .map(ExecutedOperation::Materialize)
+            }
+        }
+    }
+}
+
+impl ExecutedOperation {
+    fn completion(&self) -> &[u8] {
+        match self {
+            Self::Inspect(operation) => operation.completion(),
+            Self::Materialize(operation) => operation.completion(),
+        }
+    }
+
+    fn retained_content(&self) -> &[u8] {
+        match self {
+            Self::Inspect(operation) => operation.retained_content(),
+            Self::Materialize(operation) => operation.retained_content(),
+        }
+    }
+
+    fn evidence(&self) -> Result<sealr::__worker_lab::InspectCompletionEvidence, String> {
+        match self {
+            Self::Inspect(operation) => operation.evidence(),
+            Self::Materialize(operation) => operation.evidence(),
+        }
+    }
+
+    fn retention_evidence(
+        &self,
+    ) -> Result<Option<sealr::__worker_lab::InspectRetentionEvidence>, String> {
+        match self {
+            Self::Inspect(operation) => operation.retention_evidence().map(Some),
+            Self::Materialize(_) => Ok(None),
+        }
+    }
+}
 
 pub(crate) fn entry(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>> {
     if args.len() != 3 {
@@ -96,7 +164,7 @@ fn run(
     mode: ChildMode,
 ) -> Result<(), WorkerFailure> {
     require_kind(&bootstrap, Kind::Bootstrap, PHASE_BOOTSTRAP)?;
-    if bootstrap.flags & !(FLAG_STAGE | FLAG_MEMBER_READ) != 0 {
+    if bootstrap.flags & !(FLAG_STAGE | FLAG_MEMBER_READ | FLAG_MATERIALIZE) != 0 {
         return Err(protocol(PHASE_BOOTSTRAP, "bootstrap flags are invalid"));
     }
     if bootstrap.flags & FLAG_STAGE != 0 && bootstrap.flags & FLAG_MEMBER_READ != 0 {
@@ -107,6 +175,19 @@ fn run(
     }
     let has_stage = bootstrap.flags & FLAG_STAGE != 0;
     let member_read = bootstrap.flags & FLAG_MEMBER_READ != 0;
+    let materialize = bootstrap.flags & FLAG_MATERIALIZE != 0;
+    if materialize && !has_stage {
+        return Err(protocol(
+            PHASE_BOOTSTRAP,
+            "materialize worker requires stage authority",
+        ));
+    }
+    if materialize && member_read {
+        return Err(protocol(
+            PHASE_BOOTSTRAP,
+            "materialize and member-read modes are mutually exclusive",
+        ));
+    }
     let expected = usize::from(has_stage);
     if descriptors.len() != expected {
         return Err(descriptor(PHASE_STAGE, "stage descriptor count is invalid"));
@@ -118,7 +199,7 @@ fn run(
         ));
     }
 
-    let stage = if has_stage {
+    let mut stage = if has_stage {
         let stage = descriptors
             .pop()
             .expect("stage count was validated before removal");
@@ -147,7 +228,11 @@ fn run(
     mode.exit_at(FaultPoint::NoNewPrivs);
 
     let handled = AccessFs::from_all(ABI::V3);
-    let stage_grant = make_bitflags!(AccessFs::{WriteFile | MakeDir | MakeReg});
+    let stage_grant = if materialize {
+        make_bitflags!(AccessFs::{ReadDir | WriteFile | MakeDir | MakeReg})
+    } else {
+        make_bitflags!(AccessFs::{WriteFile | MakeDir | MakeReg})
+    };
     let created = Ruleset::default()
         .set_compatibility(CompatLevel::HardRequirement)
         .handle_access(handled)
@@ -187,7 +272,8 @@ fn run(
 
     let operation_id = bootstrap.operation_id;
     let mut ready = Frame::new(Kind::RestrictedReady, operation_id);
-    ready.flags = READY_FLAGS | (bootstrap.flags & (FLAG_STAGE | FLAG_MEMBER_READ));
+    ready.flags =
+        READY_FLAGS | (bootstrap.flags & (FLAG_STAGE | FLAG_MEMBER_READ | FLAG_MATERIALIZE));
     ready.values = [
         effective_abi,
         handled.bits(),
@@ -295,13 +381,24 @@ fn run(
             .take()
             .expect("ordinary execution consumes its source")
     };
-    let validated_operation = sealr::__worker_lab::validate_inspect_retaining(
-        validation_source,
-        source_frame.values[0],
-        original_operation_id,
-        plan.bytes(),
-        &retention,
-    )
+    let validated_operation = if materialize {
+        sealr::__worker_lab::validate_materialize(
+            validation_source,
+            source_frame.values[0],
+            operation_id,
+            plan.bytes(),
+        )
+        .map(ValidatedOperation::Materialize)
+    } else {
+        sealr::__worker_lab::validate_inspect_retaining(
+            validation_source,
+            source_frame.values[0],
+            original_operation_id,
+            plan.bytes(),
+            &retention,
+        )
+        .map(ValidatedOperation::Inspect)
+    }
     .map_err(|error| {
         protocol(
             PHASE_PLAN,
@@ -364,18 +461,26 @@ fn run(
     mode.exit_at(FaultPoint::SourceProbe);
     let outside_errno = verify_outside_denied(stage.as_ref())?;
     mode.exit_at(FaultPoint::OutsideDenial);
-    if let Some(stage) = &stage {
-        create_stage_probe(stage)?;
-        mode.exit_at(FaultPoint::StageCreate);
+    if !materialize {
+        if let Some(stage) = &stage {
+            create_stage_probe(stage)?;
+            mode.exit_at(FaultPoint::StageCreate);
+        }
     }
     mode.stall_at(StallPoint::ProbeExecution);
 
-    let executed_operation = validated_operation.execute().map_err(|error| {
-        protocol(
-            PHASE_PROBE,
-            format!("executing validated semantic plan failed: {error}"),
-        )
-    })?;
+    let execution_stage = if materialize { stage.take() } else { None };
+    let executed_operation = validated_operation
+        .execute(execution_stage)
+        .map_err(|error| {
+            protocol(
+                PHASE_PROBE,
+                format!("executing validated semantic plan failed: {error}"),
+            )
+        })?;
+    if materialize {
+        mode.exit_at(FaultPoint::StageCreate);
+    }
     let semantic_evidence = executed_operation.evidence().map_err(|error| {
         protocol(
             PHASE_PROBE,
@@ -397,14 +502,16 @@ fn run(
             format!("revalidating retained content failed: {error}"),
         )
     })?;
-    if retention_evidence.requested_paths != 2
-        || retention_evidence.retained_members != 2
-        || retention_evidence.retained_bytes != SOURCE_RETAINED_BYTES
-    {
-        return Err(protocol(
-            PHASE_PROBE,
-            format!("retained-content evidence is incomplete: {retention_evidence:?}"),
-        ));
+    if let Some(retention_evidence) = retention_evidence {
+        if retention_evidence.requested_paths != 2
+            || retention_evidence.retained_members != 2
+            || retention_evidence.retained_bytes != SOURCE_RETAINED_BYTES
+        {
+            return Err(protocol(
+                PHASE_PROBE,
+                format!("retained-content evidence is incomplete: {retention_evidence:?}"),
+            ));
+        }
     }
     let completion_payload = executed_operation.completion();
     let completion_descriptor =
@@ -469,7 +576,7 @@ fn run(
     let outside_errno = u32::try_from(outside_errno)
         .map_err(|_| protocol(PHASE_PROBE, "outside errno is unrepresentable"))?;
     let mut result = Frame::new(Kind::Result, operation_id);
-    result.flags = bootstrap.flags & FLAG_STAGE;
+    result.flags = bootstrap.flags & (FLAG_STAGE | FLAG_MATERIALIZE);
     result.values = [
         completion_total_len,
         retained_total_len,

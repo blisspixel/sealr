@@ -35,6 +35,29 @@ const DENIED_SYSCALLS: &[libc::c_long] = &[
     libc::SYS_execveat,
     libc::SYS_clone3,
     libc::SYS_fchmodat2,
+    libc::SYS_link,
+    libc::SYS_linkat,
+    libc::SYS_unlink,
+    libc::SYS_unlinkat,
+    libc::SYS_rename,
+    libc::SYS_renameat,
+    libc::SYS_renameat2,
+    libc::SYS_symlink,
+    libc::SYS_symlinkat,
+    libc::SYS_mknod,
+    libc::SYS_mknodat,
+    libc::SYS_mount,
+    libc::SYS_umount2,
+    libc::SYS_pivot_root,
+    libc::SYS_truncate,
+    libc::SYS_ftruncate,
+    libc::SYS_socket,
+    libc::SYS_socketpair,
+    libc::SYS_connect,
+    libc::SYS_bind,
+    libc::SYS_listen,
+    libc::SYS_accept,
+    libc::SYS_accept4,
 ];
 
 pub(crate) fn install_and_verify(stage: Option<BorrowedFd<'_>>) -> Result<(), SeccompError> {
@@ -174,6 +197,61 @@ fn verify_denied_syscalls(stage: Option<BorrowedFd<'_>>) -> Result<(), SeccompEr
         expect_permission_denied("setns", libc::syscall(libc::SYS_setns, -1_i32, 0_i32))?;
         expect_permission_denied("unshare", libc::syscall(libc::SYS_unshare, 0_i32))?;
         expect_permission_denied("ioctl", libc::syscall(libc::SYS_ioctl, -1_i32, 0_u64))?;
+        expect_permission_denied(
+            "renameat2",
+            libc::syscall(
+                libc::SYS_renameat2,
+                -1_i32,
+                std::ptr::null::<libc::c_char>(),
+                -1_i32,
+                std::ptr::null::<libc::c_char>(),
+                0_u32,
+            ),
+        )?;
+        expect_permission_denied(
+            "unlinkat",
+            libc::syscall(
+                libc::SYS_unlinkat,
+                -1_i32,
+                std::ptr::null::<libc::c_char>(),
+                0_i32,
+            ),
+        )?;
+        expect_permission_denied(
+            "linkat",
+            libc::syscall(
+                libc::SYS_linkat,
+                -1_i32,
+                std::ptr::null::<libc::c_char>(),
+                -1_i32,
+                std::ptr::null::<libc::c_char>(),
+                0_i32,
+            ),
+        )?;
+        expect_permission_denied(
+            "mount",
+            libc::syscall(
+                libc::SYS_mount,
+                std::ptr::null::<libc::c_char>(),
+                std::ptr::null::<libc::c_char>(),
+                std::ptr::null::<libc::c_char>(),
+                0_u64,
+                std::ptr::null::<libc::c_void>(),
+            ),
+        )?;
+        expect_permission_denied(
+            "socket",
+            libc::syscall(libc::SYS_socket, -1_i32, libc::SOCK_STREAM, 0_i32),
+        )?;
+        expect_permission_denied(
+            "connect",
+            libc::syscall(
+                libc::SYS_connect,
+                -1_i32,
+                std::ptr::null::<libc::sockaddr>(),
+                0_u32,
+            ),
+        )?;
     }
 
     if let Some(stage) = stage {

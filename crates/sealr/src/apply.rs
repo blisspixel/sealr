@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufReader};
 use std::path::Path;
 
 #[cfg(test)]
@@ -10,7 +10,7 @@ use crate::findings::{Finding, FindingCode, Severity};
 use crate::identity::OutcomeIdentities;
 use crate::ir::{ArchiveIR, IrMember, MemberKind, NormalizationAction, ZipInterpretationProfile};
 use crate::jail::jail_name;
-use crate::materialize::{CapabilityMaterializer, MaterializationMeta};
+use crate::materialize::{process_member_to_file, CapabilityMaterializer, MaterializationMeta};
 use crate::outcome::{
     AdmissionStatus, DigestHex, EffectStatus, InterpretationStatus, SemanticAxes, SourceDigest,
     VerificationStatus, ViewCompleteness,
@@ -21,7 +21,6 @@ use crate::snapshot::{SnapshotKind, SourceSnapshot};
 use crate::verification::{digest_hex, verify_payload, PayloadSpec};
 use crate::verified::{RetentionBuild, RetentionPlan, VerifiedArchive};
 use crate::zip::{self, ZipMember};
-use cap_std::fs::File as CapFile;
 use serde::Serialize;
 
 // PKWARE APPNOTE 4.4.4: traditional encryption, strong encryption, and
@@ -1052,52 +1051,6 @@ fn path_conflict(seen: &BTreeMap<String, bool>, path: &str, is_dir: bool) -> Opt
         }
     }
     None
-}
-
-fn process_member_to_file(
-    payload: impl BufRead,
-    member: PayloadSpec,
-    budget: ResourceBudget,
-    remaining_total: u64,
-    member_sync: bool,
-    capture: Option<&mut Vec<u8>>,
-    mut file: CapFile,
-) -> Result<(u64, u32, [u8; 32]), Finding> {
-    let result = {
-        let mut writer = RetainingWriter {
-            primary: &mut file,
-            capture,
-        };
-        verify_payload(payload, member, budget, remaining_total, &mut writer)?
-    };
-    file.flush().map_err(|error| {
-        Finding::error(FindingCode::MaterializeIo, format!("flush member: {error}"))
-    })?;
-    if member_sync {
-        file.sync_all().map_err(|error| {
-            Finding::error(FindingCode::MaterializeIo, format!("sync member: {error}"))
-        })?;
-    }
-    Ok(result)
-}
-
-struct RetainingWriter<'a, W> {
-    primary: &'a mut W,
-    capture: Option<&'a mut Vec<u8>>,
-}
-
-impl<W: Write> Write for RetainingWriter<'_, W> {
-    fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
-        let written = self.primary.write(bytes)?;
-        if let Some(capture) = self.capture.as_deref_mut() {
-            capture.extend_from_slice(&bytes[..written]);
-        }
-        Ok(written)
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
-        self.primary.flush()
-    }
 }
 
 fn detect_magic(snapshot: &SourceSnapshot<'_>) -> Result<&'static str, Finding> {

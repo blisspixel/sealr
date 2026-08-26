@@ -2,6 +2,9 @@
 
 use std::fs::File;
 use std::io::{BufReader, Write};
+use std::path::Path;
+
+use sha2::{Digest, Sha256};
 
 use super::{
     decode_completion, decode_planning, encode_planning, parse_hex_32, InvocationBinding,
@@ -9,6 +12,7 @@ use super::{
 };
 use crate::apply::{plan_source, PlanDecision, PlanningContext, Source};
 use crate::ir::{MemberVerification, ZipInterpretationProfile};
+use crate::materialize::{CapabilityMaterializer, StageWriteRoot};
 use crate::outcome::VerificationStatus;
 use crate::policy::Policy;
 use crate::snapshot::SourceSnapshot;
@@ -27,6 +31,41 @@ pub struct ValidatedInspectOperation {
 #[derive(Debug)]
 pub struct ExecutedInspectOperation {
     executed: super::executor::ExecutedInspectPlan<'static>,
+}
+
+/// A validated materialization plan bound to the exact worker source.
+#[derive(Debug)]
+pub struct ValidatedMaterializeOperation {
+    planning: super::ValidatedPlanningRecord,
+    snapshot: SourceSnapshot<'static>,
+}
+
+/// A completed materialization execution that retains source and stage
+/// authority until its canonical result has been observed.
+#[derive(Debug)]
+pub struct ExecutedMaterializeOperation {
+    executed: super::executor::ExecutedMaterializePlan<'static>,
+}
+
+/// Supervisor-owned staging and publication authority for the repository lab.
+pub struct WorkerLabStage {
+    materializer: CapabilityMaterializer,
+}
+
+/// A stage that passed the exact source-authorized tree audit.
+pub struct AuditedWorkerLabStage {
+    materializer: CapabilityMaterializer,
+}
+
+/// Scoped cleanup-failure injection for the repository conformance lab.
+pub struct WorkerLabCleanupFailureGuard {
+    _guard: crate::materialize::CleanupFailureGuard,
+}
+
+/// Opaque source-derived authority for one exact materialized tree.
+pub struct AuthorizedStageManifest {
+    ir: crate::ir::ArchiveIR,
+    evidence: InspectCompletionEvidence,
 }
 
 /// One exact, caller-bounded non-retained member read validated against a
@@ -123,6 +162,33 @@ pub fn plan_inspect(source: &[u8], operation_id: [u8; 16]) -> Result<Vec<u8>, St
     plan_inspect_with_retention(source, operation_id, None)
 }
 
+/// Plan one private materialization operation for the repository lab.
+pub fn plan_materialize(source: &[u8], operation_id: [u8; 16]) -> Result<Vec<u8>, String> {
+    let policy = Policy::default_v1();
+    let context = context(&policy)?;
+    let source = Source::Bytes {
+        path: Some("worker-lab.zip"),
+        data: source,
+    };
+    let ready = match plan_source(&source, context).map_err(debug_error)? {
+        PlanDecision::Ready(ready) => ready,
+        PlanDecision::Terminal(terminal) => {
+            return Err(format!(
+                "worker-lab source reached terminal planning: {terminal:?}"
+            ));
+        }
+    };
+    let (snapshot, ir, findings, context) = ready.into_parts();
+    let binding = materialize_binding(&snapshot, &context, operation_id)?;
+    encode_planning(&PlanningRecord {
+        binding,
+        disposition: PlanningDisposition::ReadyForVerification,
+        ir: Some(ir),
+        findings,
+    })
+    .map_err(debug_error)
+}
+
 /// Plan one inspect operation with a supervisor-authored retention request.
 pub fn plan_inspect_retaining(
     source: &[u8],
@@ -170,6 +236,27 @@ pub fn validate_inspect(
     planning: &[u8],
 ) -> Result<ValidatedInspectOperation, String> {
     validate_inspect_with_retention(source, source_len, operation_id, planning, None)
+}
+
+/// Validate one canonical materialization plan against the exact source.
+pub fn validate_materialize(
+    source: File,
+    source_len: u64,
+    operation_id: [u8; 16],
+    planning: &[u8],
+) -> Result<ValidatedMaterializeOperation, String> {
+    let policy = Policy::default_v1();
+    let context = context(&policy)?;
+    let snapshot = SourceSnapshot::worker_lab_from_file(
+        source,
+        Some("worker-lab.zip".into()),
+        source_len,
+        context.controls().budget.max_archive_bytes,
+    )
+    .map_err(debug_error)?;
+    let binding = materialize_binding(&snapshot, &context, operation_id)?;
+    let planning = decode_planning(planning, &binding, &snapshot).map_err(debug_error)?;
+    Ok(ValidatedMaterializeOperation { planning, snapshot })
 }
 
 /// Validate one canonical retained-content plan against the exact descriptor.
@@ -454,6 +541,109 @@ pub fn authorize_inspect_completion(
     Ok(completion_evidence(proposal))
 }
 
+/// Replay a materialization plan against the supervisor's retained source and
+/// authorize an exact stage manifest only when the worker completion matches.
+pub fn authorize_materialize_execution(
+    source: File,
+    source_len: u64,
+    operation_id: [u8; 16],
+    planning: &[u8],
+    completion: &[u8],
+) -> Result<AuthorizedStageManifest, String> {
+    let policy = Policy::default_v1();
+    let context = context(&policy)?;
+    let snapshot = SourceSnapshot::worker_lab_from_file(
+        source,
+        Some("worker-lab-supervisor.zip".into()),
+        source_len,
+        context.controls().budget.max_archive_bytes,
+    )
+    .map_err(debug_error)?;
+    let binding = materialize_binding(&snapshot, &context, operation_id)?;
+    let planning = decode_planning(planning, &binding, &snapshot).map_err(debug_error)?;
+    let executed = planning
+        .bind_materialize_replay(snapshot)
+        .map_err(debug_error)?
+        .execute()
+        .map_err(debug_error)?;
+    if executed.completion() != completion {
+        return Err(
+            "worker completion differs from the supervisor's source-derived replay".to_owned(),
+        );
+    }
+    let proposal =
+        decode_completion(executed.completion(), executed.planning()).map_err(debug_error)?;
+    let evidence = completion_evidence(proposal.clone());
+    if !evidence.complete {
+        return Err("only a complete source-derived execution can authorize a stage".to_owned());
+    }
+    Ok(AuthorizedStageManifest {
+        ir: proposal.ir,
+        evidence,
+    })
+}
+
+impl WorkerLabStage {
+    /// Create the real production stage while retaining publication authority.
+    pub fn create(destination: &Path) -> Result<Self, String> {
+        CapabilityMaterializer::create(destination, false)
+            .map(|materializer| Self { materializer })
+            .map_err(debug_error)
+    }
+
+    /// Duplicate only the retained stage root for transfer to a worker.
+    pub fn try_clone_writer_file(&self) -> Result<File, String> {
+        self.materializer
+            .try_clone_worker_file()
+            .map_err(debug_error)
+    }
+
+    /// Consume a reaped stage and require an exact source-authorized audit.
+    pub fn audit(
+        self,
+        manifest: &AuthorizedStageManifest,
+    ) -> Result<AuditedWorkerLabStage, String> {
+        self.materializer
+            .audit_against(&manifest.ir)
+            .map_err(debug_error)?;
+        Ok(AuditedWorkerLabStage {
+            materializer: self.materializer,
+        })
+    }
+
+    /// Abort a stage after the supervisor has proved writer quiescence.
+    pub fn abort(mut self) -> Result<(), String> {
+        self.materializer.abort().map_err(debug_error)
+    }
+
+    /// Deliberately retain an uncleaned stage when writer quiescence is not
+    /// proved. This prevents Drop from recursively removing a live namespace.
+    pub fn abandon(self) {
+        std::mem::forget(self);
+    }
+}
+
+/// Inject a bounded number of stage cleanup failures on the current thread.
+pub fn inject_worker_lab_cleanup_failures(count: u32) -> WorkerLabCleanupFailureGuard {
+    WorkerLabCleanupFailureGuard {
+        _guard: crate::materialize::inject_cleanup_failures_for_current_thread(count),
+    }
+}
+
+impl AuditedWorkerLabStage {
+    /// Publish through the retained parent with no replacement.
+    pub fn publish(mut self) -> Result<(), String> {
+        self.materializer.commit().map_err(debug_error)
+    }
+}
+
+impl AuthorizedStageManifest {
+    /// Return bounded completion evidence for conformance assertions.
+    pub fn evidence(&self) -> InspectCompletionEvidence {
+        self.evidence
+    }
+}
+
 fn context(policy: &Policy) -> Result<PlanningContext, String> {
     PlanningContext::compile(policy, ZipInterpretationProfile::StrictAsciiV2).map_err(debug_error)
 }
@@ -493,6 +683,42 @@ fn inspect_binding(
         retention: retention.map_or(RetentionBinding::None, |retention| {
             RetentionBinding::from_plan(Some(&retention.plan))
         }),
+    })
+}
+
+fn materialize_binding(
+    snapshot: &SourceSnapshot<'_>,
+    context: &PlanningContext,
+    operation_id: [u8; 16],
+) -> Result<InvocationBinding, String> {
+    let controls = context.controls();
+    let source_sha256 = parse_hex_32(
+        snapshot
+            .digest()
+            .sha256()
+            .ok_or_else(|| "worker-lab snapshot digest is unavailable".to_owned())?,
+    )
+    .ok_or_else(|| "worker-lab snapshot digest is not SHA-256".to_owned())?;
+    let profile_sha256 = parse_hex_32(&context.profile().digest())
+        .ok_or_else(|| "worker-lab profile digest is not SHA-256".to_owned())?;
+    let policy_sha256 = parse_hex_32(context.policy_sha256())
+        .ok_or_else(|| "worker-lab policy digest is not SHA-256".to_owned())?;
+    let target_sha256 = Sha256::digest(b"sealr.worker-lab.materialize-target.v1\0").into();
+    Ok(InvocationBinding {
+        operation_id,
+        source_len: snapshot.len(),
+        source_sha256,
+        profile: context.profile(),
+        profile_sha256,
+        policy_id: context.policy_id().to_owned(),
+        policy_sha256,
+        budget: controls.budget,
+        target: controls.target,
+        consumer: controls.consumer,
+        requested_effect: RequestedEffect::Materialize,
+        target_sha256: Some(target_sha256),
+        member_sync: controls.effect.member_sync,
+        retention: RetentionBinding::None,
     })
 }
 
@@ -551,6 +777,48 @@ impl ExecutedInspectOperation {
         )
         .map_err(debug_error)?;
         Ok(retention_evidence(evidence))
+    }
+}
+
+impl ValidatedMaterializeOperation {
+    /// Read the existing source probe byte through the bound snapshot.
+    pub fn source_probe(&self) -> Result<u8, String> {
+        let mut byte = [0_u8; 1];
+        self.snapshot
+            .read_exact_at(0, &mut byte)
+            .map_err(debug_error)?;
+        Ok(byte[0])
+    }
+
+    /// Consume the validated plan and write only its planned member ranges.
+    pub fn execute_into(self, stage: File) -> Result<ExecutedMaterializeOperation, String> {
+        let stage = StageWriteRoot::from_worker_file(stage).map_err(debug_error)?;
+        let executed = self
+            .planning
+            .bind_materialize_execution(self.snapshot, stage)
+            .map_err(debug_error)?
+            .execute()
+            .map_err(debug_error)?;
+        Ok(ExecutedMaterializeOperation { executed })
+    }
+}
+
+impl ExecutedMaterializeOperation {
+    /// Return the canonical semantic completion bytes.
+    pub fn completion(&self) -> &[u8] {
+        self.executed.completion()
+    }
+
+    /// Return the canonical empty retention bundle bound to this execution.
+    pub fn retained_content(&self) -> &[u8] {
+        self.executed.retained_content()
+    }
+
+    /// Revalidate the generated completion against its retained planning state.
+    pub fn evidence(&self) -> Result<InspectCompletionEvidence, String> {
+        let proposal = decode_completion(self.executed.completion(), self.executed.planning())
+            .map_err(debug_error)?;
+        Ok(completion_evidence(proposal))
     }
 }
 
@@ -647,6 +915,27 @@ mod tests {
         cursor.into_inner()
     }
 
+    fn materialize_source() -> Vec<u8> {
+        let mut cursor = Cursor::new(Vec::new());
+        {
+            let mut writer = ZipWriter::new(&mut cursor);
+            let stored = SimpleFileOptions::default()
+                .compression_method(CompressionMethod::Stored)
+                .last_modified_time(zip::DateTime::default());
+            writer.add_directory("nested/", stored).unwrap();
+            writer.start_file("stored.txt", stored).unwrap();
+            writer.write_all(b"stored payload").unwrap();
+            writer.start_file("empty.txt", stored).unwrap();
+            let deflated = SimpleFileOptions::default()
+                .compression_method(CompressionMethod::Deflated)
+                .last_modified_time(zip::DateTime::default());
+            writer.start_file("nested/deflated.txt", deflated).unwrap();
+            writer.write_all(b"deflated payload").unwrap();
+            writer.finish().unwrap();
+        }
+        cursor.into_inner()
+    }
+
     fn source_file(source: &[u8]) -> (File, PathBuf) {
         let mut random = [0_u8; 12];
         getrandom::fill(&mut random).unwrap();
@@ -703,6 +992,75 @@ mod tests {
         assert_eq!(crate::verification::verify_payload_calls(), 2);
         drop(executed);
         fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn materialize_bridge_replays_audits_and_publishes_exact_tree() {
+        let source = materialize_source();
+        let operation_id = [0x51; 16];
+        let planning = plan_materialize(&source, operation_id).unwrap();
+        let (file, source_path) = source_file(&source);
+        let root = unique_directory("materialize-success");
+        let destination = root.join("published");
+        let stage = WorkerLabStage::create(&destination).unwrap();
+        let writer = stage.try_clone_writer_file().unwrap();
+
+        crate::zip::reset_parse_calls();
+        crate::verification::reset_verify_payload_calls();
+        let executed = validate_materialize(file, source.len() as u64, operation_id, &planning)
+            .unwrap()
+            .execute_into(writer)
+            .unwrap();
+        assert_eq!(crate::zip::parse_calls(), 0);
+        assert_eq!(crate::verification::verify_payload_calls(), 3);
+        let completion = executed.completion().to_vec();
+        assert_eq!(
+            executed.evidence().unwrap(),
+            InspectCompletionEvidence {
+                complete: true,
+                member_count: 4,
+                verified_members: 4,
+            }
+        );
+        drop(executed);
+
+        let manifest = authorize_materialize_execution(
+            File::open(&source_path).unwrap(),
+            source.len() as u64,
+            operation_id,
+            &planning,
+            &completion,
+        )
+        .unwrap();
+        assert_eq!(crate::zip::parse_calls(), 0);
+        assert_eq!(crate::verification::verify_payload_calls(), 6);
+        stage.audit(&manifest).unwrap().publish().unwrap();
+
+        assert_eq!(
+            fs::read(destination.join("stored.txt")).unwrap(),
+            b"stored payload"
+        );
+        assert_eq!(fs::read(destination.join("empty.txt")).unwrap(), b"");
+        assert_eq!(
+            fs::read(destination.join("nested/deflated.txt")).unwrap(),
+            b"deflated payload"
+        );
+        fs::remove_dir_all(root).unwrap();
+        fs::remove_file(source_path).unwrap();
+    }
+
+    fn unique_directory(label: &str) -> PathBuf {
+        let mut random = [0_u8; 12];
+        getrandom::fill(&mut random).unwrap();
+        let suffix: String = random.iter().map(|byte| format!("{byte:02x}")).collect();
+        let path = std::env::temp_dir().join(format!("sealr-worker-lab-{label}-{suffix}"));
+        fs::create_dir(&path).unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        path
     }
 
     #[test]
