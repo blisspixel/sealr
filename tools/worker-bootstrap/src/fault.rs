@@ -66,6 +66,8 @@ pub(crate) enum StallPoint {
     RestrictedReady,
     SourceReceive,
     SourceAcceptance,
+    PlanReceive,
+    PlanAcceptance,
     ProceedReceive,
     ProbeExecution,
     ExitAckReceive,
@@ -73,12 +75,14 @@ pub(crate) enum StallPoint {
 }
 
 impl StallPoint {
-    pub(crate) const ALL: [Self; 9] = [
+    pub(crate) const ALL: [Self; 11] = [
         Self::BootstrapReceive,
         Self::RestrictionSetup,
         Self::RestrictedReady,
         Self::SourceReceive,
         Self::SourceAcceptance,
+        Self::PlanReceive,
+        Self::PlanAcceptance,
         Self::ProceedReceive,
         Self::ProbeExecution,
         Self::ExitAckReceive,
@@ -92,6 +96,8 @@ impl StallPoint {
             Self::RestrictedReady => "stall-before-restriction-ready",
             Self::SourceReceive => "stall-before-source-receive",
             Self::SourceAcceptance => "stall-before-source-acceptance",
+            Self::PlanReceive => "stall-before-plan-receive",
+            Self::PlanAcceptance => "stall-before-plan-acceptance",
             Self::ProceedReceive => "stall-before-proceed-receive",
             Self::ProbeExecution => "stall-before-probe-execution",
             Self::ExitAckReceive => "stall-before-exit-ack-receive",
@@ -127,10 +133,14 @@ pub(crate) enum FaultPoint {
     StageCreate = 16,
     Result = 17,
     ExitAck = 18,
+    PlanReceive = 19,
+    PlanValidation = 20,
+    PlanAccepted = 21,
+    CompletionSeal = 22,
 }
 
 impl FaultPoint {
-    pub(crate) const ALL: [Self; 18] = [
+    pub(crate) const ALL: [Self; 22] = [
         Self::ExecEntry,
         Self::PeerValidation,
         Self::InheritedClosure,
@@ -149,6 +159,10 @@ impl FaultPoint {
         Self::StageCreate,
         Self::Result,
         Self::ExitAck,
+        Self::PlanReceive,
+        Self::PlanValidation,
+        Self::PlanAccepted,
+        Self::CompletionSeal,
     ];
 
     pub(crate) fn argument(self) -> &'static str {
@@ -171,6 +185,10 @@ impl FaultPoint {
             Self::StageCreate => "exit-after-stage-create",
             Self::Result => "exit-after-result",
             Self::ExitAck => "exit-after-exit-ack",
+            Self::PlanReceive => "exit-after-plan-receive",
+            Self::PlanValidation => "exit-after-plan-validation",
+            Self::PlanAccepted => "exit-after-plan-accepted",
+            Self::CompletionSeal => "exit-after-completion-seal",
         }
     }
 

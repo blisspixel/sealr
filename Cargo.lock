@@ -528,6 +528,7 @@ dependencies = [
  "landlock",
  "libc",
  "rustix",
+ "sha2",
  "thiserror",
 ]
 
