@@ -885,7 +885,7 @@ impl CapabilityMaterializer {
         self.stage_writer()?.create_file(parts)
     }
 
-    #[cfg(feature = "__internal-worker-lab")]
+    #[cfg(any(target_os = "linux", feature = "__internal-worker-lab"))]
     pub(crate) fn try_clone_worker_file(&self) -> Result<StdFile, Finding> {
         #[cfg(target_os = "linux")]
         let file = rustix::fs::openat(
@@ -906,6 +906,34 @@ impl CapabilityMaterializer {
                 format!("clone worker staging capability: {error}"),
             )
         })
+    }
+
+    /// Bind a supervised materialization plan to the retained destination
+    /// parent object and its exact final component without serializing a path.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn target_digest(&self) -> Result<[u8; 32], Finding> {
+        use std::os::unix::ffi::OsStrExt;
+
+        let stat = rustix::fs::fstat(&self.parent).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("identify retained destination parent: {error}"),
+            )
+        })?;
+        let component = self.final_name.as_os_str().as_bytes();
+        let component_len = u64::try_from(component.len()).map_err(|_| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                "destination component length is unrepresentable",
+            )
+        })?;
+        let mut digest = Sha256::new();
+        digest.update(b"sealr.materialization.target.v1\0");
+        digest.update(stat.st_dev.to_le_bytes());
+        digest.update(stat.st_ino.to_le_bytes());
+        digest.update(component_len.to_le_bytes());
+        digest.update(component);
+        Ok(digest.finalize().into())
     }
 
     pub(crate) fn commit(&mut self) -> Result<(), Finding> {

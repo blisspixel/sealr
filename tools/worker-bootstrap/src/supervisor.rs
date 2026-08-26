@@ -185,7 +185,7 @@ fn run_package_smoke() -> Result<(), Box<dyn std::error::Error>> {
         .expect("child programs remain initialized during package smoke")
         .production;
     println!(
-        "sealr.worker-package-smoke.v1: authenticated helper sha256={} bytes={}, private inspect and public supervised inspect, retained borrow, cloned one-shot read, and exact reap passed",
+        "sealr.worker-package-smoke.v1: authenticated helper sha256={} bytes={}, private inspect, public supervised inspect and materialize, retained borrow, cloned one-shot read, setup-failure preservation, and exact reap passed",
         helper.digest_hex(),
         helper.len()
     );
@@ -238,7 +238,7 @@ fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
         .expect("child programs remain initialized during conformance")
         .production;
     println!(
-        "sealr.worker-bootstrap-evidence.v1: authenticated helper sha256={} bytes={}, 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 1 supervisor content replay, 1 immutable inspect retention transfer, 1 public supervised inspect with retained borrow and cloned one-shot read, 1 isolated one-shot Store-and-Deflate read boundary, 1 reaped and audited Store-and-Deflate writer publication with immutable retention transfer, 1 post-reap writer audit-mutation rejection, 1 writer destination-race rejection, 1 distinct writer cleanup failure, 4 writer crash barriers, 2 writer authority-epoch stalls, 22 bootstrap crash barriers, 11 bootstrap authority-epoch stalls, 500 bounded bootstrap stress iterations, 500 bounded writer lifecycle iterations, and bounded reap passed",
+        "sealr.worker-bootstrap-evidence.v1: authenticated helper sha256={} bytes={}, 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 1 supervisor content replay, 1 immutable inspect retention transfer, 1 public supervised inspect and materialize with retained borrow, cloned one-shot read, setup-failure preservation, and exact reap, 1 isolated one-shot Store-and-Deflate read boundary, 1 reaped and audited Store-and-Deflate writer publication with immutable retention transfer, 1 post-reap writer audit-mutation rejection, 1 writer destination-race rejection, 1 distinct writer cleanup failure, 4 writer crash barriers, 2 writer authority-epoch stalls, 22 bootstrap crash barriers, 11 bootstrap authority-epoch stalls, 500 bounded bootstrap stress iterations, 500 bounded writer lifecycle iterations, and bounded reap passed",
         helper.digest_hex(),
         helper.len()
     );
@@ -285,6 +285,95 @@ fn run_public_api_smoke() -> Result<(), Box<dyn std::error::Error>> {
     }
     drop(clone);
     require_no_supervisor_children("after public supervised capability last-owner drop")?;
+
+    let fixture = Fixture::new(false, false, false)?;
+    let destination = fixture.root.join("public-output");
+    let outcome = sealr::apply_supervised(
+        sealr::Request {
+            source: sealr::Source::Bytes {
+                path: Some("public-supervised-materialize.zip"),
+                data: source_bytes(),
+            },
+            policy: &policy,
+            dest: Some(&destination),
+        },
+        &options,
+        &programs.public,
+    )?;
+    if outcome.rejected()
+        || !outcome.wrote()
+        || outcome.receipt.environment.kernel_jail != "landlock-abi3+seccomp-v1"
+        || outcome.receipt.materialization.outcome != "committed"
+        || outcome.receipt.materialization.cleanup != "not-applicable-after-commit"
+    {
+        return Err(io::Error::other(format!(
+            "public supervised materialize produced unexpected axes or receipt: {:?}",
+            outcome.verdict
+        ))
+        .into());
+    }
+    verify_public_materialized_tree(&destination)?;
+    let archive = outcome
+        .into_verified_archive()
+        .ok_or("public supervised materialize produced no verified capability")?;
+    if archive.retained_member("stored.txt") != Some(b"stored payload".as_slice())
+        || archive.read_member("deflated.txt", 16)? != b"deflated payload"
+    {
+        return Err(io::Error::other(
+            "public materialized capability returned incorrect retained or one-shot bytes",
+        )
+        .into());
+    }
+    drop(archive);
+    require_no_supervisor_children("after public materialized capability last-owner drop")?;
+
+    let setup_failure = sealr::apply_supervised(
+        sealr::Request {
+            source: sealr::Source::Bytes {
+                path: Some("public-supervised-setup-failure.zip"),
+                data: source_bytes(),
+            },
+            policy: &policy,
+            dest: Some(&destination),
+        },
+        &options,
+        &programs.public,
+    )?;
+    if !setup_failure.rejected()
+        || setup_failure.wrote()
+        || setup_failure.archive_ir().is_none()
+        || setup_failure.verified_archive().is_some()
+        || setup_failure.receipt.environment.kernel_jail != "not-entered"
+        || setup_failure.receipt.materialization.outcome != "setup-failed"
+        || setup_failure.receipt.materialization.cleanup != "not-created"
+    {
+        return Err(io::Error::other(
+            "public supervised setup failure lost its pre-worker semantic contract",
+        )
+        .into());
+    }
+    verify_public_materialized_tree(&destination)?;
+    if directory_entry_names(&fixture.root)?
+        != vec!["outside-sentinel".to_owned(), "public-output".to_owned()]
+    {
+        return Err(io::Error::other(
+            "public supervised materialization left an unexpected staging object",
+        )
+        .into());
+    }
+    require_no_supervisor_children("after public supervised setup failure")?;
+    fixture.cleanup()?;
+    Ok(())
+}
+
+fn verify_public_materialized_tree(destination: &Path) -> io::Result<()> {
+    if fs::read(destination.join("stored.txt"))? != b"stored payload"
+        || fs::read(destination.join("deflated.txt"))? != b"deflated payload"
+    {
+        return Err(io::Error::other(
+            "public supervised materialized tree contains incorrect bytes",
+        ));
+    }
     Ok(())
 }
 

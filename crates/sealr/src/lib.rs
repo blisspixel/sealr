@@ -116,7 +116,9 @@ pub use outcome::{
 };
 pub use policy::{hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget};
 pub use snapshot::SnapshotKind;
-pub use supervised::{inspect_supervised, LinuxWorker, SupervisionError, SupervisionErrorKind};
+pub use supervised::{
+    apply_supervised, inspect_supervised, LinuxWorker, SupervisionError, SupervisionErrorKind,
+};
 pub use verified::{
     MemberReadError, MemberReadErrorKind, RetentionPlan, RetentionPlanError,
     RetentionPlanErrorKind, RetentionStatus, VerifiedArchive, MAX_RETENTION_PATHS,
