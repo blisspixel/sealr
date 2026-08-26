@@ -1,6 +1,6 @@
 # Real-kernel restriction floor
 
-This fixture boots the Debian 6.1.0-15-amd64 installer kernel under QEMU TCG with a minimal initramfs. The guest independently requires the running Landlock ABI to equal 2. It then calls the supported Linux supervisor for inspect and materialize and requires both calls to fail as `RestrictionUnavailable` during restriction setup.
+This fixture boots the Debian 6.1.0-15-amd64 installer kernel under QEMU TCG with a minimal initramfs. The guest mounts a private tmpfs for Sealr-owned test state, independently requires the running Landlock ABI to equal 2, then calls the supported Linux supervisor for inspect and materialize. Both calls must fail as `RestrictionUnavailable` during restriction setup.
 
 The evidence also requires exact helper authentication, no in-process fallback, no destination creation, removal of the supervisor-created stage, preservation of an outside sentinel, and no surviving worker child. The production floor requires Landlock ABI 3 because that version adds `LANDLOCK_ACCESS_FS_TRUNCATE`.
 

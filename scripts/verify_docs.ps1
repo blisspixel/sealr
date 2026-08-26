@@ -290,6 +290,7 @@ foreach ($contract in @(
         '3d3fdbe91d4660c873e14b092c213fe81c1da6362daa236eb25d0171eb108744  busybox-static_1.35.0-4+deb12u1+b1_amd64.deb'
     ) },
     @{ Name = 'guest init'; Text = $kernelFloorInit; Terms = @(
+        '/bin/busybox mount -t tmpfs -o mode=1777,nosuid,nodev tmpfs /tmp',
         '/bin/sealr-worker-bootstrap-lab kernel-floor',
         'SEALR_KERNEL_FLOOR_FAIL',
         'SEALR_KERNEL_FLOOR_PASS'

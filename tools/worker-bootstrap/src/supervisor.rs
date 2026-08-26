@@ -189,7 +189,9 @@ fn run_kernel_floor() -> Result<(), Box<dyn std::error::Error>> {
     let programs = CHILD_PROGRAMS
         .get()
         .ok_or("worker child programs are not initialized")?;
-    let options = sealr::ApplyOptions::new();
+    let mut retention = sealr::RetentionPlan::new(64, 64);
+    retention.add_path("stored.txt")?;
+    let options = sealr::ApplyOptions::new().with_retention(retention);
     let policy = sealr::Policy::default_v1();
 
     expect_real_kernel_restriction_failure(sealr::inspect_supervised(
@@ -241,9 +243,17 @@ fn expect_real_kernel_restriction_failure(
     result: Result<sealr::Outcome, sealr::SupervisionError>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let error = match result {
-        Ok(_) => {
+        Ok(outcome) => {
             return Err(io::Error::other(
-                "a real Landlock ABI 2 kernel unexpectedly satisfied the ABI 3 supervisor floor",
+                format!(
+                    "a real Landlock ABI 2 operation returned an ordinary outcome instead of a restriction failure: interpretation={:?}, admission={:?}, verification={:?}, effect={:?}, jail={}, findings={:?}",
+                    outcome.interpretation,
+                    outcome.admission,
+                    outcome.verification,
+                    outcome.effect,
+                    outcome.receipt.environment.kernel_jail,
+                    outcome.view.findings
+                ),
             )
             .into());
         }
