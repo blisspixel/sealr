@@ -66,6 +66,8 @@ Invariants:
 
 Evolving output enums and records are non-exhaustive so the preview API can add evidence without forcing downstream exhaustive matches or permitting caller-constructed receipts. Every public field type in `View` and `Receipt`, including `SourceMeta`, `PolicyMeta`, `ToolMeta`, `EnvMeta`, and `SnapshotKind`, is exported from the crate root and exercised by an external-crate compile fixture. `Request` remains directly constructible for the current compatibility facade.
 
+`ZipInterpretationProfile::WheelUtf8V1` is a selectable prerelease research profile, not the default and not a supported wheel consumer API. It admits only its separately identified strict UTF-8 NFC container language. `IrMember::container_facts()` returns immutable `MemberContainerFacts` for ZIP creator-system and external-attribute evidence. Those facts are deliberately excluded from `sealrTreeV1` identities, which bind paths, kinds, methods, sizes, and verified content rather than installer-specific mode interpretation. The downstream compile fixture names both the profile and facts so accidental visibility drift fails CI.
+
 No second function that “recovers” a broken zip.
 
 ---
@@ -134,7 +136,7 @@ The current receipt is versioned unsigned JSON (`signed: false`). DSSE and in-to
     "content": { "sealrTreeV1": "..." }
   },
   "view_digest": { "sha256": "..." },
-  "tool": { "name": "sealr", "version": "0.1.0-alpha.6" },
+  "tool": { "name": "sealr", "version": "0.1.0-alpha.7" },
   "environment": { "os": "windows", "arch": "x86_64", "kernel_jail": "unavailable" },
   "materialization": {
     "schema": "sealr.materialization.v2",
@@ -160,7 +162,7 @@ On reject, `members` in the view may be partial; `view_digest` still covers exac
 `receipt.identities` is separate from `view_digest`:
 
 - `source` is the archive SHA-256, or `{ "status": "unavailable" }`.
-- `interpretation` binds the selected profile identifier and the SHA-256 of its canonical method, flag, extra-field, and name rules. `apply()` selects `sealr.profile.zip.strict-ascii.v1`; `ApplyOptions::with_interpretation_profile(StrictAsciiV2)` selects the [closed v2 contract](profiles/zip-strict-ascii-v2.md). Profile selection affects admission and interpretation identity but not the resource-policy digest.
+- `interpretation` binds the selected profile identifier and the SHA-256 of its canonical method, flag, extra-field, and name rules. `apply()` selects `sealr.profile.zip.strict-ascii.v1`; `ApplyOptions::with_interpretation_profile(StrictAsciiV2)` selects the [closed v2 contract](profiles/zip-strict-ascii-v2.md); `WheelUtf8V1` selects the separately named repository-only wheel research language. Profile selection affects admission and interpretation identity but not the resource-policy digest.
 - `layout` is `sealrTreeV1` over canonical paths, kinds, raw names, flags, methods, declared sizes, complete local-header, payload, optional-descriptor, and central-header ranges, extra-field dispositions, and normalization actions. It is present once an `ArchiveIR` exists. It is `{ "status": "unavailable" }` when planning never produced a tree.
 - `content` is `sealrTreeV1` over canonical paths, kinds, actual sizes, and member SHA-256 digests. It is present only when verification is complete. An admitted archive whose destination fails keeps its layout root and does not claim a content root until members are verified.
 - Layout and content encodings are Git-style domain-separated preimages (`sealr.tree.layout.v1` and `sealr.tree.content.v1`) over little-endian length-prefixed covering ranges and member records. They do not use JSON, so they are independent of `view_digest` and of later RFC 8785 work. The interpretation profile is a sibling identity, not mixed into the tree bytes. The production golden test and a standalone no-Sealr-dependency verifier consume the same [identity-conformance bundle](identity-conformance.md), independently reproducing both published profile digests plus three layout and three content roots. Layout identity includes the source covering (local prefix, central directory, EOCD, comment). Content identity does not. The standalone checker and internal codec-free audit follow claimed ranges without searching or inflating; materialization audits the staged tree against the same IR before publication.

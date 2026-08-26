@@ -30,7 +30,7 @@ Anything that would require guessing is a finding and, under default policy, a h
 ## Polyglots and magic
 
 - Alpha.6 selects the parser from magic bytes and does not assign security meaning to the filename extension. The `magic_vs_extension` policy field is reserved and no extension-mismatch finding is emitted today.
-- Alpha.6 has no mixed-container allow profile. A future consumer such as OOXML, wheel, JAR, or APK needs a versioned interpretation and consumer profile that defines its permitted container structure and identity files.
+- Alpha.6 has no mixed-container allow profile. Current main has a separate strict wheel research profile, but a supported wheel consumer and future OOXML, JAR, or APK consumers each need a versioned interpretation and consumer profile that defines permitted container structure and identity files.
 - Alpha.6 never recursively opens a nested archive. A future nested-content profile would need a separate resource and evidence design; changing the reserved `nested_depth` field does not enable recursion.
 
 ## Format-specific extras (not ZipDiff, still differentials)

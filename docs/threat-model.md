@@ -99,7 +99,7 @@ CRC32 is **not** authentication (paper: easy to pad while preserving CRC). We st
 
 ### Wheel consumer threats
 
-Wheel admission adds a second semantic layer above the ZIP container. The proposed controls below are design targets, not Alpha.6 behavior. Their full contract is in [Python wheel consumer profile v1](profiles/python-wheel-v1.md).
+Wheel admission adds a second semantic layer above the ZIP container. The controls below are implemented in the repository-only laboratory but are not Alpha.6 behavior or supported wheel admission. Their full contract is in [Python wheel consumer profile v1](profiles/python-wheel-v1.md).
 
 | Attack | Ambiguity or effect | Planned control |
 |---|---|---|
@@ -123,7 +123,7 @@ You et al. §7.2, seven strategies:
 | **Normalize** (extract + repack to an unambiguous ZIP) | Phase 3. Powerful; must not become a second parser. Normalize **with this engine**, then the output is the artifact. |
 | Identify ambiguous patterns | **Current strict default.** Known ambiguous or malformed structure is denied. A future compatibility profile must be separately versioned rather than acting as an insecure fallback. |
 | Incorporate multiple parsers | Research/CI only (ZipDiff corpus). Not in the hot path. |
-| Fix unique/outlier behaviors | A versioned interpretation specification and executable behavior must agree. Alpha.6 has two preview profile identities, but neither is yet stable. |
+| Fix unique/outlier behaviors | A versioned interpretation specification and executable behavior must agree. Current main has three preview profile identities, including one repository-only wheel research profile, but none is yet stable. |
 | Better format design | Later (next-gen container). |
 
 Default posture: **reject ambiguity**. Future SFX or APK support would require separate named interpretation and consumer profiles recorded in evidence, never an `--insecure` fallback.

@@ -8,8 +8,9 @@ Start with the [README](../README.md) for the published Alpha.6 boundary and a s
 |---|---|
 | [Usage](usage.md) | Current CLI behavior and examples |
 | [API contract](api.md) | Current Rust and JSON surface, plus clearly marked target notation |
-| [Current release notes](releases/v0.1.0-alpha.6.md) | Alpha.6 contents and limitations |
+| [Current release notes](releases/v0.1.0-alpha.7.md) | Alpha.7 contents and limitations |
 | [Release verification](release-verification.md) | Verify checksums, provenance, tag, and immutable release state |
+| [Distribution contract](distribution-contract.md) | Exact source-package scope, compatibility policy, and native archive floors |
 
 ## Trust boundary
 
@@ -22,6 +23,7 @@ Start with the [README](../README.md) for the published Alpha.6 boundary and a s
 | [Assurance discovery and promotion](assurance-promotion.md) | Pinned Kani, mutation, coverage, report, and promotion contracts |
 | [Identity conformance](identity-conformance.md) | Current vectors, standalone verifier, exact root bytes, and bounded claims |
 | [Wheel compatibility pilot](wheel-compatibility-pilot.md) | Initial non-shipping corpus measurement and investigated denial evidence |
+| [Wheel semantic inventory v2](wheel-compatibility-v2.md) | Predecessor-bound wheel-profile and consumer evaluation over the same pinned bytes |
 | [Strict ASCII ZIP32 profile v2](profiles/zip-strict-ascii-v2.md) | Executable exhaustive flag and extra-field interpretation contract |
 | [Differentials](differentials.md) | Single-interpretation rules and the ZipDiff corpus |
 | [Reduced-authority execution](sandbox.md) | Supervisor and worker design |
@@ -52,7 +54,7 @@ Repository vulnerability reporting and supported-version policy are in [SECURITY
 |---|---|
 | [Roadmap](../ROADMAP.md) | Long-range capability order and release gates |
 | [Near-term execution plan](near-term.md) | Alpha.4 through Alpha.6 work packages and acceptance gates |
-| [Python wheel profile draft](profiles/python-wheel-v1.md) | First-consumer semantics and research plan |
+| [Python wheel profile draft](profiles/python-wheel-v1.md) | Implemented repository-only first-consumer semantics, evidence, and promotion gates |
 | [Vision](vision.md) | Durable category and priorities |
 | [Usefulness test](usefulness.md) | Proof that a downstream consumer stops reparsing |
 | [Competitive context](competitive.md) | Category boundaries and alternatives |

@@ -5,6 +5,7 @@ use std::cell::Cell;
 
 use crate::findings::{Finding, FindingCode};
 use crate::ir::NormalizationAction;
+use unicode_normalization::UnicodeNormalization;
 
 /// Jailed relative components plus the recorded normalization actions.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -92,10 +93,10 @@ fn validate_name(raw: &str, max_depth: u32) -> Result<(usize, usize), JailNameEr
             detail: "NUL in member name",
         });
     }
-    if !raw.is_ascii() {
+    if !raw.nfc().eq(raw.chars()) {
         return Err(JailNameError::Invalid {
             code: FindingCode::PathUnicode,
-            detail: "Unicode path normalization is not implemented",
+            detail: "member name is not NFC-normalized",
         });
     }
     if raw.contains('\\') {
@@ -164,7 +165,12 @@ fn validate_component(part: &str) -> Result<ComponentDisposition, JailNameError>
     }
     if part
         .chars()
-        .any(|c| c.is_ascii_control() || "<>\"|?*".contains(c))
+        .any(|c| {
+            c.is_control()
+                || (!c.is_ascii() && c.is_whitespace())
+                || matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
+                || "<>\"|?*".contains(c)
+        })
     {
         return Err(JailNameError::Invalid {
             code: FindingCode::PathInvalidChar,
@@ -184,6 +190,11 @@ fn validate_component(part: &str) -> Result<ComponentDisposition, JailNameError>
         });
     }
     Ok(ComponentDisposition::Keep)
+}
+
+/// Deterministic portable collision key for admitted NFC paths.
+pub(crate) fn portable_case_fold(value: &str) -> String {
+    value.chars().flat_map(char::to_lowercase).nfc().collect()
 }
 
 fn reserve_exact<T>(items: &mut Vec<T>, count: usize) -> Result<(), JailNameError> {

@@ -2599,6 +2599,8 @@ mod tests {
             kind: crate::ir::MemberKind::File,
             method: 0,
             flags: 0,
+            creator_system: 0,
+            external_attributes: 0,
             declared_crc: 0,
             declared_comp_size: body.len() as u64,
             declared_uncomp_size: body.len() as u64,

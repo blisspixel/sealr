@@ -104,10 +104,12 @@ pub use findings::{Finding, FindingCode, Severity};
 pub use identity::{content_root, layout_root, OutcomeIdentities, TreeRoot, TREE_ENCODING_ID};
 pub use ir::{
     zip_strict_ascii_v1_canonical_bytes, zip_strict_ascii_v1_digest,
-    zip_strict_ascii_v2_canonical_bytes, zip_strict_ascii_v2_digest, ArchiveCovering, ArchiveIR,
-    ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite, IrMember, MemberKind,
-    MemberSourceRanges, MemberVerification, NormalizationAction, ZipInterpretationProfile,
-    ARCHIVE_IR_SCHEMA, ZIP_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2,
+    zip_strict_ascii_v2_canonical_bytes, zip_strict_ascii_v2_digest,
+    zip_wheel_utf8_v1_canonical_bytes, zip_wheel_utf8_v1_digest, ArchiveCovering, ArchiveIR,
+    ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite, IrMember, MemberContainerFacts,
+    MemberKind, MemberSourceRanges, MemberVerification, NormalizationAction,
+    ZipInterpretationProfile, ARCHIVE_IR_SCHEMA, ZIP_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2,
+    ZIP_WHEEL_UTF8_V1,
 };
 pub use jail::{jail_name, jail_relative, join_under_dest, JailedName};
 pub use materialize::{MaterializationMeta, WindowsMaterializationEvidence};

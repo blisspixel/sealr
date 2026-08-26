@@ -9,7 +9,7 @@ use crate::covering::audit_covering;
 use crate::findings::{Finding, FindingCode, Severity};
 use crate::identity::OutcomeIdentities;
 use crate::ir::{ArchiveIR, IrMember, MemberKind, NormalizationAction, ZipInterpretationProfile};
-use crate::jail::jail_name;
+use crate::jail::{jail_name, portable_case_fold};
 use crate::materialize::{process_member_to_file, CapabilityMaterializer, MaterializationMeta};
 use crate::outcome::{
     AdmissionStatus, DigestHex, EffectStatus, InterpretationStatus, SemanticAxes, SourceDigest,
@@ -630,10 +630,22 @@ fn plan_snapshot<'a>(snapshot: SourceSnapshot<'a>, context: PlanningContext) -> 
         };
         match jail_name(jailed_name, budget.max_path_depth) {
             Ok(jailed) => {
+                if interpretation_profile == ZipInterpretationProfile::WheelUtf8V1
+                    && !jailed.actions.is_empty()
+                {
+                    findings.push(
+                        Finding::error(
+                            FindingCode::PathInvalidChar,
+                            "wheel UTF-8 paths may not contain dot components",
+                        )
+                        .on(&member.name),
+                    );
+                    continue;
+                }
                 actions.extend(jailed.actions);
                 let parts = jailed.components;
                 let joined = parts.join("/");
-                let fold = joined.to_ascii_lowercase();
+                let fold = portable_case_fold(&joined);
                 if dest_seen.contains_key(&joined) {
                     findings.push(
                         Finding::error(FindingCode::ZipDiffB1Dup, "duplicate dest path")
@@ -1423,6 +1435,23 @@ mod tests {
         )
     }
 
+    fn apply_wheel_utf8_v1(bytes: &[u8]) -> Outcome {
+        let policy = Policy::default_v1();
+        let options =
+            ApplyOptions::new().with_interpretation_profile(ZipInterpretationProfile::WheelUtf8V1);
+        apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("wheel-utf8-v1.zip"),
+                    data: bytes,
+                },
+                policy: &policy,
+                dest: None,
+            },
+            &options,
+        )
+    }
+
     fn temp_dest(label: &str) -> PathBuf {
         let mut random = [0_u8; 12];
         getrandom::fill(&mut random).unwrap();
@@ -1753,6 +1782,8 @@ mod tests {
             name: "invalid.txt".to_owned(),
             method: 8,
             flags: 0,
+            creator_system: 0,
+            external_attributes: 0,
             crc: 0,
             comp_size: 1,
             uncomp_size: 0,
@@ -1802,6 +1833,8 @@ mod tests {
             name: "io-failure.bin".to_owned(),
             method: 8,
             flags: 0,
+            creator_system: 0,
+            external_attributes: 0,
             crc: 0,
             comp_size: compressed.len() as u64,
             uncomp_size: payload.len() as u64,
@@ -1853,6 +1886,8 @@ mod tests {
             name: "stream.bin".to_owned(),
             method: 0,
             flags: 0,
+            creator_system: 0,
+            external_attributes: 0,
             crc: 0,
             comp_size: payload.len() as u64,
             uncomp_size: payload.len() as u64,
@@ -1912,6 +1947,8 @@ mod tests {
             name: "stream.deflate".to_owned(),
             method: 8,
             flags: 0,
+            creator_system: 0,
+            external_attributes: 0,
             crc: 0,
             comp_size: compressed.len() as u64,
             uncomp_size: payload.len() as u64,
@@ -2700,6 +2737,70 @@ mod tests {
         assert!(out.view.findings.iter().any(|finding| {
             finding.code == FindingCode::ZipFlags && finding.detail.contains("0x0800")
         }));
+    }
+
+    #[test]
+    fn wheel_utf8_v1_admits_nfc_unicode_and_binds_the_profile() {
+        let bytes = make_zip(&[("caf\u{e9}.txt", b"content")]);
+        let out = apply_wheel_utf8_v1(&bytes);
+        assert!(!out.rejected(), "{:?}", out.view.findings);
+        let ir = out.archive_ir().expect("admitted archive IR");
+        assert_eq!(ir.members[0].canonical_path, "caf\u{e9}.txt");
+        assert_eq!(ir.members[0].flags & 0x0800, 0x0800);
+        assert_eq!(
+            out.receipt.identities.interpretation.id,
+            crate::ir::ZIP_WHEEL_UTF8_V1
+        );
+        assert_eq!(
+            out.receipt.identities.interpretation.digest.sha256,
+            crate::ir::zip_wheel_utf8_v1_digest()
+        );
+    }
+
+    #[test]
+    fn wheel_utf8_v1_denies_non_nfc_names() {
+        let bytes = make_zip(&[("cafe\u{301}.txt", b"content")]);
+        let out = apply_wheel_utf8_v1(&bytes);
+        assert!(out.rejected());
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PathUnicode));
+    }
+
+    #[test]
+    fn wheel_utf8_v1_denies_unicode_case_collisions() {
+        let bytes = make_zip(&[("\u{c9}.txt", b"one"), ("\u{e9}.txt", b"two")]);
+        let out = apply_wheel_utf8_v1(&bytes);
+        assert!(out.rejected());
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PathCaseFold));
+    }
+
+    #[test]
+    fn wheel_utf8_v1_denies_data_descriptors_and_dot_normalization() {
+        let mut descriptor = make_zip(&[("descriptor.txt", b"content")]);
+        add_matching_flags(&mut descriptor, 0x0008);
+        let descriptor_out = apply_wheel_utf8_v1(&descriptor);
+        assert!(descriptor_out.rejected());
+        assert!(descriptor_out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::ZipFlags));
+
+        let dot = make_zip(&[("./member.txt", b"content")]);
+        let dot_out = apply_wheel_utf8_v1(&dot);
+        assert!(dot_out.rejected());
+        assert!(dot_out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PathInvalidChar));
     }
 
     #[test]

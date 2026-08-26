@@ -1,6 +1,6 @@
 # Python wheel consumer profile draft
 
-> Status: design plus initial container-compatibility evidence. Alpha.6 does not recognize wheels as a consumer type, parse wheel metadata, validate `RECORD`, or produce an installation plan. It has a generic opaque verified-member capability, an explicit Linux supervised backend, and a small non-shipping wheel pilot, but no wheel-specific rule or identity on this page is a shipped contract.
+> Status: implemented repository-only research consumer in Alpha.7. The library exposes the generic verified-member and immutable container facts needed by the laboratory, but does not advertise or ship wheel support through the supported library surface or CLI. The non-published `sealr-wheel-lab` crate implements the exact UTF-8 container profile, bounded artifact and plan evaluation, distinct research identities, hostile regressions, and a pinned PyPA `installer` bridge. No wheel-specific rule or identity on this page is a supported public contract.
 
 The first consumer should force Sealr to prove its category: another tool receives one admitted representation and does not open the ZIP again. Python wheels are a strong target because wheel installation has archive semantics, package metadata, an internal content manifest, relocations, and target-dependent transformations.
 
@@ -39,26 +39,30 @@ The wheel evaluator consumes an opaque verified archive capability. It reads bou
 
 The verification pass can retain bounded semantic members such as `WHEEL`, `METADATA`, `RECORD`, and `entry_points.txt`, or provide verified reads from the immutable snapshot. The chosen mechanism must preserve one parse and one measured content result.
 
-Current main now supplies the generic mechanism for both halves of this boundary. `VerifiedArchive` retains the snapshot and IR, prevents caller construction, and supports caller-bounded revalidated reads. `RetentionPlan` selects an exact canonical path set under independent per-member and aggregate content limits; `apply_with_options` captures successful selections during the original checked stream. The wheel profile remains unpromoted because a wheel-aware selector, metadata parser, `RECORD` bijection, wheel-specific budgets, and consumer identities do not yet exist.
+Current main supplies the generic mechanism for both halves of this boundary. `VerifiedArchive` retains the snapshot and IR, prevents caller construction, and supports caller-bounded revalidated reads. `RetentionPlan` selects an exact canonical path set under independent per-member and aggregate content limits; `apply_with_options` captures successful selections during the original checked stream. Central creator-system and external-attribute words remain outside `sealrTreeV1` but are available as immutable container facts so the laboratory can reproduce PyPA installer 0.7.0 executable detection exactly.
+
+The research evaluator uses independent byte caps for the outer filename, every semantic member class, parsed header and CSV structure, tag expansion, script inspection, bridge members, bridge aggregate bytes, and bridge descriptor. Cap or allocation failures cannot become artifact denial evidence.
 
 ## Container profile
 
-The planned wheel container profile is narrower than general ZIP compatibility:
+`sealr.profile.zip.wheel-utf8.v1` is narrower than general ZIP compatibility:
 
-- ZIP32 with Store and Deflate first;
+- ZIP32 with Store and Deflate;
 - exact covering and exact Deflate input consumption;
-- member names encoded as strict UTF-8 under the wheel specification;
+- member names encoded as strict UTF-8, with bit 11 required for non-ASCII names;
 - no legacy CP437 fallback inside this profile;
 - no Unicode Path extra-field override;
-- exhaustive flags and extra-field dispositions;
-- canonical path, normalization, case, and target-collision rules selected from published vectors and compatibility data;
+- an exhaustive 65,536-value flag language in which only bit 11 is admitted;
+- an exhaustive 65,536-ID extra-field language in which every extra field is denied;
+- NFC paths with no dot component, non-ASCII control, non-ASCII whitespace, or bidi control;
+- deterministic lowercase-then-NFC collision detection pinned to Rust 1.98;
 - no encryption, ZIP64, spanned records, links, devices, recovery parsing, or archive mode restoration.
 
-The exact profile identifier is assigned only after its rule table and conformance vectors are complete. The generic legacy CP437 question remains a separate profile decision and does not block a wheel-specific UTF-8 language.
+The profile's canonical JSON and SHA-256 `757ead2782ab9f352fc1ff386733020e4cb114aa43aa1b756f6b7001d4c4cd5f` are committed with the independent identity conformance vectors. The generic legacy CP437 question remains a separate profile decision and does not block this wheel-specific UTF-8 language.
 
 ## `WheelArtifactIR`
 
-The proposed artifact object records, at minimum:
+The repository-only artifact object records:
 
 - parsed outer filename and expanded compatibility tags;
 - normalized distribution and version;
@@ -89,7 +93,7 @@ The research corpus and specification review must settle these rules before impl
 11. Deprecated `RECORD` signature files, if admitted at all, are explicit legacy objects and are never treated as verified signatures.
 12. Metadata, row count, line length, field count, tag expansion, and retained semantic bytes have independent checked caps.
 
-Candidate rules remain draft until compatibility measurement and hostile fixtures establish their consequences.
+These rules are executable research behavior. They remain unsupported until the compatibility inventory and promotion review establish their consequences.
 
 ## Identities
 
@@ -135,7 +139,9 @@ Sampling should cover pure and platform wheels, common build backends, operating
 
 The initial [20-wheel compatibility pilot](../wheel-compatibility-pilot.md) covers eight universal artifacts and twelve native artifacts across Linux x86_64, Windows x86_64, macOS arm64, and macOS universal2. It is a judgmental sample of named current releases, not a prevalence estimate. Under `sealr.profile.zip.strict-ascii.v2`, 19 artifacts are admitted. The SciPy artifact is denied by three `quota.ratio` findings on test-data members with declared expansion above the default `100:1` limit. Across the 19 interpreted artifacts, all 4,504 members use Store or Deflate, all general-purpose flags are zero, and no extra fields occur. Every interpreted artifact has one top-level `.dist-info` path, but Setuptools carries twelve additional nested vendored `.dist-info` paths. This confirms that selection must match the normalized outer filename at the top level; counting every `.dist-info` suffix is not a valid wheel rule.
 
-That result supports the closed ASCII v2 contract but is deliberately insufficient to choose the future wheel-oriented UTF-8 container profile. The next corpus increment should target producers and historical artifacts known to exercise UTF-8 flag handling, data descriptors, timestamps, platform extras, `.data` trees, and Unicode paths. Ratio-boundary sampling should remain a separate resource-policy study so a benign compatibility observation cannot silently weaken the interpretation profile or default adversarial budget.
+The predecessor-bound [v2 semantic inventory](../wheel-compatibility-v2.md) evaluates the same exact bytes through the wheel profile and bounded consumer. Sixteen are admitted, two denied, and two unsupported. It inventories Core Metadata 2.1 and 2.4 among admitted artifacts, ten exact generator strings, expanded filename tags, creator systems, and 61 executable members. No artifact in this judgmental pilot uses `.data` or Unicode paths, so hostile fixtures provide those rule consequences. The cffi duplicate `Generator`, Core Metadata 2.5 in Hatchling and wheel, and SciPy ratio ceiling are individually investigated rather than collapsed into an acceptance percentage.
+
+That predecessor result supports the closed ASCII v2 contract but was deliberately insufficient by itself to choose the wheel-oriented UTF-8 profile. The implemented profile therefore derives its exact UTF-8, NFC, flag, extra-field, and collision rules from a closed specification decision plus hostile boundary fixtures, not from prevalence in the benign sample. The next corpus increment should target producers and historical artifacts known to exercise UTF-8 flag handling, data descriptors, timestamps, platform extras, `.data` trees, and Unicode paths. Ratio-boundary sampling remains a separate resource-policy study so a benign compatibility observation cannot silently weaken the interpretation profile or default adversarial budget.
 
 The hostile corpus includes:
 
@@ -151,9 +157,9 @@ Every discovered failure becomes a minimized deterministic regression with an ex
 
 ## Canonical consumer proof
 
-The eventual integration must make the original wheel unavailable after admission, then complete its work through the admitted capability or plan. An open-hook or process trace verifies that no ZIP parser reopens the source.
+The canonical-consumer integration makes the original wheel unavailable after admission, then completes its work through the admitted capability and plan. An audit hook verifies that no ZIP parser reopens the source.
 
-A PyPA `installer` `WheelSource` adapter is a promising experimental bridge because it can represent an alternative verified wheel source. Its API stability and upstream fit must be evaluated before it becomes a supported dependency or integration.
+The laboratory pins PyPA `installer` 0.7.0 by version and wheel SHA-256. Rust stages bounded blobs only through `VerifiedArchive::read_member`, deletes the original fixture wheel before Python starts, and passes no source-wheel path or ZIP descriptor to the external process. The Python adapter receives only a bounded verified-member and plan descriptor, installs an audit hook before importing installer, rejects every `.whl` open, validates `RECORD`, proves repeatable `WheelSource` iteration, and compares installer writes, relocations, shebang rewrites, generated wrappers, and final `RECORD` placement with the Rust plan. The resulting target outputs receive a separate realization identity.
 
 A GitHub Action that checks a wheel and then lets another tool unzip the original does not pass this test. It is a useful gate, not a canonical consumer.
 
@@ -177,13 +183,13 @@ A GitHub Action that checks a wheel and then lets another tool unzip the origina
 The design becomes experimental admission only when:
 
 - the wheel-oriented ZIP profile has an exhaustive rule table and cross-platform vectors;
-- verified-member access works without reparsing or reinflating;
+- verified-member access works without reopening the source or invoking a second ZIP parser;
 - the artifact filename is bound into consumer identity;
 - strict `RECORD` bijection, hash, size, relocation, and path tests pass;
 - artifact and plan identities are byte-identical across supported platforms;
 - the compatibility report is reproducible and every material rejection cluster is investigated.
 
-It becomes the canonical-consumer proof only when an external tool consumes the admitted representation while denied access to the original wheel.
+The repository laboratory meets these bounded research gates and includes the external non-reopening consumer proof. Promotion to a supported API still requires an explicit stability decision, cross-platform required-CI evidence for the final public surface, broader targeted corpus evidence, and the remaining roadmap trust gates. The external proof does not itself turn a repository-only crate into shipped wheel support.
 
 ## Primary sources
 

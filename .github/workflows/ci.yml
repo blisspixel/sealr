@@ -16,12 +16,13 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  MACOSX_DEPLOYMENT_TARGET: "15.0"
   RUST_VERSION: 1.98.0
 
 jobs:
   quality:
     name: Format, lint, test, and docs
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out repository
@@ -77,6 +78,10 @@ jobs:
       - name: Select pinned Rust
         run: rustup default ${{ env.RUST_VERSION }}
 
+      - name: Assert Linux package floor
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_native_floor.ps1 -ExpectedTarget x86_64-unknown-linux-gnu
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -85,6 +90,29 @@ jobs:
 
       - name: Run tests
         run: cargo test --locked --workspace --all-features
+
+      - name: Prove the pinned external wheel consumer boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          download="${RUNNER_TEMP}/sealr-installer-download"
+          extracted="${RUNNER_TEMP}/sealr-installer-extracted"
+          mkdir --parents "${download}" "${extracted}"
+          python3 -m pip download \
+            --disable-pip-version-check \
+            --no-deps \
+            --only-binary=:all: \
+            --require-hashes \
+            --requirement tools/wheel-lab/bridge/requirements.txt \
+            --dest "${download}"
+          installer="${download}/installer-0.7.0-py3-none-any.whl"
+          echo "05d1933f0a5ba7d8d6296bb6d5018e7c94fa473ceb10cf198a92ccea19c27b53  ${installer}" |
+            sha256sum --check
+          python3 -m zipfile -e "${installer}" "${extracted}"
+          SEALR_BRIDGE_PYTHON="$(command -v python3)" \
+          SEALR_INSTALLER_PYTHONPATH="${extracted}" \
+            cargo test --locked -p sealr-wheel-lab --test installer_bridge -- --exact \
+              pypa_installer_consumes_only_verified_staged_members
 
       - name: Stress native materialization lifecycle
         run: cargo run --locked --release -p sealr-materialization-lifecycle
@@ -140,10 +168,17 @@ jobs:
 
       - name: Verify committed wheel compatibility report
         run: >-
-          cargo run --locked -p sealr-wheel-lab -- verify-report
+          cargo run --locked -p sealr-wheel-lab --bin sealr-wheel-lab -- verify-report
           tests/corpus/wheels/manifest.json
           tests/corpus/wheels/report.json
           docs/wheel-compatibility-pilot.md
+
+      - name: Verify committed wheel semantic inventory
+        run: >-
+          cargo run --locked -p sealr-wheel-lab --bin wheel_inventory_v2 -- verify
+          tests/corpus/wheels/manifest.json
+          tests/corpus/wheels/report-v2.json
+          docs/wheel-compatibility-v2.md
 
       - name: Build optimized workspace
         run: cargo build --locked --release --workspace --all-features
@@ -152,6 +187,10 @@ jobs:
         run: |
           cargo package --locked -p sealr
           cargo build --locked --release --manifest-path tests/packaged-consumer/Cargo.toml
+
+      - name: Verify crate publication contract
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_crate_package.ps1
 
       - name: Verify native release package contract
         shell: pwsh
@@ -194,7 +233,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, windows-latest]
+        os: [macos-15, windows-2022]
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -204,6 +243,12 @@ jobs:
 
       - name: Select pinned Rust
         run: rustup default ${{ env.RUST_VERSION }}
+
+      - name: Assert native package floor
+        shell: pwsh
+        run: |
+          $target = if ($IsMacOS) { 'aarch64-apple-darwin' } else { 'x86_64-pc-windows-msvc' }
+          pwsh -NoLogo -NoProfile -File scripts/verify_native_floor.ps1 -ExpectedTarget $target
 
       - name: Install 32-bit Windows target
         if: runner.os == 'Windows'
@@ -252,7 +297,7 @@ jobs:
 
   zipdiff:
     name: ZipDiff 14-class gate
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 25
     env:
       ZIPDIFF_REVISION: 7c427ed254bb3a5985d54870c12f97db78118e67
@@ -297,7 +342,7 @@ jobs:
 
   supply-chain:
     name: Supply chain
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - name: Check out repository
@@ -335,7 +380,7 @@ jobs:
 
   kernel-floor:
     name: Real-kernel Landlock ABI 2 floor
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out repository
@@ -360,7 +405,7 @@ jobs:
     name: Required CI
     if: ${{ always() }}
     needs: [quality, platform, zipdiff, supply-chain, kernel-floor]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
       - name: Require every promotion gate

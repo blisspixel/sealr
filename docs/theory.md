@@ -36,7 +36,7 @@ Effect is a different morphism. A failed destination does not retract the coveri
 | \(\mathbb{B} = \{0,\ldots,255\}\) | Bytes. |
 | \(b \in \mathbb{B}^n\) | A source snapshot, identified with the half-open interval \([0,n)\). |
 | \([i,j)\) | Byte range. Empty iff \(i=j\). Adjacent ranges meet: \([i,j) \cup [j,k) = [i,k)\). |
-| \(\pi\) | Versioned interpretation profile. Executable profiles: compatibility-default `sealr.profile.zip.strict-ascii.v1` and opt-in closed `sealr.profile.zip.strict-ascii.v2`. |
+| \(\pi\) | Versioned interpretation profile. Executable profiles: compatibility-default `sealr.profile.zip.strict-ascii.v1`, opt-in closed `sealr.profile.zip.strict-ascii.v2`, and repository-only research `sealr.profile.zip.wheel-utf8.v1`. |
 | \(I_\pi : \mathbb{B}^* \rightharpoonup \mathsf{IR}\) | Partial interpretation. Undefined means no admitted tree. |
 | \(L(\pi) = \mathrm{dom}(I_\pi)\) | The unique-parse language of the profile: a **strict subset** of APPNOTE. |
 | \(\mathsf{H}\) | SHA-256, treated as a collision-resistant hash **assumption**, not a theorem. |

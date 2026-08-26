@@ -73,7 +73,7 @@ Combine the hostile ZipDiff gate with a benign ecosystem corpus, source-mutation
 
 ### 3. One canonical consumer
 
-Python wheel admission is the first candidate. It has a documented same-bytes, different-installed-tree problem and meaningful consumer semantics beyond ZIP. The [profile draft](profiles/python-wheel-v1.md) separates archive-tree, wheel-artifact, scheme-relative install-plan, and target realization identities. It is not current functionality. It is also the first consumer that would prove the category: if a builder or installer still unzipped the wheel, Sealr would have produced a receipt, not an admission boundary.
+Python wheel admission is the first candidate. It has a documented same-bytes, different-installed-tree problem and meaningful consumer semantics beyond ZIP. The repository-only [profile implementation](profiles/python-wheel-v1.md) separates source, archive-tree, wheel-artifact, scheme-relative install-plan, and target-realization identities and proves an external installer can consume bounded verified members after the original wheel is removed. It is current research functionality, not supported admission. A supported consumer still matters because if a builder or installer reopens the wheel, Sealr has produced a receipt rather than an admission boundary.
 
 ### 4. Reusable admitted trees
 
