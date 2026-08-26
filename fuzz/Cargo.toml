@@ -10,8 +10,8 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "=0.4.13"
-sealr = { path = "../crates/sealr", version = "=0.1.0-alpha.5", features = ["__internal-fuzzing"] }
-sealr-worker-protocol = { path = "../crates/sealr-protocol", version = "=0.1.0-alpha.5" }
+sealr = { path = "../crates/sealr", version = "=0.1.0-alpha.6", features = ["__internal-fuzzing"] }
+sealr-worker-protocol = { path = "../crates/sealr-protocol", version = "=0.1.0-alpha.6" }
 
 [[bin]]
 name = "protocol_decoders"

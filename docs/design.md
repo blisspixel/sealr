@@ -1,6 +1,6 @@
 # Design principles
 
-> Current Alpha.5 behavior is defined by the [README](../README.md), [API contract](api.md), and [security policy](../SECURITY.md). Product sequencing is defined only by the [roadmap](../ROADMAP.md).
+> Current Alpha.6 behavior is defined by the [README](../README.md), [API contract](api.md), and [security policy](../SECURITY.md). Product sequencing is defined only by the [roadmap](../ROADMAP.md).
 
 Sealr is trying to become a dependable archive-to-tree admission boundary. It is not trying to be a general unarchiver, codec benchmark, or scheduler.
 
@@ -8,11 +8,11 @@ Sealr is trying to become a dependable archive-to-tree admission boundary. It is
 
 One bounded source invocation receives one versioned interpretation. Inspect, materialize, evidence, and future consumers must use the same immutable representation. No recovery parser or downstream reparse may assign a second meaning to the archive.
 
-Alpha.5 preserves this rule through one `apply()` path and one versioned, effect-independent `ArchiveIR`. Inspect and materialize consume the same IR and private or borrowed snapshot, and preview layout and content-tree identities are derived from it.
+Alpha.6 preserves this rule through the compatibility `apply()` path and the explicit supervised path, both using one versioned, effect-independent `ArchiveIR`. Inspect and materialize consume the same IR and private or borrowed snapshot, and preview layout and content-tree identities are derived from it.
 
 ## Admission and effects are different facts
 
-The compatibility `Allowed { wrote } | Rejected` result combines semantic and operational outcomes. Alpha.5 exposes separate interpretation, admission, verification, effect, and view-completeness axes, and CLI exit `3` identifies an admitted archive whose requested destination effect failed.
+The compatibility `Allowed { wrote } | Rejected` result combines semantic and operational outcomes. Alpha.6 exposes separate interpretation, admission, verification, effect, and view-completeness axes, and CLI exit `3` identifies an admitted archive whose requested destination effect failed.
 
 ## Filesystem access is capability based
 
@@ -22,7 +22,7 @@ A future worker reduces parser authority. It does not replace the path grammar, 
 
 ## Evidence names only established facts
 
-Alpha.5 emits deterministic unsigned evidence plus preview semantic tree roots. It does not emit an authenticated attestation, stable lock, or formal proof. Future evidence keeps source, interpretation, layout, content, policy, and effect identities distinct.
+Alpha.6 emits deterministic unsigned evidence plus preview semantic tree roots. It does not emit an authenticated archive-decision attestation, stable lock, or formal proof. Future evidence keeps source, interpretation, layout, content, policy, and effect identities distinct.
 
 ## Compatibility is measured
 

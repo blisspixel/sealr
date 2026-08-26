@@ -6,6 +6,10 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+No unreleased changes.
+
+## [0.1.0-alpha.6] - 2026-08-26
+
 ### Added
 
 - Added a pinned weekly and on-demand assurance workflow. Kani 0.67.0 checks the exact production interval, quota, and ratio scalar kernels through three named harnesses with explicit full-width domains, assumptions, solvers, nonclaims, and unwind bound 1. Local reproduction completed all three harnesses with zero failed checks. A proof-only manifest isolates those exact modules for Kani's Rust 1.93 compiler while required CI separately compiles the full workspace and proof crate with Rust 1.98.
@@ -221,7 +225,8 @@ First public development preview of the ZIP boundary.
 
 This preview is not a production-ready security boundary and has not received an external security audit. See the security limitations in the README and the reporting policy in `SECURITY.md` before evaluating it.
 
-[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.5...HEAD
+[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.6...HEAD
+[0.1.0-alpha.6]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.5...v0.1.0-alpha.6
 [0.1.0-alpha.5]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.4...v0.1.0-alpha.5
 [0.1.0-alpha.4]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.3...v0.1.0-alpha.4
 [0.1.0-alpha.3]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.2...v0.1.0-alpha.3

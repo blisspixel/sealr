@@ -25,7 +25,7 @@ The working hypothesis is modest:
 4. downstream consumers use the admitted representation instead of reparsing the source;
 5. Linux, macOS, and Windows produce the same semantic tree evidence for the same profile.
 
-Alpha.5 establishes reusable same-process verified admission over a private random-access path snapshot, a closed opt-in interpretation profile, preview tree identities, and a bounded protocol for the next worker boundary. It does not yet establish stable lock semantics, a stable consumer profile, worker isolation, or the complete Phase 0.1 cross-platform contract.
+Alpha.6 adds an explicit reduced-authority x86_64 Linux path to reusable verified admission over a private random-access path snapshot, a closed opt-in interpretation profile, and preview tree identities. It does not yet establish stable lock semantics, a stable consumer profile, cross-platform worker isolation, or the complete Phase 0.1 contract.
 
 ## What not to optimize for first
 

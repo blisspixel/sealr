@@ -1,6 +1,6 @@
 # Vision: one archive, one tree, evidence
 
-> This document describes the product direction. Current Alpha.5 behavior and limitations are defined by the [README](../README.md) and [API contract](api.md). The target semantic design is specified in [semantic-model.md](semantic-model.md).
+> This document describes the product direction. Current Alpha.6 behavior and limitations are defined by the [README](../README.md) and [API contract](api.md). The target semantic design is specified in [semantic-model.md](semantic-model.md).
 
 Sealr is not a general-purpose unarchiver, archive GUI, malware scanner, agent-execution proxy, model verifier, credential broker, or enterprise control plane.
 
@@ -16,9 +16,9 @@ Archive bytes are a weak program in a language with disagreeing interpreters. Pa
 
 Sealr owns that semantic boundary first. Materialization, projection, caching, language bindings, consumer integrations, and acceleration are consumers of the boundary. The [usefulness test](usefulness.md) is whether another program calls that boundary and stops opening the ZIP.
 
-## The Alpha.5 foundation
+## The Alpha.6 foundation
 
-The current Rust library provides one `apply()` path:
+The current Rust library preserves one compatibility `apply()` path and adds an explicit supervised x86_64 Linux path:
 
 ```text
 UntrustedArchive x Policy
@@ -27,7 +27,7 @@ UntrustedArchive x Policy
 
 Inspect and materialize share one planned tree. Every outcome includes structured findings, a view, and deterministic unsigned receipt data. Accepted members are content-verified, and requested files are staged and published through capability-relative, native no-replace materialization on the documented Linux, macOS, and Windows filesystem matrix.
 
-This is the foundation, not the finished semantic API. Preview-line work includes `ArchiveIR`, unsigned `sealrTreeV1` roots, a private file-backed path snapshot, checked random access, bounded resource evidence, and the capability-oriented worker-protocol codec. It does not yet produce worker isolation, semantic locks, signed attestations, read-only projection, content-addressed reuse, wheel admission, extra ZIP codecs, or proof certificates.
+This is the foundation, not the finished semantic API. Preview-line work includes `ArchiveIR`, unsigned `sealrTreeV1` roots, a private file-backed path snapshot, checked random access, bounded resource evidence, an explicit authenticated Linux worker, and the separate capability-oriented worker-protocol codec. The worker reduces authority for payload verification, stage writes, and later non-retained reads, but does not confine structural planning or establish general process containment. Sealr does not yet produce semantic locks, signed archive-decision attestations, read-only projection, content-addressed reuse, wheel admission, extra ZIP codecs, or proof certificates.
 
 ## The target contract
 
@@ -100,7 +100,7 @@ That surface compounds semantic knowledge, compatibility data, test fixtures, au
 
 ## Evidence discipline
 
-Alpha.5 receipts are deterministic unsigned evidence records. They are not attestations. Future authenticated claims should use standard envelopes and verified identities, keep interpretation, verification, admission, and effect claims distinct, and use SBOM formats only where a consumer profile establishes package or component semantics.
+Alpha.6 receipts are deterministic unsigned evidence records. They are not attestations. Future authenticated claims should use standard envelopes and verified identities, keep interpretation, verification, admission, and effect claims distinct, and use SBOM formats only where a consumer profile establishes package or component semantics.
 
 Do not use a numeric risk score. Current findings provide stable codes, severity, member context, and detail. The target finding schema adds explicit rule versions, phases, deterministic evidence, source spans where applicable, and remediation without turning the human message into the machine contract.
 
@@ -134,7 +134,7 @@ The complete task-oriented map is the [documentation index](index.md).
 | [near-term.md](near-term.md) | Alpha.4 through Alpha.6 work packages and acceptance gates |
 | [profiles/python-wheel-v1.md](profiles/python-wheel-v1.md) | First-consumer design and corpus plan |
 | [semantic-model.md](semantic-model.md) | Target outcome axes, `ArchiveIR`, identities, profiles, locks, and sequencing |
-| [api.md](api.md) | Implemented Alpha.5 contract and future type-state direction |
+| [api.md](api.md) | Implemented Alpha.6 contract and future type-state direction |
 | [architecture.md](architecture.md) | Current trust boundaries and target pipeline |
 | [threat-model.md](threat-model.md) | Adversaries and protected properties |
 | [invariants.md](invariants.md) | Testable safety invariants |

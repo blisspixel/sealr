@@ -15,13 +15,13 @@ Policy evaluation, content verification, materialization, projection, caching, a
 
 This is a stronger and narrower claim than safe extraction. Archive formats contain redundant metadata and consumer-specific semantics. The same byte digest can produce different trees when parsers disagree. The ZipDiff study found 14 ambiguity classes across 50 ZIP parsers in 19 languages, and Python wheel advisories have demonstrated same-bytes, different-installation behavior in practice.
 
-The intended mathematics of that statement, including unique covering, partial interpretation, and effect independence, is sketched in [theory.md](theory.md). That sketch is a research program, not a claim that Alpha.5 has a uniqueness proof.
+The intended mathematics of that statement, including unique covering, partial interpretation, and effect independence, is sketched in [theory.md](theory.md). That sketch is a research program, not a claim that Alpha.6 has a uniqueness proof.
 
 The short product statement is:
 
 > One archive. One tree. Evidence.
 
-Do not use "proven" in current product claims. Alpha.5 emits deterministic unsigned evidence and a preview `sealrTreeV1` encoding. It does not emit an authenticated attestation or a formal uniqueness proof.
+Do not use "proven" in current product claims. Alpha.6 emits deterministic unsigned evidence and a preview `sealrTreeV1` encoding. It does not emit an authenticated archive-decision attestation or a formal uniqueness proof.
 
 ## Research disposition
 
@@ -212,7 +212,7 @@ Target operations establish different facts:
 | `materialize` | complete | complete while writing | transactional publication |
 | `project` | complete | partial, advancing on read | read-only namespace |
 
-Alpha.5 `inspect` currently verifies accepted members fully rather than performing a structure-only pass. The target operation names above are not current CLI verbs.
+Alpha.6 `inspect` currently verifies accepted members fully rather than performing a structure-only pass. The target operation names above are not current CLI verbs.
 
 A partial view must say where and why it stopped. A partial member list must never look complete. A projected tree receives a complete content-tree identity only after all required members have been verified.
 
@@ -287,7 +287,7 @@ The archive content root therefore cannot be relabeled as a universal installed-
 3. **Hermetic build inputs**: make the canonical tree, not a second extraction, the build input and cache key.
 4. **OCI layers and other rich formats**: later, because whiteouts, ownership, xattrs, links, devices, and ordered application require a dedicated consumer model.
 
-No wheel consumer profile, projection, content-addressed store, semantic lock, or GitHub admission action exists in Alpha.5.
+No wheel consumer profile, projection, content-addressed store, semantic lock, or GitHub admission action exists in Alpha.6.
 
 ## Compatibility is part of assurance
 

@@ -7,7 +7,7 @@ license.workspace = true
 publish = false
 
 [dependencies]
-sealr = { version = "=0.1.0-alpha.5", path = "../../crates/sealr" }
+sealr = { version = "=0.1.0-alpha.6", path = "../../crates/sealr" }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
