@@ -374,6 +374,13 @@ fn parse_worker_manifest(
     crate::worker_protocol::helper::parse_digest(&manifest.sha256).map_err(|error| {
         SupervisionError::new(SupervisionErrorKind::HelperArtifact, error.to_string())
     })?;
+    if manifest
+        .sha256
+        .bytes()
+        .any(|byte| byte.is_ascii_uppercase())
+    {
+        return helper_artifact_error("worker manifest SHA-256 must use lowercase hexadecimal");
+    }
     let parent = manifest_path.parent().ok_or_else(|| {
         SupervisionError::new(
             SupervisionErrorKind::HelperArtifact,
