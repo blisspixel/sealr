@@ -180,7 +180,13 @@ $ciWorkflow = Get-Content -Raw -LiteralPath (Join-Path $workspace '.github/workf
 $qualityStart = $ciWorkflow.IndexOf("  quality:`n", [StringComparison]::Ordinal)
 $platformStart = $ciWorkflow.IndexOf("  platform:`n", [StringComparison]::Ordinal)
 $zipDiffStart = $ciWorkflow.IndexOf("  zipdiff:`n", [StringComparison]::Ordinal)
-if ($qualityStart -lt 0 -or $platformStart -le $qualityStart -or $zipDiffStart -le $platformStart) {
+$supplyChainStart = $ciWorkflow.IndexOf("  supply-chain:`n", [StringComparison]::Ordinal)
+$requiredStart = $ciWorkflow.IndexOf("  required:`n", [StringComparison]::Ordinal)
+if ($qualityStart -lt 0 -or
+    $platformStart -le $qualityStart -or
+    $zipDiffStart -le $platformStart -or
+    $supplyChainStart -le $zipDiffStart -or
+    $requiredStart -le $supplyChainStart) {
     throw 'Could not locate the required quality and platform CI jobs'
 }
 $qualityJob = $ciWorkflow.Substring($qualityStart, $platformStart - $qualityStart)
@@ -197,6 +203,22 @@ foreach ($job in @(
         ([regex]::Matches($job.Text, '(?m)^\s*- name: Measure near-limit semantic completion heap\s*$')).Count -ne 1 -or
         ([regex]::Matches($normalizedJob, [regex]::Escape($semanticPeakCommand))).Count -ne 1) {
         throw "The $($job.Name) CI job does not contain the exact required semantic peak-live probe"
+    }
+}
+
+$requiredJob = $ciWorkflow.Substring($requiredStart)
+foreach ($fragment in @(
+    '    name: Required CI',
+    '    if: ${{ always() }}',
+    '    needs: [quality, platform, zipdiff, supply-chain]',
+    '          QUALITY_RESULT: ${{ needs.quality.result }}',
+    '          PLATFORM_RESULT: ${{ needs.platform.result }}',
+    '          ZIPDIFF_RESULT: ${{ needs.zipdiff.result }}',
+    "          SUPPLY_CHAIN_RESULT: `${{ needs['supply-chain'].result }}",
+    '          exit "${failed}"'
+)) {
+    if (-not $requiredJob.Contains($fragment, [StringComparison]::Ordinal)) {
+        throw "The Required CI aggregator is missing its exact dependency contract: $fragment"
     }
 }
 

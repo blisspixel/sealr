@@ -115,8 +115,8 @@ The repository now has:
 - a reproducible, byte-addressed 20-wheel compatibility pilot that uses only the public Sealr outcome and read-only IR, binds its manifest and interpretation-profile digests, and records 19 admissions plus one investigated three-member expansion-ratio denial without advertising wheel support;
 - a non-published, zero-dependency bounded worker-protocol codec with out-of-band capability slots, canonical result manifests, fallible decode, adversarial regressions, source-controlled seed digests, and a pinned weekly and on-demand AddressSanitizer campaign;
 - dependency update automation and an explicit permissive-license policy;
-- protected `main` requiring pull requests, linear history, resolved conversations, and all five current required CI checks;
-- the `v0.1.0-alpha.5` bounded-immutable-input preview line, built from protected `main` through all five required main CI checks, exact-commit on-demand fuzz evidence, and the release workflow, with immutable releases enabled.
+- protected `main` requiring pull requests, linear history, resolved conversations, and one stable `Required CI` check that fails unless all five platform, quality, corpus, and supply-chain gates pass;
+- the `v0.1.0-alpha.5` bounded-immutable-input preview line, built from protected `main` through all five main CI gates, exact-commit on-demand fuzz evidence, and the release workflow, with immutable releases enabled.
 
 This is the released Alpha.5 baseline. It is incomplete and is not a production security boundary. Path inputs no longer retain the complete archive in heap memory; caller byte inputs remain memory-backed by definition. Checked random access, private-spool ownership, source-change controls, backend parity, resource evidence, and the bounded capability protocol have passed their release gates. Broader native stress and open-handle measurement continue as later assurance work.
 

@@ -242,3 +242,33 @@ jobs:
       - name: Verify third-party license bundles
         shell: pwsh
         run: pwsh -NoLogo -NoProfile -File scripts/verify_third_party_licenses.ps1
+
+  required:
+    name: Required CI
+    if: ${{ always() }}
+    needs: [quality, platform, zipdiff, supply-chain]
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require every promotion gate
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          PLATFORM_RESULT: ${{ needs.platform.result }}
+          ZIPDIFF_RESULT: ${{ needs.zipdiff.result }}
+          SUPPLY_CHAIN_RESULT: ${{ needs['supply-chain'].result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          for gate in \
+            QUALITY_RESULT \
+            PLATFORM_RESULT \
+            ZIPDIFF_RESULT \
+            SUPPLY_CHAIN_RESULT; do
+            result="${!gate}"
+            if [[ "${result}" != "success" ]]; then
+              echo "::error::${gate} completed as ${result}"
+              failed=1
+            fi
+          done
+          exit "${failed}"
