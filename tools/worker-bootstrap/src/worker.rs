@@ -5,6 +5,7 @@ use crate::linux::{
     ERROR_AUTHORITY_CLOSE, ERROR_DESCRIPTOR, ERROR_PROBE, ERROR_PROTOCOL, ERROR_RESTRICTION,
     FLAG_STAGE, READY_FLAGS,
 };
+use crate::seccomp;
 use landlock::{
     make_bitflags, Access, AccessFs, CompatLevel, Compatible, LandlockStatus, PathBeneath, Ruleset,
     RulesetAttr, RulesetCreatedAttr, RulesetStatus, ABI,
@@ -159,6 +160,15 @@ fn run(
         _ => return Err(restriction("Landlock ABI 3 is unavailable")),
     };
     mode.exit_at(FaultPoint::Landlock);
+
+    if mode == ChildMode::SeccompInstallationFailure {
+        return Err(restriction(
+            "deterministic conformance injection rejected seccomp installation",
+        ));
+    }
+    seccomp::install_and_verify(stage.as_ref().map(AsFd::as_fd))
+        .map_err(|error| restriction(format!("installing syscall restrictions failed: {error}")))?;
+    mode.exit_at(FaultPoint::Seccomp);
 
     let operation_id = bootstrap.operation_id;
     let mut ready = Frame::new(Kind::RestrictedReady, operation_id);
@@ -345,7 +355,7 @@ fn probe_landlock_abi(mode: ChildMode) -> Result<u64, WorkerFailure> {
                 "deterministic conformance injection rejected the Landlock ABI probe",
             ));
         }
-        ChildMode::Normal | ChildMode::ExitAt(_) => {
+        ChildMode::Normal | ChildMode::SeccompInstallationFailure | ChildMode::ExitAt(_) => {
             const LANDLOCK_CREATE_RULESET_VERSION: u32 = 1;
             // SAFETY: a null attribute pointer and zero size are the kernel's
             // documented Landlock ABI query. No userspace memory is read or

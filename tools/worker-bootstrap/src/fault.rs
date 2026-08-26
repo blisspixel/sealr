@@ -5,6 +5,7 @@ pub(crate) enum ChildMode {
     Normal,
     InsufficientLandlockAbi,
     RestrictionProbeFailure,
+    SeccompInstallationFailure,
     ExitAt(FaultPoint),
 }
 
@@ -14,6 +15,7 @@ impl ChildMode {
             Self::Normal => "normal",
             Self::InsufficientLandlockAbi => "insufficient-landlock-abi",
             Self::RestrictionProbeFailure => "restriction-probe-failure",
+            Self::SeccompInstallationFailure => "seccomp-installation-failure",
             Self::ExitAt(point) => point.argument(),
         }
     }
@@ -24,6 +26,7 @@ impl ChildMode {
             "normal" => Some(Self::Normal),
             "insufficient-landlock-abi" => Some(Self::InsufficientLandlockAbi),
             "restriction-probe-failure" => Some(Self::RestrictionProbeFailure),
+            "seccomp-installation-failure" => Some(Self::SeccompInstallationFailure),
             _ => FaultPoint::parse(argument).map(Self::ExitAt),
         }
     }
@@ -48,20 +51,21 @@ pub(crate) enum FaultPoint {
     StageValidation = 5,
     NoNewPrivs = 6,
     Landlock = 7,
-    Ready = 8,
-    SourceReceive = 9,
-    SourceValidation = 10,
-    Accepted = 11,
-    Proceed = 12,
-    SourceProbe = 13,
-    OutsideDenial = 14,
-    StageCreate = 15,
-    Result = 16,
-    ExitAck = 17,
+    Seccomp = 8,
+    Ready = 9,
+    SourceReceive = 10,
+    SourceValidation = 11,
+    Accepted = 12,
+    Proceed = 13,
+    SourceProbe = 14,
+    OutsideDenial = 15,
+    StageCreate = 16,
+    Result = 17,
+    ExitAck = 18,
 }
 
 impl FaultPoint {
-    pub(crate) const ALL: [Self; 17] = [
+    pub(crate) const ALL: [Self; 18] = [
         Self::ExecEntry,
         Self::PeerValidation,
         Self::InheritedClosure,
@@ -69,6 +73,7 @@ impl FaultPoint {
         Self::StageValidation,
         Self::NoNewPrivs,
         Self::Landlock,
+        Self::Seccomp,
         Self::Ready,
         Self::SourceReceive,
         Self::SourceValidation,
@@ -90,6 +95,7 @@ impl FaultPoint {
             Self::StageValidation => "exit-after-stage-validation",
             Self::NoNewPrivs => "exit-after-no-new-privs",
             Self::Landlock => "exit-after-landlock",
+            Self::Seccomp => "exit-after-seccomp",
             Self::Ready => "exit-after-ready",
             Self::SourceReceive => "exit-after-source-receive",
             Self::SourceValidation => "exit-after-source-validation",
@@ -125,6 +131,7 @@ mod tests {
             ChildMode::Normal,
             ChildMode::InsufficientLandlockAbi,
             ChildMode::RestrictionProbeFailure,
+            ChildMode::SeccompInstallationFailure,
         ] {
             assert_eq!(ChildMode::parse(OsStr::new(mode.argument())), Some(mode));
         }

@@ -39,6 +39,7 @@ pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
     run_protocol_rejection(CaseMutation::WrongSourceOperation, 4)?;
     run_restriction_rejection(ChildMode::InsufficientLandlockAbi)?;
     run_restriction_rejection(ChildMode::RestrictionProbeFailure)?;
+    run_restriction_rejection(ChildMode::SeccompInstallationFailure)?;
     run_transport_rejection(CaseMutation::ShortSource, DETAIL_SHORT_FRAME)?;
     run_transport_rejection(CaseMutation::LongSource, DETAIL_DATA_TRUNCATED)?;
     run_transport_rejection(
@@ -50,7 +51,7 @@ pub(crate) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
     }
     run_timeout_reap()?;
     println!(
-        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 2 restriction failures, 3 process-boundary truncations, 17 crash barriers, and bounded reap passed"
+        "sealr.worker-bootstrap-evidence.v1: 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 18 crash barriers, and bounded reap passed"
     );
     Ok(())
 }
@@ -432,6 +433,7 @@ fn exchange_active(
             FaultPoint::StageValidation,
             FaultPoint::NoNewPrivs,
             FaultPoint::Landlock,
+            FaultPoint::Seccomp,
         ],
         child,
     )?;
@@ -678,10 +680,20 @@ fn observe_restricted_child(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let proc_root = PathBuf::from(format!("/proc/{pid}"));
     let status = fs::read_to_string(proc_root.join("status"))?;
+    let seccomp_filters = status
+        .lines()
+        .find_map(|line| line.strip_prefix("Seccomp_filters:\t"))
+        .map(str::parse::<u64>)
+        .transpose()?;
     if !status.lines().any(|line| line == "NoNewPrivs:\t1")
         || !status.lines().any(|line| line == "Threads:\t1")
+        || !status.lines().any(|line| line == "Seccomp:\t2")
+        || seccomp_filters.is_none_or(|count| count == 0)
     {
-        return Err(io::Error::other("restricted worker status is not single-threaded NNP").into());
+        return Err(io::Error::other(
+            "restricted worker status is not single-threaded NNP with an active seccomp filter",
+        )
+        .into());
     }
 
     let mut descriptors = Vec::new();
