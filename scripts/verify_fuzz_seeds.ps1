@@ -934,7 +934,8 @@ Assert-SemanticJobMutationRejected `
 foreach ($required in @(
     'Require exact protected main fuzz evidence',
     'actions/workflows/fuzz.yml/runs',
-    'Bounded worker protocol'
+    'Bounded worker protocol',
+    'Bounded semantic records'
 )) {
     if (-not $releaseWorkflow.Contains($required, [StringComparison]::Ordinal)) {
         throw "Release workflow is missing exact fuzz evidence: $required"
@@ -942,7 +943,9 @@ foreach ($required in @(
 }
 foreach ($required in @(
     "`$FuzzWorkflow = '.github/workflows/fuzz.yml'",
-    "`$ExpectedFuzzJob = 'Bounded worker protocol'",
+    '$ExpectedFuzzJobs = @(',
+    "'Bounded worker protocol'",
+    "'Bounded semantic records'",
     'Get-ExactFuzzState',
     'fuzz_run_id'
 )) {

@@ -218,19 +218,26 @@ jobs:
               "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/attempts/${run_attempt}/jobs" \
               -f per_page=100
           )"
-          count="$(jq '[.jobs[] | select(.name == "Bounded worker protocol")] | length' <<<"${jobs_json}")"
-          if [[ "${count}" -ne 1 ]]; then
-            echo "::error::expected exactly one bounded worker protocol fuzz job, found ${count}"
-            exit 1
-          fi
-          if ! jq -e '
-            .jobs[] |
-            select(.name == "Bounded worker protocol") |
-            .status == "completed" and .conclusion == "success"
-          ' <<<"${jobs_json}" >/dev/null; then
-            echo "::error::bounded worker protocol fuzz job did not complete successfully"
-            exit 1
-          fi
+          required_fuzz_jobs=(
+            "Bounded worker protocol"
+            "Bounded semantic records"
+          )
+          for required in "${required_fuzz_jobs[@]}"; do
+            count="$(jq --arg name "${required}" '[.jobs[] | select(.name == $name)] | length' <<<"${jobs_json}")"
+            if [[ "${count}" -ne 1 ]]; then
+              echo "::error::expected exactly one fuzz job named ${required}, found ${count}"
+              exit 1
+            fi
+            if ! jq -e \
+              --arg name "${required}" '
+                .jobs[] |
+                select(.name == $name) |
+                .status == "completed" and .conclusion == "success"
+              ' <<<"${jobs_json}" >/dev/null; then
+              echo "::error::required fuzz job did not complete successfully: ${required}"
+              exit 1
+            fi
+          done
 
           git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
           if [[ "$(git rev-parse refs/remotes/origin/main)" != "${tag_commit}" ]]; then

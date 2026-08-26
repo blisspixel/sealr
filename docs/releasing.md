@@ -13,7 +13,7 @@ Before creating a tag:
 1. Update the workspace version, lockfile, changelog, release notes, workflow `RELEASE_VERSION`, and promotion-script constants together.
 2. Confirm the local checkout, `origin/main`, and intended release commit are identical and clean.
 3. Confirm every protected `main` check passed on that exact commit.
-4. Dispatch the fuzz workflow for that exact commit and require its bounded worker-protocol job to pass.
+4. Dispatch the fuzz workflow for that exact commit and require both bounded worker-protocol and semantic-record jobs to pass.
 5. Confirm there are no open release-blocking pull requests or security advisories.
 6. Confirm every action in the release workflow is pinned to a reviewed full commit hash.
 7. Run the walkthrough, asset verification, ordinary CI gates, and actionlint from a clean checkout.
@@ -62,8 +62,8 @@ Create an annotated tag at the verified commit and push only that tag. For `0.1.
 The tag workflow:
 
 1. verifies the annotated tag, workspace version, clean checkout, and identity with current `main`;
-2. waits for the exact protected `main` CI run at that commit and requires all five protected jobs to succeed;
-3. requires a successful bounded worker-protocol fuzz campaign on that exact commit;
+2. waits for the exact protected `main` CI run at that commit, requires all five promotion jobs to succeed, and verifies the stable `Required CI` branch-protection check;
+3. requires successful bounded worker-protocol and semantic-record fuzz campaigns on that exact commit;
 4. tests optimized workspace builds on standard Ubuntu, Windows, and macOS runners;
 5. builds and packages each native executable with README, changelog, the Apache-2.0 project license, and the verified target-specific third-party license bundle, including upstream root notice and copyright files;
 6. extracts every package and smoke-tests its version and help output;
@@ -92,7 +92,7 @@ The script accepts no repository, tag, or release parameters. Before changing th
 
 - a clean, unmodified checkout whose `HEAD` equals remote `main` and the annotated release tag;
 - exact workspace version and tagged release notes;
-- unchanged strict branch protection, enforced administrators, pull requests, linear history, resolved conversations, and the exact five GitHub Actions checks;
+- unchanged strict branch protection, enforced administrators, pull requests, linear history, resolved conversations, and the exact GitHub Actions `Required CI` check that aggregates all five promotion jobs;
 - successful exact-commit `main` CI, exact-commit on-demand fuzz, and exact-tag Release workflow runs;
 - repository release immutability enabled;
 - the exact draft ID, title, notes, prerelease state, and four expected assets;

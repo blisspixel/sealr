@@ -22,6 +22,7 @@ The project is in initial development. Compatibility may change between preview 
 
 ### Changed
 
+- Collapsed branch protection onto one stable `Required CI` check that runs after all five platform, quality, ZipDiff, and supply-chain promotion gates and fails unless every dependency succeeds. Release validation still reads back every underlying job on the exact commit, and exact-commit fuzz promotion now requires both the worker-protocol and semantic-record jobs.
 - Split Alpha.6 planning into a nonsemantic Linux authority bootstrap, a consumer-preserving semantic-ownership decision, and supervised execution. The plan now requires writer quiescence before stage audit and keeps protocol v1 byte-compatible and non-runtime.
 - Kept the bootstrap lab outside the library, CLI, operation protocol, receipt schemas, and release archives. It establishes repository conformance evidence, not a claim that archive parsing is confined.
 - Made every post-spawn supervisor exit converge on bounded termination and reap. Cleanup becomes authorized only after reap, executes as a checked operation, and verifies that the fixture root is absent.

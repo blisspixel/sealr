@@ -17,14 +17,18 @@ $GithubActionsAppId = 15368
 $ReleaseNotesRelativePath = "docs/releases/$ReleaseTag.md"
 $ApiVersion = '2026-03-10'
 $FuzzWorkflow = '.github/workflows/fuzz.yml'
-$ExpectedFuzzJob = 'Bounded worker protocol'
-$ExpectedChecks = @(
+$ExpectedFuzzJobs = @(
+    'Bounded worker protocol'
+    'Bounded semantic records'
+)
+$ExpectedCiJobs = @(
     'Format, lint, test, and docs'
     'Test on windows-latest'
     'Test on macos-latest'
     'ZipDiff 14-class gate'
     'Supply chain'
 )
+$ExpectedChecks = @('Required CI')
 $ExpectedReleaseJobs = @(
     'Validate release tag'
     'Build and test on ubuntu-latest'
@@ -270,11 +274,13 @@ function Get-ExactFuzzState {
         "repos/$Repository/actions/runs/$($run.id)/attempts/$($run.run_attempt)/jobs",
         '-f', 'per_page=100'
     )
-    $jobs = @($jobsResponse.jobs | Where-Object { [string]$_.name -eq $ExpectedFuzzJob })
-    Assert-Equal -Expected 1 -Actual $jobs.Count -Label 'on-demand fuzz job count'
-    Assert-Equal -Expected 'completed' -Actual ([string]$jobs[0].status) -Label 'on-demand fuzz job status'
-    Assert-Equal -Expected 'success' -Actual ([string]$jobs[0].conclusion) -Label 'on-demand fuzz job conclusion'
-    Assert-Equal -Expected $Commit -Actual (([string]$jobs[0].head_sha).ToLowerInvariant()) -Label 'on-demand fuzz job commit'
+    foreach ($expectedFuzzJob in $ExpectedFuzzJobs) {
+        $jobs = @($jobsResponse.jobs | Where-Object { [string]$_.name -eq $expectedFuzzJob })
+        Assert-Equal -Expected 1 -Actual $jobs.Count -Label "on-demand fuzz job count for $expectedFuzzJob"
+        Assert-Equal -Expected 'completed' -Actual ([string]$jobs[0].status) -Label "on-demand fuzz job status for $expectedFuzzJob"
+        Assert-Equal -Expected 'success' -Actual ([string]$jobs[0].conclusion) -Label "on-demand fuzz job conclusion for $expectedFuzzJob"
+        Assert-Equal -Expected $Commit -Actual (([string]$jobs[0].head_sha).ToLowerInvariant()) -Label "on-demand fuzz job commit for $expectedFuzzJob"
+    }
 
     [pscustomobject]@{
         Id = [int64]$run.id
@@ -322,12 +328,12 @@ function Get-ExactCiState {
         '-f', 'per_page=100'
     )
     $jobs = @($jobsResponse.jobs)
-    foreach ($expectedCheck in $ExpectedChecks) {
-        $matchingJobs = @($jobs | Where-Object { [string]$_.name -eq $expectedCheck })
-        Assert-Equal -Expected 1 -Actual $matchingJobs.Count -Label "CI job count for $expectedCheck"
-        Assert-Equal -Expected 'completed' -Actual ([string]$matchingJobs[0].status) -Label "CI job status for $expectedCheck"
-        Assert-Equal -Expected 'success' -Actual ([string]$matchingJobs[0].conclusion) -Label "CI job conclusion for $expectedCheck"
-        Assert-Equal -Expected $Commit -Actual (([string]$matchingJobs[0].head_sha).ToLowerInvariant()) -Label "CI job commit for $expectedCheck"
+    foreach ($expectedJob in $ExpectedCiJobs) {
+        $matchingJobs = @($jobs | Where-Object { [string]$_.name -eq $expectedJob })
+        Assert-Equal -Expected 1 -Actual $matchingJobs.Count -Label "CI job count for $expectedJob"
+        Assert-Equal -Expected 'completed' -Actual ([string]$matchingJobs[0].status) -Label "CI job status for $expectedJob"
+        Assert-Equal -Expected 'success' -Actual ([string]$matchingJobs[0].conclusion) -Label "CI job conclusion for $expectedJob"
+        Assert-Equal -Expected $Commit -Actual (([string]$matchingJobs[0].head_sha).ToLowerInvariant()) -Label "CI job commit for $expectedJob"
     }
 
     foreach ($requiredCheck in @($RequiredChecks)) {
