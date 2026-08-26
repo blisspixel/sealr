@@ -1,4 +1,4 @@
-use crate::fault::{ChildMode, FaultPoint};
+use crate::fault::{ChildMode, FaultPoint, StallPoint};
 use crate::frame::{Frame, Kind};
 use crate::linux::{
     close_inherited_authority, configure_timeout, receive_packet, send_packet,
@@ -69,6 +69,7 @@ pub(crate) fn entry(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>>
     mode.exit_at(FaultPoint::InheritedClosure);
     configure_timeout(control)?;
 
+    mode.stall_at(StallPoint::BootstrapReceive);
     let (bootstrap, descriptors) = receive_packet(control, None)?;
     mode.exit_at(FaultPoint::BootstrapReceive);
     let operation_id = bootstrap.operation_id;
@@ -115,6 +116,7 @@ fn run(
         None
     };
     mode.exit_at(FaultPoint::StageValidation);
+    mode.stall_at(StallPoint::RestrictionSetup);
 
     let probed_abi = probe_landlock_abi(mode)?;
     if probed_abi < ABI::V3 as u64 {
@@ -169,6 +171,7 @@ fn run(
     seccomp::install_and_verify(stage.as_ref().map(AsFd::as_fd))
         .map_err(|error| restriction(format!("installing syscall restrictions failed: {error}")))?;
     mode.exit_at(FaultPoint::Seccomp);
+    mode.stall_at(StallPoint::RestrictedReady);
 
     let operation_id = bootstrap.operation_id;
     let mut ready = Frame::new(Kind::RestrictedReady, operation_id);
@@ -188,6 +191,7 @@ fn run(
         enable_timestamp_ancillary(control)?;
     }
 
+    mode.stall_at(StallPoint::SourceReceive);
     let (source_frame, mut source_descriptors) =
         receive_packet(control, Some(1)).map_err(|error| {
             let detail = error.protocol_detail();
@@ -207,6 +211,7 @@ fn run(
         .expect("source descriptor count was validated by the transport");
     validate_source(&source, source_frame.values, stage.as_ref())?;
     mode.exit_at(FaultPoint::SourceValidation);
+    mode.stall_at(StallPoint::SourceAcceptance);
 
     let mut accepted = Frame::new(Kind::Accepted, operation_id);
     accepted.values = source_frame.values;
@@ -215,6 +220,7 @@ fn run(
         .map_err(|error| protocol(PHASE_SOURCE, format!("sending acceptance failed: {error}")))?;
     await_observation_checkpoint(control, mode, FaultPoint::Accepted, operation_id)?;
 
+    mode.stall_at(StallPoint::ProceedReceive);
     let (proceed, descriptors) = receive_packet(control, Some(0))
         .map_err(|error| protocol(PHASE_PROBE, format!("receiving proceed failed: {error}")))?;
     require_kind_and_operation(&proceed, Kind::Proceed, operation_id, PHASE_PROBE)?;
@@ -234,6 +240,7 @@ fn run(
     } else {
         0
     };
+    mode.stall_at(StallPoint::ProbeExecution);
 
     let mut result = Frame::new(Kind::Result, operation_id);
     result.flags = bootstrap.flags & FLAG_STAGE;
@@ -242,6 +249,7 @@ fn run(
         .map_err(|error| protocol(PHASE_PROBE, format!("sending result failed: {error}")))?;
     await_observation_checkpoint(control, mode, FaultPoint::Result, operation_id)?;
 
+    mode.stall_at(StallPoint::ExitAckReceive);
     let (ack, descriptors) = receive_packet(control, Some(0))
         .map_err(|error| protocol(PHASE_EXIT, format!("receiving exit ack failed: {error}")))?;
     require_kind_and_operation(&ack, Kind::ExitAck, operation_id, PHASE_EXIT)?;
@@ -249,6 +257,7 @@ fn run(
         return Err(protocol(PHASE_EXIT, "exit acknowledgement is not empty"));
     }
     mode.exit_at(FaultPoint::ExitAck);
+    mode.stall_at(StallPoint::ExitCompletion);
     Ok(())
 }
 
@@ -361,6 +370,7 @@ fn probe_landlock_abi(mode: ChildMode) -> Result<u64, WorkerFailure> {
         ChildMode::Normal
         | ChildMode::SeccompInstallationFailure
         | ChildMode::UnknownAncillary
+        | ChildMode::StallAt(_)
         | ChildMode::ExitAt(_) => {
             const LANDLOCK_CREATE_RULESET_VERSION: u32 = 1;
             // SAFETY: a null attribute pointer and zero size are the kernel's
