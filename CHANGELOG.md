@@ -49,6 +49,7 @@ The project is in initial development. Compatibility may change between preview 
 
 ### Fixed
 
+- Made the cross-platform destination-race oracle arm deterministically on fast hosts. The caller thread now observes the stage while a scoped application thread starts through a zero-capacity rendezvous and a bounded 1 ms arming window. The oracle still creates the competing destination only after observing the real private stage, but no longer fails merely because a secondary observer was not scheduled before publication.
 - Replaced reconstructed pending-IR test evidence with the actual production planning-boundary IR, added a scoped post-planning snapshot fault for reachable `source.io` parity, made the shadow manifest reject unknown fields, pinned generated ZIP system and timestamp metadata for cross-platform evidence, and removed parse-failure mappings for finding codes not authored in that phase.
 - Verification-time source I/O failures now preserve `Admitted + Partial` while reporting interpretation as `Indeterminate`, instead of misclassifying an operational read failure as policy denial. Inspect remains `NotRequested`; a requested materialization reports a failed effect. The compatibility verdict and CLI still fail closed whenever verification is incomplete.
 - Protocol manifests now reject a file that is an ancestor of another claimed object, including cases where another lexicographic entry separates the ancestor and descendant.
