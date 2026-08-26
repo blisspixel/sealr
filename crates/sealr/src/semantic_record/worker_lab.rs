@@ -11,6 +11,7 @@ use crate::ir::{MemberVerification, ZipInterpretationProfile};
 use crate::outcome::VerificationStatus;
 use crate::policy::Policy;
 use crate::snapshot::SourceSnapshot;
+use crate::verified::RetentionPlan;
 
 /// A canonical planning record bound to the exact worker source descriptor.
 #[derive(Debug)]
@@ -36,8 +37,57 @@ pub struct InspectCompletionEvidence {
     pub verified_members: u64,
 }
 
+/// Bounded retention request supplied independently by the repository lab's
+/// trusted supervisor and bound into the semantic plan.
+#[derive(Clone, Debug)]
+pub struct InspectRetentionRequest {
+    plan: RetentionPlan,
+}
+
+/// Bounded retained-content result observed by the repository worker lab.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct InspectRetentionEvidence {
+    /// Exact paths represented by the canonical retention bundle.
+    pub requested_paths: u64,
+    /// Requested file members retained during the verification pass.
+    pub retained_members: u64,
+    /// Aggregate logical bytes in the immutable retention bundle.
+    pub retained_bytes: u64,
+}
+
+impl InspectRetentionRequest {
+    /// Create an empty bounded request.
+    pub fn new(max_member_bytes: u64, max_total_bytes: u64) -> Self {
+        Self {
+            plan: RetentionPlan::new(max_member_bytes, max_total_bytes),
+        }
+    }
+
+    /// Add one exact canonical path.
+    pub fn add_path(&mut self, path: impl Into<String>) -> Result<(), String> {
+        self.plan.add_path(path).map_err(debug_error)
+    }
+}
+
 /// Plan one inspect operation and return its canonical semantic record.
 pub fn plan_inspect(source: &[u8], operation_id: [u8; 16]) -> Result<Vec<u8>, String> {
+    plan_inspect_with_retention(source, operation_id, None)
+}
+
+/// Plan one inspect operation with a supervisor-authored retention request.
+pub fn plan_inspect_retaining(
+    source: &[u8],
+    operation_id: [u8; 16],
+    retention: &InspectRetentionRequest,
+) -> Result<Vec<u8>, String> {
+    plan_inspect_with_retention(source, operation_id, Some(retention))
+}
+
+fn plan_inspect_with_retention(
+    source: &[u8],
+    operation_id: [u8; 16],
+    retention: Option<&InspectRetentionRequest>,
+) -> Result<Vec<u8>, String> {
     let policy = Policy::default_v1();
     let context = context(&policy)?;
     let source = Source::Bytes {
@@ -53,7 +103,7 @@ pub fn plan_inspect(source: &[u8], operation_id: [u8; 16]) -> Result<Vec<u8>, St
         }
     };
     let (snapshot, ir, findings, context) = ready.into_parts();
-    let binding = inspect_binding(&snapshot, &context, operation_id)?;
+    let binding = inspect_binding(&snapshot, &context, operation_id, retention)?;
     encode_planning(&PlanningRecord {
         binding,
         disposition: PlanningDisposition::ReadyForVerification,
@@ -70,6 +120,27 @@ pub fn validate_inspect(
     operation_id: [u8; 16],
     planning: &[u8],
 ) -> Result<ValidatedInspectOperation, String> {
+    validate_inspect_with_retention(source, source_len, operation_id, planning, None)
+}
+
+/// Validate one canonical retained-content plan against the exact descriptor.
+pub fn validate_inspect_retaining(
+    source: File,
+    source_len: u64,
+    operation_id: [u8; 16],
+    planning: &[u8],
+    retention: &InspectRetentionRequest,
+) -> Result<ValidatedInspectOperation, String> {
+    validate_inspect_with_retention(source, source_len, operation_id, planning, Some(retention))
+}
+
+fn validate_inspect_with_retention(
+    source: File,
+    source_len: u64,
+    operation_id: [u8; 16],
+    planning: &[u8],
+    retention: Option<&InspectRetentionRequest>,
+) -> Result<ValidatedInspectOperation, String> {
     let policy = Policy::default_v1();
     let context = context(&policy)?;
     let snapshot = SourceSnapshot::worker_lab_from_file(
@@ -79,9 +150,29 @@ pub fn validate_inspect(
         context.controls().budget.max_archive_bytes,
     )
     .map_err(debug_error)?;
-    let binding = inspect_binding(&snapshot, &context, operation_id)?;
+    let binding = inspect_binding(&snapshot, &context, operation_id, retention)?;
     let planning = decode_planning(planning, &binding, &snapshot).map_err(debug_error)?;
     Ok(ValidatedInspectOperation { planning, snapshot })
+}
+
+/// Validate a canonical retained-content bundle as a plan- and
+/// completion-bound worker proposal without granting source authority.
+pub fn validate_inspect_retained_content(
+    source: &[u8],
+    operation_id: [u8; 16],
+    planning: &[u8],
+    completion: &[u8],
+    retained_content: &[u8],
+    retention: &InspectRetentionRequest,
+) -> Result<InspectRetentionEvidence, String> {
+    let policy = Policy::default_v1();
+    let context = context(&policy)?;
+    let snapshot = SourceSnapshot::borrowed(Some("worker-lab.zip".into()), source);
+    let binding = inspect_binding(&snapshot, &context, operation_id, Some(retention))?;
+    let planning = decode_planning(planning, &binding, &snapshot).map_err(debug_error)?;
+    let evidence = super::retained_content::validate(&planning, completion, retained_content)
+        .map_err(debug_error)?;
+    Ok(retention_evidence(evidence))
 }
 
 /// Validate a worker completion as a canonical, plan-bound proposal. This does
@@ -95,10 +186,60 @@ pub fn validate_inspect_completion(
     let policy = Policy::default_v1();
     let context = context(&policy)?;
     let snapshot = SourceSnapshot::borrowed(Some("worker-lab.zip".into()), source);
-    let binding = inspect_binding(&snapshot, &context, operation_id)?;
+    let binding = inspect_binding(&snapshot, &context, operation_id, None)?;
     let planning = decode_planning(planning, &binding, &snapshot).map_err(debug_error)?;
     let proposal = decode_completion(completion, &planning).map_err(debug_error)?;
     Ok(completion_evidence(proposal))
+}
+
+/// Replay a retained-content execution against the supervisor's exact source
+/// and require both canonical worker outputs to match the source-derived
+/// completion and retention bundle byte for byte.
+pub fn authorize_inspect_retained_execution(
+    source: File,
+    source_len: u64,
+    operation_id: [u8; 16],
+    planning: &[u8],
+    completion: &[u8],
+    retained_content: &[u8],
+    retention: &InspectRetentionRequest,
+) -> Result<(InspectCompletionEvidence, InspectRetentionEvidence), String> {
+    let policy = Policy::default_v1();
+    let context = context(&policy)?;
+    let snapshot = SourceSnapshot::worker_lab_from_file(
+        source,
+        Some("worker-lab-supervisor.zip".into()),
+        source_len,
+        context.controls().budget.max_archive_bytes,
+    )
+    .map_err(debug_error)?;
+    let binding = inspect_binding(&snapshot, &context, operation_id, Some(retention))?;
+    let planning = decode_planning(planning, &binding, &snapshot).map_err(debug_error)?;
+    let executed = planning
+        .bind_inspect_execution(snapshot)
+        .map_err(debug_error)?
+        .execute()
+        .map_err(debug_error)?;
+    if executed.completion() != completion {
+        return Err(
+            "worker completion differs from the supervisor's source-derived replay".to_owned(),
+        );
+    }
+    if executed.retained_content() != retained_content {
+        return Err(
+            "worker retained content differs from the supervisor's source-derived replay"
+                .to_owned(),
+        );
+    }
+    let proposal =
+        decode_completion(executed.completion(), executed.planning()).map_err(debug_error)?;
+    let retained = super::retained_content::validate(
+        executed.planning(),
+        executed.completion(),
+        executed.retained_content(),
+    )
+    .map_err(debug_error)?;
+    Ok((completion_evidence(proposal), retention_evidence(retained)))
 }
 
 /// Replay one accepted plan against the supervisor's exact retained source and
@@ -121,7 +262,7 @@ pub fn authorize_inspect_completion(
         context.controls().budget.max_archive_bytes,
     )
     .map_err(debug_error)?;
-    let binding = inspect_binding(&snapshot, &context, operation_id)?;
+    let binding = inspect_binding(&snapshot, &context, operation_id, None)?;
     let planning = decode_planning(planning, &binding, &snapshot).map_err(debug_error)?;
     let executed = planning
         .bind_inspect_execution(snapshot)
@@ -146,6 +287,7 @@ fn inspect_binding(
     snapshot: &SourceSnapshot<'_>,
     context: &PlanningContext,
     operation_id: [u8; 16],
+    retention: Option<&InspectRetentionRequest>,
 ) -> Result<InvocationBinding, String> {
     let controls = context.controls();
     let source_sha256 = parse_hex_32(
@@ -173,7 +315,9 @@ fn inspect_binding(
         requested_effect: RequestedEffect::Inspect,
         target_sha256: None,
         member_sync: controls.effect.member_sync,
-        retention: RetentionBinding::None,
+        retention: retention.map_or(RetentionBinding::None, |retention| {
+            RetentionBinding::from_plan(Some(&retention.plan))
+        }),
     })
 }
 
@@ -209,11 +353,39 @@ impl ExecutedInspectOperation {
         self.executed.completion()
     }
 
+    /// Return the canonical retained-content transfer captured during the
+    /// same verification pass as the completion.
+    pub fn retained_content(&self) -> &[u8] {
+        self.executed.retained_content()
+    }
+
     /// Revalidate the generated completion against its retained planning state.
     pub fn evidence(&self) -> Result<InspectCompletionEvidence, String> {
         let proposal = decode_completion(self.executed.completion(), self.executed.planning())
             .map_err(debug_error)?;
         Ok(completion_evidence(proposal))
+    }
+
+    /// Revalidate the canonical retained-content transfer against the
+    /// completion and retained planning state.
+    pub fn retention_evidence(&self) -> Result<InspectRetentionEvidence, String> {
+        let evidence = super::retained_content::validate(
+            self.executed.planning(),
+            self.executed.completion(),
+            self.executed.retained_content(),
+        )
+        .map_err(debug_error)?;
+        Ok(retention_evidence(evidence))
+    }
+}
+
+fn retention_evidence(
+    evidence: super::retained_content::RetainedContentEvidence,
+) -> InspectRetentionEvidence {
+    InspectRetentionEvidence {
+        requested_paths: evidence.requested_paths,
+        retained_members: evidence.retained_members,
+        retained_bytes: evidence.retained_bytes,
     }
 }
 
@@ -327,6 +499,115 @@ mod tests {
         drifted[0] ^= 1;
         let (file, path) = source_file(&drifted);
         assert!(validate_inspect(file, drifted.len() as u64, operation_id, &planning).is_err());
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn retained_content_is_captured_once_and_transferred_canonically() {
+        let source = source();
+        let operation_id = [0x61; 16];
+        let mut retention = InspectRetentionRequest::new(64, 64);
+        retention.add_path("missing.txt").unwrap();
+        retention.add_path("planned.txt").unwrap();
+        let planning = plan_inspect_retaining(&source, operation_id, &retention).unwrap();
+        let (file, path) = source_file(&source);
+
+        crate::zip::reset_parse_calls();
+        crate::verification::reset_verify_payload_calls();
+        let executed = validate_inspect_retaining(
+            file,
+            source.len() as u64,
+            operation_id,
+            &planning,
+            &retention,
+        )
+        .unwrap()
+        .execute()
+        .unwrap();
+        assert_eq!(crate::zip::parse_calls(), 0);
+        assert_eq!(crate::verification::verify_payload_calls(), 1);
+
+        let proposal = validate_inspect_retained_content(
+            &source,
+            operation_id,
+            &planning,
+            executed.completion(),
+            executed.retained_content(),
+            &retention,
+        )
+        .unwrap();
+        assert_eq!(
+            proposal,
+            InspectRetentionEvidence {
+                requested_paths: 2,
+                retained_members: 1,
+                retained_bytes: b"planned payload".len() as u64,
+            }
+        );
+        assert_eq!(crate::verification::verify_payload_calls(), 1);
+
+        let (completion, authorized) = authorize_inspect_retained_execution(
+            File::open(&path).unwrap(),
+            source.len() as u64,
+            operation_id,
+            &planning,
+            executed.completion(),
+            executed.retained_content(),
+            &retention,
+        )
+        .unwrap();
+        assert!(completion.complete);
+        assert_eq!(authorized, proposal);
+        assert_eq!(crate::zip::parse_calls(), 0);
+        assert_eq!(crate::verification::verify_payload_calls(), 2);
+
+        let mut mutated = executed.retained_content().to_vec();
+        *mutated.last_mut().unwrap() ^= 1;
+        assert!(validate_inspect_retained_content(
+            &source,
+            operation_id,
+            &planning,
+            executed.completion(),
+            &mutated,
+            &retention,
+        )
+        .is_err());
+        for length in 0..executed.retained_content().len() {
+            assert!(validate_inspect_retained_content(
+                &source,
+                operation_id,
+                &planning,
+                executed.completion(),
+                &executed.retained_content()[..length],
+                &retention,
+            )
+            .is_err());
+        }
+        drop(executed);
+        fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn retained_content_transfer_rejects_an_oversized_request_before_execution() {
+        let source = source();
+        let operation_id = [0x62; 16];
+        let mut retention = InspectRetentionRequest::new(
+            super::super::retained_content::MAX_TRANSFER_CONTENT_BYTES as u64 + 1,
+            super::super::retained_content::MAX_TRANSFER_CONTENT_BYTES as u64 + 1,
+        );
+        retention.add_path("planned.txt").unwrap();
+        let planning = plan_inspect_retaining(&source, operation_id, &retention).unwrap();
+        let (file, path) = source_file(&source);
+        let validated = validate_inspect_retaining(
+            file,
+            source.len() as u64,
+            operation_id,
+            &planning,
+            &retention,
+        )
+        .unwrap();
+        let error = validated.execute().unwrap_err();
+        assert!(error.contains("transfer content bound"));
         fs::remove_file(path).unwrap();
     }
 

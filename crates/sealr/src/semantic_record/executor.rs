@@ -1,19 +1,21 @@
 //! Plan-native inspect execution for the dormant semantic-record experiment.
 
+use std::collections::BTreeMap;
 use std::io::{self, BufReader};
 
 use sha2::{Digest, Sha256};
 
 use super::{
-    encode_completion, validate_snapshot_binding, CompletionDisposition, CompletionRecord,
-    MemberCompletion, PlanningDisposition, RecordError, RecordErrorKind, RequestedEffect,
-    RetentionBinding, ValidatedPlanningRecord,
+    encode_completion, retained_content, validate_snapshot_binding, CompletionDisposition,
+    CompletionRecord, MemberCompletion, PlanningDisposition, RecordError, RecordErrorKind,
+    RequestedEffect, RetentionBinding, ValidatedPlanningRecord,
 };
 use crate::findings::{Finding, FindingCode};
 use crate::ir::{IrMember, MemberKind};
 use crate::quota::{QuotaError, QuotaState};
 use crate::snapshot::SourceSnapshot;
 use crate::verification::{verify_payload, PayloadSpec};
+use crate::verified::{RetentionBuild, RetentionEntry};
 use crate::zip;
 
 #[cfg(test)]
@@ -32,6 +34,12 @@ pub(super) struct ExecutedInspectPlan<'source> {
     planning: ValidatedPlanningRecord,
     _snapshot: SourceSnapshot<'source>,
     completion: Vec<u8>,
+    retained_content: Vec<u8>,
+}
+
+struct ExecutionOutput {
+    completion: Vec<u8>,
+    retained_content: Vec<u8>,
 }
 
 impl ValidatedPlanningRecord {
@@ -57,12 +65,21 @@ impl ValidatedPlanningRecord {
                 "materialization planning cannot enter inspect execution",
             ));
         }
-        if !matches!(self.record.binding.retention, RetentionBinding::None) {
-            return Err(RecordError::new(
-                RecordErrorKind::PhaseMismatch,
-                0,
-                "retention planning cannot enter execution before content transfer exists",
-            ));
+        if let RetentionBinding::Plan {
+            max_member_bytes,
+            max_total_bytes,
+            ..
+        } = &self.record.binding.retention
+        {
+            if *max_member_bytes > retained_content::MAX_TRANSFER_CONTENT_BYTES as u64
+                || *max_total_bytes > retained_content::MAX_TRANSFER_CONTENT_BYTES as u64
+            {
+                return Err(RecordError::new(
+                    RecordErrorKind::LimitExceeded,
+                    0,
+                    "retention plan exceeds the isolated transfer content bound",
+                ));
+            }
         }
         validate_snapshot_binding(&snapshot, &self.record.binding)?;
         Ok(ValidatedInspectPlan {
@@ -74,11 +91,12 @@ impl ValidatedPlanningRecord {
 
 impl<'source> ValidatedInspectPlan<'source> {
     pub(super) fn execute(self) -> Result<ExecutedInspectPlan<'source>, RecordError> {
-        let completion = execute_completion(&self.planning, &self.snapshot)?;
+        let output = execute_completion(&self.planning, &self.snapshot)?;
         Ok(ExecutedInspectPlan {
             planning: self.planning,
             _snapshot: self.snapshot,
-            completion,
+            completion: output.completion,
+            retained_content: output.retained_content,
         })
     }
 }
@@ -91,12 +109,16 @@ impl ExecutedInspectPlan<'_> {
     pub(super) fn completion(&self) -> &[u8] {
         &self.completion
     }
+
+    pub(super) fn retained_content(&self) -> &[u8] {
+        &self.retained_content
+    }
 }
 
 fn execute_completion(
     planning: &ValidatedPlanningRecord,
     snapshot: &SourceSnapshot<'_>,
-) -> Result<Vec<u8>, RecordError> {
+) -> Result<ExecutionOutput, RecordError> {
     let ir = planning.record.ir.as_ref().ok_or_else(|| {
         RecordError::new(
             RecordErrorKind::PhaseMismatch,
@@ -107,6 +129,8 @@ fn execute_completion(
     let mut members = Vec::new();
     reserve_member_states(&mut members, ir.members.len())?;
     let mut actual_total = QuotaState::new(planning.record.binding.budget.max_total_bytes);
+    let retention_plan = retained_content::retention_plan(&planning.record.binding.retention)?;
+    let mut retention = RetentionBuild::plan(retention_plan.as_ref(), ir);
 
     #[cfg(test)]
     crate::snapshot::arm_test_read_failure();
@@ -124,18 +148,31 @@ fn execute_completion(
         let payload = match zip::planned_payload_reader(snapshot, member) {
             Ok(payload) => payload,
             Err(finding) => {
-                return stopped_completion(planning, members, ir.members.len(), finding);
+                let completion = stopped_completion(planning, members, ir.members.len(), finding)?;
+                return finish_execution(planning, completion, retention.into_entries());
             }
         };
         let payload = BufReader::with_capacity(64 * 1024, payload);
-        let mut sink = io::sink();
-        let verified = verify_payload(
-            payload,
-            PayloadSpec::from_ir(member),
-            planning.record.binding.budget,
-            actual_total.remaining(),
-            &mut sink,
-        );
+        let mut capture = retention.begin_capture(&member.canonical_path);
+        let verified = match capture.as_mut() {
+            Some(bytes) => verify_payload(
+                payload,
+                PayloadSpec::from_ir(member),
+                planning.record.binding.budget,
+                actual_total.remaining(),
+                bytes,
+            ),
+            None => {
+                let mut sink = io::sink();
+                verify_payload(
+                    payload,
+                    PayloadSpec::from_ir(member),
+                    planning.record.binding.budget,
+                    actual_total.remaining(),
+                    &mut sink,
+                )
+            }
+        };
         let (actual, crc, content_sha256) = match verified {
             Ok(verified) => verified,
             Err(finding) => {
@@ -143,7 +180,8 @@ fn execute_completion(
                 if !inspect_failure_reachable(member, finding.code) {
                     return Err(unreachable_execution_failure(finding.code));
                 }
-                return stopped_completion(planning, members, ir.members.len(), finding);
+                let completion = stopped_completion(planning, members, ir.members.len(), finding)?;
+                return finish_execution(planning, completion, retention.into_entries());
             }
         };
         if crc != member.declared_crc {
@@ -152,7 +190,8 @@ fn execute_completion(
                 format!("got {crc:08x} want {:08x}", member.declared_crc),
             )
             .on(&member.decoded_name);
-            return stopped_completion(planning, members, ir.members.len(), finding);
+            let completion = stopped_completion(planning, members, ir.members.len(), finding)?;
+            return finish_execution(planning, completion, retention.into_entries());
         }
         actual_total.consume(actual).map_err(|error| {
             let detail = match error {
@@ -165,6 +204,7 @@ fn execute_completion(
             };
             RecordError::new(RecordErrorKind::InvalidSemanticState, 0, detail)
         })?;
+        retention.finish_capture(&member.canonical_path, capture);
         members.push(MemberCompletion::Verified {
             actual_uncomp_size: actual,
             actual_crc: crc,
@@ -172,7 +212,7 @@ fn execute_completion(
         });
     }
 
-    encode_completion(
+    let completion = encode_completion(
         &CompletionRecord {
             operation_id: planning.record.binding.operation_id,
             request_id: planning.request_id,
@@ -182,7 +222,20 @@ fn execute_completion(
             findings: Vec::new(),
         },
         planning,
-    )
+    )?;
+    finish_execution(planning, completion, retention.into_entries())
+}
+
+fn finish_execution(
+    planning: &ValidatedPlanningRecord,
+    completion: Vec<u8>,
+    retention: BTreeMap<String, RetentionEntry>,
+) -> Result<ExecutionOutput, RecordError> {
+    let retained_content = retained_content::encode(planning, &completion, &retention)?;
+    Ok(ExecutionOutput {
+        completion,
+        retained_content,
+    })
 }
 
 fn stopped_completion(

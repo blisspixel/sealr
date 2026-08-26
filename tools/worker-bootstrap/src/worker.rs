@@ -26,6 +26,7 @@ const PHASE_SOURCE: u64 = 4;
 const PHASE_PROBE: u64 = 5;
 const PHASE_EXIT: u64 = 6;
 const PHASE_PLAN: u64 = 7;
+const SOURCE_RETAINED_BYTES: u64 = 30;
 
 pub(crate) fn entry(args: &[OsString]) -> Result<(), Box<dyn std::error::Error>> {
     if args.len() != 3 {
@@ -241,11 +242,18 @@ fn run(
                 format!("validating sealed plan failed: {error}"),
             )
         })?;
-    let validated_operation = sealr::__worker_lab::validate_inspect(
+    let retention = crate::semantic_retention_request().map_err(|error| {
+        protocol(
+            PHASE_PLAN,
+            format!("constructing semantic retention request failed: {error}"),
+        )
+    })?;
+    let validated_operation = sealr::__worker_lab::validate_inspect_retaining(
         File::from(source),
         source_frame.values[0],
         operation_id,
         plan.bytes(),
+        &retention,
     )
     .map_err(|error| {
         protocol(
@@ -313,6 +321,21 @@ fn run(
             format!("semantic completion is incomplete: {semantic_evidence:?}"),
         ));
     }
+    let retention_evidence = executed_operation.retention_evidence().map_err(|error| {
+        protocol(
+            PHASE_PROBE,
+            format!("revalidating retained content failed: {error}"),
+        )
+    })?;
+    if retention_evidence.requested_paths != 2
+        || retention_evidence.retained_members != 2
+        || retention_evidence.retained_bytes != SOURCE_RETAINED_BYTES
+    {
+        return Err(protocol(
+            PHASE_PROBE,
+            format!("retained-content evidence is incomplete: {retention_evidence:?}"),
+        ));
+    }
     let completion_payload = executed_operation.completion();
     let completion_descriptor =
         sealed::create(BlobRole::Completion, completion_payload).map_err(|error| {
@@ -340,18 +363,55 @@ fn run(
             "sealed completion bytes differ after validation",
         ));
     }
+    let retained_payload = executed_operation.retained_content();
+    let retained_descriptor =
+        sealed::create(BlobRole::RetainedContent, retained_payload).map_err(|error| {
+            protocol(
+                PHASE_PROBE,
+                format!("sealing retained content failed: {error}"),
+            )
+        })?;
+    let retained_total_len = sealed::total_len(retained_payload.len())
+        .ok_or_else(|| protocol(PHASE_PROBE, "retained-content length is invalid"))?;
+    let validated_retained = sealed::validate(
+        &retained_descriptor,
+        BlobRole::RetainedContent,
+        retained_total_len,
+    )
+    .map_err(|error| {
+        protocol(
+            PHASE_PROBE,
+            format!("revalidating sealed retained content failed: {error}"),
+        )
+    })?;
+    if validated_retained.bytes() != retained_payload {
+        return Err(protocol(
+            PHASE_PROBE,
+            "sealed retained-content bytes differ after validation",
+        ));
+    }
     mode.exit_at(FaultPoint::CompletionSeal);
 
+    let completion_fd = u32::try_from(completion_descriptor.as_raw_fd())
+        .map_err(|_| protocol(PHASE_PROBE, "completion descriptor is unrepresentable"))?;
+    let retained_fd = u32::try_from(retained_descriptor.as_raw_fd())
+        .map_err(|_| protocol(PHASE_PROBE, "retained descriptor is unrepresentable"))?;
+    let outside_errno = u32::try_from(outside_errno)
+        .map_err(|_| protocol(PHASE_PROBE, "outside errno is unrepresentable"))?;
     let mut result = Frame::new(Kind::Result, operation_id);
     result.flags = bootstrap.flags & FLAG_STAGE;
     result.values = [
         completion_total_len,
-        u64::from(source_byte),
-        outside_errno,
-        completion_descriptor.as_raw_fd() as u64,
+        retained_total_len,
+        u64::from(completion_fd) | (u64::from(retained_fd) << 32),
+        u64::from(source_byte) | (u64::from(outside_errno) << 8),
     ];
-    send_packet(control, result, &[completion_descriptor.as_fd()])
-        .map_err(|error| protocol(PHASE_PROBE, format!("sending result failed: {error}")))?;
+    send_packet(
+        control,
+        result,
+        &[completion_descriptor.as_fd(), retained_descriptor.as_fd()],
+    )
+    .map_err(|error| protocol(PHASE_PROBE, format!("sending result failed: {error}")))?;
     await_observation_checkpoint(control, mode, FaultPoint::Result, operation_id)?;
 
     mode.stall_at(StallPoint::ExitAckReceive);

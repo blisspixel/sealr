@@ -190,7 +190,7 @@ pub enum RetentionStatus {
     IntegrityMismatch,
 }
 
-enum RetentionEntry {
+pub(crate) enum RetentionEntry {
     Selected { expected_size: u64 },
     Retained(Vec<u8>),
     NotFound,
@@ -294,6 +294,10 @@ impl RetentionBuild {
             RetentionEntry::IntegrityMismatch
         };
         self.entries.insert(path.to_string(), entry);
+    }
+
+    pub(crate) fn into_entries(self) -> BTreeMap<String, RetentionEntry> {
+        self.entries
     }
 }
 
