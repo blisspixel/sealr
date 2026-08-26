@@ -412,6 +412,9 @@ pub(super) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
             ))
             .into());
         }
+        drop(cancelled);
+        drop(queued_cancel);
+        drop(active_cancel);
 
         let crash = capability
             .read(
