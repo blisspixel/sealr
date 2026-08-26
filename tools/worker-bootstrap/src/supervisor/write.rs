@@ -257,7 +257,7 @@ fn run_case(
     configure_supervisor_control(&control)?;
     let child = spawn_child(child_socket, mode)?;
     fixture.revoke_cleanup();
-    let child = match ChildBoundary::bind(child) {
+    let child = match ChildBoundary::bind_authenticated(child, &control, mode) {
         Ok(child) => child,
         Err(error) => {
             if error.reaped {

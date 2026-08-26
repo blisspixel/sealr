@@ -21,6 +21,8 @@ pub(crate) enum Kind {
     MemberRead = 12,
     MemberReadAccepted = 13,
     MemberReadResult = 14,
+    HelperChallenge = 15,
+    HelperHello = 16,
 }
 
 impl TryFrom<u8> for Kind {
@@ -42,6 +44,8 @@ impl TryFrom<u8> for Kind {
             12 => Ok(Self::MemberRead),
             13 => Ok(Self::MemberReadAccepted),
             14 => Ok(Self::MemberReadResult),
+            15 => Ok(Self::HelperChallenge),
+            16 => Ok(Self::HelperHello),
             _ => Err(FrameError::Kind(value)),
         }
     }
@@ -177,6 +181,8 @@ mod tests {
             Kind::MemberRead,
             Kind::MemberReadAccepted,
             Kind::MemberReadResult,
+            Kind::HelperChallenge,
+            Kind::HelperHello,
         ] {
             let frame = Frame::new(kind, OPERATION_ID);
             assert_eq!(Frame::decode(&frame.encode()), Ok(frame));

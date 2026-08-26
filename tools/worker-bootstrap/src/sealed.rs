@@ -56,6 +56,7 @@ pub(crate) fn create(role: BlobRole, payload: &[u8]) -> Result<OwnedFd, BlobErro
     Ok(fd)
 }
 
+#[cfg(feature = "lab")]
 pub(crate) fn create_unsealed_for_conformance(
     role: BlobRole,
     payload: &[u8],

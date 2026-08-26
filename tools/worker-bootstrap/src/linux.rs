@@ -89,6 +89,7 @@ pub(crate) fn send_packet<Fd: AsFd>(
     Ok(())
 }
 
+#[cfg(feature = "lab")]
 pub(crate) fn send_raw_conformance_packet<Fd: AsFd>(
     socket: Fd,
     bytes: &[u8],
@@ -363,6 +364,7 @@ pub(crate) enum TransportError {
 }
 
 impl TransportError {
+    #[cfg(feature = "lab")]
     pub(crate) fn is_would_block(&self) -> bool {
         match self {
             Self::Errno(error) => *error == rustix::io::Errno::AGAIN,

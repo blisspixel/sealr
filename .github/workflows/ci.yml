@@ -92,7 +92,36 @@ jobs:
           --ignored --exact --nocapture --test-threads=1
 
       - name: Verify Linux authority bootstrap
-        run: cargo run --locked --release -p sealr-worker-bootstrap-lab -- conformance
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --locked --release -p sealr-worker-bootstrap-lab \
+            --no-default-features --bin sealr-worker \
+            --target x86_64-unknown-linux-musl
+          worker="${PWD}/target/x86_64-unknown-linux-musl/release/sealr-worker"
+          readelf --file-header "${worker}" | grep --extended-regexp --quiet \
+            'Class:[[:space:]]+ELF64'
+          readelf --file-header "${worker}" | grep --extended-regexp --quiet \
+            'Machine:[[:space:]]+Advanced Micro Devices X86-64'
+          if readelf --program-headers "${worker}" | grep --quiet 'INTERP'; then
+            echo 'production helper must not contain a program interpreter' >&2
+            exit 1
+          fi
+          if "${worker}" >/dev/null 2>&1; then
+            echo 'production helper accepted direct invocation' >&2
+            exit 1
+          fi
+          if "${worker}" --help >/dev/null 2>&1; then
+            echo 'production helper exposed a command surface' >&2
+            exit 1
+          fi
+          worker_bytes="$(stat --format=%s "${worker}")"
+          worker_sha256="$(sha256sum "${worker}" | cut --delimiter=' ' --fields=1)"
+          cargo run --locked --release -p sealr-worker-bootstrap-lab \
+            --features lab --bin sealr-worker-bootstrap-lab -- \
+            conformance --worker "${worker}" --bytes "${worker_bytes}" \
+            --sha256 "${worker_sha256}"
 
       - name: Compile fuzz targets
         run: cargo check --locked --manifest-path fuzz/Cargo.toml --bins
