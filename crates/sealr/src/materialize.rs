@@ -953,11 +953,6 @@ impl CapabilityMaterializer {
         StageWriteRoot::try_clone_from(self.root()?, test_root_path)
     }
 
-    #[cfg(test)]
-    fn open_or_create_directories(&self, parts: &[String]) -> Result<CapDir, Finding> {
-        self.stage_writer()?.open_or_create_directories(parts)
-    }
-
     fn open_existing_directories(&self, parts: &[String]) -> Result<CapDir, Finding> {
         let mut current = self.root()?.try_clone().map_err(|error| {
             Finding::error(
@@ -2002,6 +1997,8 @@ mod tests {
         let dest = temp_dest("private-stage-dacl");
         let mut materializer = CapabilityMaterializer::create(&dest, true).unwrap();
         let directory = materializer
+            .stage_writer()
+            .unwrap()
             .open_or_create_directories(&["nested".to_owned()])
             .unwrap();
         let mut file = materializer
