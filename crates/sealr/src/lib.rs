@@ -31,6 +31,14 @@ pub fn __fuzz_semantic_records(input: &[u8]) {
     semantic_record::exercise_fuzz_input(input);
 }
 
+/// Repository-only bridge used by the Linux worker conformance lab.
+///
+/// This module is absent unless the private `__internal-worker-lab` feature is
+/// selected. It is not a supported runtime or public API surface.
+#[cfg(feature = "__internal-worker-lab")]
+#[doc(hidden)]
+pub use semantic_record::worker_lab as __worker_lab;
+
 pub use apply::{
     apply, apply_with_options, ApplyOptions, EnvMeta, MemberView, Outcome, PolicyMeta, Receipt,
     Request, Source, SourceMeta, ToolMeta, Verdict, View,

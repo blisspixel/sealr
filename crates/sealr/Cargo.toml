@@ -11,6 +11,9 @@ publish = false
 [features]
 # Enables only the external cargo-fuzz entry point. This is not a shipped API.
 __internal-fuzzing = []
+# Enables only the repository Linux worker conformance bridge. This is not a
+# shipped API or a supported runtime activation surface.
+__internal-worker-lab = []
 
 [dependencies]
 cap-fs-ext.workspace = true
