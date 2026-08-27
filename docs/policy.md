@@ -70,7 +70,7 @@ The following constructor fields exist so the receipt-hashed `Policy` object kee
 - `setuid`: new files do not preserve archive mode bits.
 - `nested_depth`: nested archives are never recursively opened.
 - `ambiguity`: known structural ambiguity is always rejected by the interpretation profile.
-- `case_fold_collision`: ASCII case-fold collisions are always rejected by the path grammar.
+- `case_fold_collision`: collisions under the interpretation profile's exact case-fold relation are always rejected by the path grammar.
 - `magic_vs_extension`: the parser uses magic and does not interpret filename extensions.
 - `encrypted`: encrypted ZIP members are always denied. The admission check covers the traditional, strong-encryption, and masked-header indicators defined by the ZIP general-purpose flags.
 

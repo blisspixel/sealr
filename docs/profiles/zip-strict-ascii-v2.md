@@ -53,7 +53,7 @@ This rule is intentionally stricter than v1, which rejects ZIP64 (`0x0001`) and 
 
 ## Name rule
 
-Every raw member-name byte must be ASCII and flag bit 11 must be clear. ASCII is a strict subset of the wheel specification's UTF-8 name language, but this profile is a generic ZIP boundary rather than the repository-only `sealr.profile.zip.wheel-utf8.v1` research profile. Non-ASCII input requires a separately selected profile with its own UTF-8 vectors and compatibility evidence.
+Every raw member-name byte must be ASCII and flag bit 11 must be clear. ASCII is a strict subset of the wheel specification's UTF-8 name language. Non-ASCII input requires the separately selected [`sealr.profile.zip.portable-utf8.v1`](zip-portable-utf8-v1.md) profile with its own UTF-8 vector and compatibility evidence.
 
 ## Compatibility evidence
 
@@ -75,4 +75,4 @@ The selected profile is recorded in `ArchiveIR` and receipt interpretation ident
 ## Normative references
 
 - [PKWARE APPNOTE 6.3.10](https://pkware.cachefly.net/webdocs/casestudies/APPNOTE.TXT) defines the ZIP32 records, general-purpose bits, methods, descriptors, and extra-field mechanism classified by this profile.
-- [Python wheel binary distribution format](https://packaging.python.org/en/latest/specifications/binary-distribution-format/) establishes the distinct UTF-8 requirement implemented by the separately named repository-only wheel profile.
+- [Python wheel binary distribution format](https://packaging.python.org/en/latest/specifications/binary-distribution-format/) establishes the distinct UTF-8 requirement consumed through the portable profile.

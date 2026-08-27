@@ -26,6 +26,7 @@ mod worker_protocol;
 #[allow(dead_code)]
 mod semantic_record;
 mod verified;
+pub mod wheel;
 mod zip;
 
 /// Exercises the private semantic-record decoders from the separate fuzz
@@ -103,15 +104,19 @@ pub use apply::{
 pub use findings::{Finding, FindingCode, Severity};
 pub use identity::{content_root, layout_root, OutcomeIdentities, TreeRoot, TREE_ENCODING_ID};
 pub use ir::{
+    zip_portable_utf8_v1_canonical_bytes, zip_portable_utf8_v1_digest,
     zip_strict_ascii_v1_canonical_bytes, zip_strict_ascii_v1_digest,
     zip_strict_ascii_v2_canonical_bytes, zip_strict_ascii_v2_digest,
     zip_wheel_utf8_v1_canonical_bytes, zip_wheel_utf8_v1_digest, ArchiveCovering, ArchiveIR,
     ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite, IrMember, MemberContainerFacts,
     MemberKind, MemberSourceRanges, MemberVerification, NormalizationAction,
-    ZipInterpretationProfile, ARCHIVE_IR_SCHEMA, ZIP_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2,
-    ZIP_WHEEL_UTF8_V1,
+    ZipInterpretationProfile, ARCHIVE_IR_SCHEMA, ZIP_PORTABLE_UTF8_V1, ZIP_STRICT_ASCII_V1,
+    ZIP_STRICT_ASCII_V2, ZIP_WHEEL_UTF8_V1,
 };
-pub use jail::{jail_name, jail_relative, join_under_dest, JailedName};
+pub use jail::{
+    jail_name, jail_relative, join_under_dest, JailedName, PORTABLE_NAME_MAX_COMPONENT_UTF16_UNITS,
+    PORTABLE_NAME_MAX_COMPONENT_UTF8_BYTES,
+};
 pub use materialize::{MaterializationMeta, WindowsMaterializationEvidence};
 pub use outcome::{
     AdmissionStatus, DigestHex, EffectStatus, InterpretationStatus, SourceDigest, StoppingPhase,

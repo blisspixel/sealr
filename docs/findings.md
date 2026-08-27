@@ -48,9 +48,9 @@ Unknown error codes must be treated as rejection by consumers.
 | `path.escape` | Internal containment join failed. |
 | `path.depth` | Normalized depth exceeds policy. |
 | `path.nul` | NUL byte in a decoded name. |
-| `path.invalid_char` | ASCII control, backslash, or a portable Windows-illegal character. |
-| `path.unicode` | Non-ASCII path rejected until canonical Unicode normalization is implemented. |
-| `path.case_fold` | ASCII case-fold collision or case-fold topology conflict. |
+| `path.invalid_char` | Character denied by the selected profile, including controls, backslash, portable Windows-illegal characters, and Portable v1's pinned non-ASCII whitespace, bidi-control, assigned-repertoire, and private-use rules. |
+| `path.unicode` | Path is not in the selected profile's canonical Unicode form, including a non-NFC path under portable UTF-8 v1. |
+| `path.case_fold` | Collision or topology conflict under the selected profile's case-fold relation. |
 | `path.conflict` | A path is both a file and a directory ancestor or descendant. |
 
 ### Materialization
@@ -110,7 +110,7 @@ Unknown error codes must be treated as rejection by consumers.
 
 ## Reserved registry work
 
-The pinned 5,927-file upstream construction corpus is already enforced. B3 canonicalization and B4 case constructions currently map to the specific implemented `path.*` codes for the accepted ASCII subset. Phase 0.1 still needs to decide whether the future Unicode and CP437 model requires aliases or dedicated `zip.diff.b3_canon` and `zip.diff.b4_case` codes.
+The pinned 5,927-file upstream construction corpus is already enforced. B3 canonicalization and B4 case constructions map to the specific implemented `path.*` codes for the selected ASCII or portable UTF-8 profile. A future CP437 profile must decide whether its additional collision model needs aliases or dedicated `zip.diff.b3_canon` and `zip.diff.b4_case` codes.
 
 TAR link, permission, dictionary, polyglot, signing, and sandbox findings will be added only with their implementations and tests.
 

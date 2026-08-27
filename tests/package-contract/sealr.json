@@ -47,12 +47,18 @@
     "src/worker_protocol/linux.rs",
     "src/worker_protocol/mod.rs",
     "src/worker_protocol/sealed.rs",
+    "src/wheel/evaluate.rs",
+    "src/wheel/identity.rs",
+    "src/wheel/mod.rs",
+    "src/wheel/model.rs",
+    "src/wheel/parse.rs",
     "src/zip.rs",
     "tests/bounded_path_memory.rs",
     "tests/conformance/identity-v1.json",
     "tests/conformance/semantic-shadow-v1.json",
     "tests/conformance/semantic-shadow-v2.json",
     "tests/golden_identity.rs",
-    "tests/public_api.rs"
+    "tests/public_api.rs",
+    "tests/wheel_consumer_api.rs"
   ]
 }

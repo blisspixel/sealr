@@ -18,7 +18,10 @@ use crate::ir::{
     MemberKind, MemberSourceRanges, MemberVerification, NormalizationAction,
     ZipInterpretationProfile,
 };
-use crate::jail::{jail_name_fallible, portable_case_fold, JailNameError, JailedName};
+use crate::jail::{
+    jail_name_fallible, jail_name_fallible_for_profile, portable_name_violation, profile_case_fold,
+    JailNameError, JailedName,
+};
 use crate::outcome::{
     AdmissionStatus, InterpretationStatus, SemanticAxes, SourceDigest, StoppingPhase,
     VerificationStatus, ViewCompleteness,
@@ -699,6 +702,7 @@ fn encode_binding_validated(
         ZipInterpretationProfile::StrictAsciiV1 => 1,
         ZipInterpretationProfile::StrictAsciiV2 => 2,
         ZipInterpretationProfile::WheelUtf8V1 => 3,
+        ZipInterpretationProfile::PortableUtf8V1 => 4,
     });
     encoder.fixed(&binding.profile_sha256);
     encoder.string(&binding.policy_id)?;
@@ -771,6 +775,7 @@ fn decode_binding(cursor: &mut Cursor<'_>) -> Result<InvocationBinding, RecordEr
         1 => ZipInterpretationProfile::StrictAsciiV1,
         2 => ZipInterpretationProfile::StrictAsciiV2,
         3 => ZipInterpretationProfile::WheelUtf8V1,
+        4 => ZipInterpretationProfile::PortableUtf8V1,
         _ => {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidEnum,
@@ -1759,8 +1764,8 @@ fn validate_pending_ir(ir: &ArchiveIR, binding: &InvocationBinding) -> Result<()
         expected_central = checked_end(member.source_ranges.central_header)?;
     }
 
-    validate_path_topology(&mut paths, false)?;
-    validate_path_topology(&mut paths, true)?;
+    validate_path_topology(&mut paths, None)?;
+    validate_path_topology(&mut paths, Some(binding.profile))?;
 
     if expected_central != checked_end(ir.covering.central_directory)? {
         return Err(RecordError::new(
@@ -1879,11 +1884,23 @@ fn validate_pending_member(
         }
         member.decoded_name.as_str()
     };
-    let jailed = validate_jailed_name(
+    let jailed = jail_name_fallible_for_profile(
         jailed_input,
         binding.budget.max_path_depth,
-        "member name does not satisfy the bound path grammar",
-    )?;
+        binding.profile,
+    )
+    .map_err(|error| match error {
+        JailNameError::Invalid { .. } => RecordError::new(
+            RecordErrorKind::InvalidString,
+            0,
+            "member name does not satisfy the bound path grammar",
+        ),
+        JailNameError::AllocationFailed => RecordError::new(
+            RecordErrorKind::AllocationFailed,
+            0,
+            "bounded path-validation allocation failed",
+        ),
+    })?;
     if jailed.components.len() > MAX_COMPONENTS
         || jailed.components != member.components
         || !components_equal_path(&jailed.components, &member.canonical_path)
@@ -1942,6 +1959,17 @@ fn validate_pending_member(
             RecordErrorKind::InvalidSemanticState,
             0,
             "wheel UTF-8 IR violates its flag or normalization contract",
+        ));
+    }
+    if binding.profile == ZipInterpretationProfile::PortableUtf8V1
+        && ((member.flags & !0x0808) != 0
+            || (!member.raw_name_bytes.is_ascii() && (member.flags & 0x0800) == 0)
+            || portable_name_violation(&jailed).is_some())
+    {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "portable UTF-8 IR violates its flag or canonical-name contract",
         ));
     }
     if is_dir
@@ -2039,7 +2067,9 @@ fn validate_extra_fields(
     }
     if matches!(
         profile,
-        ZipInterpretationProfile::StrictAsciiV2 | ZipInterpretationProfile::WheelUtf8V1
+        ZipInterpretationProfile::StrictAsciiV2
+            | ZipInterpretationProfile::PortableUtf8V1
+            | ZipInterpretationProfile::WheelUtf8V1
     ) && !member.extra_fields.is_empty()
     {
         return Err(RecordError::new(
@@ -2232,14 +2262,14 @@ fn member_record_end(ranges: &MemberSourceRanges) -> Result<u64, RecordError> {
 
 fn validate_path_topology(
     paths: &mut [(&str, bool)],
-    ascii_folded: bool,
+    folded_profile: Option<ZipInterpretationProfile>,
 ) -> Result<(), RecordError> {
-    paths.sort_unstable_by(|left, right| path_compare(left.0, right.0, ascii_folded));
+    paths.sort_unstable_by(|left, right| path_compare(left.0, right.0, folded_profile));
     for pair in paths.windows(2) {
         let path = pair[0].0;
         let candidate = pair[1].0;
-        if path_equal(path, candidate, ascii_folded) {
-            let detail = if ascii_folded {
+        if path_equal(path, candidate, folded_profile) {
+            let detail = if folded_profile.is_some() {
                 "IR contains a case-fold collision"
             } else {
                 "IR contains a duplicate canonical path"
@@ -2255,7 +2285,7 @@ fn validate_path_topology(
         for (separator, _) in candidate.match_indices('/') {
             let ancestor = &candidate[..separator];
             let Ok(ancestor_index) =
-                paths.binary_search_by(|entry| path_compare(entry.0, ancestor, ascii_folded))
+                paths.binary_search_by(|entry| path_compare(entry.0, ancestor, folded_profile))
             else {
                 continue;
             };
@@ -2271,20 +2301,22 @@ fn validate_path_topology(
     Ok(())
 }
 
-fn path_compare(left: &str, right: &str, ascii_folded: bool) -> Ordering {
-    if ascii_folded {
-        portable_case_fold(left).cmp(&portable_case_fold(right))
-    } else {
-        left.cmp(right)
-    }
+fn path_compare(
+    left: &str,
+    right: &str,
+    folded_profile: Option<ZipInterpretationProfile>,
+) -> Ordering {
+    folded_profile.map_or_else(
+        || left.cmp(right),
+        |profile| profile_case_fold(left, profile).cmp(&profile_case_fold(right, profile)),
+    )
 }
 
-fn path_equal(left: &str, right: &str, ascii_folded: bool) -> bool {
-    if ascii_folded {
-        portable_case_fold(left) == portable_case_fold(right)
-    } else {
-        left == right
-    }
+fn path_equal(left: &str, right: &str, folded_profile: Option<ZipInterpretationProfile>) -> bool {
+    folded_profile.map_or_else(
+        || left == right,
+        |profile| profile_case_fold(left, profile) == profile_case_fold(right, profile),
+    )
 }
 
 fn encode_planning(record: &PlanningRecord) -> Result<Vec<u8>, RecordError> {
@@ -7147,19 +7179,37 @@ mod tests {
     fn path_topology_rejects_interleaved_file_ancestors() {
         let mut exact = [("a", false), ("a-foo", false), ("a/child", false)];
         assert_eq!(
-            validate_path_topology(&mut exact, false).unwrap_err().kind,
+            validate_path_topology(&mut exact, None).unwrap_err().kind,
             RecordErrorKind::InvalidSemanticState
         );
 
         let mut folded = [("A", false), ("a-foo", false), ("a/child", false)];
         assert_eq!(
-            validate_path_topology(&mut folded, true).unwrap_err().kind,
+            validate_path_topology(&mut folded, Some(ZipInterpretationProfile::StrictAsciiV1))
+                .unwrap_err()
+                .kind,
             RecordErrorKind::InvalidSemanticState
         );
 
         let mut directory = [("a", true), ("a-foo", false), ("a/child", false)];
-        validate_path_topology(&mut directory, false)
+        validate_path_topology(&mut directory, None)
             .expect("a directory may precede descendants despite an interleaving sibling");
+
+        let mut portable_sigma = [("\u{3c3}", false), ("\u{3c2}", false)];
+        assert_eq!(
+            validate_path_topology(
+                &mut portable_sigma,
+                Some(ZipInterpretationProfile::PortableUtf8V1)
+            )
+            .unwrap_err()
+            .kind,
+            RecordErrorKind::InvalidSemanticState
+        );
+        validate_path_topology(
+            &mut portable_sigma,
+            Some(ZipInterpretationProfile::WheelUtf8V1),
+        )
+        .expect("the immutable research profile retains its lowercase-only model");
     }
 
     #[test]

@@ -56,7 +56,7 @@ IDs are from the paper §5.2. `#` = new or newly extended by You et al.
 |---|---|---|---|
 | A1 | Compression method confusion | CDH method ≠ LFH method (often one is “stored”) | **Deny** if CDH and LFH methods differ. Finding `zip.diff.a1_method`. |
 | A2 | File size confusion `#` | Compressed/uncompressed size in CDH, LFH, data descriptor, one or more ZIP64 extras | **Never trust declared size.** Measure actual bytes. Deny if any declared size used for allocation disagrees with actual, or if CDH/LFH/descriptor/ZIP64 sizes disagree. Finding `zip.diff.a2_size`. |
-| A3 | Filename confusion `#` | CDH name vs LFH name vs Info-ZIP Unicode Path extra (UP), version/CRC32/flag 11 games | **CD-first.** Raw LFH and CDH names must match. Alternate Unicode Path extras are rejected until one canonical Unicode representation exists. Finding `zip.diff.a3_name`. |
+| A3 | Filename confusion `#` | CDH name vs LFH name vs Info-ZIP Unicode Path extra (UP), version/CRC32/flag 11 games | **CD-first.** Raw LFH and CDH names must match. All current closed profiles deny Unicode Path extras. Portable UTF-8 v1 gives member-name bytes one strict UTF-8 NFC meaning. Finding `zip.diff.a3_name`. |
 | A4 | Fake directory `#` | Trailing `/` vs `\`, external attributes (DOS vs Unix), `version made by` | `/` and zero sizes define a directory, and external type attributes must not contradict it. Backslash and non-regular external types are rejected. Finding `zip.diff.a4_dir`. |
 | A5 | Fake encryption `#` | Encryption-related flags in CDH vs LFH; “first member encrypted ⇒ skip archive”; strong-encryption or masked-header bits without the traditional bit | CDH/LFH flags MUST agree. Admission refuses traditional bit 0, strong-encryption bit 6, and masked-header bit 13. Findings `zip.diff.a5_crypt` and `zip.encrypted`. |
 
@@ -99,9 +99,9 @@ CRC32 is **not** authentication (paper: easy to pad while preserving CRC). We st
 
 ### Wheel consumer threats
 
-Wheel admission adds a second semantic layer above the ZIP container. The controls below are implemented in the repository-only laboratory but are not Alpha.6 behavior or supported wheel admission. Their full contract is in [Python wheel consumer profile v1](profiles/python-wheel-v1.md).
+Wheel evaluation adds a second semantic layer above the ZIP container. The controls below are supported Alpha.8 preview behavior in `sealr::wheel`; the Alpha.7 laboratory preserves the external installer proof. Their full contract is in [Python wheel consumer profile v1](profiles/python-wheel-v1.md).
 
-| Attack | Ambiguity or effect | Planned control |
+| Attack | Ambiguity or effect | Supported-preview control |
 |---|---|---|
 | Missing, duplicate, or phantom `RECORD` rows | ZIP members and the hashed inventory disagree | Require one canonical `RECORD`, one row per admitted member, no unknown rows, and verified hashes and sizes except for specification-defined self and signature-file exemptions |
 | Traversing or colliding `RECORD` paths | The metadata inventory names a different target from the archive member | Parse every row through the same wheel path grammar and reject normalized, case-folded, and Unicode collisions |
@@ -123,7 +123,7 @@ You et al. §7.2, seven strategies:
 | **Normalize** (extract + repack to an unambiguous ZIP) | Phase 3. Powerful; must not become a second parser. Normalize **with this engine**, then the output is the artifact. |
 | Identify ambiguous patterns | **Current strict default.** Known ambiguous or malformed structure is denied. A future compatibility profile must be separately versioned rather than acting as an insecure fallback. |
 | Incorporate multiple parsers | Research/CI only (ZipDiff corpus). Not in the hot path. |
-| Fix unique/outlier behaviors | A versioned interpretation specification and executable behavior must agree. Current main has three preview profile identities, including one repository-only wheel research profile, but none is yet stable. |
+| Fix unique/outlier behaviors | A versioned interpretation specification and executable behavior must agree. Current main has four preview profile identities, including one supported portable UTF-8 profile and one immutable wheel research profile, but none is yet stable. |
 | Better format design | Later (next-gen container). |
 
 Default posture: **reject ambiguity**. Future SFX or APK support would require separate named interpretation and consumer profiles recorded in evidence, never an `--insecure` fallback.
@@ -132,6 +132,6 @@ Default posture: **reject ambiguity**. Future SFX or APK support would require s
 
 ## What we are not
 
-Sealr is not an antivirus or package inventory system. It does not claim CRC is a signature and does not run 50 parsers during an invocation. Alpha.6 is one strict parser with selectable versioned rules that returns a structured finding at the deterministic refusal point. A rejected view may be partial and must not be treated as a complete inventory.
+Sealr is not an antivirus or package inventory system. It does not claim CRC is a signature and does not run 50 parsers during an invocation. Alpha.8 is one strict parser with selectable versioned rules that returns a structured finding at the deterministic refusal point. A rejected view may be partial and must not be treated as a complete inventory.
 
 Property tests, fuzzing, model checking, native race stress, and release provenance support different claims. None alone establishes unique interpretation, complete filesystem race freedom, or a formally verified extractor. Every assurance result is scoped to its input domain, model, platform, tool version, and stated assumptions.

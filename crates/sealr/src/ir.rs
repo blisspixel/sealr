@@ -1,5 +1,6 @@
 use serde::Serialize;
 
+use crate::jail::{PORTABLE_PATH_GRAMMAR_ID, PORTABLE_RESERVED_NAMES_ID};
 use crate::outcome::SourceDigest;
 use crate::policy::hex_sha256;
 use crate::zip::ZipMember;
@@ -7,6 +8,7 @@ use crate::zip::ZipMember;
 pub const ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.v1";
 pub const ZIP_STRICT_ASCII_V1: &str = "sealr.profile.zip.strict-ascii.v1";
 pub const ZIP_STRICT_ASCII_V2: &str = "sealr.profile.zip.strict-ascii.v2";
+pub const ZIP_PORTABLE_UTF8_V1: &str = "sealr.profile.zip.portable-utf8.v1";
 pub const ZIP_WHEEL_UTF8_V1: &str = "sealr.profile.zip.wheel-utf8.v1";
 
 const DENIED_EXTRA_ZIP64: u16 = 0x0001;
@@ -18,6 +20,10 @@ const DENIED_EXTRA_UNICODE_PATH: u16 = 0x7075;
 /// unknown flag bits and records unknown extra fields as ignored. New callers
 /// that need a closed interpretation contract should select `StrictAsciiV2`,
 /// which permits only flag bit 3 and denies every extra field.
+/// `PortableUtf8V1` is the supported preview Unicode language. It accepts
+/// strict UTF-8 names, requires bit 11 for non-ASCII names, permits data
+/// descriptors, denies every extra field, and requires canonical portable
+/// paths under fixed component limits.
 /// `WheelUtf8V1` is a closed, research-only wheel container language. It
 /// permits only the UTF-8 flag, requires that flag for non-ASCII names, denies
 /// data descriptors and every extra field, and requires NFC paths.
@@ -27,6 +33,7 @@ pub enum ZipInterpretationProfile {
     #[default]
     StrictAsciiV1,
     StrictAsciiV2,
+    PortableUtf8V1,
     WheelUtf8V1,
 }
 
@@ -35,6 +42,7 @@ impl ZipInterpretationProfile {
         match self {
             Self::StrictAsciiV1 => ZIP_STRICT_ASCII_V1,
             Self::StrictAsciiV2 => ZIP_STRICT_ASCII_V2,
+            Self::PortableUtf8V1 => ZIP_PORTABLE_UTF8_V1,
             Self::WheelUtf8V1 => ZIP_WHEEL_UTF8_V1,
         }
     }
@@ -43,6 +51,7 @@ impl ZipInterpretationProfile {
         match self {
             Self::StrictAsciiV1 => zip_strict_ascii_v1_digest(),
             Self::StrictAsciiV2 => zip_strict_ascii_v2_digest(),
+            Self::PortableUtf8V1 => zip_portable_utf8_v1_digest(),
             Self::WheelUtf8V1 => zip_wheel_utf8_v1_digest(),
         }
     }
@@ -145,6 +154,14 @@ impl MemberContainerFacts {
     /// Unix mode when the ZIP creator system explicitly identifies Unix.
     pub fn unix_mode(self) -> Option<u16> {
         (self.creator_system == 3).then_some((self.external_attributes >> 16) as u16)
+    }
+
+    /// Whether Unix creator metadata describes an executable regular file.
+    pub fn unix_regular_executable(self) -> bool {
+        let Some(mode) = self.unix_mode() else {
+            return false;
+        };
+        mode & 0o170000 == 0o100000 && mode & 0o111 != 0
     }
 
     /// Executable disposition used by PyPA installer 0.7.0 WheelFile.
@@ -340,6 +357,162 @@ struct ZipWheelUtf8V1Profile {
     redundant_metadata: &'static str,
 }
 
+#[derive(Clone, Debug, Serialize)]
+struct ZipPortableUtf8V1Profile {
+    schema: &'static str,
+    status: &'static str,
+    format: &'static str,
+    methods: [u16; 2],
+    general_purpose_bits: [GeneralPurposeBitRule; 16],
+    extra_fields_semantic: [u16; 0],
+    extra_fields_permitted_nonsemantic: [u16; 0],
+    extra_fields_other: &'static str,
+    names: &'static str,
+    legacy_encoding: &'static str,
+    unicode_repertoire_version: &'static str,
+    unicode_repertoire: &'static str,
+    unicode_repertoire_implementation: &'static str,
+    character_restrictions: &'static str,
+    path_grammar: &'static str,
+    reserved_names: &'static str,
+    normalization_unicode_version: &'static str,
+    normalization_implementation: &'static str,
+    case_folding_unicode_version: &'static str,
+    case_folding_implementation: &'static str,
+    normalization: &'static str,
+    case_collision: &'static str,
+    component_limit: &'static str,
+    directories: &'static str,
+    redundant_metadata: &'static str,
+}
+
+fn zip_portable_utf8_v1_profile() -> ZipPortableUtf8V1Profile {
+    ZipPortableUtf8V1Profile {
+        schema: ZIP_PORTABLE_UTF8_V1,
+        status: "supported-preview",
+        format: "zip32",
+        methods: [0, 8],
+        general_purpose_bits: [
+            GeneralPurposeBitRule {
+                bit: 0,
+                mask: 0x0001,
+                disposition: "denied",
+                meaning: "traditional-encryption",
+            },
+            GeneralPurposeBitRule {
+                bit: 1,
+                mask: 0x0002,
+                disposition: "denied",
+                meaning: "method-dependent-option-1",
+            },
+            GeneralPurposeBitRule {
+                bit: 2,
+                mask: 0x0004,
+                disposition: "denied",
+                meaning: "method-dependent-option-2",
+            },
+            GeneralPurposeBitRule {
+                bit: 3,
+                mask: 0x0008,
+                disposition: "semantic",
+                meaning: "data-descriptor",
+            },
+            GeneralPurposeBitRule {
+                bit: 4,
+                mask: 0x0010,
+                disposition: "denied",
+                meaning: "enhanced-deflating",
+            },
+            GeneralPurposeBitRule {
+                bit: 5,
+                mask: 0x0020,
+                disposition: "denied",
+                meaning: "compressed-patched-data",
+            },
+            GeneralPurposeBitRule {
+                bit: 6,
+                mask: 0x0040,
+                disposition: "denied",
+                meaning: "strong-encryption",
+            },
+            GeneralPurposeBitRule {
+                bit: 7,
+                mask: 0x0080,
+                disposition: "denied",
+                meaning: "unused",
+            },
+            GeneralPurposeBitRule {
+                bit: 8,
+                mask: 0x0100,
+                disposition: "denied",
+                meaning: "unused",
+            },
+            GeneralPurposeBitRule {
+                bit: 9,
+                mask: 0x0200,
+                disposition: "denied",
+                meaning: "unused",
+            },
+            GeneralPurposeBitRule {
+                bit: 10,
+                mask: 0x0400,
+                disposition: "denied",
+                meaning: "unused",
+            },
+            GeneralPurposeBitRule {
+                bit: 11,
+                mask: 0x0800,
+                disposition: "semantic",
+                meaning: "utf8-name",
+            },
+            GeneralPurposeBitRule {
+                bit: 12,
+                mask: 0x1000,
+                disposition: "denied",
+                meaning: "reserved-enhanced-compression",
+            },
+            GeneralPurposeBitRule {
+                bit: 13,
+                mask: 0x2000,
+                disposition: "denied",
+                meaning: "masked-local-header",
+            },
+            GeneralPurposeBitRule {
+                bit: 14,
+                mask: 0x4000,
+                disposition: "denied",
+                meaning: "alternate-streams",
+            },
+            GeneralPurposeBitRule {
+                bit: 15,
+                mask: 0x8000,
+                disposition: "denied",
+                meaning: "reserved",
+            },
+        ],
+        extra_fields_semantic: [],
+        extra_fields_permitted_nonsemantic: [],
+        extra_fields_other: "denied",
+        names: "strict-utf8-nonascii-requires-bit11",
+        legacy_encoding: "nonascii-without-bit11-denied-cp437-separate-profile",
+        unicode_repertoire_version: "16.0.0",
+        unicode_repertoire: "public-assigned-no-private-use",
+        unicode_repertoire_implementation: "unicode-general-category-1.1.0-exact",
+        character_restrictions: "unicode-16-general-category-cc;white-space-0085-00a0-1680-2000..200a-2028-2029-202f-205f-3000;bidi-control-061c-200e-200f-202a..202e-2066..2069",
+        path_grammar: PORTABLE_PATH_GRAMMAR_ID,
+        reserved_names: PORTABLE_RESERVED_NAMES_ID,
+        normalization_unicode_version: "17.0.0-stable-for-16.0.0-repertoire",
+        normalization_implementation: "unicode-normalization-0.1.25-exact",
+        case_folding_unicode_version: "16.0.0",
+        case_folding_implementation: "caseless-0.2.2-exact",
+        normalization: "unicode-17-full-nfc-over-unicode-16-repertoire-no-dot-component",
+        case_collision: "unicode-16-full-default-case-fold-then-nfc",
+        component_limit: "utf8-bytes<=255-and-utf16-code-units<=255",
+        directories: "trailing-slash-store-empty-crc32-zero",
+        redundant_metadata: "exact-lfh-cdh-optional-descriptor",
+    }
+}
+
 fn zip_wheel_utf8_v1_profile() -> ZipWheelUtf8V1Profile {
     ZipWheelUtf8V1Profile {
         schema: ZIP_WHEEL_UTF8_V1,
@@ -463,6 +636,10 @@ pub fn zip_strict_ascii_v2_digest() -> String {
     hex_sha256(&zip_strict_ascii_v2_canonical_bytes())
 }
 
+pub fn zip_portable_utf8_v1_digest() -> String {
+    hex_sha256(&zip_portable_utf8_v1_canonical_bytes())
+}
+
 pub fn zip_wheel_utf8_v1_digest() -> String {
     hex_sha256(&zip_wheel_utf8_v1_canonical_bytes())
 }
@@ -475,6 +652,11 @@ pub fn zip_strict_ascii_v1_canonical_bytes() -> Vec<u8> {
 /// Canonical JSON bytes hashed by the v2 interpretation identity.
 pub fn zip_strict_ascii_v2_canonical_bytes() -> Vec<u8> {
     serde_json::to_vec(&zip_strict_ascii_v2_profile()).expect("profile serializes")
+}
+
+/// Canonical JSON bytes hashed by the portable UTF-8 interpretation.
+pub fn zip_portable_utf8_v1_canonical_bytes() -> Vec<u8> {
+    serde_json::to_vec(&zip_portable_utf8_v1_profile()).expect("profile serializes")
 }
 
 /// Canonical JSON bytes hashed by the research wheel UTF-8 interpretation.
@@ -740,5 +922,42 @@ mod tests {
         assert!(profile.extra_fields_permitted_nonsemantic.is_empty());
         assert_eq!(profile.extra_fields_other, "denied");
         assert_ne!(zip_strict_ascii_v2_digest(), zip_strict_ascii_v1_digest());
+    }
+
+    #[test]
+    fn portable_utf8_v1_profile_is_exhaustive_and_pinned() {
+        let profile = zip_portable_utf8_v1_profile();
+        assert_eq!(profile.general_purpose_bits.len(), 16);
+        for (bit, rule) in profile.general_purpose_bits.iter().enumerate() {
+            assert_eq!(usize::from(rule.bit), bit);
+            assert_eq!(rule.mask, 1_u16 << bit);
+        }
+        assert!(profile
+            .general_purpose_bits
+            .iter()
+            .enumerate()
+            .all(|(bit, rule)| matches!(bit, 3 | 11) || rule.disposition == "denied"));
+        assert_eq!(profile.general_purpose_bits[3].disposition, "semantic");
+        assert_eq!(profile.general_purpose_bits[11].disposition, "semantic");
+        assert!(profile.extra_fields_semantic.is_empty());
+        assert!(profile.extra_fields_permitted_nonsemantic.is_empty());
+        assert_eq!(profile.extra_fields_other, "denied");
+        assert_eq!(profile.unicode_repertoire_version, "16.0.0");
+        assert_eq!(
+            profile.unicode_repertoire_implementation,
+            "unicode-general-category-1.1.0-exact"
+        );
+        assert_eq!(
+            profile.normalization_unicode_version,
+            "17.0.0-stable-for-16.0.0-repertoire"
+        );
+        assert_eq!(profile.case_folding_unicode_version, "16.0.0");
+        assert!(profile.character_restrictions.contains("bidi-control-061c"));
+        assert_eq!(profile.path_grammar, PORTABLE_PATH_GRAMMAR_ID);
+        assert_eq!(profile.reserved_names, PORTABLE_RESERVED_NAMES_ID);
+        assert_eq!(
+            zip_portable_utf8_v1_digest(),
+            "acee86158d481adff96da0277a470ba753d6208ede74bc48586bb0134db5152e"
+        );
     }
 }

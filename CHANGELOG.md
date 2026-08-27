@@ -8,6 +8,32 @@ The project is in initial development. Compatibility may change between preview 
 
 No unreleased changes.
 
+## [0.1.0-alpha.8] - 2026-08-26
+
+### Added
+
+- Added the supported-preview `sealr.profile.zip.portable-utf8.v1` interpretation. It permits ZIP32 Store and Deflate with exact optional data descriptors, assigns a disposition to every general-purpose flag bit and extra-field identifier, requires strict UTF-8 and NFC, requires bit 11 for non-ASCII names, denies every extra field, and pins portable component and collision rules.
+- Added a fourth canonical profile vector with digest `acee86158d481adff96da0277a470ba753d6208ede74bc48586bb0134db5152e`. The production serializer and standalone no-Sealr-dependency verifier reproduce the exact bytes and digest.
+- Added the public `sealr::wheel` supported-preview evaluator. It consumes only `VerifiedArchive` under the portable profile, returns admitted, denied, unsupported, or infrastructure-failure outcomes, and produces bounded `WheelArtifactIR`, `WheelInstallPlan`, and domain-separated source, archive-tree, artifact, plan, and realization identities.
+- Bound portable Unicode behavior to exact Unicode 16 assigned-code-point, category, whitespace, bidi-control, and full default case-fold data, with an exact Unicode 17 NFC implementation whose behavior is stable over the admitted Unicode 16 repertoire.
+- Added downstream contracts that delete the original NFC Unicode wheel before evaluation, require deterministic exact consumer identities, classify the Alpha.7 research profile as unsupported rather than denied, and exercise the public wheel API from the extracted crate package.
+- Added cross-platform NFC materialization coverage and an authenticated Linux packaged-consumer check that reads a supervised `demo/café.py` member after the source wheel is deleted.
+- Added a predecessor-bound v3 inventory over the exact 20-wheel, 90,417,280-byte pilot through the shipped evaluator. The result remains sixteen admitted, two denied, and two unsupported artifacts.
+- Added exhaustive portable-profile regressions over all 65,536 flag words and all 65,536 extra-field identifiers, plus composition coverage for UTF-8 names carried by descriptor-bearing streaming ZIPs.
+
+### Changed
+
+- Tightened executable intent in the supported wheel plan. Unix mode bits are authoritative only when the ZIP creator system is Unix. The v3 inventory therefore reports 60 executable regular-file members instead of the Alpha.7 research report's 61; the removed orjson case used creator system 0.
+- Tightened wheel parsing around case-insensitive bounded headers, complete PEP 440 classification, exact artifact-root topology, selected-distribution `RECORD` signature exemptions, and dotted entry-point targets with validated legacy extras.
+- Made install-plan internals evaluator-owned and read-only to callers, added typed verified-read infrastructure failures, and required realization to validate the complete plan, target topology, hashes, sizes, and portable paths before producing an identity.
+- Extended Windows reserved-device handling to the superscript-digit `COM¹` through `COM³` and `LPT¹` through `LPT³` forms, and reused the same portable component contract for generated wheel command names.
+- Preserved `sealr.profile.zip.wheel-utf8.v1`, the Alpha.7 v2 inventory, PyPA installer predicate, hostile fixtures, and external installer bridge as immutable historical research evidence.
+
+### Security
+
+- Portable Unicode admission never guesses between UTF-8 and CP437 and never accepts a Unicode Path extra-field override. Unflagged non-ASCII, non-NFC, dot-normalizing, oversized, reserved, colliding, or otherwise nonportable names fail closed before consumer evaluation or materialization.
+- Wheel evaluation receives no source path, does not invoke another ZIP parser, and keeps verified-read infrastructure failures distinct from artifact denial evidence.
+
 ## [0.1.0-alpha.7] - 2026-08-26
 
 ### Added
@@ -246,7 +272,8 @@ First public development preview of the ZIP boundary.
 
 This preview is not a production-ready security boundary and has not received an external security audit. See the security limitations in the README and the reporting policy in `SECURITY.md` before evaluating it.
 
-[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.7...HEAD
+[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.8...HEAD
+[0.1.0-alpha.8]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.7...v0.1.0-alpha.8
 [0.1.0-alpha.7]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.6...v0.1.0-alpha.7
 [0.1.0-alpha.6]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.5...v0.1.0-alpha.6
 [0.1.0-alpha.5]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.4...v0.1.0-alpha.5

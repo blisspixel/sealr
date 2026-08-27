@@ -7,11 +7,13 @@
 use std::fs;
 
 use sealr::{
-    apply, apply_with_options, hex_sha256, zip_strict_ascii_v1_canonical_bytes,
-    zip_strict_ascii_v1_digest, zip_strict_ascii_v2_canonical_bytes, zip_strict_ascii_v2_digest,
+    apply, apply_with_options, hex_sha256, zip_portable_utf8_v1_canonical_bytes,
+    zip_portable_utf8_v1_digest, zip_strict_ascii_v1_canonical_bytes, zip_strict_ascii_v1_digest,
+    zip_strict_ascii_v2_canonical_bytes, zip_strict_ascii_v2_digest,
     zip_wheel_utf8_v1_canonical_bytes, zip_wheel_utf8_v1_digest, AdmissionStatus, ApplyOptions,
     EffectStatus, InterpretationStatus, Policy, Request, Source, VerificationStatus,
-    ZipInterpretationProfile, ZIP_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2, ZIP_WHEEL_UTF8_V1,
+    ZipInterpretationProfile, ZIP_PORTABLE_UTF8_V1, ZIP_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2,
+    ZIP_WHEEL_UTF8_V1,
 };
 
 #[path = "../../../scripts/walkthrough_fixtures.rs"]
@@ -193,7 +195,7 @@ fn identity_conformance_manifest_matches_production_evidence() {
     let profiles = manifest["profiles"]
         .as_array()
         .expect("identity vectors contain profiles");
-    assert_eq!(profiles.len(), 3);
+    assert_eq!(profiles.len(), 4);
     for profile in profiles {
         let id = profile["id"].as_str().expect("profile id");
         let (canonical, digest) = match id {
@@ -204,6 +206,10 @@ fn identity_conformance_manifest_matches_production_evidence() {
             ZIP_STRICT_ASCII_V2 => (
                 zip_strict_ascii_v2_canonical_bytes(),
                 zip_strict_ascii_v2_digest(),
+            ),
+            ZIP_PORTABLE_UTF8_V1 => (
+                zip_portable_utf8_v1_canonical_bytes(),
+                zip_portable_utf8_v1_digest(),
             ),
             ZIP_WHEEL_UTF8_V1 => (
                 zip_wheel_utf8_v1_canonical_bytes(),

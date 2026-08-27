@@ -36,7 +36,7 @@ Effect is a different morphism. A failed destination does not retract the coveri
 | \(\mathbb{B} = \{0,\ldots,255\}\) | Bytes. |
 | \(b \in \mathbb{B}^n\) | A source snapshot, identified with the half-open interval \([0,n)\). |
 | \([i,j)\) | Byte range. Empty iff \(i=j\). Adjacent ranges meet: \([i,j) \cup [j,k) = [i,k)\). |
-| \(\pi\) | Versioned interpretation profile. Executable profiles: compatibility-default `sealr.profile.zip.strict-ascii.v1`, opt-in closed `sealr.profile.zip.strict-ascii.v2`, and repository-only research `sealr.profile.zip.wheel-utf8.v1`. |
+| \(\pi\) | Versioned interpretation profile. Executable profiles: compatibility-default `sealr.profile.zip.strict-ascii.v1`, opt-in closed `sealr.profile.zip.strict-ascii.v2`, supported `sealr.profile.zip.portable-utf8.v1`, and research-preserving `sealr.profile.zip.wheel-utf8.v1`. |
 | \(I_\pi : \mathbb{B}^* \rightharpoonup \mathsf{IR}\) | Partial interpretation. Undefined means no admitted tree. |
 | \(L(\pi) = \mathrm{dom}(I_\pi)\) | The unique-parse language of the profile: a **strict subset** of APPNOTE. |
 | \(\mathsf{H}\) | SHA-256, treated as a collision-resistant hash **assumption**, not a theorem. |
@@ -158,9 +158,9 @@ If `parse_π(S)` succeeds, then for every member, CDH and LFH agree on method, f
 
 ### Path-Projection Injectivity
 
-The ASCII jail is a partial function. On an admitted IR, `canonical_path` is injective, the prefix relation is a forest, and ASCII case-fold is injective on the same set. Distinct raw names that jail identifies (`a/./b` versus `a/b`) are duplicates, not two files.
+The path jail is a partial function. On an admitted IR, `canonical_path` is injective, the prefix relation is a forest, and the selected portable collision key is injective on the same set. Distinct raw names that jail identifies (`a/./b` versus `a/b`) are duplicates, not two files.
 
-**Code.** Approximate for ASCII. Unicode NFC/NFKC, CP437, and host case tables are not in the domain.
+**Code.** Portable UTF-8 v1 admits only the Unicode 16.0 public-assigned, non-private-use repertoire in NFC and uses Unicode 16.0 full default case folding followed by NFC as its explicit cross-platform collision key. Exact repertoire, case-fold, and normalization dependencies are bound in the canonical profile. NFKC, CP437, and host case tables are not in the profile domain.
 
 ### CD/LFH Confluence
 

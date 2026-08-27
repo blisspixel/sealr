@@ -3,6 +3,10 @@ use std::fs;
 use std::io::{Cursor, Write};
 use std::path::Path;
 
+use sealr::wheel::{
+    evaluate_wheel as evaluate_supported_wheel, WheelEvaluation as SupportedWheelEvaluation,
+    WheelLimits as SupportedWheelLimits,
+};
 use sealr::{apply_with_options, ApplyOptions, Policy, Request, Source, ZipInterpretationProfile};
 use sealr_wheel_lab::{evaluate_wheel, WheelEvaluation, WheelLimits};
 use serde::{Deserialize, Serialize};
@@ -65,6 +69,9 @@ fn hostile_wheel_fixtures_are_minimized_deterministic_regressions() {
                 "{} finding",
                 fixture.id
             );
+            let supported = evaluate_supported(&fixture, &bytes);
+            assert_eq!(supported.0, status, "{} supported status", fixture.id);
+            assert_eq!(supported.1, finding, "{} supported finding", fixture.id);
             let filename = format!("{}.whl", fixture.id);
             (
                 ManifestCase {
@@ -378,6 +385,53 @@ fn evaluate(fixture: &Fixture, bytes: &[u8]) -> (String, Option<String>) {
         WheelEvaluation::InfrastructureFailure { detail } => {
             panic!("fixture evaluation infrastructure failure: {detail}")
         }
+    }
+}
+
+fn evaluate_supported(fixture: &Fixture, bytes: &[u8]) -> (String, Option<String>) {
+    let policy = Policy::default_v1();
+    let options =
+        ApplyOptions::new().with_interpretation_profile(ZipInterpretationProfile::PortableUtf8V1);
+    let outcome = apply_with_options(
+        Request {
+            source: Source::Bytes {
+                path: Some(fixture.outer_filename),
+                data: bytes,
+            },
+            policy: &policy,
+            dest: None,
+        },
+        &options,
+    );
+    if outcome.rejected() {
+        return (
+            "denied".into(),
+            outcome
+                .view
+                .findings
+                .first()
+                .map(|finding| finding.code.as_str().to_owned()),
+        );
+    }
+    let archive = outcome
+        .verified_archive()
+        .expect("verified hostile fixture");
+    match evaluate_supported_wheel(
+        fixture.outer_filename,
+        archive,
+        SupportedWheelLimits::default(),
+    ) {
+        SupportedWheelEvaluation::Admitted { .. } => ("admitted".into(), None),
+        SupportedWheelEvaluation::Denied { findings } => {
+            ("denied".into(), Some(findings[0].code.clone()))
+        }
+        SupportedWheelEvaluation::Unsupported { findings } => {
+            ("unsupported".into(), Some(findings[0].code.clone()))
+        }
+        SupportedWheelEvaluation::InfrastructureFailure { detail, .. } => {
+            panic!("fixture evaluation infrastructure failure: {detail}")
+        }
+        _ => panic!("fixture evaluation returned an unknown outcome"),
     }
 }
 

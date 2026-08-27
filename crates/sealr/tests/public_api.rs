@@ -6,7 +6,7 @@ use sealr::{
     apply, apply_with_options, ApplyOptions, EnvMeta, MaterializationMeta, MemberContainerFacts,
     MemberReadErrorKind, Outcome, OutcomeIdentities, Policy, PolicyMeta, Receipt, Request,
     RetentionPlan, RetentionStatus, SnapshotKind, Source, SourceMeta, ToolMeta, VerifiedArchive,
-    View, ZipInterpretationProfile, ZIP_STRICT_ASCII_V2, ZIP_WHEEL_UTF8_V1,
+    View, ZipInterpretationProfile, ZIP_PORTABLE_UTF8_V1, ZIP_STRICT_ASCII_V2, ZIP_WHEEL_UTF8_V1,
 };
 #[cfg(not(target_os = "linux"))]
 use sealr::{LinuxWorker, SupervisionErrorKind};
@@ -98,6 +98,38 @@ fn downstream_callers_can_select_the_closed_strict_profile() {
     assert_eq!(
         outcome.receipt.identities.interpretation.id,
         ZIP_STRICT_ASCII_V2
+    );
+}
+
+#[test]
+fn downstream_callers_can_select_the_portable_utf8_profile() {
+    let policy = Policy::default_v1();
+    let options =
+        ApplyOptions::new().with_interpretation_profile(ZipInterpretationProfile::PortableUtf8V1);
+    assert_eq!(
+        options.interpretation_profile(),
+        ZipInterpretationProfile::PortableUtf8V1
+    );
+    let outcome = apply_with_options(
+        Request {
+            source: Source::Bytes {
+                path: Some("empty.zip"),
+                data: EMPTY_ZIP,
+            },
+            policy: &policy,
+            dest: None,
+        },
+        &options,
+    );
+
+    assert!(!outcome.rejected(), "{:?}", outcome.view.findings);
+    assert_eq!(
+        outcome.archive_ir().unwrap().profile(),
+        ZIP_PORTABLE_UTF8_V1
+    );
+    assert_eq!(
+        outcome.receipt.identities.interpretation.id,
+        ZIP_PORTABLE_UTF8_V1
     );
 }
 

@@ -180,6 +180,13 @@ jobs:
           tests/corpus/wheels/report-v2.json
           docs/wheel-compatibility-v2.md
 
+      - name: Verify supported-preview wheel inventory
+        run: >-
+          cargo run --locked -p sealr-wheel-lab --bin wheel_inventory_v3 -- verify
+          tests/corpus/wheels/manifest.json
+          tests/corpus/wheels/report-v3.json
+          docs/wheel-compatibility-v3.md
+
       - name: Build optimized workspace
         run: cargo build --locked --release --workspace --all-features
 

@@ -1,6 +1,6 @@
 # Near-term execution plan
 
-> Status: active plan from the released Alpha.6 baseline. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
+> Status: active plan through the Alpha.8 portable-name and supported-consumer increment. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
 
 The next work should produce thin, independently reviewable trust increments. Each increment must finish with a useful artifact, explicit evidence, and a bounded claim. Work that merely makes the codebase larger does not count as progress.
 
@@ -10,21 +10,21 @@ Three dependencies are now explicit:
 
 1. **The private file-backed source snapshot precedes the worker.** The worker must receive an immutable, bounded archive capability. Designing IPC around a whole-archive `Vec<u8>` would make the protocol temporary and would test the wrong resource model.
 2. **Assurance starts now.** Pure interval, quota, path, and lifecycle properties are prerequisites for worker, Unicode, and random-access changes. They cannot wait for a late assurance phase.
-3. **Wheel research starts before wheel support.** The non-shipping laboratory now measures real wheels and pressure-tests the semantic API through an exact UTF-8 profile, pure evaluator, hostile fixtures, distinct identities, and an external consumer bridge. Promotion still requires a supported API decision and evidence beyond the bounded research corpus.
+3. **Wheel research starts before wheel support.** Alpha.7 established the exact UTF-8 research profile, pure evaluator, hostile fixtures, distinct identities, and external consumer bridge. Alpha.8 promotes the bounded evaluator through the public library under a new portable profile while preserving the research bytes.
 
 The result is one primary delivery stream and two parallel research streams:
 
 ```text
-Primary       private snapshot [done] -> supervised Linux worker [done] -> portable canonical names [next]
+Primary       private snapshot [done] -> supervised worker [done] -> portable names [done]
 Assurance     property models [done]  -> fuzz and Kani [active]    -> stable history [next]
-Wheel lab     corpus inventory [done] -> pure evaluator [done]    -> supported promotion [next]
+Wheel         research proof [done]   -> supported evaluator [done] -> targeted corpus [next]
 ```
 
 The assurance and wheel lanes may add test, corpus, and research tooling. They do not add a fallback parser or silently widen the shipped profile. The exact Kani, mutation, coverage, and promotion contracts are recorded in [assurance discovery and promotion](assurance-promotion.md).
 
-## Immediate post-Alpha.6 sequence
+## Immediate post-Alpha.8 sequence
 
-The bounded shadow-parity prerequisite, shared owning planner, plan-native inspect and materialize executors, sealed transport, measured isolated plan consumption, supervisor-owned exact-byte replay, immutable retained-content transfer, one-shot isolated non-retained reads, reaped materializing-writer lifecycle, authenticated child-only normal execution, fixed release packaging, public fail-closed supervisor, hidden worker-backed `VerifiedArchive` backend, actual Landlock ABI 2 failure gate, manifest-backed CLI, wheel-laboratory and extracted-package-consumer activation, and scheduled assurance spine shipped in Alpha.6. Alpha.7 adds the repository-only strict UTF-8 NFC interpretation, pure bounded evaluator, hostile fixtures, distinct identities, predecessor-bound compatibility inventory, and external PyPA installer bridge that receives no original wheel. This closes the research proof without changing the supported default. Portable general-purpose naming and a supported consumer promotion remain the next product gate. Assurance history, authenticated recovery, and durability continue in parallel.
+Alpha.6 shipped the public fail-closed Linux supervisor and capability boundary. Alpha.7 closed the repository-only wheel research proof. Alpha.8 adds the supported portable UTF-8 profile, public capability-only wheel evaluator, exact public consumer identity golden, and v3 replay over the pinned 20-wheel corpus. The next consumer gate is targeted benign coverage for Unicode, `.data`, and data descriptors, followed by stable identity and API review. Assurance history, authenticated recovery, and durability continue in parallel.
 
 1. **Extend semantic assurance.** **Allocation, ownership, bounded shadow parity, shared planning, and near-limit completion measurement landed:** input-sized validation is fallible or allocation-free; invalid completion decode materializes no IR; accepted decode materializes one fallibly reconstructed IR; findings move instead of cloning; and a deterministic failpoint walk covers every reconstruction reservation. A required isolated-child probe pins a 67,041,104-byte plan and enforces that completion reconstruction adds less than 1 MiB transient requested heap above its one logical output. The frozen 12-case v1 artifact and 12 additive v2 cases pin exact bounded evidence from the production-compiled owning planner, the plan-native completion boundary, and the explicitly labeled supervisor-reproduction oracle. Their apply oracle intentionally runs a separate complete public operation for differential comparison. Clean exact-main on-demand and first scheduled-event fuzz evidence are in the [assurance ledger](assurance.md#current-evidence). Parity beyond these named fixtures and accumulated scheduled history remain open.
 2. **Close the pre-parser Linux authority gate.** **No-descendant, permission-mutation, raw ancillary, authority-epoch deadline, repeated-stress, sealed-blob, isolated inspect, and private writer controls landed:** the x86_64 bootstrap installs an architecture-checked `TSYNC` seccomp-BPF deny set after Landlock and before source transfer, directly probes representative denial, and exposes filter readiness for supervisor observation. Its raw `recvmsg` path validates every returned control header, accepts exactly one `SCM_RIGHTS` record, rejects kernel-generated unknown ancillary, malformed layouts, and multiple rights records, and owns installed descriptors before reporting any framing error. The nonblocking supervisor shares one absolute monotonic deadline across each send-and-response round, polls the control socket and pidfd, and proves pidfd kill and reap before cleanup for eleven stalls across four authority epochs. Canonical semantic plan and completion records cross through bounded kernel-sealed memfds with required seals, exact length, independent SHA-256 verification, binding, descriptor, and malformed-plan evidence. The restricted worker validates the plan against its exact file-backed source and executes planned Store and Deflate ranges without structural reparse. One required 500-iteration Linux campaign cycles the 44-case non-stall matrix at least 11 times per case. A separate 500-iteration writer campaign alternates publication, audit mutation, destination race, cleanup failure, pre-result crash, and post-result crash. Both check no surviving child, descriptor-count growth, source or outside-sentinel change, or cleanup before reap.
@@ -33,7 +33,7 @@ The bounded shadow-parity prerequisite, shared owning planner, plan-native inspe
 
 5. **Prove and activate the materializing-writer lifecycle.** **Landed in the Linux lab and explicit supported supervisor:** the supervisor creates the production stage before spawn and retains the destination parent, random stage name, final name, cleanup, and publication authority. The restricted worker receives only that stage root, the exact source, and a sealed materialization plan. The supervisor validates results only after clean exit and exact pidfd-backed reap, replays the plan against its retained source, audits root security and exact contents, and alone invokes no-replace publication. Targeted evidence covers post-reap stage mutation, destination races, cleanup failure, four writer crash barriers, two writer stalls, and 500 alternating writer lifecycles. Public package smoke covers committed materialization, retained and one-shot reads from its `VerifiedArchive`, pre-worker setup-failure IR preservation, exact destination preservation, no leaked stage, and exact reap. Ordinary `apply`, ordinary CLI invocation, and protocol v1 remain unchanged; `--worker-manifest` selects the explicit supervised CLI path.
 
-Together, these completed increments freeze what the worker may mean, how read output is withheld on failure, when staged effects become stable enough for supervisor audit and publication, and which exact helper artifact may cross the release boundary. The real insufficient-kernel proof and exact packaged-consumer activation are required CI. The assurance manifest, scheduled workflow, and promotion ledger close the governance increment without pretending that a new workflow already has ten scheduled runs. The wheel research increment demonstrates the intended consumer shape. The next increment decides and proves the portable supported name language before that research API is promoted.
+Together, these completed increments freeze what the worker may mean, how read output is withheld on failure, when staged effects become stable enough for supervisor audit and publication, which exact helper artifact may cross the release boundary, and how the first supported consumer uses only verified authority. The next increment expands targeted consequences and lifecycle evidence without changing the established interpretation silently.
 
 ## Delivery map
 
@@ -43,6 +43,7 @@ Together, these completed increments freeze what the worker may mean, how read o
 | Alpha.5 | Bounded immutable input | Private file-backed snapshot, checked random access, mutation resistance, memory budget, fuzzable worker protocol |
 | Alpha.6 | Reduced-authority Linux execution | Enforced worker, minimum Landlock rights, descriptor audit, supervisor re-audit, native race evidence |
 | Post-Alpha.6 research | Wheel consumer proof | Exact UTF-8 profile, bounded evaluator, hostile fixtures, identity separation, external non-reopening bridge |
+| Alpha.8 | Portable names and supported consumer | Closed Unicode profile, public four-way evaluator, source-deletion proof, exact identities, public-surface corpus replay |
 
 Version labels are delivery targets, not permission to cut a release with a red gate. If an increment changes identity or interpretation, it receives a new profile or schema identifier and preserves prior identifiers as immutable historical contracts.
 
@@ -54,7 +55,7 @@ The [distribution contract](distribution-contract.md) now decides the source pac
 
 Alpha.4 closes the contract before another public surface becomes accidental API.
 
-Current main has completed the Alpha.4 measured-contract gate. It removes public `ArchiveIR` construction and mutation, exposes read-only evidence and an opaque `VerifiedArchive`, supports independently bounded exact-path retention during the original verification pass, preserves caller-bounded fallback reads, and tests a separate consumer against the extracted packaged crate. Six finite-domain property families run in required CI. A separate workspace verifier with no Sealr dependency checks a four-case conformance bundle, validates the recorded covering without discovery or inflation, and independently reproduces three exact profile digests plus three layout and three content roots. ZIP discovery and the codec-free covering audit share checked interval construction and use separate bitmap-oracle-backed partition predicates, while declared and actual quota transitions use one atomic kernel. The reproducible 20-wheel pilot records 19 admissions plus one investigated ratio denial under the new closed strict ASCII v2 profile. The profile and identities remain preview contracts until their documented stability bar is met.
+Current main retains the Alpha.4 measured-contract gate and extends its independent bundle to four exact profile digests plus three layout and three content roots. ZIP discovery and the codec-free covering audit share checked interval construction and use separate bitmap-oracle-backed partition predicates, while declared and actual quota transitions use one atomic kernel. The reproducible 20-wheel pilot records 19 admissions plus one investigated ratio denial under strict ASCII v2.
 
 ### Semantic profile
 
@@ -193,9 +194,9 @@ The semantic sequence remains dependency-ordered. The additive v2 matrix, shared
 - Linux fails closed when the minimum handled rights are unavailable.
 - Receipts distinguish enforcement, protocol, worker, audit, effect, and cleanup outcomes without changing archive admission into an effect verdict.
 
-## Wheel laboratory, parallel and non-shipping
+## Wheel evidence and supported preview
 
-The [Python wheel profile draft](profiles/python-wheel-v1.md) defines this lane. Its purpose is to make the generic boundary answer a real consumer before the consumer API freezes.
+The [Python wheel profile](profiles/python-wheel-v1.md) defines this lane. The Alpha.7 laboratory remains non-shipping evidence; Alpha.8 exposes pure evaluation through the shipped library.
 
 The first [compatibility pilot](wheel-compatibility-pilot.md) is now reproducible from a bounded manifest and ignored local cache. Its committed report is checked offline in the existing required `CI` workflow for manifest binding, current profile and default-policy identities, internal rollups, canonical JSON, and Markdown rendering. CI does not download the corpus or claim to re-execute the measurements.
 
@@ -207,16 +208,16 @@ The laboratory may:
 - parse verified metadata through the new member-read capability;
 - compare a pure wheel plan with established tools on well-formed inputs.
 
-It may not:
+The evidence tooling may not:
 
-- advertise wheel support;
+- advertise installation or general ecosystem compatibility;
 - add a second ZIP parser;
 - silently accept unknown ZIP features;
 - call an ordinary unzip after admission;
 - label an archive content root as an installed-tree root;
 - make a GitHub gate count as the canonical-consumer proof.
 
-The lab becomes experimental `python-wheel.v1` admission only after the exact wheel ZIP profile, canonical UTF-8 paths, verified-member access, consumer budgets, and consumer identities pass their gates. Linux worker isolation is required for a Sealr-owned install effect, but not for a pure no-effect wheel evaluator.
+The pure `python-wheel.v1` evaluator is supported preview behavior after the portable profile, verified-member access, consumer budgets, and consumer identities pass required CI. Linux worker isolation remains required for any future Sealr-owned install effect, but not for pure no-effect evaluation.
 
 ## Assurance cadence
 
@@ -234,11 +235,11 @@ Evidence types remain distinct:
 
 The existing `CI` workflow remains the only required promotion authority. Scheduled assurance discovers failures. A check moves into required CI only when its runtime is bounded, failures reproduce locally, and ten consecutive scheduled runs on distinct `main` commits establish stability. Any failed scheduled run resets that category's sequence. Manual runs never count. Mutation and coverage remain discovery-only and cannot be promoted as scores. The exact machine-checked rules and current separate histories are in [assurance discovery and promotion](assurance-promotion.md).
 
-## After Alpha.6
+## After Alpha.8
 
 Two implementation lanes can proceed in parallel without inventing another meaning:
 
-- **Semantic and consumer lane:** canonical UTF-8 paths for wheels, a separately versioned legacy CP437 profile where compatibility evidence justifies it, `WheelArtifactIR`, scheme-relative `WheelInstallPlan`, and the first external consumer bridge.
+- **Semantic and consumer lane:** targeted benign Unicode, `.data`, and descriptor-bearing wheel evidence; stable identity and API review; and a separately versioned legacy CP437 profile only where compatibility evidence justifies it.
 - **Systems lane:** authenticated abandoned-stage recovery, explicit durability levels, and platform-specific worker research.
 
 Both lanes consume the same snapshot, `ArchiveIR`, identities, findings discipline, and conformance bundles. Common codecs and TAR remain behind the Phase 0.1 trust gate.

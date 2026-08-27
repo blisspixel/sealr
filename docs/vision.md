@@ -1,6 +1,6 @@
 # Vision: one archive, one tree, evidence
 
-> This document describes the product direction. Current Alpha.6 behavior and limitations are defined by the [README](../README.md) and [API contract](api.md). The target semantic design is specified in [semantic-model.md](semantic-model.md).
+> This document describes the product direction. Current Alpha.8 behavior and limitations are defined by the [README](../README.md) and [API contract](api.md). The target semantic design is specified in [semantic-model.md](semantic-model.md).
 
 Sealr is not a general-purpose unarchiver, archive GUI, malware scanner, agent-execution proxy, model verifier, credential broker, or enterprise control plane.
 
@@ -73,7 +73,7 @@ Combine the hostile ZipDiff gate with a benign ecosystem corpus, source-mutation
 
 ### 3. One canonical consumer
 
-Python wheel admission is the first candidate. It has a documented same-bytes, different-installed-tree problem and meaningful consumer semantics beyond ZIP. The repository-only [profile implementation](profiles/python-wheel-v1.md) separates source, archive-tree, wheel-artifact, scheme-relative install-plan, and target-realization identities and proves an external installer can consume bounded verified members after the original wheel is removed. It is current research functionality, not supported admission. A supported consumer still matters because if a builder or installer reopens the wheel, Sealr has produced a receipt rather than an admission boundary.
+Python wheel evaluation is the first supported-preview consumer. It has a documented same-bytes, different-installed-tree problem and meaningful consumer semantics beyond ZIP. The [profile implementation](profiles/python-wheel-v1.md) separates source, archive-tree, wheel-artifact, scheme-relative install-plan, and target-realization identities. The public evaluator consumes only `VerifiedArchive`; the Alpha.7 laboratory separately proves an external installer can consume bounded verified members after the original wheel is removed. A stable external adopter still matters because if a builder or installer reopens the wheel, Sealr has produced a receipt rather than an admission boundary.
 
 ### 4. Reusable admitted trees
 

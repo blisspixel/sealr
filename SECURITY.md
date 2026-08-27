@@ -21,7 +21,7 @@ Do not include malware or sensitive third-party data. A synthetic proof is prefe
 
 ## Current status
 
-There is no production-ready or stable supported version. The current limitations are listed in [README.md](README.md). The complete pinned ZipDiff construction corpus is enforced in CI. Kernel isolation, portable Unicode paths, signed receipts, ZIP64, and non-ZIP formats are not complete.
+There is no production-ready or stable supported version. The current limitations are listed in [README.md](README.md). The complete pinned ZipDiff construction corpus is enforced in CI. Portable UTF-8 paths are supported preview behavior, while production containment, legacy CP437, signed receipts, ZIP64, and non-ZIP formats are not complete.
 
 Materialization is supported on Linux, macOS, and Windows. Other platforms reject materialization with `materialize.unsupported` rather than falling back to a weaker publication primitive.
 
@@ -43,7 +43,7 @@ The current core's only `unsafe` blocks are isolated in the macOS descriptor-ACL
 
 ## Residual privilege boundary
 
-The in-process materializer does not claim containment from root, an administrator, SYSTEM, a principal matching the effective token's default-owner SID, a process running as the same security principal, Linux capabilities or Windows privileges that override filesystem access checks, filter drivers, debugging rights, or handle-duplication rights. Those actors can act with the library's authority or interfere below its namespace controls. The planned worker will constrain its own parser authority, but a distinct service identity or equivalent mandatory-access-control boundary is required to contain another process running as the same user.
+The in-process materializer does not claim containment from root, an administrator, SYSTEM, a principal matching the effective token's default-owner SID, a process running as the same security principal, Linux capabilities or Windows privileges that override filesystem access checks, filter drivers, debugging rights, or handle-duplication rights. Those actors can act with the library's authority or interfere below its namespace controls. The explicit x86_64 Linux worker constrains payload verification, stage writes, and later reads, but structural planning remains in the supervisor and a distinct service identity or equivalent mandatory-access-control boundary is required to contain another process running as the same user.
 
 ## High-value security properties
 
