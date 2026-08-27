@@ -12,7 +12,7 @@ use sealr::{
 };
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
-use zip::{CompressionMethod, ZipWriter};
+use zip::{CompressionMethod, DateTime, System, ZipWriter};
 
 const WHEEL: &[u8] =
     b"Wheel-Version: 1.0\nGenerator: sealr-api-test\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n";
@@ -66,7 +66,12 @@ fn wheel_bytes() -> Vec<u8> {
     let mut cursor = Cursor::new(Vec::new());
     {
         let mut writer = ZipWriter::new(&mut cursor);
-        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        let options = SimpleFileOptions::default()
+            .compression_method(CompressionMethod::Deflated)
+            .compression_level(Some(6))
+            .last_modified_time(DateTime::DEFAULT)
+            .unix_permissions(0o644)
+            .system(System::Unix);
         for (path, bytes) in files {
             writer
                 .start_file(path, options)
@@ -159,7 +164,7 @@ fn supported_consumer_uses_only_the_verified_capability_after_source_deletion() 
     assert_eq!(plan.artifact_sha256(), identities.artifact_sha256);
     assert_eq!(
         identities.source_sha256,
-        "6f7e1b33fcd0ea3bcee2ad9bb3cbd946a4d3ad8a29c70632fcb8b27752292082"
+        "57f9666477acdcceb9d3dab63b3b13f21ae9359442874c8f507b56a934c6f1fd"
     );
     assert_eq!(
         identities.archive_tree_sha256,
@@ -167,11 +172,11 @@ fn supported_consumer_uses_only_the_verified_capability_after_source_deletion() 
     );
     assert_eq!(
         identities.artifact_sha256,
-        "122788049c0b2487bd349a338927e3332d11bb82ef2b36e5d4a83d35b9b765aa"
+        "c26d5c8779051b2e995d81ee2e71095205bd6ce371ec051a12d61d9571fce157"
     );
     assert_eq!(
         identities.install_plan_sha256,
-        "0341aca87f33afea6e8cc4d0e755156aaafc1248df0a26d2923552446976aa24"
+        "74b7b2162c8cc361bb9db89c68f184a9c064318da7598274404137b973e3c4da"
     );
     assert_eq!(
         [
