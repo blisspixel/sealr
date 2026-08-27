@@ -1,6 +1,6 @@
 # Identity conformance and independent verification
 
-> Status: introduced in Alpha.4 and extended with the repository-only wheel profile. The vectors and verifier protect preview identities. They do not make any profile stable or turn unsigned evidence into an attestation.
+> Status: introduced in Alpha.4 and extended through Alpha.8 with the repository-only wheel profile and supported portable UTF-8 profile. The vectors and verifier protect preview identities. They do not make any profile stable or turn unsigned evidence into an attestation.
 
 Sealr now publishes a small, versioned identity-conformance bundle and checks it two ways:
 
@@ -41,7 +41,7 @@ The verifier does not independently interpret ZIP flags, names, extras, or metho
 | `cases[].archive_ir` | Full serializable IR evidence, or `null` when no IR exists |
 | `layout_root`, `content_root` | `sealrTreeV1` root or explicit unavailability |
 
-The current bundle has three profile vectors and four source cases. The strict ASCII v1, strict ASCII v2, and wheel UTF-8 v1 canonical profile bytes are compared directly with production serialization before the standalone verifier independently hashes them. Source cases currently exercise strict ASCII v1 tree evidence; a separate cross-platform production golden pins the strict ASCII v2 empty-tree identities. The wheel vector pins its closed container-language bytes and digest without claiming that the repository-only consumer is supported.
+The current bundle has four profile vectors and four source cases. The strict ASCII v1, strict ASCII v2, wheel UTF-8 v1, and portable UTF-8 v1 canonical profile bytes are compared directly with production serialization before the standalone verifier independently hashes them. Source cases currently exercise strict ASCII v1 tree evidence; separate cross-platform production goldens pin strict ASCII v2 empty-tree identities and the supported wheel consumer source, archive-tree, artifact, and install-plan identities. The wheel vector preserves the Alpha.7 research container language, while the portable vector binds the Alpha.8 supported Unicode contract.
 
 The source cases are:
 

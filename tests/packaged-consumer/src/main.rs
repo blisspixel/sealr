@@ -1,8 +1,15 @@
+use std::collections::BTreeMap;
+use std::io::{Cursor, Write};
+
+use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelLimits, CONSUMER_PROFILE_ID};
 use sealr::{
     apply_supervised, ApplyOptions, LinuxWorker, MemberReadErrorKind, Policy, Request,
     RetentionPlan, RetentionStatus, Source, VerifiedArchive, ZipInterpretationProfile,
     ZIP_STRICT_ASCII_V2,
 };
+use sha2::{Digest, Sha256};
+use zip::write::SimpleFileOptions;
+use zip::{CompressionMethod, ZipWriter};
 
 // A canonical ZIP32 archive containing stored `hello.txt` with bytes `hello`.
 const HELLO_ZIP: &[u8] = &[
@@ -106,4 +113,105 @@ fn main() {
         .into_verified_archive()
         .expect("capability remains available when taken from the outcome");
     assert_eq!(retained.member("hello.txt").unwrap().canonical_path, "hello.txt");
+
+    let wheel_bytes = wheel_bytes();
+    let wheel_options =
+        ApplyOptions::new().with_interpretation_profile(ZipInterpretationProfile::PortableUtf8V1);
+    let wheel_outcome = apply_supervised(
+        Request {
+            source: Source::Bytes {
+                path: Some("demo-1.0-py3-none-any.whl"),
+                data: &wheel_bytes,
+            },
+            policy: &policy,
+            dest: None,
+        },
+        &wheel_options,
+        &worker,
+    )
+    .expect("packaged crate must verify the portable wheel through the supervisor");
+    assert!(!wheel_outcome.rejected(), "{:?}", wheel_outcome.view.findings);
+    let evaluation = evaluate_wheel(
+        "demo-1.0-py3-none-any.whl",
+        wheel_outcome
+            .verified_archive()
+            .expect("verified wheel authority"),
+        WheelLimits::default(),
+    );
+    let WheelEvaluation::Admitted {
+        artifact,
+        plan,
+        identities,
+        ..
+    } = evaluation
+    else {
+        panic!("packaged wheel evaluator did not admit its canonical fixture");
+    };
+    assert_eq!(artifact.consumer_profile, CONSUMER_PROFILE_ID);
+    assert!(artifact
+        .record
+        .iter()
+        .any(|binding| binding.path == "demo/caf\u{e9}.py"));
+    assert_eq!(plan.artifact_sha256(), identities.artifact_sha256);
+}
+
+fn wheel_bytes() -> Vec<u8> {
+    let mut files = BTreeMap::new();
+    files.insert("demo/__init__.py".to_owned(), b"VALUE = 1\n".to_vec());
+    files.insert(
+        "demo/caf\u{e9}.py".to_owned(),
+        b"VALUE = 'unicode'\n".to_vec(),
+    );
+    files.insert(
+        "demo-1.0.dist-info/WHEEL".to_owned(),
+        b"Wheel-Version: 1.0\nGenerator: packaged-consumer\nRoot-Is-Purelib: true\nTag: py3-none-any\n\n".to_vec(),
+    );
+    files.insert(
+        "demo-1.0.dist-info/METADATA".to_owned(),
+        b"Metadata-Version: 2.4\nName: demo\nVersion: 1.0\n\n".to_vec(),
+    );
+    let mut record = String::new();
+    for (path, bytes) in &files {
+        record.push_str(path);
+        record.push_str(",sha256=");
+        record.push_str(&base64url(&Sha256::digest(bytes)));
+        record.push(',');
+        record.push_str(&bytes.len().to_string());
+        record.push('\n');
+    }
+    record.push_str("demo-1.0.dist-info/RECORD,,\n");
+    files.insert("demo-1.0.dist-info/RECORD".to_owned(), record.into_bytes());
+
+    let mut cursor = Cursor::new(Vec::new());
+    {
+        let mut writer = ZipWriter::new(&mut cursor);
+        let options =
+            SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+        for (path, bytes) in files {
+            writer.start_file(path, options).expect("start wheel member");
+            writer.write_all(&bytes).expect("write wheel member");
+        }
+        writer.finish().expect("finish wheel");
+    }
+    cursor.into_inner()
+}
+
+fn base64url(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8; 64] =
+        b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut output = String::new();
+    for chunk in bytes.chunks(3) {
+        let value = (u32::from(chunk[0]) << 16)
+            | (u32::from(*chunk.get(1).unwrap_or(&0)) << 8)
+            | u32::from(*chunk.get(2).unwrap_or(&0));
+        output.push(ALPHABET[((value >> 18) & 63) as usize] as char);
+        output.push(ALPHABET[((value >> 12) & 63) as usize] as char);
+        if chunk.len() > 1 {
+            output.push(ALPHABET[((value >> 6) & 63) as usize] as char);
+        }
+        if chunk.len() > 2 {
+            output.push(ALPHABET[(value & 63) as usize] as char);
+        }
+    }
+    output
 }

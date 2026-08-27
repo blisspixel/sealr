@@ -9,7 +9,7 @@ use crate::covering::audit_covering;
 use crate::findings::{Finding, FindingCode, Severity};
 use crate::identity::OutcomeIdentities;
 use crate::ir::{ArchiveIR, IrMember, MemberKind, NormalizationAction, ZipInterpretationProfile};
-use crate::jail::{jail_name, portable_case_fold};
+use crate::jail::{jail_name_for_profile, portable_name_violation, profile_case_fold};
 use crate::materialize::{process_member_to_file, CapabilityMaterializer, MaterializationMeta};
 use crate::outcome::{
     AdmissionStatus, DigestHex, EffectStatus, InterpretationStatus, SemanticAxes, SourceDigest,
@@ -628,7 +628,7 @@ fn plan_snapshot<'a>(snapshot: SourceSnapshot<'a>, context: PlanningContext) -> 
         } else {
             &member.name
         };
-        match jail_name(jailed_name, budget.max_path_depth) {
+        match jail_name_for_profile(jailed_name, budget.max_path_depth, interpretation_profile) {
             Ok(jailed) => {
                 if interpretation_profile == ZipInterpretationProfile::WheelUtf8V1
                     && !jailed.actions.is_empty()
@@ -642,10 +642,18 @@ fn plan_snapshot<'a>(snapshot: SourceSnapshot<'a>, context: PlanningContext) -> 
                     );
                     continue;
                 }
+                if interpretation_profile == ZipInterpretationProfile::PortableUtf8V1 {
+                    if let Some(detail) = portable_name_violation(&jailed) {
+                        findings.push(
+                            Finding::error(FindingCode::PathInvalidChar, detail).on(&member.name),
+                        );
+                        continue;
+                    }
+                }
                 actions.extend(jailed.actions);
                 let parts = jailed.components;
                 let joined = parts.join("/");
-                let fold = portable_case_fold(&joined);
+                let fold = profile_case_fold(&joined, interpretation_profile);
                 if dest_seen.contains_key(&joined) {
                     findings.push(
                         Finding::error(FindingCode::ZipDiffB1Dup, "duplicate dest path")
@@ -1443,6 +1451,23 @@ mod tests {
             Request {
                 source: Source::Bytes {
                     path: Some("wheel-utf8-v1.zip"),
+                    data: bytes,
+                },
+                policy: &policy,
+                dest: None,
+            },
+            &options,
+        )
+    }
+
+    fn apply_portable_utf8_v1(bytes: &[u8]) -> Outcome {
+        let policy = Policy::default_v1();
+        let options = ApplyOptions::new()
+            .with_interpretation_profile(ZipInterpretationProfile::PortableUtf8V1);
+        apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("portable-utf8-v1.zip"),
                     data: bytes,
                 },
                 policy: &policy,
@@ -2755,6 +2780,97 @@ mod tests {
             out.receipt.identities.interpretation.digest.sha256,
             crate::ir::zip_wheel_utf8_v1_digest()
         );
+    }
+
+    #[test]
+    fn portable_utf8_v1_admits_nfc_unicode_and_binds_the_profile() {
+        let bytes = make_zip(&[("caf\u{e9}.txt", b"content")]);
+        let out = apply_portable_utf8_v1(&bytes);
+        assert!(!out.rejected(), "{:?}", out.view.findings);
+        let ir = out.archive_ir().expect("admitted archive IR");
+        assert_eq!(ir.members[0].canonical_path, "caf\u{e9}.txt");
+        assert_eq!(ir.members[0].flags & 0x0800, 0x0800);
+        assert_eq!(
+            out.receipt.identities.interpretation.id,
+            crate::ir::ZIP_PORTABLE_UTF8_V1
+        );
+        assert_eq!(
+            out.receipt.identities.interpretation.digest.sha256,
+            crate::ir::zip_portable_utf8_v1_digest()
+        );
+    }
+
+    #[test]
+    fn portable_utf8_v1_denies_noncanonical_and_oversized_components() {
+        for name in [
+            "cafe\u{301}.txt".to_owned(),
+            "./member.txt".to_owned(),
+            "a".repeat(crate::jail::PORTABLE_NAME_MAX_COMPONENT_UTF8_BYTES + 1),
+        ] {
+            let bytes = make_zip(&[(&name, b"content")]);
+            let out = apply_portable_utf8_v1(&bytes);
+            assert!(out.rejected(), "{name:?} was admitted");
+            assert!(out.view.findings.iter().any(|finding| matches!(
+                finding.code,
+                FindingCode::PathUnicode | FindingCode::PathInvalidChar
+            )));
+        }
+
+        let sigma_collision = make_zip(&[("\u{3c3}.txt", b"sigma"), ("\u{3c2}.txt", b"final")]);
+        let out = apply_portable_utf8_v1(&sigma_collision);
+        assert!(out.rejected());
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PathCaseFold));
+
+        let private_use = make_zip(&[("\u{e000}.txt", b"private")]);
+        let out = apply_portable_utf8_v1(&private_use);
+        assert!(out.rejected());
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PathInvalidChar));
+    }
+
+    #[test]
+    fn portable_utf8_v1_materializes_nfc_unicode_without_path_drift() {
+        let canonical_path = "caf\u{e9}/na\u{ef}ve.txt";
+        let payload = b"portable unicode materialization";
+        let bytes = make_zip(&[(canonical_path, payload)]);
+        let policy = Policy::default_v1();
+        let options = ApplyOptions::new()
+            .with_interpretation_profile(ZipInterpretationProfile::PortableUtf8V1);
+        let destination = temp_dest("portable-unicode-mat");
+        assert!(!destination.exists());
+        let outcome = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("portable-unicode.zip"),
+                    data: &bytes,
+                },
+                policy: &policy,
+                dest: Some(&destination),
+            },
+            &options,
+        );
+        assert!(outcome.wrote(), "{:?}", outcome.view.findings);
+        assert_eq!(outcome.effect, EffectStatus::Committed);
+        assert_eq!(
+            outcome.archive_ir().unwrap().profile,
+            crate::ZIP_PORTABLE_UTF8_V1
+        );
+        assert_eq!(
+            outcome.view.members[0].path, canonical_path,
+            "published path must equal the admitted NFC path"
+        );
+        assert_eq!(
+            fs::read(destination.join("caf\u{e9}").join("na\u{ef}ve.txt")).unwrap(),
+            payload
+        );
+        fs::remove_dir_all(&destination).unwrap();
     }
 
     #[test]

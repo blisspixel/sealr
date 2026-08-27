@@ -127,6 +127,14 @@ if ($releaseWorkflowVersion -ne $version -or
     $candidateTag -ne "v$version") {
     throw 'Release workflow, publisher, or candidate tag version does not match Cargo.toml'
 }
+$changelog = Get-Content -Raw -LiteralPath (Join-Path $workspace 'CHANGELOG.md')
+$unreleasedLink = "[Unreleased]: https://github.com/blisspixel/sealr/compare/v$version...HEAD"
+$releaseLinkPrefix = "[$version]: https://github.com/blisspixel/sealr/compare/"
+if (-not $changelog.Contains($unreleasedLink, [StringComparison]::Ordinal) -or
+    -not $changelog.Contains($releaseLinkPrefix, [StringComparison]::Ordinal) -or
+    -not $changelog.Contains("...v$version", [StringComparison]::Ordinal)) {
+    throw 'CHANGELOG comparison links do not match the workspace release version'
+}
 
 $helperPackaging = Get-Content -Raw -LiteralPath (Join-Path $workspace 'docs/helper-packaging.md')
 foreach ($term in @(

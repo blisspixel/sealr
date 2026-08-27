@@ -2,7 +2,7 @@
 
 These are **properties**, not features. They are the *type* of `inspect` / `materialize` / `mount`. Files on disk are a side effect that is only allowed if this boundary returns yes.
 
-This document is the target safety contract. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) are authoritative for current implementation status. Current main intentionally fails closed where canonical Unicode handling is unfinished. It has bounded protocol fuzzing and three scalar Kani harnesses, but does not yet satisfy every ZIP-parser fuzzing, filesystem-race, proof, isolation, or alternate-input obligation below. Exact model-checking domains and nonclaims are in [assurance discovery and promotion](assurance-promotion.md).
+This document is the target safety contract. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) are authoritative for current implementation status. Current main implements a strict portable UTF-8 NFC profile and fails closed on unflagged legacy non-ASCII names. It has bounded protocol fuzzing and three scalar Kani harnesses, but does not yet satisfy every ZIP-parser fuzzing, filesystem-race, proof, isolation, or alternate-input obligation below. Exact model-checking domains and nonclaims are in [assurance discovery and promotion](assurance-promotion.md).
 
 Each invariant MUST appear in the assurance claim ledger and receive evidence appropriate to its kind. Pure input properties require deterministic tests and generated properties; byte parsers require finite hostile corpora and coverage-guided fuzzing; bounded arithmetic and finite state machines are model-checking candidates; filesystem and authority properties require native fault and race tests. A finding code is required when an invocation can report the violation. CI infrastructure failures and excluded-adversary assumptions are recorded as evidence or limitations rather than invented archive findings.
 
@@ -14,7 +14,7 @@ Detail for ZIP differentials: [threat-model.md](threat-model.md). Path grammar: 
 
 ## I1 - Path containment
 
-Every extracted (or hydrated) path, with `/` as the only accepted archive separator, canonical Unicode normalization, case-fold where the destination filesystem is case-insensitive, and rejection of backslashes, reserved names, ADS names, and trailing-dot names, MUST be `dest` or a strict child. Alpha.4 strict ASCII v2 rejects non-ASCII paths until that canonical Unicode representation exists.
+Every extracted (or hydrated) path, with `/` as the only accepted archive separator, canonical Unicode normalization, case-fold where the destination filesystem is case-insensitive, and rejection of backslashes, reserved names, ADS names, and trailing-dot names, MUST be `dest` or a strict child. Strict ASCII v2 rejects non-ASCII paths; portable UTF-8 v1 admits only already-NFC strict UTF-8 under its closed component and collision contract.
 
 - No symlink or hardlink is followed when computing the dest (`O_NOFOLLOW` / `FILE_FLAG_OPEN_REPARSE_POINT`).
 - Pre-existing reparse points inside the private stage are hostile and are never traversed for member creation.

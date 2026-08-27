@@ -4,7 +4,7 @@
 
 ## Current profiles
 
-Sealr exposes three separately identified ZIP32 interpretations. The compatibility default and strict ASCII v2 profile reject non-ASCII names. The repository-only wheel research profile accepts only strict UTF-8 NFC names and does not change the default. All three share these structural rules:
+Sealr exposes four separately identified ZIP32 interpretations. The compatibility default accepts ASCII or explicitly flagged strict UTF-8 names. Strict ASCII v2 rejects non-ASCII names. Portable UTF-8 v1 is the supported Unicode profile. Wheel UTF-8 v1 preserves the narrower Alpha.7 research language. None changes the default. All four share these structural rules:
 
 - central-directory-first structure discovery;
 - exact EOCD, central header, local header, and data-descriptor agreement;
@@ -38,12 +38,12 @@ Formats are not added as checkboxes. Each needs:
 
 ## Wheel profiles are two layers
 
-The repository-only wheel work does not turn the generic ZIP policy into a package installer.
+The supported wheel evaluator does not turn the generic ZIP policy into a package installer.
 
-1. `sealr.profile.zip.wheel-utf8.v1` defines the accepted research container language. It requires strict UTF-8 NFC member names, rejects legacy CP437 and alternate Unicode-name extras, and uses exhaustive flag and extra-field tables without waiting for a general legacy-name profile.
-2. The `python-wheel.v1-research` consumer profile binds the exact artifact filename, validates verified `WHEEL`, `METADATA`, and `RECORD` members, and produces a scheme-relative installation plan.
+1. `sealr.profile.zip.portable-utf8.v1` defines the supported container language. It requires strict UTF-8 NFC member names, rejects legacy CP437 and alternate Unicode-name extras, permits exact data descriptors, and uses exhaustive flag and extra-field tables.
+2. `sealr.consumer.python-wheel.v1` binds the exact artifact filename, validates verified `WHEEL`, `METADATA`, and `RECORD` members, and produces a scheme-relative installation plan.
 
-The first layer constructs one archive tree. The second assigns Python packaging meaning to that tree. Neither may reparse the source. The detailed candidate rules and corpus plan are in the [Python wheel profile draft](profiles/python-wheel-v1.md).
+The first layer constructs one archive tree. The second assigns Python packaging meaning to that tree. Neither may reparse the source. The detailed supported-preview rules and corpus plan are in the [Python wheel profile](profiles/python-wheel-v1.md).
 
 ## Planned order
 
@@ -53,13 +53,13 @@ The first layer constructs one archive tree. The second assigns Python packaging
 | Exact strict ASCII ZIP profile | Alpha.4 implementation complete | Opt-in v2 has an exhaustive flag table, denies every extra field, and is measured against the pinned pilot |
 | Private file-backed ZIP snapshot | Alpha.5 released | Copy-hash-retain source capability, checked random access, native mutation controls, required resource bounds, and scheduled 3 GiB sparse evidence |
 | Supervised Linux ZIP worker | Alpha.6 released | Explicit x86_64 Linux activation, authenticated packaged helper, Landlock ABI 3 plus seccomp, source replay, and supervisor audit and publication |
-| Canonical general ZIP path and tree profile | Phase 0.1 closure | UTF-8 and separately justified legacy CP437 rules, target collision model, and assurance gates |
+| Portable UTF-8 ZIP path and tree profile | Alpha.8 supported preview | Strict UTF-8 NFC, explicit flagging, no extras, component ceilings, target collision model, and independent vector |
 | ZIP Zstd, XZ/LZMA, BZip2, Deflate64 adapters | After Phase 0.1 | Same exact-consumption, bounded-window, and dependency rules as Deflate; no second parser |
 | TAR plus PAX and GNU name handling | Phase 1 | ZIP trust gate and codec adapters exist so TAR wrappers reuse them |
 | gzip, bzip2, xz, and zstd wrappers | Phase 1 with TAR | Exact stream, window, metadata, and cancellation semantics via the ZIP codec adapters |
 | ZIP64 | Deferred and consumer-driven | A named consumer demonstrates compatibility need and receives new offset, size, and corpus gates |
-| Wheel-oriented UTF-8 ZIP profile | Repository laboratory implemented, not current support | Exact UTF-8 path rules, exhaustive ZIP feature table, hostile fixtures, and benign compatibility report |
-| Python wheel consumer profile | Repository research implemented; supported promotion remains Phase 0.2 | Verified-member API plus wheel metadata, `RECORD`, artifact identity, scheme-relative install-plan rules, and external bridge |
+| Wheel-oriented UTF-8 ZIP profile | Alpha.7 research evidence preserved | Exact research bytes remain available for historical verification |
+| Python wheel consumer profile | Alpha.8 supported preview | Verified-member API plus wheel metadata, `RECORD`, artifact identity, scheme-relative install-plan rules, and public-surface corpus replay |
 | JAR, APK, OCI, Office, and other ZIP consumers | Later consumer profiles | Signature, relocation, layer, or document semantics specified independently |
 | 7z and other archive families | Deliberately deferred | Concrete consumer, maintained parser strategy, and equivalent assurance evidence |
 | Encrypted or spanned archives | Refused in the current direction | Separate key, volume, and streaming trust models would be required |

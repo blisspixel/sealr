@@ -7,12 +7,11 @@ Set-StrictMode -Version Latest
 $workspace = Split-Path -Parent $PSScriptRoot
 $expected = [ordered]@{
     'x86_64-unknown-linux-gnu' = [pscustomobject]@{
-        Components = 62
-        Notices = 13
+        Components = 67
+        Notices = 14
         Present = @(
             'linux-raw-sys 0.12.1',
             'rustix-linux-procfs 0.1.1',
-            'once_cell 1.21.4',
             'landlock 0.4.7',
             'enumflags2 0.7.12',
             'enumflags2_derive 0.7.12',
@@ -29,14 +28,14 @@ $expected = [ordered]@{
         )
     }
     'aarch64-apple-darwin' = [pscustomobject]@{
-        Components = 56
-        Notices = 10
+        Components = 62
+        Notices = 11
         Present = @('errno 0.3.14', 'rustix 1.1.4', 'libc 0.2.189')
-        Absent = @('linux-raw-sys 0.12.1', 'windows-sys 0.61.2', 'once_cell 1.21.4')
+        Absent = @('linux-raw-sys 0.12.1', 'windows-sys 0.61.2')
     }
     'x86_64-pc-windows-msvc' = [pscustomobject]@{
-        Components = 64
-        Notices = 9
+        Components = 70
+        Notices = 10
         Present = @('windows-sys 0.61.2', 'winx 0.36.4', 'once_cell_polyfill 1.70.2')
         Absent = @('rustix 1.1.4', 'libc 0.2.189', 'errno 0.3.14')
     }
@@ -95,10 +94,15 @@ try {
         }
 
         foreach ($requiredEntry in @(
+                'caseless 0.2.2',
+                'once_cell 1.21.4',
+                'pep440_rs 0.7.3',
                 'strsim 0.11.1',
                 'tinyvec 1.12.0',
                 'tinyvec_macros 0.1.1',
+                'unicode-general-category 1.1.0',
                 'unicode-normalization 0.1.25',
+                'unscanny 0.1.0',
                 'zlib-rs 0.6.7',
                 'zmij 1.0.23'
             ) +

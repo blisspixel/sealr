@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
 
+use caseless::Caseless;
 #[cfg(test)]
 use std::cell::Cell;
 
 use crate::findings::{Finding, FindingCode};
-use crate::ir::NormalizationAction;
+use crate::ir::{NormalizationAction, ZipInterpretationProfile};
+use unicode_general_category::{get_general_category, GeneralCategory};
 use unicode_normalization::UnicodeNormalization;
 
 /// Jailed relative components plus the recorded normalization actions.
@@ -39,6 +41,17 @@ const RESERVED: &[&str] = &[
     "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
 ];
 
+const PORTABLE_ADDITIONAL_RESERVED: &[&str] = &["COM¹", "COM²", "COM³", "LPT¹", "LPT²", "LPT³"];
+
+pub(crate) const PORTABLE_PATH_GRAMMAR_ID: &str = "jail-portable-v1:absolute-or-drive-denied;slash-only;empty-denied;dot-denied;dotdot-denied;colon-denied;ascii-illegal-003c-003e-0022-007c-003f-002a;trailing-dot-or-space-denied;duplicate-and-file-directory-topology-denied";
+pub(crate) const PORTABLE_RESERVED_NAMES_ID: &str = "ascii-case-insensitive-stem-before-dot:CON,PRN,AUX,NUL,COM1,COM2,COM3,COM4,COM5,COM6,COM7,COM8,COM9,LPT1,LPT2,LPT3,LPT4,LPT5,LPT6,LPT7,LPT8,LPT9,COM¹,COM²,COM³,LPT¹,LPT²,LPT³";
+
+/// Conservative per-component ceiling shared by the supported release
+/// platforms. Both encodings are checked because Unix names are byte-bounded
+/// while Windows names are UTF-16-code-unit-bounded.
+pub const PORTABLE_NAME_MAX_COMPONENT_UTF8_BYTES: usize = 255;
+pub const PORTABLE_NAME_MAX_COMPONENT_UTF16_UNITS: usize = 255;
+
 /// Jail a member name to a relative component list. Pure: no filesystem.
 pub fn jail_relative(raw: &str, max_depth: u32) -> Result<Vec<String>, Finding> {
     Ok(jail_name(raw, max_depth)?.components)
@@ -56,14 +69,38 @@ pub fn jail_name(raw: &str, max_depth: u32) -> Result<JailedName, Finding> {
 }
 
 pub(crate) fn jail_name_fallible(raw: &str, max_depth: u32) -> Result<JailedName, JailNameError> {
-    let (component_count, action_count) = validate_name(raw, max_depth)?;
+    jail_name_fallible_for_profile(raw, max_depth, ZipInterpretationProfile::StrictAsciiV1)
+}
+
+pub(crate) fn jail_name_for_profile(
+    raw: &str,
+    max_depth: u32,
+    profile: ZipInterpretationProfile,
+) -> Result<JailedName, Finding> {
+    match jail_name_fallible_for_profile(raw, max_depth, profile) {
+        Ok(jailed) => Ok(jailed),
+        Err(JailNameError::Invalid { code, detail }) => Err(Finding::error(code, detail).on(raw)),
+        Err(JailNameError::AllocationFailed) => {
+            panic!("bounded path normalization allocation failed")
+        }
+    }
+}
+
+pub(crate) fn jail_name_fallible_for_profile(
+    raw: &str,
+    max_depth: u32,
+    profile: ZipInterpretationProfile,
+) -> Result<JailedName, JailNameError> {
+    let (component_count, action_count) = validate_name(raw, max_depth, profile)?;
 
     let mut out = Vec::new();
     reserve_exact(&mut out, component_count)?;
     let mut actions = Vec::new();
     reserve_exact(&mut actions, action_count)?;
     for (component_index, part) in raw.split('/').enumerate() {
-        match validate_component(part).expect("first path-validation pass accepted the component") {
+        match validate_component(part, profile)
+            .expect("first path-validation pass accepted the component")
+        {
             ComponentDisposition::DropDot => {
                 actions.push(NormalizationAction::DropDotComponent {
                     component_index: u32::try_from(component_index)
@@ -86,7 +123,11 @@ pub(crate) fn jail_name_fallible(raw: &str, max_depth: u32) -> Result<JailedName
     })
 }
 
-fn validate_name(raw: &str, max_depth: u32) -> Result<(usize, usize), JailNameError> {
+fn validate_name(
+    raw: &str,
+    max_depth: u32,
+    profile: ZipInterpretationProfile,
+) -> Result<(usize, usize), JailNameError> {
     if raw.contains('\0') {
         return Err(JailNameError::Invalid {
             code: FindingCode::PathNul,
@@ -115,7 +156,7 @@ fn validate_name(raw: &str, max_depth: u32) -> Result<(usize, usize), JailNameEr
     let mut component_count = 0_usize;
     let mut action_count = 0_usize;
     for (component_index, part) in raw.split('/').enumerate() {
-        match validate_component(part)? {
+        match validate_component(part, profile)? {
             ComponentDisposition::DropDot => {
                 u32::try_from(component_index).map_err(|_| JailNameError::Invalid {
                     code: FindingCode::PathDepth,
@@ -141,7 +182,10 @@ fn validate_name(raw: &str, max_depth: u32) -> Result<(usize, usize), JailNameEr
     Ok((component_count, action_count))
 }
 
-fn validate_component(part: &str) -> Result<ComponentDisposition, JailNameError> {
+fn validate_component(
+    part: &str,
+    profile: ZipInterpretationProfile,
+) -> Result<ComponentDisposition, JailNameError> {
     if part.is_empty() {
         return Err(JailNameError::Invalid {
             code: FindingCode::PathEmpty,
@@ -163,15 +207,9 @@ fn validate_component(part: &str) -> Result<ComponentDisposition, JailNameError>
             detail: "colon in component",
         });
     }
-    if part
-        .chars()
-        .any(|c| {
-            c.is_control()
-                || (!c.is_ascii() && c.is_whitespace())
-                || matches!(c, '\u{200e}' | '\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2066}'..='\u{2069}')
-                || "<>\"|?*".contains(c)
-        })
-    {
+    if part.chars().any(|character| {
+        invalid_character_for_profile(character, profile) || "<>\"|?*".contains(character)
+    }) {
         return Err(JailNameError::Invalid {
             code: FindingCode::PathInvalidChar,
             detail: "illegal character",
@@ -183,7 +221,7 @@ fn validate_component(part: &str) -> Result<ComponentDisposition, JailNameError>
             detail: "trailing dot or space",
         });
     }
-    if is_reserved(part) {
+    if is_reserved(part, profile) {
         return Err(JailNameError::Invalid {
             code: FindingCode::PathReserved,
             detail: "Windows reserved name",
@@ -192,9 +230,94 @@ fn validate_component(part: &str) -> Result<ComponentDisposition, JailNameError>
     Ok(ComponentDisposition::Keep)
 }
 
-/// Deterministic portable collision key for admitted NFC paths.
-pub(crate) fn portable_case_fold(value: &str) -> String {
+fn invalid_character_for_profile(character: char, profile: ZipInterpretationProfile) -> bool {
+    if profile != ZipInterpretationProfile::PortableUtf8V1 {
+        return character.is_control()
+            || (!character.is_ascii() && character.is_whitespace())
+            || is_legacy_bidi_control(character);
+    }
+    get_general_category(character) == GeneralCategory::Control
+        || (!character.is_ascii() && is_unicode_16_white_space(character))
+        || is_bidi_control(character)
+}
+
+fn is_legacy_bidi_control(character: char) -> bool {
+    matches!(
+        character,
+        '\u{200e}'
+            | '\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2066}'..='\u{2069}'
+    )
+}
+
+fn is_unicode_16_white_space(character: char) -> bool {
+    matches!(
+        character,
+        '\u{0085}' | '\u{00a0}' | '\u{1680}' | '\u{2000}'
+            ..='\u{200a}' | '\u{2028}' | '\u{2029}' | '\u{202f}' | '\u{205f}' | '\u{3000}'
+    )
+}
+
+fn is_bidi_control(character: char) -> bool {
+    matches!(
+        character,
+        '\u{061c}'
+            | '\u{200e}'
+            | '\u{200f}'
+            | '\u{202a}'..='\u{202e}'
+            | '\u{2066}'..='\u{2069}'
+    )
+}
+
+/// Collision key selected by the interpretation profile.
+pub(crate) fn profile_case_fold(value: &str, profile: ZipInterpretationProfile) -> String {
+    if profile == ZipInterpretationProfile::PortableUtf8V1 {
+        return portable_unicode_case_fold(value);
+    }
     value.chars().flat_map(char::to_lowercase).nfc().collect()
+}
+
+/// Unicode 16 full-default-case-fold collision key for portable UTF-8 v1.
+pub(crate) fn portable_unicode_case_fold(value: &str) -> String {
+    let folded: String = value.chars().default_case_fold().collect();
+    folded.nfc().collect()
+}
+
+pub(crate) fn portable_name_violation(jailed: &JailedName) -> Option<&'static str> {
+    if !jailed.actions.is_empty() {
+        return Some("portable UTF-8 paths may not contain dot components");
+    }
+    if jailed
+        .components
+        .iter()
+        .flat_map(|component| component.chars())
+        .any(|character| {
+            matches!(
+                get_general_category(character),
+                GeneralCategory::Unassigned
+                    | GeneralCategory::PrivateUse
+                    | GeneralCategory::Surrogate
+            )
+        })
+    {
+        return Some("portable UTF-8 paths require Unicode 16.0 public assigned scalars");
+    }
+    if jailed
+        .components
+        .iter()
+        .any(|component| component.len() > PORTABLE_NAME_MAX_COMPONENT_UTF8_BYTES)
+    {
+        return Some("portable UTF-8 path component exceeds 255 UTF-8 bytes");
+    }
+    if jailed
+        .components
+        .iter()
+        .any(|component| component.encode_utf16().count() > PORTABLE_NAME_MAX_COMPONENT_UTF16_UNITS)
+    {
+        return Some("portable UTF-8 path component exceeds 255 UTF-16 code units");
+    }
+    None
 }
 
 fn reserve_exact<T>(items: &mut Vec<T>, count: usize) -> Result<(), JailNameError> {
@@ -235,9 +358,13 @@ fn looks_like_drive(s: &str) -> bool {
     b.len() >= 2 && b[0].is_ascii_alphabetic() && b[1] == b':'
 }
 
-fn is_reserved(part: &str) -> bool {
+fn is_reserved(part: &str, profile: ZipInterpretationProfile) -> bool {
     let stem = part.split('.').next().unwrap_or(part);
     RESERVED.iter().any(|r| stem.eq_ignore_ascii_case(r))
+        || (profile == ZipInterpretationProfile::PortableUtf8V1
+            && PORTABLE_ADDITIONAL_RESERVED
+                .iter()
+                .any(|reserved| stem.eq_ignore_ascii_case(reserved)))
 }
 
 fn is_strict_child_or_eq(root: &Path, target: &Path) -> bool {
@@ -284,6 +411,89 @@ mod tests {
         assert_eq!(
             jail_relative("NUL.txt", 32).unwrap_err().code,
             FindingCode::PathReserved
+        );
+    }
+
+    #[test]
+    fn rejects_windows_superscript_device_names() {
+        for name in ["COM¹", "com².txt", "LPT³.log"] {
+            assert_eq!(
+                jail_name_for_profile(name, 32, ZipInterpretationProfile::PortableUtf8V1)
+                    .unwrap_err()
+                    .code,
+                FindingCode::PathReserved,
+                "{name}"
+            );
+            assert!(jail_name_for_profile(name, 32, ZipInterpretationProfile::WheelUtf8V1).is_ok());
+        }
+        let executable_set = RESERVED
+            .iter()
+            .chain(PORTABLE_ADDITIONAL_RESERVED)
+            .copied()
+            .collect::<Vec<_>>()
+            .join(",");
+        assert_eq!(
+            format!("ascii-case-insensitive-stem-before-dot:{executable_set}"),
+            PORTABLE_RESERVED_NAMES_ID
+        );
+    }
+
+    #[test]
+    fn portable_component_limit_checks_the_active_utf8_ceiling() {
+        let byte_heavy = format!("{}aa", "é".repeat(127));
+        let jailed = jail_name(&byte_heavy, 32).unwrap();
+        assert_eq!(
+            portable_name_violation(&jailed),
+            Some("portable UTF-8 path component exceeds 255 UTF-8 bytes")
+        );
+
+        let exact = "a".repeat(255);
+        assert!(portable_name_violation(&jail_name(&exact, 32).unwrap()).is_none());
+        assert_eq!(
+            portable_name_violation(&jail_name("a/./b", 32).unwrap()),
+            Some("portable UTF-8 paths may not contain dot components")
+        );
+    }
+
+    #[test]
+    fn portable_unicode_tables_and_full_case_fold_are_pinned() {
+        assert_eq!(unicode_general_category::UNICODE_VERSION, (16, 0, 0));
+        assert_eq!(unicode_normalization::UNICODE_VERSION, (17, 0, 0));
+        assert_eq!(caseless::UNICODE_VERSION, (16, 0, 0));
+        assert_eq!(
+            portable_unicode_case_fold("\u{3c3}"),
+            portable_unicode_case_fold("\u{3c2}")
+        );
+        assert_eq!(
+            portable_unicode_case_fold("Straße"),
+            portable_unicode_case_fold("STRASSE")
+        );
+        assert_ne!(
+            profile_case_fold("\u{3c3}", ZipInterpretationProfile::WheelUtf8V1),
+            profile_case_fold("\u{3c2}", ZipInterpretationProfile::WheelUtf8V1)
+        );
+        assert_eq!(
+            portable_name_violation(&jail_name("\u{e000}", 32).unwrap()),
+            Some("portable UTF-8 paths require Unicode 16.0 public assigned scalars")
+        );
+        for character in [
+            '\u{0085}', '\u{00a0}', '\u{1680}', '\u{2000}', '\u{200a}', '\u{2028}', '\u{2029}',
+            '\u{202f}', '\u{205f}', '\u{3000}', '\u{061c}', '\u{200e}', '\u{200f}', '\u{202a}',
+            '\u{202e}', '\u{2066}', '\u{2069}',
+        ] {
+            assert!(jail_name_for_profile(
+                &format!("a{character}b"),
+                32,
+                ZipInterpretationProfile::PortableUtf8V1,
+            )
+            .is_err());
+        }
+        assert!(
+            jail_name_for_profile("a\u{180e}b", 32, ZipInterpretationProfile::PortableUtf8V1,)
+                .is_ok()
+        );
+        assert!(
+            jail_name_for_profile("a\u{061c}b", 32, ZipInterpretationProfile::WheelUtf8V1,).is_ok()
         );
     }
 
