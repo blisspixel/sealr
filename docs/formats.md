@@ -22,7 +22,7 @@ The [API contract](api.md), [safety specification](safety.md), and [finding regi
 
 The product destination includes the lossless methods ordinary ZIP and TAR producers actually emit. They are codec adapters, not a second unarchiver. Sequencing is in the [roadmap](../ROADMAP.md#common-compression-one-boundary).
 
-ZIP methods in scope: Store, Deflate, Deflate64, BZip2, LZMA, XZ, and Zstandard. TAR wrappers in scope: uncompressed, gzip, bzip2, xz, and zstd. Each adapter must consume declared compressed input exactly, bind every transform and snapshot domain, bound its window and output, fail closed, and reuse the same path, quota, verification, and publication core.
+ZIP methods in scope: Store, Deflate, Deflate64, BZip2, LZMA, XZ, and Zstandard. TAR wrappers in scope: uncompressed, gzip, zstd, xz, bzip2, and LZ4 frame. Each adapter must consume declared compressed input exactly, bind every transform and snapshot domain, bound its window and output, fail closed, and reuse the same path, quota, verification, and publication core.
 
 PPMd and encrypted payload decoding are outside the current default direction. RAR4 and RAR5 remain separate research targets subject to decoder-license and trusted-code decisions. Shelling out to another extractor is out of scope. ZIP64 is a structural profile, not a codec.
 
@@ -60,7 +60,7 @@ The first layer constructs one archive tree. The second assigns Python packaging
 | ZIP64 | Next structural increment | Exact saturated legacy and redundant ZIP64 field agreement with no new runtime dependency |
 | gzip-wrapped TAR | After transform-chain architecture | Bounded derived snapshot, exact RFC 1952 consumption and checksum, existing `flate2`, outer plus inner identities |
 | PAX and GNU TAR dialects | Separate later profiles | Bounded keyword precedence, long-name behavior, link and sparse decisions, and no implicit widening of portable ustar |
-| zstd, xz/LZMA, and bzip2 wrappers | Independently promoted | One measured decoder at a time with exact input, memory, work, checksum, and dependency evidence |
+| zstd, xz/LZMA, bzip2, and LZ4 frame wrappers | Independently promoted in that order | One measured decoder at a time with exact input, memory, work, checksum, and dependency evidence |
 | ZIP Zstd, XZ/LZMA, BZip2, Deflate64 adapters | After each codec promotion | Same exact-consumption, bounded-window, and dependency rules as Deflate; no second parser |
 | Wheel-oriented UTF-8 ZIP profile | Alpha.7 research evidence preserved | Exact research bytes remain available for historical verification |
 | Python wheel consumer profile | Alpha.8 supported preview | Verified-member API plus wheel metadata, `RECORD`, artifact identity, scheme-relative install-plan rules, and public-surface corpus replay |

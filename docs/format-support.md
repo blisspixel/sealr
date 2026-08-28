@@ -1,6 +1,6 @@
 # Format support architecture
 
-Updated 2026-08-27.
+Updated 2026-08-28.
 
 Sealr targets the major open archive families used for software distribution, system packaging, and cross-platform exchange. Format breadth does not authorize a fallback extractor, implicit recovery, or an unbounded dependency graph. Every accepted language is an explicit interpretation profile over one immutable source snapshot.
 
@@ -18,14 +18,15 @@ The matrix separates structural parsing, payload decoding, advanced dialect feat
 | zstd | exact frame wrapper profile | Zstandard | Window, skippable-frame, checksum, concatenation, and dictionary rules | Planned | Required before promotion | Review `ruzstd` with a hard maximum window |
 | xz and LZMA | exact stream wrapper and coder profiles | LZMA, LZMA2 | Memory limit, concatenation, and exact input consumption | Planned | Required before promotion | Review minimal `lzma-rust2` features |
 | bzip2 | exact stream wrapper profile | BWT pipeline | Whole-stream CRC, concatenation, and work budget | Planned | Required before promotion | Review `bzip2` with pure-Rust `libbz2-rs-sys` backend |
+| LZ4 frame | exact modern frame wrapper profile | LZ4 blocks | Block bounds, checksums, dictionary, legacy, skippable, and concatenation rules | Planned Tier 2 | Required before promotion | Review `lz4_flex` after the shared xxHash dependency lands |
 | 7z | local bounded header and coder-graph interpreter | Copy first, then LZMA and LZMA2 | Packed headers, acyclic bind graph, substreams, solid routing, encryption denial | Planned Tier 1 | Required before promotion | No full extractor crate; reuse reviewed codec adapter |
-| RAR4 | separate local structural profile | Store first | Volumes, solid state, services, recovery, redirections, encryption | Research gate | Required before promotion | Decoder and license decision required |
-| RAR5 | separate local structural profile | Store first | Bounded vint headers, solid state, filters, services, volumes, encryption | Research gate | Required before promotion | Decoder and license decision required |
 | cpio | portable `newc` profile | Raw payload | Hardlink identity, trailer, modes, devices, alignment | Planned Tier 2 | Required before promotion | Zero new runtime dependencies |
 | ar | common GNU and BSD profiles | Raw payload | Long-name tables, symbol tables, thin-reference denial | Planned Tier 2 | Required before promotion | Zero new runtime dependencies |
 | deb | typed common-ar composition | gzip, xz, zstd, bzip2 as promoted | Exact order and constrained `control.tar` plus `data.tar` profiles | Planned Tier 2 | Required before promotion | Reuse promoted wrappers only |
-| RPM | local lead, signature, and header profiles | gzip, xz, zstd, bzip2 as promoted | Typed cpio payload composition and signature policy | Planned Tier 2 | Required before promotion | Reuse cpio and promoted wrappers only |
 | CAB | local bounded cabinet profile | Store and MSZIP first, LZX later | Folder streams, block checksums, multi-cabinet authority | Planned Tier 2 | Required before promotion | Reuse Deflate; separate LZX decision |
+| RPM | local lead, signature, and header profiles | gzip, xz, zstd, bzip2 as promoted | Typed cpio payload composition and signature policy | Planned Tier 2 | Required before promotion | Reuse cpio and promoted wrappers only |
+| RAR5 | separate local structural profile | Store first | Bounded vint headers, solid state, filters, services, volumes, encryption | Research gate | Required before promotion | Decoder and license decision required |
+| RAR4 | separate local structural profile | Store first | Volumes, solid state, services, recovery, redirections, encryption | Research gate | Required before promotion | Decoder and license decision required |
 
 JAR, wheel, and NuGet are consumer profiles over ZIP. APK is ZIP-derived but needs a distinct structural profile because its signing block sits before the central directory. OCI layers require a TAR dialect plus a stateful layer applier for whiteouts, links, ownership, modes, extended attributes, and prior-tree effects. They are not equivalent to generic raw-TAR extraction. Compression aliases such as `.tgz` select an explicit wrapper plus TAR profile; they do not cause suffix sniffing.
 
@@ -60,6 +61,10 @@ Every proposed runtime dependency must include:
 7. removal criteria if the dependency becomes unmaintained or violates the boundary.
 
 Optional Cargo features are not used to make the default binary unpredictably format-dependent. If a major format becomes supported by the release binary, release evidence names the exact codec graph it ships.
+
+The current dependency ceiling is no more than two new runtime packages for one promoted codec and no new C or C++ build chain. ZIP64, gzip, PAX, GNU TAR, cpio, ar, deb structure, RPM structure, and CAB Store or MSZIP require no new package. The current candidates are `ruzstd` plus `twox-hash` for zstd, `lzma-rust2` for xz and 7z LZMA, `bzip2` plus pure-Rust `libbz2-rs-sys` for bzip2, `lz4_flex` after xxHash is shared, and `lzxd` for later CAB LZX. Full RAR decompression has no accepted dependency.
+
+The ranked delivery order is transform authority, ZIP64, single-member gzip-wrapped ustar, PAX and selected GNU TAR, zstd, xz, bzip2, LZ4 frame, 7z, cpio, ar/deb, CAB, RPM, and separate RAR5 and RAR4 research. Every stage reuses the same snapshot, plan, quota, path, verification, capability, worker, and identity boundary.
 
 ## Why ustar is first
 
