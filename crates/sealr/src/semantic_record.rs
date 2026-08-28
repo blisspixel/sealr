@@ -1268,6 +1268,7 @@ fn finding_code_tag(code: FindingCode) -> u16 {
         FindingCode::TarTruncated => 62,
         FindingCode::TarType => 63,
         FindingCode::TarFeatureUnsupported => 64,
+        FindingCode::GzipExtra => 65,
     }
 }
 
@@ -1338,6 +1339,7 @@ fn finding_code_from_tag(tag: u16, offset: usize) -> Result<FindingCode, RecordE
         62 => FindingCode::TarTruncated,
         63 => FindingCode::TarType,
         64 => FindingCode::TarFeatureUnsupported,
+        65 => FindingCode::GzipExtra,
         _ => {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidEnum,
@@ -4692,6 +4694,15 @@ mod tests {
         inject_read_failure, reset_test_read_ranges, test_read_failure_is_armed, test_read_ranges,
     };
     use crate::verification::{reset_verify_payload_calls, verify_payload_calls};
+
+    #[test]
+    fn gzip_extra_finding_code_has_a_stable_wire_tag() {
+        assert_eq!(finding_code_tag(FindingCode::GzipExtra), 65);
+        assert_eq!(
+            finding_code_from_tag(65, 0).unwrap(),
+            FindingCode::GzipExtra
+        );
+    }
 
     fn test_zip_evidence(member: &IrMember) -> &ZipMemberEvidence {
         member

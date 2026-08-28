@@ -48,6 +48,7 @@ pub(crate) struct GzipHeader {
     pub(crate) header: ByteRange,
     /// Includes the two-byte XLEN field and its exact payload.
     pub(crate) extra: Option<ByteRange>,
+    pub(crate) extra_subfield_count: u32,
     /// Includes the terminating NUL byte.
     pub(crate) original_name: Option<ByteRange>,
     /// Includes the terminating NUL byte.
@@ -88,6 +89,7 @@ pub(crate) enum GzipErrorKind {
     CompressionMethod,
     ReservedFlags,
     HeaderLimit,
+    ExtraField,
     HeaderChecksum,
     DeflateStream,
     DeflateAccounting,
@@ -302,7 +304,7 @@ fn parse_header(
     header_crc.update(&fixed);
     let mut cursor = FIXED_HEADER_LEN;
 
-    let extra = if flags & FLAG_EXTRA != 0 {
+    let (extra, extra_subfield_count) = if flags & FLAG_EXTRA != 0 {
         let start = cursor;
         let mut xlen_bytes = [0_u8; 2];
         reserve_header(&mut cursor, 2, max_header_bytes, max_metadata_bytes)?;
@@ -315,6 +317,7 @@ fn parse_header(
         header_crc.update(&xlen_bytes);
         let xlen = u64::from(u16::from_le_bytes(xlen_bytes));
         reserve_header(&mut cursor, xlen, max_header_bytes, max_metadata_bytes)?;
+        let subfield_count = validate_extra_subfields(source, start + 2, xlen)?;
         hash_range(
             source,
             start + 2,
@@ -322,12 +325,15 @@ fn parse_header(
             &mut header_crc,
             "gzip FEXTRA payload is truncated",
         )?;
-        Some(ByteRange {
-            offset: start,
-            len: xlen + 2,
-        })
+        (
+            Some(ByteRange {
+                offset: start,
+                len: xlen + 2,
+            }),
+            subfield_count,
+        )
     } else {
-        None
+        (None, 0)
     };
 
     let original_name = if flags & FLAG_NAME != 0 {
@@ -389,10 +395,66 @@ fn parse_header(
             len: cursor,
         },
         extra,
+        extra_subfield_count,
         original_name,
         comment,
         header_crc16,
     })
+}
+
+fn validate_extra_subfields(
+    source: &SourceSnapshot<'_>,
+    offset: u64,
+    len: u64,
+) -> Result<u32, GzipError> {
+    let end = offset
+        .checked_add(len)
+        .ok_or_else(|| malformed_extra("gzip FEXTRA range overflowed u64"))?;
+    let mut cursor = offset;
+    let mut count = 0_u32;
+    while cursor < end {
+        let remaining = end - cursor;
+        if remaining < 4 {
+            return Err(malformed_extra(format!(
+                "gzip FEXTRA has {remaining} trailing byte(s) outside a complete subfield header"
+            )));
+        }
+        let mut fixed = [0_u8; 4];
+        read_exact(
+            source,
+            cursor,
+            &mut fixed,
+            "gzip FEXTRA subfield header is truncated",
+        )?;
+        if fixed[1] == 0 {
+            return Err(malformed_extra(format!(
+                "gzip FEXTRA subfield ID {:02x}00 uses reserved SI2 value zero",
+                fixed[0]
+            )));
+        }
+        let data_len = u64::from(u16::from_le_bytes([fixed[2], fixed[3]]));
+        let subfield_end = cursor
+            .checked_add(4)
+            .and_then(|value| value.checked_add(data_len))
+            .ok_or_else(|| malformed_extra("gzip FEXTRA subfield range overflowed u64"))?;
+        if subfield_end > end {
+            return Err(malformed_extra(format!(
+                "gzip FEXTRA subfield {:02x}{:02x} declares {data_len} data byte(s) with only {} available",
+                fixed[0],
+                fixed[1],
+                end - cursor - 4
+            )));
+        }
+        count = count
+            .checked_add(1)
+            .ok_or_else(|| malformed_extra("gzip FEXTRA subfield count overflowed u32"))?;
+        cursor = subfield_end;
+    }
+    Ok(count)
+}
+
+fn malformed_extra(detail: impl Into<String>) -> GzipError {
+    GzipError::new(GzipErrorKind::ExtraField, FindingCode::GzipExtra, detail)
 }
 
 fn reserve_header(
@@ -804,6 +866,8 @@ mod tests {
     fn fixture(flags: u8, payload: &[u8]) -> Vec<u8> {
         let mut bytes = vec![0x1f, 0x8b, 8, flags, 0x78, 0x56, 0x34, 0x12, 0, 255];
         if flags & FLAG_EXTRA != 0 {
+            bytes.extend_from_slice(&7_u16.to_le_bytes());
+            bytes.extend_from_slice(b"SL");
             bytes.extend_from_slice(&3_u16.to_le_bytes());
             bytes.extend_from_slice(b"xyz");
         }
@@ -828,6 +892,16 @@ mod tests {
         bytes
     }
 
+    fn fixture_with_extra(extra: &[u8], payload: &[u8]) -> Vec<u8> {
+        let mut bytes = fixture(0, payload);
+        bytes[3] = FLAG_EXTRA;
+        let mut field = Vec::with_capacity(2 + extra.len());
+        field.extend_from_slice(&(extra.len() as u16).to_le_bytes());
+        field.extend_from_slice(extra);
+        bytes.splice(FIXED_HEADER_LEN as usize..FIXED_HEADER_LEN as usize, field);
+        bytes
+    }
+
     fn decode(bytes: &[u8]) -> Result<DecodedGzipMember, GzipError> {
         decode_single_member(&SourceSnapshot::borrowed(None, bytes), LARGE_LIMITS)
     }
@@ -845,27 +919,28 @@ mod tests {
         assert_eq!(decoded.header.modification_time, 0x1234_5678);
         assert_eq!(decoded.header.extra_flags, 0);
         assert_eq!(decoded.header.operating_system, 255);
-        assert_eq!(decoded.header.extra, Some(ByteRange { offset: 10, len: 5 }));
+        assert_eq!(decoded.header.extra, Some(ByteRange { offset: 10, len: 9 }));
+        assert_eq!(decoded.header.extra_subfield_count, 1);
         assert_eq!(
             decoded.header.original_name,
             Some(ByteRange {
-                offset: 15,
+                offset: 19,
                 len: 12
             })
         );
         assert_eq!(
             decoded.header.comment,
             Some(ByteRange {
-                offset: 27,
+                offset: 31,
                 len: 14
             })
         );
         assert_eq!(
             decoded.header.header_crc16,
-            Some(ByteRange { offset: 41, len: 2 })
+            Some(ByteRange { offset: 45, len: 2 })
         );
-        assert_eq!(decoded.header.header, ByteRange { offset: 0, len: 43 });
-        assert_eq!(decoded.compressed_payload.offset, 43);
+        assert_eq!(decoded.header.header, ByteRange { offset: 0, len: 47 });
+        assert_eq!(decoded.compressed_payload.offset, 47);
         assert_eq!(decoded.trailer.len, 8);
         assert_eq!(
             decoded.trailer.offset,
@@ -880,6 +955,27 @@ mod tests {
             decoded.output.read_vec(0, decoded.output.len()).unwrap(),
             payload
         );
+    }
+
+    #[test]
+    fn fextra_is_an_exact_sequence_of_rfc_1952_subfields() {
+        let valid = fixture_with_extra(b"SL\x03\x00xyzAB\x00\x00", b"payload");
+        let decoded = decode(&valid).unwrap();
+        assert_eq!(decoded.header.extra_subfield_count, 2);
+
+        let empty = fixture_with_extra(b"", b"payload");
+        assert_eq!(decode(&empty).unwrap().header.extra_subfield_count, 0);
+
+        for (label, extra) in [
+            ("truncated fixed header", b"SL\x00".as_slice()),
+            ("declared data overrun", b"SL\x04\x00x".as_slice()),
+            ("trailing remainder", b"SL\x00\x00x".as_slice()),
+            ("reserved SI2", b"S\x00\x00\x00".as_slice()),
+        ] {
+            let error = decode(&fixture_with_extra(extra, b"payload")).unwrap_err();
+            assert_eq!(error.kind, GzipErrorKind::ExtraField, "{label}");
+            assert_eq!(error.finding().code, FindingCode::GzipExtra, "{label}");
+        }
     }
 
     #[test]
@@ -956,7 +1052,7 @@ mod tests {
             FLAG_EXTRA | FLAG_NAME | FLAG_COMMENT | FLAG_HEADER_CRC,
             b"payload",
         );
-        let header_len = 43;
+        let header_len = 47;
         let metadata_len = header_len + TRAILER_LEN;
         let exact = decode_single_member(
             &SourceSnapshot::borrowed(None, &bytes),
