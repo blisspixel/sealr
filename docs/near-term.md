@@ -1,6 +1,6 @@
 # Near-term execution plan
 
-> Status: active plan after the Alpha.9 portable-ustar and multi-format-core increment. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
+> Status: active plan after the Alpha.10 strict-ZIP64 and gzip-TAR increment. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
 
 The next work should produce thin, independently reviewable trust increments. Each increment must finish with a useful artifact, explicit evidence, and a bounded claim. Work that merely makes the codebase larger does not count as progress.
 
@@ -22,9 +22,22 @@ Wheel         research proof [done]   -> supported evaluator [done] -> targeted 
 
 The assurance and wheel lanes may add test, corpus, and research tooling. They do not add a fallback parser or silently widen the shipped profile. The exact Kani, mutation, coverage, and promotion contracts are recorded in [assurance discovery and promotion](assurance-promotion.md).
 
-## Immediate post-Alpha.9 sequence
+## Immediate post-Alpha.10 sequence
 
-Alpha.6 shipped the public fail-closed Linux supervisor and capability boundary. Alpha.7 closed the repository-only wheel research proof. Alpha.8 added the supported portable UTF-8 profile, public capability-only wheel evaluator, exact public consumer identity golden, and v3 replay over the pinned 20-wheel corpus. Alpha.9 released a strict portable POSIX ustar profile with zero new runtime dependencies and separately versioned TAR layout evidence while preserving every ZIP32 profile and root. Current main exposes strict ZIP64 under policy v3 with ZIP64-native IR, covering, and `sealrTreeV3` evidence, plus strict single-member gzip-wrapped portable ustar under policy v4 with two immutable snapshot domains, exact transform binding, and `sealrTreeV4`. ZIP32 does not alias to either, and the authenticated worker refuses both without fallback until later semantic records can represent their evidence. Raw PAX and a narrow GNU long-name profile follow, then gzip composition, zstd, XZ, bzip2, and the separately gated 7z, cpio, ar/deb, CAB, RPM, and RAR5 programs. ISO 9660, UDF, and filesystem images are a separate program. The next consumer gate remains targeted benign wheel coverage followed by stable identity and API review. Assurance history, authenticated recovery, and durability continue in parallel.
+Alpha.6 shipped the public fail-closed Linux supervisor and capability boundary. Alpha.7 closed the repository-only wheel research proof. Alpha.8 added the supported portable UTF-8 profile and public capability-only wheel evaluator. Alpha.9 released strict portable POSIX ustar with zero new runtime dependencies. Alpha.10 released strict ZIP64 under policy v3 and strict single-member gzip-wrapped portable ustar under policy v4, with ZIP64-native and two-domain transform evidence, independently reconstructed roots, public package paths, and separate bounded fuzz campaigns. ZIP32 does not alias to either, and the authenticated worker refuses both without fallback until later semantic records can represent their evidence.
+
+Raw PAX is next because it expands the most common TAR naming and metadata dialect without adding a decoder dependency or changing the established snapshot, materialization, and content-verification core. A narrow GNU long-name-only profile follows as a separate language so precedence cannot vary by producer. Only after both raw dialects have independent identities and covering evidence will they be composed with the existing gzip transform. Zstd, XZ, and bzip2 then enter one at a time under the codec dependency gate. The 7z, cpio, ar/deb, CAB, RPM, and RAR5 programs remain separately gated. ISO 9660, UDF, and filesystem images are a separate program. Targeted benign wheel coverage, stable identity and API review, assurance history, authenticated recovery, and durability continue in parallel.
+
+### Alpha.11 PAX and GNU TAR gates
+
+1. Publish separate raw profiles for POSIX PAX and GNU long-name TAR. Neither may widen, detect, retry, or alias the portable-ustar selection.
+2. Parse PAX records with exact decimal record lengths and complete byte consumption. Bound record count, individual record length, cumulative extension metadata, keyword length, and value length before allocation.
+3. Model per-file `x` and global `g` state with explicit provenance and deterministic precedence. Start from a closed keyword allowlist needed for portable paths and sizes; deny unknown or security-sensitive keywords until individually specified.
+4. Keep links, sparse mappings, devices, FIFOs, base-256 numbers, mixed PAX and GNU extension state, concatenation, and recovery behavior outside the first profiles.
+5. Limit the first GNU profile to exact GNU magic plus `L` long-name records. Deny `K` long-link records, `S` sparse records, GNU base-256 numbers, and any long-name record not consumed exactly by its one following member.
+6. Preserve zero new runtime dependencies. Reuse the raw-TAR snapshot, path, quota, verification, read, materialization, and content-root core while assigning new interpretation and layout identities.
+7. Add independent covering and identity reconstruction, exact GNU tar and bsdtar producer fixtures, field-family mutations, public package coverage, worker no-fallback refusal, and separate bounded fuzz targets before promotion.
+8. Compose each promoted raw dialect with the existing exact gzip transform only after raw conformance is frozen. The composed profiles must publish distinct transform-bound layout identities while preserving the same verified content root.
 
 ### Alpha.9 portable ustar gates
 
@@ -57,8 +70,8 @@ Together, these completed increments freeze what the worker may mean, how read o
 | Post-Alpha.6 research | Wheel consumer proof | Exact UTF-8 profile, bounded evaluator, hostile fixtures, identity separation, external non-reopening bridge |
 | Alpha.8 | Portable names and supported consumer | Closed Unicode profile, public four-way evaluator, source-deletion proof, exact identities, public-surface corpus replay |
 | Alpha.9 | Portable ustar and multi-format core | Explicit selection and policy authorization, zero-dependency raw ustar, TAR-native evidence, independent roots, producer corpus, package and fuzz gates |
-| Current main | Strict ZIP64 in-process preview | Explicit policy v3 selection, non-aliasing ZIP32 default, ZIP64-native evidence, fail-closed worker refusal pending semantic-record v3 |
-| Current main | Strict gzip-wrapped portable ustar | Explicit policy v4 selection, zero new dependencies, two-domain transform and covering evidence, `sealrTreeV4`, and fail-closed worker refusal pending a later semantic record |
+| Alpha.10 | Strict ZIP64 and gzip TAR | Policy v3 and v4 selections, zero new dependencies, ZIP64-native and two-domain evidence, independently reconstructed roots, package paths, bounded fuzz, and fail-closed worker refusal |
+| Alpha.11 target | PAX and GNU TAR | Separate raw dialect profiles, exact extension state and provenance, zero new dependencies, independent roots and producer fixtures, then gzip composition |
 
 Version labels are delivery targets, not permission to cut a release with a red gate. If an increment changes identity or interpretation, it receives a new profile or schema identifier and preserves prior identifiers as immutable historical contracts.
 

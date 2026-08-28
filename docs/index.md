@@ -1,6 +1,6 @@
 # Documentation
 
-Start with the [README](../README.md) for the published Alpha.9 boundary and a short walkthrough. This index separates current contracts from plans and research notes.
+Start with the [README](../README.md) for the published Alpha.10 boundary and a short walkthrough. This index separates current contracts from plans and research notes.
 
 ## Start and integrate
 
@@ -8,7 +8,7 @@ Start with the [README](../README.md) for the published Alpha.9 boundary and a s
 |---|---|
 | [Usage](usage.md) | Current CLI behavior and examples |
 | [API contract](api.md) | Current Rust and JSON surface, plus clearly marked target notation |
-| [Current release notes](releases/v0.1.0-alpha.9.md) | Alpha.9 contents and limitations |
+| [Current release notes](releases/v0.1.0-alpha.10.md) | Alpha.10 contents and limitations |
 | [Release verification](release-verification.md) | Verify checksums, provenance, tag, and immutable release state |
 | [Distribution contract](distribution-contract.md) | Exact source-package scope, compatibility policy, and native archive floors |
 
@@ -60,7 +60,7 @@ Repository vulnerability reporting and supported-version policy are in [SECURITY
 | Document | Purpose |
 |---|---|
 | [Roadmap](../ROADMAP.md) | Long-range capability order and release gates |
-| [Near-term execution plan](near-term.md) | Release-sized work packages through Alpha.9 and the next acceptance gates |
+| [Near-term execution plan](near-term.md) | Release-sized work packages through Alpha.10 and the next acceptance gates |
 | [Vision](vision.md) | Durable category and priorities |
 | [Usefulness test](usefulness.md) | Proof that a downstream consumer stops reparsing |
 | [Competitive context](competitive.md) | Category boundaries and alternatives |

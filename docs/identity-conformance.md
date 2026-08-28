@@ -1,6 +1,6 @@
 # Identity conformance and independent verification
 
-> Status: introduced in Alpha.4, extended through Alpha.8 with the repository-only wheel and supported portable UTF-8 profiles, extended in Alpha.9 with portable ustar, and extended on current main with strict ZIP64 `sealrTreeV3` plus strict gzip-wrapped ustar `sealrTreeV4` vectors. The vectors and verifier protect preview identities. They do not make any profile stable or turn unsigned evidence into an attestation.
+> Status: introduced in Alpha.4, extended through Alpha.8 with the repository-only wheel and supported portable UTF-8 profiles, extended in Alpha.9 with portable ustar, and extended in Alpha.10 with strict ZIP64 `sealrTreeV3` plus strict gzip-wrapped ustar `sealrTreeV4` vectors. The vectors and verifier protect preview identities. They do not make any profile stable or turn unsigned evidence into an attestation.
 
 Sealr now publishes a small, versioned identity-conformance bundle and checks it two ways:
 

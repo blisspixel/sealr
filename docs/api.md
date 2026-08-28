@@ -1,6 +1,6 @@
 # API contract
 
-This page distinguishes the implemented preview contract from the target semantic API. Alpha.9 is the latest published release. It adds explicitly selected portable ustar without changing the compatibility `apply()` behavior. Current main additionally exposes explicit in-process strict ZIP64 under policy v3 and strict gzip-wrapped portable ustar under policy v4; neither changes the ZIP32 default. Current callers must pin to the implemented section. The target is specified further in [semantic-model.md](semantic-model.md).
+This page distinguishes the implemented preview contract from the target semantic API. Alpha.10 is the latest published release. It includes explicitly selected portable ustar, strict ZIP64 under policy v3, and strict gzip-wrapped portable ustar under policy v4 without changing the compatibility `apply()` behavior or ZIP32 default. Current callers must pin to the implemented section. The target is specified further in [semantic-model.md](semantic-model.md).
 
 ## Implemented surface
 
@@ -144,7 +144,7 @@ The current receipt is versioned unsigned JSON (`signed: false`). DSSE and in-to
     "content": { "sealrTreeV1": "..." }
   },
   "view_digest": { "sha256": "..." },
-  "tool": { "name": "sealr", "version": "0.1.0-alpha.9" },
+  "tool": { "name": "sealr", "version": "0.1.0-alpha.10" },
   "environment": { "os": "windows", "arch": "x86_64", "kernel_jail": "unavailable" },
   "materialization": {
     "schema": "sealr.materialization.v2",

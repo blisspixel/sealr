@@ -27,7 +27,7 @@ The CLI and helper have mode `0755`. Documentation, licenses, and the manifest h
 ```json
 {
   "schema": "sealr.worker-artifact.v1",
-  "release_version": "0.1.0-alpha.9",
+  "release_version": "0.1.0-alpha.10",
   "target": "x86_64-unknown-linux-musl",
   "bootstrap_abi": 1,
   "byte_len": 0,

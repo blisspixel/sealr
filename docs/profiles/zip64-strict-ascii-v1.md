@@ -1,6 +1,6 @@
 # Strict ASCII ZIP64 profile v1
 
-> Status: explicit in-process alpha preview on current main. The latest published Alpha.9 release does not contain this profile. Authenticated worker execution fails closed until semantic-record v3 can represent ZIP64-native evidence.
+> Status: supported Alpha.10 in-process preview. Authenticated worker execution fails closed until semantic-record v3 can represent ZIP64-native evidence.
 
 Profile ID: `sealr.profile.zip64.strict-ascii.v1`
 

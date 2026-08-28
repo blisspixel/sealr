@@ -11,10 +11,10 @@ The matrix separates structural parsing, payload decoding, advanced dialect feat
 | Family | Structural profile | Payload codecs | Advanced or composed semantics | State | Supervised parity | Dependency intent |
 |---|---|---|---|---|---|---|
 | ZIP | classic ZIP32 | Store, Deflate | Closed ASCII and portable UTF-8 profiles | Shipped | Shipped on x86_64 Linux | Existing `flate2` boundary |
-| ZIP64 | saturated legacy fields plus exact ZIP64 records | Reuse ZIP codecs | Redundant-field and descriptor agreement | Explicit current-main in-process preview under policy v3 | Fails closed until semantic-record v3 | Zero new runtime dependencies |
+| ZIP64 | saturated legacy fields plus exact ZIP64 records | Reuse ZIP codecs | Redundant-field and descriptor agreement | Alpha.10 in-process preview under policy v3 | Fails closed until semantic-record v3 | Zero new runtime dependencies |
 | raw TAR | portable POSIX ustar | Raw payload | Regular files and directories only | Supported preview in v0.1.0-alpha.9 | Pending, typed refusal today | Zero new runtime dependencies |
 | rich TAR | separate PAX and GNU profiles | Raw payload | Bounded keyword precedence, long names, links, sparse rules | Planned | Required before promotion | Zero new runtime dependencies |
-| gzip-wrapped portable ustar | exact RFC 1952 single-member wrapper plus portable ustar | Deflate | Closed optional fields, no trailing input, two immutable domains, exact transform binding | Explicit current-main in-process preview under policy v4 | Fails closed until a later semantic record | Reuse existing `flate2`; zero new packages |
+| gzip-wrapped portable ustar | exact RFC 1952 single-member wrapper plus portable ustar | Deflate | Closed optional fields, no trailing input, two immutable domains, exact transform binding | Alpha.10 in-process preview under policy v4 | Fails closed until a later semantic record | Reuse existing `flate2`; zero new packages |
 | zstd | exact frame wrapper profile | Zstandard | Window, skippable-frame, checksum, concatenation, and dictionary rules | Planned | Required before promotion | Review `ruzstd` with a hard maximum window |
 | xz and LZMA | exact stream wrapper and coder profiles | LZMA, LZMA2 | Memory limit, concatenation, and exact input consumption | Planned | Required before promotion | Review minimal `lzma-rust2` features |
 | bzip2 | exact stream wrapper profile | BWT pipeline | Whole-stream CRC, concatenation, and work budget | Planned | Required before promotion | Review `bzip2` with pure-Rust `libbz2-rs-sys` backend |
@@ -48,7 +48,7 @@ Format-specific evidence is not forced into ZIP field names. ZIP32 keeps `sealr.
 
 ## Dependency budget
 
-The Alpha.9 `sealr` library has 14 direct runtime dependencies. `cargo tree -p sealr -e normal` resolves 67 unique package lines on the current Windows target, including platform and transitive packages. Raw ustar adds no dependency and does not change the dependency set.
+The Alpha.10 `sealr` library has 14 direct runtime dependencies. `cargo tree -p sealr -e normal` resolves 67 unique package lines on the current Windows target, including platform and transitive packages. Raw ustar, strict ZIP64, and gzip-wrapped ustar add no dependency and do not change the dependency set.
 
 Every proposed runtime dependency must include high-assurance evidence and:
 

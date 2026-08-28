@@ -965,7 +965,7 @@ function Assert-FuzzMetadataBinding {
             (Join-Path $workspace 'crates/sealr-protocol')
         )
         if ($sealrDependency.Count -ne 1 -or
-            [string]$sealrDependency[0].req -cne '=0.1.0-alpha.9' -or
+            [string]$sealrDependency[0].req -cne '=0.1.0-alpha.10' -or
             [IO.Path]::GetFullPath((Get-OptionalMetadataText $sealrDependency[0] 'path')) -cne $expectedSealrPath -or
             (@($sealrDependency[0].features) -join "`n") -cne '__internal-fuzzing' -or
             [bool]$sealrDependency[0].optional -or
@@ -978,7 +978,7 @@ function Assert-FuzzMetadataBinding {
             throw 'Cargo metadata must enable only the exact hidden Sealr fuzz feature dependency'
         }
         if ($protocolDependency.Count -ne 1 -or
-            [string]$protocolDependency[0].req -cne '=0.1.0-alpha.9' -or
+            [string]$protocolDependency[0].req -cne '=0.1.0-alpha.10' -or
             [IO.Path]::GetFullPath((Get-OptionalMetadataText $protocolDependency[0] 'path')) -cne $expectedProtocolPath -or
             @($protocolDependency[0].features).Count -ne 0 -or
             [bool]$protocolDependency[0].optional -or
@@ -1203,8 +1203,8 @@ function Assert-FuzzCargoManifestContract {
         ''
         '[dependencies]'
         'libfuzzer-sys = "=0.4.13"'
-        'sealr = { path = "../crates/sealr", version = "=0.1.0-alpha.9", features = ["__internal-fuzzing"] }'
-        'sealr-worker-protocol = { path = "../crates/sealr-protocol", version = "=0.1.0-alpha.9" }'
+        'sealr = { path = "../crates/sealr", version = "=0.1.0-alpha.10", features = ["__internal-fuzzing"] }'
+        'sealr-worker-protocol = { path = "../crates/sealr-protocol", version = "=0.1.0-alpha.10" }'
         ''
         '[[bin]]'
         'name = "protocol_decoders"'
@@ -1503,8 +1503,8 @@ publish = false
 
 [dependencies]
 libfuzzer-sys = { path = "fake-libfuzzer", version = "=0.4.13" }
-sealr = { path = "$sealrDependencyPath", version = "=0.1.0-alpha.9", features = ["__internal-fuzzing"] }
-sealr-worker-protocol = { path = "$protocolDependencyPath", version = "=0.1.0-alpha.9" }
+sealr = { path = "$sealrDependencyPath", version = "=0.1.0-alpha.10", features = ["__internal-fuzzing"] }
+sealr-worker-protocol = { path = "$protocolDependencyPath", version = "=0.1.0-alpha.10" }
 
 [[bin]]
 name = "protocol_decoders"

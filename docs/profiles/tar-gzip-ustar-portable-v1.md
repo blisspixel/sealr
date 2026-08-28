@@ -1,6 +1,6 @@
 # Strict gzip-wrapped portable ustar profile v1
 
-> Status: explicit in-process alpha preview on current main. The latest published Alpha.9 release does not contain this profile. Authenticated worker execution fails closed until a later semantic record can bind both snapshot domains and their transform.
+> Status: supported Alpha.10 in-process preview. Authenticated worker execution fails closed until a later semantic record can bind both snapshot domains and their transform.
 
 Profile ID: `sealr.profile.tar-gzip.ustar-portable.v1`
 
