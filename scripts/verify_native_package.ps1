@@ -1000,6 +1000,100 @@ try {
         throw 'packaged zstd-wrapped ustar materialization did not preserve the effective admitted tree'
     }
 
+    # XZ Utils v5.8.1 `xz -6 -T1` output for the same conformance derived TAR
+    # holding mission/plan.txt with `verify twice, decode once`.
+    $xzHex = 'fd377a585a000004e6d6b4460200210116000000742fe5a3e007ff00705d00369a4adff3ff417' +
+        '3689225555d5c3da569f20e0f1e46ed67823a5dcf0c5c5749d5f12bb878efa1897bcfa2a38633f7d28f' +
+        'c607eaad183da7c2063caa76c99a73e3434b174e4fa5f5dd59582a4d6308d2ffca92620af736cdb6f7b' +
+        '1240ae87699d3cfb3eb7748f4ff4a5b315efe8cd37d00ec921496b86e87ef00018c0180100000853c38' +
+        '66b1c467fb020000000004595a'
+    $xzBytes = [System.Convert]::FromHexString($xzHex)
+    if ($xzBytes.Length -ne 176) {
+        throw "native-package xz-wrapped ustar fixture length changed: $($xzBytes.Length)"
+    }
+    $xzArchivePath = Join-Path $temporaryRoot 'portable-ustar.tar.xz'
+    [System.IO.File]::WriteAllBytes($xzArchivePath, $xzBytes)
+    $xzSourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $xzArchivePath).Hash.ToLowerInvariant()
+    if ($xzSourceHash -cne '54f88a8a4b418364e2c3f7747d9a40aecee3624d0d0880727e674a9cbc60a8ca') {
+        throw "native-package xz-wrapped ustar fixture identity changed: $xzSourceHash"
+    }
+
+    $xzInspect = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-xz-ustar', $xzArchivePath) `
+        -Role 'packaged xz-wrapped ustar inspect'
+    if ($xzInspect.ExitCode -ne 0) {
+        throw "packaged xz-wrapped ustar inspect failed: $($xzInspect.Stderr)"
+    }
+    $xzView = $xzInspect.Stdout | ConvertFrom-Json
+    $xzReceipt = $xzInspect.Stderr | ConvertFrom-Json
+    if ($xzView.schema -cne 'sealr.view.v1' -or
+        $xzReceipt.schema -cne 'sealr.receipt.v2' -or
+        $xzView.source.magic -cne 'xz' -or
+        $xzView.interpretation.status -cne 'interpreted' -or
+        $xzView.admission.status -cne 'admitted' -or
+        $xzView.verification.status -cne 'complete' -or
+        $xzView.effect.status -cne 'not-requested' -or
+        @($xzView.members).Count -ne 1 -or
+        $xzView.members[0].path -cne 'mission/plan.txt' -or
+        $xzView.members[0].method -cne 'raw' -or
+        $xzView.members[0].uncomp_bytes -ne 25 -or
+        $xzReceipt.policy.id -cne 'sealr:policy/default/v9' -or
+        $xzReceipt.policy.digest.sha256 -cne 'c512895c09453f16c07ebeae94712099191b197ba9edaae384dba0fe7bb8b39e' -or
+        $xzReceipt.identities.interpretation.id -cne 'sealr.profile.tar-xz.ustar-portable.v1' -or
+        $xzReceipt.identities.interpretation.digest.sha256 -cne '16ec815ab3b2c3c5f877ec04e592d1dd1a6ec41f2c7d843dd7aa2bc6b50cfd05' -or
+        $xzReceipt.identities.layout.sealrTreeV10 -cne '558d5f8e75966e1ab4b1892e71fcf871f9670f07b3e6ef47ae6e57b6a4e05f8d' -or
+        $xzReceipt.identities.content.sealrTreeV1 -cne 'bc8f6d6f7870aeab647cff08db25471a729bd2a41e095d49d6254c49afc34278') {
+        throw 'packaged xz-wrapped ustar inspect returned unexpected semantic evidence'
+    }
+
+    $xzDefault = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @($xzArchivePath) `
+        -Role 'packaged xz-wrapped ustar compatibility-default refusal'
+    $xzDefaultView = $xzDefault.Stdout | ConvertFrom-Json
+    $xzDefaultReceipt = $xzDefault.Stderr | ConvertFrom-Json
+    if ($xzDefault.ExitCode -ne 2 -or
+        $xzDefaultView.verdict -cne 'rejected' -or
+        $xzDefaultView.source.magic -cne 'unknown' -or
+        $xzDefaultView.policy.id -cne 'sealr:policy/default/v1' -or
+        $xzDefaultView.interpretation.status -cne 'unsupported' -or
+        $xzDefaultView.admission.status -cne 'not-evaluated' -or
+        @($xzDefaultView.members).Count -ne 0 -or
+        $xzDefaultReceipt.identities.interpretation.id -cne 'sealr.profile.zip.strict-ascii.v1' -or
+        $xzDefaultReceipt.identities.layout.status -cne 'unavailable' -or
+        $xzDefaultReceipt.identities.content.status -cne 'unavailable') {
+        throw 'packaged compatibility default unexpectedly recognized xz-wrapped ustar'
+    }
+
+    $xzDestination = Join-Path $temporaryRoot 'xz-ustar-output'
+    $xzMaterialize = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-xz-ustar', $xzArchivePath, '--dest', $xzDestination) `
+        -Role 'packaged xz-wrapped ustar materialization'
+    if ($xzMaterialize.ExitCode -ne 0) {
+        throw "packaged xz-wrapped ustar materialization failed: $($xzMaterialize.Stderr)"
+    }
+    $xzMaterializedView = $xzMaterialize.Stdout | ConvertFrom-Json
+    $xzMaterializedReceipt = $xzMaterialize.Stderr | ConvertFrom-Json
+    $xzFiles = @(Get-ChildItem -LiteralPath $xzDestination -Recurse -Force -File | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($xzDestination, $_.FullName).Replace('\', '/')
+        })
+    $xzDirectories = @(Get-ChildItem -LiteralPath $xzDestination -Recurse -Force -Directory | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($xzDestination, $_.FullName).Replace('\', '/')
+        })
+    $leakedStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+    if (-not $xzMaterializedView.wrote -or
+        $xzMaterializedView.effect.status -cne 'committed' -or
+        $xzMaterializedReceipt.identities.layout.sealrTreeV10 -cne $xzReceipt.identities.layout.sealrTreeV10 -or
+        $xzMaterializedReceipt.identities.content.sealrTreeV1 -cne $xzReceipt.identities.content.sealrTreeV1 -or
+        $xzFiles.Count -ne 1 -or $xzFiles[0] -cne 'mission/plan.txt' -or
+        $xzDirectories.Count -ne 1 -or $xzDirectories[0] -cne 'mission' -or
+        [System.IO.File]::ReadAllText((Join-Path $xzDestination 'mission/plan.txt')) -cne 'verify twice, decode once' -or
+        $leakedStages.Count -ne 0) {
+        throw 'packaged xz-wrapped ustar materialization did not preserve the effective admitted tree'
+    }
+
     if ($TargetTriple -ne $windowsTarget) {
         foreach ($relative in $expectedFiles) {
             $expectedMode = if ($relative -in @($binaryName, 'libexec/sealr/sealr-worker')) { '755' } else { '644' }
@@ -1153,6 +1247,25 @@ try {
             (Test-Path -LiteralPath $zstdWorkerDestination) -or
             $workerStages.Count -ne 0) {
             throw 'packaged zstd-wrapped ustar worker selection did not fail closed without fallback'
+        }
+        $xzWorkerDestination = Join-Path $temporaryRoot 'xz-ustar-worker-output'
+        $xzWorker = Invoke-Captured `
+            -FilePath $packagedCli `
+            -Arguments @(
+                '--format', 'tar-xz-ustar',
+                '--worker-manifest', $manifestPath,
+                $xzArchivePath,
+                '--dest', $xzWorkerDestination
+            ) `
+            -Role 'packaged xz-wrapped ustar worker refusal'
+        $workerStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+        if ($xzWorker.ExitCode -ne 1 -or
+            -not [string]::IsNullOrEmpty($xzWorker.Stdout) -or
+            $xzWorker.Stderr -notmatch 'isolation unavailable' -or
+            $xzWorker.Stderr -notmatch 'xz-wrapped TAR' -or
+            (Test-Path -LiteralPath $xzWorkerDestination) -or
+            $workerStages.Count -ne 0) {
+            throw 'packaged xz-wrapped ustar worker selection did not fail closed without fallback'
         }
         $elfHeader = readelf --file-header $helper | Out-String
         if ($LASTEXITCODE -ne 0 -or

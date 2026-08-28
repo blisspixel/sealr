@@ -13,8 +13,8 @@ use crate::ir::{
     ArchiveFormat, ArchiveIR, ExtraDisposition, ExtraSite, GnuLongNamePathSource, IrMember,
     MemberKind, MemberVerification, NormalizationAction, PaxExtensionKind, PaxKeyword,
     PaxValueSource, TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile,
-    TarInterpretationProfile, TarPaxInterpretationProfile, TarZstdInterpretationProfile,
-    ZipInterpretationProfile,
+    TarInterpretationProfile, TarPaxInterpretationProfile, TarXzInterpretationProfile,
+    TarZstdInterpretationProfile, ZipInterpretationProfile,
 };
 use crate::outcome::{DigestHex, SourceDigest, VerificationStatus};
 use crate::policy::hex_sha256;
@@ -29,6 +29,7 @@ pub const TREE_ENCODING_V6_ID: &str = "sealrTreeV6";
 pub const TREE_ENCODING_V7_ID: &str = "sealrTreeV7";
 pub const TREE_ENCODING_V8_ID: &str = "sealrTreeV8";
 pub const TREE_ENCODING_V9_ID: &str = "sealrTreeV9";
+pub const TREE_ENCODING_V10_ID: &str = "sealrTreeV10";
 const LAYOUT_LABEL: &str = "sealr.tree.layout.v1";
 const TAR_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-ustar.v1";
 const ZIP64_LAYOUT_LABEL: &str = "sealr.tree.layout.zip64.v1";
@@ -38,6 +39,7 @@ const TAR_GNU_LONGNAME_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gnu-longname.
 const TAR_GZIP_PAX_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gzip-pax.v1";
 const TAR_GZIP_GNU_LONGNAME_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gzip-gnu-longname.v1";
 const TAR_ZSTD_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-zstd-ustar.v1";
+const TAR_XZ_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-xz-ustar.v1";
 const CONTENT_LABEL: &str = "sealr.tree.content.v1";
 const FILE: u8 = 1;
 const DIRECTORY: u8 = 2;
@@ -70,6 +72,7 @@ pub enum TreeRoot {
     SealrTreeV7 { hex: String },
     SealrTreeV8 { hex: String },
     SealrTreeV9 { hex: String },
+    SealrTreeV10 { hex: String },
     Unavailable,
 }
 
@@ -132,6 +135,12 @@ impl TreeRoot {
         }
     }
 
+    pub fn from_v10_bytes(bytes: &[u8]) -> Self {
+        Self::SealrTreeV10 {
+            hex: hex_sha256(bytes),
+        }
+    }
+
     pub fn hex(&self) -> Option<&str> {
         match self {
             Self::SealrTreeV1 { hex } => Some(hex),
@@ -143,6 +152,7 @@ impl TreeRoot {
             Self::SealrTreeV7 { hex } => Some(hex),
             Self::SealrTreeV8 { hex } => Some(hex),
             Self::SealrTreeV9 { hex } => Some(hex),
+            Self::SealrTreeV10 { hex } => Some(hex),
             Self::Unavailable => None,
         }
     }
@@ -194,6 +204,11 @@ impl Serialize for TreeRoot {
             Self::SealrTreeV9 { hex } => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 map.serialize_entry(TREE_ENCODING_V9_ID, hex)?;
+                map.end()
+            }
+            Self::SealrTreeV10 { hex } => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry(TREE_ENCODING_V10_ID, hex)?;
                 map.end()
             }
             Self::Unavailable => {
@@ -258,6 +273,13 @@ impl OutcomeIdentities {
     pub fn unavailable_for_tar_zstd(
         source: SourceDigest,
         profile: TarZstdInterpretationProfile,
+    ) -> Self {
+        Self::unavailable_for_named(source, profile.id(), profile.digest())
+    }
+
+    pub fn unavailable_for_tar_xz(
+        source: SourceDigest,
+        profile: TarXzInterpretationProfile,
     ) -> Self {
         Self::unavailable_for_named(source, profile.id(), profile.digest())
     }
@@ -698,6 +720,56 @@ fn encode_zstd_wrapper_header(ir: &ArchiveIR) -> Option<Vec<u8>> {
     Some(body)
 }
 
+fn encode_xz_wrapper_header(ir: &ArchiveIR) -> Option<Vec<u8>> {
+    let xz = ir.xz_evidence()?;
+    let transform = TransformProfile::XzSingleStreamV1;
+    let mut body = Vec::new();
+    push_bytes(&mut body, transform.id().as_bytes());
+    body.extend_from_slice(&parse_hex32(transform.digest())?);
+    body.extend_from_slice(&parse_hex32(transform.decoder_parameters_digest())?);
+    push_u16(&mut body, 0);
+    encode_range(
+        &mut body,
+        crate::ir::ByteRange {
+            offset: 0,
+            len: xz.footer.offset.checked_add(xz.footer.len)?,
+        },
+    );
+    body.extend_from_slice(&parse_hex32(ir.source_digest().sha256()?)?);
+    push_u16(&mut body, 1);
+    push_u64(&mut body, xz.derived_output_len);
+    body.extend_from_slice(&parse_hex32(&xz.derived_output_sha256)?);
+    body.push(xz.check_id);
+    encode_range(&mut body, xz.header);
+    push_u32(&mut body, u32::try_from(xz.blocks.len()).ok()?);
+    for block in &xz.blocks {
+        encode_range(&mut body, block.header);
+        encode_range(&mut body, block.compressed);
+        encode_range(&mut body, block.padding);
+        encode_range(&mut body, block.check);
+        push_u32(&mut body, block.dict_size);
+        push_optional_u64(&mut body, block.declared_compressed);
+        push_optional_u64(&mut body, block.declared_uncompressed);
+        push_u64(&mut body, block.uncompressed_len);
+        push_bytes(&mut body, &block.check_value);
+    }
+    encode_range(&mut body, xz.index);
+    encode_range(&mut body, xz.footer);
+    push_u64(&mut body, xz.derived_output_len);
+    body.extend_from_slice(&parse_hex32(&xz.derived_output_sha256)?);
+    Some(body)
+}
+
+/// Canonical wrapper-plus-inner-layout encoding for restricted xz-wrapped ustar.
+pub fn encode_tar_xz_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
+    if ir.format() != ArchiveFormat::TarXzUstar {
+        return None;
+    }
+    let mut body = encode_xz_wrapper_header(ir)?;
+    push_bytes(&mut body, &tar_layout_body(ir, ArchiveFormat::TarXzUstar)?);
+    Some(preimage(TAR_XZ_LAYOUT_LABEL, &body))
+}
+
 /// Canonical wrapper-plus-inner-layout encoding for strict zstd-wrapped ustar.
 pub fn encode_tar_zstd_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
     if ir.format() != ArchiveFormat::TarZstdUstar {
@@ -953,6 +1025,9 @@ pub fn layout_root(ir: &ArchiveIR) -> TreeRoot {
             .unwrap_or_else(TreeRoot::unavailable),
         ArchiveFormat::TarZstdUstar => encode_tar_zstd_layout(ir)
             .map(|bytes| TreeRoot::from_v9_bytes(&bytes))
+            .unwrap_or_else(TreeRoot::unavailable),
+        ArchiveFormat::TarXzUstar => encode_tar_xz_layout(ir)
+            .map(|bytes| TreeRoot::from_v10_bytes(&bytes))
             .unwrap_or_else(TreeRoot::unavailable),
     }
 }

@@ -60,6 +60,14 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar.zst --format tar-zstd-ust
 
 `--format tar-zstd-ustar` accepts exactly one strict RFC 8878 frame whose bounded decoded output is exact portable ustar. Skippable frames, dictionaries, windows beyond 8 MiB, concatenation, and trailing bytes fail closed.
 
+The xz-wrapped portable ustar profile is a separate current-main in-process preview under policy v9, and the second promoted codec:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.tar.xz --format tar-xz-ustar
+```
+
+`--format tar-xz-ustar` accepts exactly one restricted XZ stream — one to 4096 LZMA2-only blocks, dictionaries at most 8 MiB, CRC32/CRC64/SHA-256 checks verified twice with check `None` denied — whose bounded decoded output is exact portable ustar. Other filter chains, stream padding, concatenation, and trailing bytes fail closed.
+
 Strict ZIP64 is a separate current-main in-process preview under policy v3:
 
 ```text
@@ -92,13 +100,14 @@ For restricted raw PAX:
 cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-pax --dest ./new-output
 ```
 
-For restricted GNU long-name TAR and the gzip compositions:
+For restricted GNU long-name TAR, the gzip compositions, and the promoted codec wrappers:
 
 ```text
 cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-gnu-longname --dest ./new-output
 cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-pax --dest ./new-output
 cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-gnu-longname --dest ./new-output
 cargo run --locked -p sealr-cli -- path/to/archive.tar.zst --format tar-zstd-ustar --dest ./new-output
+cargo run --locked -p sealr-cli -- path/to/archive.tar.xz --format tar-xz-ustar --dest ./new-output
 ```
 
 For strict ZIP64 in process:
@@ -128,7 +137,7 @@ establish the complete supervised boundary or the command exits unsuccessfully
 without invoking the in-process payload path. macOS and Windows return
 isolation unavailable if this option is selected.
 
-The authenticated worker currently carries semantic-record v2 ZIP32 plans only. Combining `--format tar-ustar`, `--format tar-gzip-ustar`, `--format tar-pax`, `--format tar-gnu-longname`, `--format tar-gzip-pax`, `--format tar-gzip-gnu-longname`, `--format tar-zstd-ustar`, or `--format zip64` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it refuses before source access, never creates a destination effect, and never falls back to in-process verification. Worker support waits for later semantic records that bind each format-specific evidence model.
+The authenticated worker currently carries semantic-record v2 ZIP32 plans only. Combining `--format tar-ustar`, `--format tar-gzip-ustar`, `--format tar-pax`, `--format tar-gnu-longname`, `--format tar-gzip-pax`, `--format tar-gzip-gnu-longname`, `--format tar-zstd-ustar`, `--format tar-xz-ustar`, or `--format zip64` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it refuses before source access, never creates a destination effect, and never falls back to in-process verification. Worker support waits for later semantic records that bind each format-specific evidence model.
 
 ## Output contract
 
@@ -179,7 +188,7 @@ Arguments:
   <ARCHIVE>  Archive file
 
 Options:
-      --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar, tar-gzip-ustar, tar-pax, tar-gnu-longname, tar-gzip-pax, tar-gzip-gnu-longname, tar-zstd-ustar]
+      --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar, tar-gzip-ustar, tar-pax, tar-gnu-longname, tar-gzip-pax, tar-gzip-gnu-longname, tar-zstd-ustar, tar-xz-ustar]
       --dest <DEST>                      Materialize into a new directory below an existing parent
       --worker-manifest <ABSOLUTE_PATH>  Use the exact packaged Linux worker bound by this manifest
   -h, --help                             Print help

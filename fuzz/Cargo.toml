@@ -90,4 +90,11 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "tar_xz_ustar_portable_v1"
+path = "fuzz_targets/tar_xz_ustar_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
