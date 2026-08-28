@@ -5,13 +5,13 @@ use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelLimits, CONSUMER_PROFIL
 use sealr::{
     apply_supervised, apply_with_options, AdmissionStatus, ApplyOptions, ArchiveFormat,
     LinuxWorker, MemberReadErrorKind, Policy, Request, RetentionPlan, RetentionStatus, Source,
-    TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
-    TarPaxInterpretationProfile, TarXzInterpretationProfile, TarZstdInterpretationProfile,
-    TreeRoot, VerificationStatus,
-    VerifiedArchive, ZipInterpretationProfile, TAR_GNU_LONGNAME_PORTABLE_V1,
-    TAR_GZIP_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_PAX_PORTABLE_V1, TAR_PAX_PORTABLE_V1,
-    TAR_USTAR_PORTABLE_V1, TAR_XZ_USTAR_PORTABLE_V1, TAR_ZSTD_USTAR_PORTABLE_V1,
-    ZIP_STRICT_ASCII_V2,
+    TarBzip2InterpretationProfile, TarGnuLongNameInterpretationProfile,
+    TarGzipInterpretationProfile, TarInterpretationProfile, TarPaxInterpretationProfile,
+    TarXzInterpretationProfile, TarZstdInterpretationProfile, TreeRoot, VerificationStatus,
+    VerifiedArchive, ZipInterpretationProfile, TAR_BZIP2_USTAR_PORTABLE_V1,
+    TAR_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_PAX_PORTABLE_V1,
+    TAR_PAX_PORTABLE_V1, TAR_USTAR_PORTABLE_V1, TAR_XZ_USTAR_PORTABLE_V1,
+    TAR_ZSTD_USTAR_PORTABLE_V1, ZIP_STRICT_ASCII_V2,
 };
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
@@ -546,6 +546,93 @@ fn main() {
         xz_archive.read_member("later.txt", 4).unwrap_err().kind(),
         MemberReadErrorKind::LimitExceeded
     );
+
+    // The bzip2 format has no stored mode, so the packaged consumer replays
+    // pinned producer bytes (CPython 3.12.10 `bz2.compress(tar, 9)` over the
+    // conformance TAR carrying `mission/plan.txt`).
+    let bzip2_policy = Policy::default_v10();
+    let bzip2_options = ApplyOptions::new()
+        .with_tar_bzip2_interpretation_profile(TarBzip2InterpretationProfile::UstarPortableV1)
+        .with_retention(
+            RetentionPlan::new(32, 32)
+                .with_path("mission/plan.txt")
+                .expect("canonical bzip2-wrapped TAR retention path"),
+        );
+    let bzip2_bytes = decode_hex(TAR_BZIP2_LEVEL9_FIXTURE_HEX);
+    let bzip2_outcome = apply_with_options(
+        Request {
+            source: Source::Bytes {
+                path: Some("mission.tar.bz2"),
+                data: &bzip2_bytes,
+            },
+            policy: &bzip2_policy,
+            dest: None,
+        },
+        &bzip2_options,
+    );
+    assert!(
+        matches!(bzip2_outcome.admission, AdmissionStatus::Admitted),
+        "{:?}",
+        bzip2_outcome.view.findings
+    );
+    assert!(matches!(
+        bzip2_outcome.verification,
+        VerificationStatus::Complete
+    ));
+    let bzip2_ir = bzip2_outcome.archive_ir().expect("bzip2-wrapped ustar IR");
+    assert_eq!(bzip2_ir.format(), ArchiveFormat::TarBzip2Ustar);
+    assert_eq!(bzip2_ir.profile(), TAR_BZIP2_USTAR_PORTABLE_V1);
+    let bzip2_wrapper = bzip2_ir
+        .bzip2_evidence()
+        .expect("bzip2-wrapped ustar wrapper evidence");
+    assert_eq!(bzip2_wrapper.level, 9);
+    assert_eq!(bzip2_wrapper.block_crcs.len(), 1);
+    assert_eq!(bzip2_wrapper.derived_output_len, 2048);
+    assert!(matches!(
+        bzip2_outcome.receipt.identities.layout,
+        TreeRoot::SealrTreeV11 { .. }
+    ));
+    let bzip2_archive = bzip2_outcome
+        .into_verified_archive()
+        .expect("bzip2-wrapped portable ustar must expose verified authority");
+    assert_eq!(
+        bzip2_archive.retention_status("mission/plan.txt"),
+        RetentionStatus::Retained
+    );
+    assert_eq!(
+        bzip2_archive.retained_member("mission/plan.txt"),
+        Some(b"verify twice, decode once".as_slice())
+    );
+    assert_eq!(
+        bzip2_archive.read_member("mission/plan.txt", 25).unwrap(),
+        b"verify twice, decode once"
+    );
+    assert_eq!(
+        bzip2_archive
+            .read_member("mission/plan.txt", 24)
+            .unwrap_err()
+            .kind(),
+        MemberReadErrorKind::LimitExceeded
+    );
+}
+
+/// CPython 3.12.10 `bz2.compress(tar, 9)` over the conformance derived TAR
+/// (bundled libbz2 1.0.8; byte-identical to `bzip2 -9`).
+const TAR_BZIP2_LEVEL9_FIXTURE_HEX: &str =
+    "425a68393141592653597b1dc2a70000447b91ca0000404005ff0040006f27dfe004000040000820007422\
+     6a64f51a64d0340640c4d064a0d341a680034d001e6587e2308c005913503e46a2880842162fc4d83544cc\
+     801bd752180f90d0c026e224716664838d467b58fbfac1cf118147687b09c160a4ad2080f498e75a99561f\
+     215194f509f0637e2ee48a70a120f63b854e";
+
+fn decode_hex(value: &str) -> Vec<u8> {
+    let cleaned: String = value.chars().filter(|c| !c.is_whitespace()).collect();
+    assert!(cleaned.len() % 2 == 0);
+    (0..cleaned.len())
+        .step_by(2)
+        .map(|index| {
+            u8::from_str_radix(&cleaned[index..index + 2], 16).expect("fixture hex is valid")
+        })
+        .collect()
 }
 
 fn portable_tar() -> Vec<u8> {

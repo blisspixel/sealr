@@ -712,6 +712,170 @@ fn gzip_isize(len: u64) -> u32 {
     u32::try_from(len % (u64::from(u32::MAX) + 1)).expect("gzip ISIZE modulo always fits u32")
 }
 
+/// Independently replay the restricted bzip2 container grammar over the
+/// original snapshot without invoking a decompressor: the fixed prefix, the
+/// unique-shift footer recovery, the full block-magic scan, per-block CRC and
+/// flag extraction, and the combined-CRC chain fold, each compared against
+/// the recorded evidence.
+pub(crate) fn audit_bzip2_wrapper_covering(
+    snapshot: &SourceSnapshot<'_>,
+    evidence: &crate::ir::Bzip2WrapperEvidence,
+) -> Result<(), Finding> {
+    const BLOCK_MAGIC: u64 = 0x3141_5926_5359;
+    const EOS_MAGIC: u64 = 0x1772_4538_5090;
+    const MAX_BLOCKS: u64 = 65536;
+    let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
+
+    if evidence.header != (crate::ir::ByteRange { offset: 0, len: 4 }) {
+        return Err(fail("bzip2 stream-header range is not the fixed prefix"));
+    }
+    if evidence.level < 1 || evidence.level > 9 {
+        return Err(fail("bzip2 evidence level is outside the profile"));
+    }
+    if evidence.padding_bits > 7 {
+        return Err(fail("bzip2 evidence padding exceeds seven bits"));
+    }
+    if evidence
+        .payload_bits
+        .checked_add(u64::from(evidence.padding_bits))
+        != snapshot.len().checked_mul(8)
+    {
+        return Err(fail(
+            "bzip2 evidence bit geometry does not cover the original snapshot",
+        ));
+    }
+    let block_count = evidence.block_bit_offsets.len();
+    if block_count == 0
+        || block_count as u64 > MAX_BLOCKS
+        || block_count != evidence.block_crcs.len()
+    {
+        return Err(fail("bzip2 evidence block lists are outside the profile"));
+    }
+
+    let mut header = [0_u8; 4];
+    snapshot
+        .read_exact_at(0, &mut header)
+        .map_err(|_| fail("bzip2 stream header is outside the original snapshot"))?;
+    if header[..3] != *b"BZh" || header[3] != evidence.level + b'0' {
+        return Err(fail("bzip2 stream header disagrees with the evidence"));
+    }
+
+    let tail_len = snapshot.len().min(16);
+    let tail = snapshot
+        .read_vec(snapshot.len() - tail_len, tail_len)
+        .map_err(|_| fail("bzip2 stream footer is outside the original snapshot"))?;
+    let mut tail_value = 0_u128;
+    for byte in &tail {
+        tail_value = (tail_value << 8) | u128::from(*byte);
+    }
+    let mut matches = 0_u32;
+    for pad in 0..8_u8 {
+        if u64::from(pad) + 80 > tail_len * 8 {
+            break;
+        }
+        if (tail_value >> (u32::from(pad) + 32)) & 0xFFFF_FFFF_FFFF == u128::from(EOS_MAGIC) {
+            matches += 1;
+        }
+    }
+    if matches != 1 {
+        return Err(fail("bzip2 footer recovery is not unique"));
+    }
+    let pad = evidence.padding_bits;
+    if (tail_value >> (u32::from(pad) + 32)) & 0xFFFF_FFFF_FFFF != u128::from(EOS_MAGIC) {
+        return Err(fail(
+            "bzip2 footer magic disagrees with the recorded padding",
+        ));
+    }
+    if ((tail_value >> pad) & 0xFFFF_FFFF) as u32 != evidence.combined_crc {
+        return Err(fail("bzip2 combined CRC disagrees with the evidence"));
+    }
+    if pad > 0 && tail_value & ((1 << pad) - 1) != 0 {
+        return Err(fail("bzip2 footer padding bits are not zero"));
+    }
+    let footer_magic_start = evidence.payload_bits - 80;
+
+    let mut scanned = Vec::new();
+    let mut acc = 0_u64;
+    let mut position = 0_u64;
+    let mut cursor = 0_u64;
+    while cursor < snapshot.len() {
+        let step = (64 * 1024).min(snapshot.len() - cursor);
+        let chunk = snapshot
+            .read_vec(cursor, step)
+            .map_err(|_| fail("bzip2 stream bytes are outside the original snapshot"))?;
+        for byte in &chunk {
+            acc = (acc << 8) | u64::from(*byte);
+            position += 1;
+            let end_bits = position * 8;
+            if end_bits < 80 {
+                continue;
+            }
+            for shift in (0..8_u64).rev() {
+                let start = end_bits - shift - 48;
+                if start < 32 || start + 48 > footer_magic_start {
+                    continue;
+                }
+                if (acc >> shift) & 0xFFFF_FFFF_FFFF == BLOCK_MAGIC {
+                    scanned.push(start);
+                    if scanned.len() > block_count {
+                        return Err(fail(
+                            "the bzip2 block-magic scan found more blocks than recorded",
+                        ));
+                    }
+                }
+            }
+        }
+        cursor += step;
+    }
+    if scanned != evidence.block_bit_offsets {
+        return Err(fail(
+            "the bzip2 block-magic scan disagrees with the recorded offsets",
+        ));
+    }
+
+    let mut fold = 0_u32;
+    for (offset, expected_crc) in evidence.block_bit_offsets.iter().zip(&evidence.block_crcs) {
+        if offset + 81 > footer_magic_start {
+            return Err(fail("a bzip2 block frame overlaps the stream footer"));
+        }
+        let crc_start = offset + 48;
+        let first_byte = crc_start / 8;
+        let mut bytes = [0_u8; 6];
+        snapshot
+            .read_exact_at(first_byte, &mut bytes)
+            .map_err(|_| fail("a bzip2 block frame is outside the original snapshot"))?;
+        let mut window = 0_u64;
+        for byte in bytes {
+            window = (window << 8) | u64::from(byte);
+        }
+        let lead = crc_start - first_byte * 8;
+        let crc = ((window >> (16 - lead)) & 0xFFFF_FFFF) as u32;
+        let randomised = (window >> (15 - lead)) & 1 != 0;
+        if crc != *expected_crc {
+            return Err(fail("a bzip2 block CRC disagrees with the evidence"));
+        }
+        if randomised {
+            return Err(fail("a bzip2 block sets the deprecated randomised flag"));
+        }
+        fold = crate::bzip2::fold_combined_crc(fold, crc);
+    }
+    if fold != evidence.combined_crc {
+        return Err(fail(
+            "the bzip2 block-CRC chain fold disagrees with the combined CRC",
+        ));
+    }
+
+    if evidence.derived_output_sha256.len() != 64
+        || !evidence
+            .derived_output_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(fail("bzip2 derived-output identity is malformed"));
+    }
+    Ok(())
+}
+
 /// Independently replay the restricted XZ container grammar over the
 /// original snapshot without invoking a decompressor.
 pub(crate) fn audit_xz_wrapper_covering(
@@ -1072,6 +1236,7 @@ pub(crate) fn audit_tar_covering(
             | ArchiveFormat::TarGzipUstar
             | ArchiveFormat::TarZstdUstar
             | ArchiveFormat::TarXzUstar
+            | ArchiveFormat::TarBzip2Ustar
     ) {
         return Err(fail("TAR covering audit received a non-TAR IR"));
     }
@@ -1105,6 +1270,16 @@ pub(crate) fn audit_tar_covering(
                 .ok_or_else(|| fail("xz-wrapped TAR IR has no wrapper evidence"))?;
             if xz.derived_output_len != snapshot.len()
                 || snapshot.digest().sha256() != Some(xz.derived_output_sha256.as_str())
+            {
+                return Err(fail("derived TAR identity does not match its snapshot"));
+            }
+        }
+        ArchiveFormat::TarBzip2Ustar => {
+            let bzip2 = ir
+                .bzip2_evidence()
+                .ok_or_else(|| fail("bzip2-wrapped TAR IR has no wrapper evidence"))?;
+            if bzip2.derived_output_len != snapshot.len()
+                || snapshot.digest().sha256() != Some(bzip2.derived_output_sha256.as_str())
             {
                 return Err(fail("derived TAR identity does not match its snapshot"));
             }
@@ -3155,6 +3330,7 @@ mod tests {
             ArchiveEvidence::TarGzipGnuLongName(evidence) => &mut evidence.gnu.tar,
             ArchiveEvidence::TarZstd(evidence) => &mut evidence.tar,
             ArchiveEvidence::TarXz(evidence) => &mut evidence.tar,
+            ArchiveEvidence::TarBzip2(evidence) => &mut evidence.tar,
             ArchiveEvidence::Zip(_) | ArchiveEvidence::Zip64(_) | ArchiveEvidence::TarGzip(_) => {
                 panic!("expected TAR evidence")
             }
@@ -3172,7 +3348,8 @@ mod tests {
             | ArchiveEvidence::TarGzipPax(_)
             | ArchiveEvidence::TarGzipGnuLongName(_)
             | ArchiveEvidence::TarZstd(_)
-            | ArchiveEvidence::TarXz(_) => {
+            | ArchiveEvidence::TarXz(_)
+            | ArchiveEvidence::TarBzip2(_) => {
                 panic!("expected ZIP evidence")
             }
         }
@@ -3189,7 +3366,8 @@ mod tests {
             | ArchiveEvidence::TarGzipPax(_)
             | ArchiveEvidence::TarGzipGnuLongName(_)
             | ArchiveEvidence::TarZstd(_)
-            | ArchiveEvidence::TarXz(_) => {
+            | ArchiveEvidence::TarXz(_)
+            | ArchiveEvidence::TarBzip2(_) => {
                 panic!("expected ZIP64 evidence")
             }
         }
@@ -3203,7 +3381,9 @@ mod tests {
             }
             MemberEvidence::TarGnuLongName(evidence)
             | MemberEvidence::TarGzipGnuLongName(evidence) => &mut evidence.tar,
-            MemberEvidence::TarZstd(evidence) | MemberEvidence::TarXz(evidence) => evidence,
+            MemberEvidence::TarZstd(evidence)
+            | MemberEvidence::TarXz(evidence)
+            | MemberEvidence::TarBzip2(evidence) => evidence,
             MemberEvidence::Zip(_) | MemberEvidence::Zip64(_) | MemberEvidence::TarGzip(_) => {
                 panic!("expected TAR member evidence")
             }
@@ -3221,7 +3401,8 @@ mod tests {
             | ArchiveEvidence::TarGnuLongName(_)
             | ArchiveEvidence::TarGzipGnuLongName(_)
             | ArchiveEvidence::TarZstd(_)
-            | ArchiveEvidence::TarXz(_) => panic!("expected PAX archive evidence"),
+            | ArchiveEvidence::TarXz(_)
+            | ArchiveEvidence::TarBzip2(_) => panic!("expected PAX archive evidence"),
         }
     }
 
@@ -3235,7 +3416,8 @@ mod tests {
             | MemberEvidence::TarGnuLongName(_)
             | MemberEvidence::TarGzipGnuLongName(_)
             | MemberEvidence::TarZstd(_)
-            | MemberEvidence::TarXz(_) => panic!("expected PAX member evidence"),
+            | MemberEvidence::TarXz(_)
+            | MemberEvidence::TarBzip2(_) => panic!("expected PAX member evidence"),
         }
     }
 
@@ -3250,7 +3432,8 @@ mod tests {
             | ArchiveEvidence::TarPax(_)
             | ArchiveEvidence::TarGzipPax(_)
             | ArchiveEvidence::TarZstd(_)
-            | ArchiveEvidence::TarXz(_) => panic!("expected GNU long-name archive evidence"),
+            | ArchiveEvidence::TarXz(_)
+            | ArchiveEvidence::TarBzip2(_) => panic!("expected GNU long-name archive evidence"),
         }
     }
 
@@ -3268,7 +3451,8 @@ mod tests {
             | MemberEvidence::TarPax(_)
             | MemberEvidence::TarGzipPax(_)
             | MemberEvidence::TarZstd(_)
-            | MemberEvidence::TarXz(_) => panic!("expected GNU long-name member evidence"),
+            | MemberEvidence::TarXz(_)
+            | MemberEvidence::TarBzip2(_) => panic!("expected GNU long-name member evidence"),
         }
     }
 
@@ -3283,7 +3467,8 @@ mod tests {
             | MemberEvidence::TarGzipPax(_)
             | MemberEvidence::TarGzipGnuLongName(_)
             | MemberEvidence::TarZstd(_)
-            | MemberEvidence::TarXz(_) => {
+            | MemberEvidence::TarXz(_)
+            | MemberEvidence::TarBzip2(_) => {
                 panic!("expected ZIP member evidence")
             }
         }
@@ -3300,7 +3485,8 @@ mod tests {
             | MemberEvidence::TarGzipPax(_)
             | MemberEvidence::TarGzipGnuLongName(_)
             | MemberEvidence::TarZstd(_)
-            | MemberEvidence::TarXz(_) => {
+            | MemberEvidence::TarXz(_)
+            | MemberEvidence::TarBzip2(_) => {
                 panic!("expected ZIP64 member evidence")
             }
         }

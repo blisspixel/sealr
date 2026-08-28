@@ -5,9 +5,9 @@ use std::process::ExitCode;
 use clap::{Parser, ValueEnum};
 use sealr::{
     apply_supervised, apply_with_options, ApplyOptions, LinuxWorker, Policy, Request, Source,
-    TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
-    TarPaxInterpretationProfile, TarXzInterpretationProfile, TarZstdInterpretationProfile,
-    ZipInterpretationProfile,
+    TarBzip2InterpretationProfile, TarGnuLongNameInterpretationProfile,
+    TarGzipInterpretationProfile, TarInterpretationProfile, TarPaxInterpretationProfile,
+    TarXzInterpretationProfile, TarZstdInterpretationProfile, ZipInterpretationProfile,
 };
 use serde::Serialize;
 
@@ -46,6 +46,7 @@ enum CliFormat {
     TarGzipGnuLongName,
     TarZstdUstar,
     TarXzUstar,
+    TarBzip2Ustar,
 }
 
 fn main() -> ExitCode {
@@ -100,6 +101,12 @@ fn main() -> ExitCode {
             Policy::default_v9(),
             ApplyOptions::new()
                 .with_tar_xz_interpretation_profile(TarXzInterpretationProfile::UstarPortableV1),
+        ),
+        CliFormat::TarBzip2Ustar => (
+            Policy::default_v10(),
+            ApplyOptions::new().with_tar_bzip2_interpretation_profile(
+                TarBzip2InterpretationProfile::UstarPortableV1,
+            ),
         ),
     };
     let request = Request {

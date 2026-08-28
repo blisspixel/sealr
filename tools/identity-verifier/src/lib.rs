@@ -85,6 +85,17 @@ const XZ_MAX_BLOCKS: usize = 4096;
 const XZ_CHECK_CRC32: u8 = 0x01;
 const XZ_CHECK_CRC64: u8 = 0x04;
 const XZ_CHECK_SHA256: u8 = 0x0A;
+const TAR_BZIP2_MANIFEST_SCHEMA: &str = "sealr.tar-bzip2-identity-conformance.v1";
+const TAR_BZIP2_PROFILE_SCHEMA: &str = "sealr.profile.tar-bzip2.ustar-portable.v1";
+const TAR_BZIP2_IR_SCHEMA: &str = "sealr.archive-ir.tar-bzip2-ustar.v1";
+const TAR_BZIP2_TREE_ENCODING: &str = "sealrTreeV11";
+const TAR_BZIP2_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-bzip2-ustar.v1";
+const BZIP2_TRANSFORM_ID: &str = "sealr.transform.bzip2.bzip2fmt-single-stream.v1";
+const BZIP2_TRANSFORM_DEFINITION: &[u8] = b"algorithm=bzip2fmt-1.0.8;streams=exactly-one;blocks=one-to-65536;header-level=1-to-9;randomized-blocks=forbidden;block-magic-scan=chain-fold-verified;block-crcs=decoder-verified-single-block-verified-twice;combined-crc=extracted-and-verified;footer-padding-bits=zero;trailing-data=forbidden;output=bounded";
+const BZIP2_DECODER_PARAMETERS: &[u8] = b"libbz2-rs-decompress-small=false;memory-ceiling-bytes=3700000;multiple-streams=denied;stream-decoding=bounded-incremental";
+const BZIP2_BLOCK_MAGIC: u64 = 0x3141_5926_5359;
+const BZIP2_EOS_MAGIC: u64 = 0x1772_4538_5090;
+const BZIP2_MAX_BLOCKS: usize = 65536;
 const MAX_DERIVED_TAR_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_PAX_EXTENSION_BYTES: u64 = 64 * 1024;
 const MAX_PAX_EXTENSIONS: usize = 1024;
@@ -837,6 +848,87 @@ struct TarXzLayoutRoot {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct TarBzip2Manifest {
+    schema: String,
+    archive_ir_schema: String,
+    profile: TarGzipProfileVector,
+    transform: TarGzipTransformVector,
+    inner_profile: TarGzipProfileVector,
+    layout_encoding: String,
+    layout_label: String,
+    content_encoding: String,
+    content_label: String,
+    derived_tar: TarGzipDerivedTar,
+    cases: Vec<TarBzip2Case>,
+    multiblock: TarBzip2Multiblock,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarBzip2Case {
+    id: String,
+    source_bytes_hex: String,
+    source: DigestHex,
+    bzip2: Bzip2WrapperVector,
+    layout_preimage_hex: String,
+    layout_root: TarBzip2LayoutRoot,
+    content_root: TarContentRoot,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Bzip2WrapperVector {
+    level: u8,
+    header: ByteRange,
+    payload_bits: u64,
+    padding_bits: u8,
+    block_bit_offsets: Vec<u64>,
+    block_crcs: Vec<u32>,
+    combined_crc: u32,
+    derived_output_len: u64,
+    derived_output_sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarBzip2LayoutRoot {
+    #[serde(rename = "sealrTreeV11")]
+    sealr_tree_v11: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarBzip2Multiblock {
+    id: String,
+    replay_policy: TarBzip2ReplayPolicy,
+    source_bytes_hex: String,
+    source: DigestHex,
+    layout_preimage_hex: String,
+    layout_root: TarBzip2LayoutRoot,
+    content_root: TarContentRoot,
+    bzip2: Bzip2WrapperVector,
+    derived_tar: TarBzip2MultiblockDerivedTar,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarBzip2ReplayPolicy {
+    base: String,
+    max_ratio: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarBzip2MultiblockDerivedTar {
+    bytes_hex: String,
+    source: DigestHex,
+    covering: TarCovering,
+    members: Vec<TarGzipMember>,
+    raw_layout_root: TarLayoutRoot,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ProfileVector {
     id: String,
     digest: DigestHex,
@@ -1214,6 +1306,25 @@ struct TarXzProfileDefinition {
 }
 
 #[derive(Serialize)]
+struct TarBzip2ProfileDefinition {
+    schema: &'static str,
+    status: &'static str,
+    format: &'static str,
+    wrapper_profile: &'static str,
+    wrapper_profile_sha256: String,
+    decoder_parameters_sha256: String,
+    bzip2_streams: &'static str,
+    bzip2_blocks: &'static str,
+    bzip2_level: &'static str,
+    bzip2_randomized_blocks: &'static str,
+    bzip2_integrity: &'static str,
+    bzip2_trailing_input: &'static str,
+    derived_output: &'static str,
+    inner_profile: &'static str,
+    inner_profile_sha256: String,
+}
+
+#[derive(Serialize)]
 struct TarPaxProfileDefinition {
     schema: &'static str,
     status: &'static str,
@@ -1313,6 +1424,7 @@ pub fn verify_manifest_json(bytes: &[u8]) -> Result<VerificationSummary, VerifyE
         }
         TAR_ZSTD_MANIFEST_SCHEMA => verify_tar_zstd_identity_vector_json(bytes),
         TAR_XZ_MANIFEST_SCHEMA => verify_tar_xz_identity_vector_json(bytes),
+        TAR_BZIP2_MANIFEST_SCHEMA => verify_tar_bzip2_identity_vector_json(bytes),
         schema => Err(VerifyError::new(format!("unsupported schema {schema:?}"))),
     }
 }
@@ -1341,6 +1453,19 @@ pub fn verify_tar_xz_identity_vector_json(
     let manifest: TarXzManifest = serde_json::from_slice(bytes)
         .map_err(|error| VerifyError::new(format!("TAR/xz JSON: {error}")))?;
     verify_tar_xz_manifest(&manifest)
+}
+
+pub fn verify_tar_bzip2_identity_vector_json(
+    bytes: &[u8],
+) -> Result<VerificationSummary, VerifyError> {
+    if bytes.len() > MAX_MANIFEST_BYTES {
+        return Err(VerifyError::new(format!(
+            "TAR/bzip2 manifest exceeds {MAX_MANIFEST_BYTES} bytes"
+        )));
+    }
+    let manifest: TarBzip2Manifest = serde_json::from_slice(bytes)
+        .map_err(|error| VerifyError::new(format!("TAR/bzip2 JSON: {error}")))?;
+    verify_tar_bzip2_manifest(&manifest)
 }
 
 pub fn verify_tar_gzip_pax_identity_vector_json(
@@ -3836,8 +3961,103 @@ fn tar_xz_profile_canonical_bytes(
         .map_err(|error| VerifyError::new(format!("tar-xz-ustar profile serialization: {error}")))
 }
 
+fn verify_tar_bzip2_transform(transform: &TarGzipTransformVector) -> Result<(), VerifyError> {
+    if transform.id != BZIP2_TRANSFORM_ID {
+        return Err(VerifyError::new("unsupported bzip2 transform id"));
+    }
+    let definition = decode_hex(&transform.definition_hex, "bzip2 transform definition")?;
+    let decoder_parameters = decode_hex(
+        &transform.decoder_parameters_hex,
+        "bzip2 decoder parameters",
+    )?;
+    if definition != BZIP2_TRANSFORM_DEFINITION || decoder_parameters != BZIP2_DECODER_PARAMETERS {
+        return Err(VerifyError::new(
+            "bzip2 transform constants differ from the closed verifier registry",
+        ));
+    }
+    verify_digest(&transform.digest.sha256, "bzip2 transform digest")?;
+    verify_digest(
+        &transform.decoder_parameters_digest.sha256,
+        "bzip2 decoder-parameter digest",
+    )?;
+    let profile_preimage = transform_profile_preimage(&transform.id, &definition, "bzip2")?;
+    if sha256_hex(&profile_preimage) != transform.digest.sha256
+        || sha256_hex(&decoder_parameters) != transform.decoder_parameters_digest.sha256
+    {
+        return Err(VerifyError::new(
+            "bzip2 transform or decoder parameters do not match their digest",
+        ));
+    }
+    Ok(())
+}
+
+fn verify_tar_bzip2_profile(
+    profile: &TarGzipProfileVector,
+    inner: &TarGzipProfileVector,
+    transform: &TarGzipTransformVector,
+) -> Result<(), VerifyError> {
+    if profile.id != TAR_BZIP2_PROFILE_SCHEMA
+        || inner.id != TAR_PORTABLE_PROFILE_SCHEMA
+        || inner.digest.sha256 != TAR_PORTABLE_PROFILE_DIGEST
+    {
+        return Err(VerifyError::new(
+            "unsupported TAR/bzip2 or inner TAR profile identity",
+        ));
+    }
+    verify_digest(&profile.digest.sha256, "TAR/bzip2 profile digest")?;
+    verify_digest(&inner.digest.sha256, "inner TAR profile digest")?;
+    let canonical = tar_bzip2_profile_canonical_bytes(inner, transform)?;
+    if sha256_hex(&canonical) != profile.digest.sha256 {
+        return Err(VerifyError::new(
+            "TAR/bzip2 profile digest does not match reconstructed canonical bytes",
+        ));
+    }
+    Ok(())
+}
+
+fn tar_bzip2_profile_canonical_bytes(
+    inner: &TarGzipProfileVector,
+    transform: &TarGzipTransformVector,
+) -> Result<Vec<u8>, VerifyError> {
+    let definition = TarBzip2ProfileDefinition {
+        schema: TAR_BZIP2_PROFILE_SCHEMA,
+        status: "supported-preview",
+        format: "tar-bzip2-ustar",
+        wrapper_profile: BZIP2_TRANSFORM_ID,
+        wrapper_profile_sha256: transform.digest.sha256.clone(),
+        decoder_parameters_sha256: transform.decoder_parameters_digest.sha256.clone(),
+        bzip2_streams: "exactly-one-no-concatenation",
+        bzip2_blocks: "one-to-65536-magic-scan-and-chain-fold-verified",
+        bzip2_level: "header-digit-1-to-9-caps-decoder-memory-preallocation",
+        bzip2_randomized_blocks: "denied",
+        bzip2_integrity:
+            "combined-crc-extracted-and-verified-single-block-re-hashed-footer-padding-zero",
+        bzip2_trailing_input: "denied-including-concatenated-streams",
+        derived_output: "private-immutable-bounded-and-sha256-bound",
+        inner_profile: TAR_PORTABLE_PROFILE_SCHEMA,
+        inner_profile_sha256: inner.digest.sha256.clone(),
+    };
+    serde_json::to_vec(&definition).map_err(|error| {
+        VerifyError::new(format!("tar-bzip2-ustar profile serialization: {error}"))
+    })
+}
+
 fn verify_tar_gzip_derived_tar(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, VerifyError> {
-    let bytes = decode_hex(&derived.bytes_hex, "derived TAR bytes")?;
+    verify_tar_derived_source(
+        &derived.bytes_hex,
+        &derived.source,
+        &derived.covering,
+        &derived.members,
+    )
+}
+
+fn verify_tar_derived_source(
+    bytes_hex: &str,
+    source: &DigestHex,
+    covering: &TarCovering,
+    member_list: &[TarGzipMember],
+) -> Result<Vec<u8>, VerifyError> {
+    let bytes = decode_hex(bytes_hex, "derived TAR bytes")?;
     let len = u64::try_from(bytes.len())
         .map_err(|_| VerifyError::new("derived TAR length exceeds u64"))?;
     if len > MAX_DERIVED_TAR_BYTES {
@@ -3845,22 +4065,22 @@ fn verify_tar_gzip_derived_tar(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, V
             "derived TAR exceeds the {MAX_DERIVED_TAR_BYTES}-byte verifier cap"
         )));
     }
-    verify_digest(&derived.source.sha256, "derived TAR digest")?;
-    if sha256_hex(&bytes) != derived.source.sha256 {
+    verify_digest(&source.sha256, "derived TAR digest")?;
+    if sha256_hex(&bytes) != source.sha256 {
         return Err(VerifyError::new(
             "committed derived TAR bytes do not match their digest",
         ));
     }
-    if derived.members.len() > MAX_MEMBERS_PER_CASE {
+    if member_list.len() > MAX_MEMBERS_PER_CASE {
         return Err(VerifyError::new("derived TAR member limit exceeded"));
     }
-    let records_end = checked_range_end(derived.covering.member_records, "TAR member records")?;
-    let terminator_end = checked_range_end(derived.covering.terminator, "TAR terminator")?;
-    let trailing_end = checked_range_end(derived.covering.trailing_zeros, "TAR trailing zeros")?;
-    if derived.covering.member_records.offset != 0
-        || derived.covering.terminator.offset != records_end
-        || derived.covering.terminator.len != 1024
-        || derived.covering.trailing_zeros.offset != terminator_end
+    let records_end = checked_range_end(covering.member_records, "TAR member records")?;
+    let terminator_end = checked_range_end(covering.terminator, "TAR terminator")?;
+    let trailing_end = checked_range_end(covering.trailing_zeros, "TAR trailing zeros")?;
+    if covering.member_records.offset != 0
+        || covering.terminator.offset != records_end
+        || covering.terminator.len != 1024
+        || covering.trailing_zeros.offset != terminator_end
         || trailing_end != len
         || !trailing_end.is_multiple_of(512)
     {
@@ -3869,7 +4089,7 @@ fn verify_tar_gzip_derived_tar(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, V
         ));
     }
 
-    let mut members: Vec<_> = derived.members.iter().collect();
+    let mut members: Vec<_> = member_list.iter().collect();
     members.sort_by_key(|member| member.tar.header.offset);
     let mut expected_header = 0_u64;
     let mut paths = HashSet::new();
@@ -3933,11 +4153,8 @@ fn verify_tar_gzip_derived_tar(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, V
         ));
     }
     for (range, label) in [
-        (derived.covering.terminator, "derived TAR terminator"),
-        (
-            derived.covering.trailing_zeros,
-            "derived TAR trailing zeros",
-        ),
+        (covering.terminator, "derived TAR terminator"),
+        (covering.trailing_zeros, "derived TAR trailing zeros"),
     ] {
         if range_bytes(&bytes, range, label)?
             .iter()
@@ -4453,6 +4670,260 @@ fn verify_tar_xz_case(
     verify_digest(&case.content_root.sealr_tree_v1, "TAR/xz content root")?;
     if case.content_root.sealr_tree_v1 != manifest.derived_tar.content_root.sealr_tree_v1 {
         return Err(VerifyError::new("wrapped and raw TAR content roots differ"));
+    }
+    Ok(())
+}
+
+fn verify_tar_bzip2_manifest(
+    manifest: &TarBzip2Manifest,
+) -> Result<VerificationSummary, VerifyError> {
+    if manifest.schema != TAR_BZIP2_MANIFEST_SCHEMA
+        || manifest.archive_ir_schema != TAR_BZIP2_IR_SCHEMA
+        || manifest.layout_encoding != TAR_BZIP2_TREE_ENCODING
+        || manifest.layout_label != TAR_BZIP2_LAYOUT_LABEL
+        || manifest.content_encoding != TREE_ENCODING
+        || manifest.content_label != CONTENT_LABEL
+    {
+        return Err(VerifyError::new("unsupported TAR/bzip2 manifest contract"));
+    }
+    const EXPECTED_CASE_IDS: [&str; 2] = ["bz2-cli-level9", "bz2-cli-level1"];
+    if manifest.cases.len() != EXPECTED_CASE_IDS.len()
+        || manifest
+            .cases
+            .iter()
+            .map(|case| case.id.as_str())
+            .ne(EXPECTED_CASE_IDS)
+    {
+        return Err(VerifyError::new(
+            "TAR/bzip2 v1 manifest must contain exactly the two canonical ordered cases",
+        ));
+    }
+    verify_tar_bzip2_transform(&manifest.transform)?;
+    verify_tar_bzip2_profile(
+        &manifest.profile,
+        &manifest.inner_profile,
+        &manifest.transform,
+    )?;
+    let derived = verify_tar_gzip_derived_tar(&manifest.derived_tar)?;
+    let raw_layout = encode_tar_gzip_inner_layout(&manifest.derived_tar)?;
+    let committed_raw_preimage = decode_hex(
+        &manifest.derived_tar.raw_layout_preimage_hex,
+        "raw TAR layout preimage",
+    )?;
+    if raw_layout != committed_raw_preimage {
+        return Err(VerifyError::new(
+            "raw TAR layout preimage does not match derived evidence",
+        ));
+    }
+    verify_digest(
+        &manifest.derived_tar.raw_layout_root.sealr_tree_v2,
+        "raw TAR layout root",
+    )?;
+    if sha256_hex(&raw_layout) != manifest.derived_tar.raw_layout_root.sealr_tree_v2 {
+        return Err(VerifyError::new("raw TAR layout root mismatch"));
+    }
+    let content_preimage = encode_tar_gzip_content(&manifest.derived_tar)?;
+    verify_digest(
+        &manifest.derived_tar.content_root.sealr_tree_v1,
+        "derived TAR content root",
+    )?;
+    if sha256_hex(&content_preimage) != manifest.derived_tar.content_root.sealr_tree_v1 {
+        return Err(VerifyError::new("derived TAR content root mismatch"));
+    }
+
+    let mut source_digests = HashSet::new();
+    let mut layout_roots = HashSet::new();
+    let mut levels = HashSet::new();
+    for case in &manifest.cases {
+        verify_tar_bzip2_case(case, manifest, &derived)
+            .map_err(|error| error.context(&format!("TAR/bzip2 case {}", case.id)))?;
+        source_digests.insert(case.source.sha256.as_str());
+        layout_roots.insert(case.layout_root.sealr_tree_v11.as_str());
+        levels.insert(case.bzip2.level);
+        if case.bzip2.block_bit_offsets.len() != 1 {
+            return Err(VerifyError::new(
+                "TAR/bzip2 canonical cases must be single-block streams",
+            ));
+        }
+    }
+    verify_tar_bzip2_multiblock(&manifest.multiblock, manifest)
+        .map_err(|error| error.context("TAR/bzip2 multiblock section"))?;
+    source_digests.insert(manifest.multiblock.source.sha256.as_str());
+    layout_roots.insert(manifest.multiblock.layout_root.sealr_tree_v11.as_str());
+    if source_digests.len() != manifest.cases.len() + 1
+        || layout_roots.len() != manifest.cases.len() + 1
+        || levels.len() < 2
+    {
+        return Err(VerifyError::new(
+            "TAR/bzip2 cases do not prove distinct encodings and source/layout separation",
+        ));
+    }
+    if manifest.multiblock.content_root.sealr_tree_v1
+        == manifest.derived_tar.content_root.sealr_tree_v1
+    {
+        return Err(VerifyError::new(
+            "TAR/bzip2 multiblock content must differ from the shared derived TAR",
+        ));
+    }
+    if manifest.derived_tar.raw_layout_root.sealr_tree_v2
+        == manifest.cases[0].layout_root.sealr_tree_v11
+    {
+        return Err(VerifyError::new(
+            "raw TAR and wrapped TAR layouts are not separated",
+        ));
+    }
+
+    Ok(VerificationSummary {
+        profiles: 1,
+        cases: manifest.cases.len() + 1,
+        layout_roots: manifest.cases.len() + 3,
+        content_roots: manifest.cases.len() + 2,
+    })
+}
+
+fn verify_tar_bzip2_case(
+    case: &TarBzip2Case,
+    manifest: &TarBzip2Manifest,
+    derived: &[u8],
+) -> Result<(), VerifyError> {
+    let source = decode_hex(&case.source_bytes_hex, "bzip2 source bytes")?;
+    let source_len = u64::try_from(source.len())
+        .map_err(|_| VerifyError::new("bzip2 source length exceeds u64"))?;
+    if source_len > MAX_DERIVED_TAR_BYTES {
+        return Err(VerifyError::new(format!(
+            "bzip2 source exceeds the {MAX_DERIVED_TAR_BYTES}-byte verifier cap"
+        )));
+    }
+    verify_digest(&case.source.sha256, "bzip2 source digest")?;
+    if sha256_hex(&source) != case.source.sha256 {
+        return Err(VerifyError::new(
+            "bzip2 source bytes do not match their digest",
+        ));
+    }
+    verify_bzip2_wrapper(&source, &case.bzip2, derived)?;
+
+    let mut body =
+        bzip2_wrapper_layout_body(&case.bzip2, &case.source.sha256, &manifest.transform)?;
+    push_bytes(
+        &mut body,
+        &tar_gzip_inner_layout_body(&manifest.derived_tar)?,
+    )?;
+    let actual_preimage = preimage(TAR_BZIP2_LAYOUT_LABEL, &body);
+    let committed_preimage = decode_hex(&case.layout_preimage_hex, "TAR/bzip2 layout preimage")?;
+    if actual_preimage != committed_preimage {
+        return Err(VerifyError::new(
+            "TAR/bzip2 layout preimage does not match reconstructed evidence",
+        ));
+    }
+    verify_digest(&case.layout_root.sealr_tree_v11, "TAR/bzip2 layout root")?;
+    if sha256_hex(&actual_preimage) != case.layout_root.sealr_tree_v11 {
+        return Err(VerifyError::new("TAR/bzip2 layout root mismatch"));
+    }
+    verify_digest(&case.content_root.sealr_tree_v1, "TAR/bzip2 content root")?;
+    if case.content_root.sealr_tree_v1 != manifest.derived_tar.content_root.sealr_tree_v1 {
+        return Err(VerifyError::new("wrapped and raw TAR content roots differ"));
+    }
+    Ok(())
+}
+
+fn verify_tar_bzip2_multiblock(
+    multiblock: &TarBzip2Multiblock,
+    manifest: &TarBzip2Manifest,
+) -> Result<(), VerifyError> {
+    if multiblock.id != "bz2-cli-multiblock"
+        || multiblock.replay_policy.base != "sealr:policy/default/v10"
+        || multiblock.replay_policy.max_ratio == 0
+    {
+        return Err(VerifyError::new(
+            "unsupported TAR/bzip2 multiblock section contract",
+        ));
+    }
+    let derived = verify_tar_derived_source(
+        &multiblock.derived_tar.bytes_hex,
+        &multiblock.derived_tar.source,
+        &multiblock.derived_tar.covering,
+        &multiblock.derived_tar.members,
+    )?;
+    let raw_layout = preimage(
+        TAR_LAYOUT_LABEL,
+        &tar_inner_layout_body(
+            &multiblock.derived_tar.covering,
+            &multiblock.derived_tar.members,
+        )?,
+    );
+    verify_digest(
+        &multiblock.derived_tar.raw_layout_root.sealr_tree_v2,
+        "multiblock raw TAR layout root",
+    )?;
+    if sha256_hex(&raw_layout) != multiblock.derived_tar.raw_layout_root.sealr_tree_v2 {
+        return Err(VerifyError::new("multiblock raw TAR layout root mismatch"));
+    }
+    let content_preimage = encode_tar_members_content(&multiblock.derived_tar.members)?;
+    verify_digest(
+        &multiblock.content_root.sealr_tree_v1,
+        "multiblock content root",
+    )?;
+    if sha256_hex(&content_preimage) != multiblock.content_root.sealr_tree_v1 {
+        return Err(VerifyError::new("multiblock content root mismatch"));
+    }
+
+    let source = decode_hex(
+        &multiblock.source_bytes_hex,
+        "bzip2 multiblock source bytes",
+    )?;
+    let source_len = u64::try_from(source.len())
+        .map_err(|_| VerifyError::new("bzip2 multiblock source length exceeds u64"))?;
+    if source_len > MAX_DERIVED_TAR_BYTES {
+        return Err(VerifyError::new(format!(
+            "bzip2 multiblock source exceeds the {MAX_DERIVED_TAR_BYTES}-byte verifier cap"
+        )));
+    }
+    verify_digest(&multiblock.source.sha256, "bzip2 multiblock source digest")?;
+    if sha256_hex(&source) != multiblock.source.sha256 {
+        return Err(VerifyError::new(
+            "bzip2 multiblock source bytes do not match their digest",
+        ));
+    }
+    // Interior block boundaries of the decoded domain are not observable
+    // without decoding; the block-magic scan and combined-CRC chain fold over
+    // the compressed domain are the independent multi-block verification.
+    verify_bzip2_wrapper(&source, &multiblock.bzip2, &derived)?;
+    if multiblock.bzip2.block_bit_offsets.len() != 3 {
+        return Err(VerifyError::new(
+            "TAR/bzip2 multiblock section must carry exactly three blocks",
+        ));
+    }
+
+    let mut body = bzip2_wrapper_layout_body(
+        &multiblock.bzip2,
+        &multiblock.source.sha256,
+        &manifest.transform,
+    )?;
+    push_bytes(
+        &mut body,
+        &tar_inner_layout_body(
+            &multiblock.derived_tar.covering,
+            &multiblock.derived_tar.members,
+        )?,
+    )?;
+    let actual_preimage = preimage(TAR_BZIP2_LAYOUT_LABEL, &body);
+    let committed_preimage = decode_hex(
+        &multiblock.layout_preimage_hex,
+        "TAR/bzip2 multiblock layout preimage",
+    )?;
+    if actual_preimage != committed_preimage {
+        return Err(VerifyError::new(
+            "TAR/bzip2 multiblock layout preimage does not match reconstructed evidence",
+        ));
+    }
+    verify_digest(
+        &multiblock.layout_root.sealr_tree_v11,
+        "TAR/bzip2 multiblock layout root",
+    )?;
+    if sha256_hex(&actual_preimage) != multiblock.layout_root.sealr_tree_v11 {
+        return Err(VerifyError::new(
+            "TAR/bzip2 multiblock layout root mismatch",
+        ));
     }
     Ok(())
 }
@@ -5775,6 +6246,65 @@ fn xz_wrapper_layout_body(
     Ok(body)
 }
 
+fn bzip2_wrapper_layout_body(
+    bzip2: &Bzip2WrapperVector,
+    source_sha256: &str,
+    transform: &TarGzipTransformVector,
+) -> Result<Vec<u8>, VerifyError> {
+    let mut body = Vec::new();
+    push_bytes(&mut body, transform.id.as_bytes())?;
+    body.extend_from_slice(&decode_digest(
+        &transform.digest.sha256,
+        "bzip2 transform digest",
+    )?);
+    body.extend_from_slice(&decode_digest(
+        &transform.decoder_parameters_digest.sha256,
+        "bzip2 decoder-parameter digest",
+    )?);
+    push_u16(&mut body, 0);
+    encode_range(
+        &mut body,
+        ByteRange {
+            offset: 0,
+            len: bzip2
+                .payload_bits
+                .checked_add(u64::from(bzip2.padding_bits))
+                .ok_or_else(|| VerifyError::new("bzip2 stream bit length overflows"))?
+                / 8,
+        },
+    );
+    body.extend_from_slice(&decode_digest(source_sha256, "bzip2 source digest")?);
+    push_u16(&mut body, 1);
+    push_u64(&mut body, bzip2.derived_output_len);
+    body.extend_from_slice(&decode_digest(
+        &bzip2.derived_output_sha256,
+        "bzip2 derived output digest",
+    )?);
+    body.push(bzip2.level);
+    encode_range(&mut body, bzip2.header);
+    push_u64(&mut body, bzip2.payload_bits);
+    body.push(bzip2.padding_bits);
+    push_u32(
+        &mut body,
+        u32::try_from(bzip2.block_bit_offsets.len())
+            .map_err(|_| VerifyError::new("bzip2 block count exceeds u32"))?,
+    );
+    if bzip2.block_bit_offsets.len() != bzip2.block_crcs.len() {
+        return Err(VerifyError::new("bzip2 block lists disagree in length"));
+    }
+    for (offset, crc) in bzip2.block_bit_offsets.iter().zip(&bzip2.block_crcs) {
+        push_u64(&mut body, *offset);
+        push_u32(&mut body, *crc);
+    }
+    push_u32(&mut body, bzip2.combined_crc);
+    push_u64(&mut body, bzip2.derived_output_len);
+    body.extend_from_slice(&decode_digest(
+        &bzip2.derived_output_sha256,
+        "bzip2 derived output digest",
+    )?);
+    Ok(body)
+}
+
 fn encode_tar_gzip_inner_layout(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, VerifyError> {
     Ok(preimage(
         TAR_LAYOUT_LABEL,
@@ -5783,11 +6313,18 @@ fn encode_tar_gzip_inner_layout(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, 
 }
 
 fn tar_gzip_inner_layout_body(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, VerifyError> {
+    tar_inner_layout_body(&derived.covering, &derived.members)
+}
+
+fn tar_inner_layout_body(
+    covering: &TarCovering,
+    member_list: &[TarGzipMember],
+) -> Result<Vec<u8>, VerifyError> {
     let mut body = Vec::new();
-    encode_range(&mut body, derived.covering.member_records);
-    encode_range(&mut body, derived.covering.terminator);
-    encode_range(&mut body, derived.covering.trailing_zeros);
-    let mut members: Vec<_> = derived.members.iter().collect();
+    encode_range(&mut body, covering.member_records);
+    encode_range(&mut body, covering.terminator);
+    encode_range(&mut body, covering.trailing_zeros);
+    let mut members: Vec<_> = member_list.iter().collect();
     members.sort_by(|left, right| {
         left.canonical_path
             .as_bytes()
@@ -5824,8 +6361,12 @@ fn tar_gzip_inner_layout_body(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, Ve
 }
 
 fn encode_tar_gzip_content(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, VerifyError> {
+    encode_tar_members_content(&derived.members)
+}
+
+fn encode_tar_members_content(member_list: &[TarGzipMember]) -> Result<Vec<u8>, VerifyError> {
     let mut body = Vec::new();
-    let mut members: Vec<_> = derived.members.iter().collect();
+    let mut members: Vec<_> = member_list.iter().collect();
     members.sort_by(|left, right| {
         left.canonical_path
             .as_bytes()
@@ -5846,6 +6387,212 @@ fn encode_tar_gzip_content(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, Verif
         )?);
     }
     Ok(preimage(CONTENT_LABEL, &body))
+}
+
+/// Independently replay the restricted bit-aligned bzip2 container grammar
+/// over one case's source bytes: fixed header, unique-shift footer recovery,
+/// the full block-magic scan, per-block CRC and `randomised`-flag extraction,
+/// the combined-CRC chain fold, and the derived-TAR binding, without invoking
+/// a decompressor.
+fn verify_bzip2_wrapper(
+    source: &[u8],
+    evidence: &Bzip2WrapperVector,
+    derived: &[u8],
+) -> Result<(), VerifyError> {
+    let source_bits = u64::try_from(source.len())
+        .ok()
+        .and_then(|len| len.checked_mul(8))
+        .ok_or_else(|| VerifyError::new("bzip2 source bit length exceeds u64"))?;
+    if evidence.header.offset != 0 || evidence.header.len != 4 {
+        return Err(VerifyError::new(
+            "bzip2 stream-header range is not the fixed four-byte prefix",
+        ));
+    }
+    if evidence.level < 1 || evidence.level > 9 {
+        return Err(VerifyError::new(
+            "bzip2 level is outside the restricted profile",
+        ));
+    }
+    if evidence.padding_bits > 7 {
+        return Err(VerifyError::new("bzip2 padding exceeds seven bits"));
+    }
+    if evidence
+        .payload_bits
+        .checked_add(u64::from(evidence.padding_bits))
+        != Some(source_bits)
+    {
+        return Err(VerifyError::new(
+            "bzip2 bit geometry does not cover the source",
+        ));
+    }
+    let block_count = evidence.block_bit_offsets.len();
+    if block_count == 0
+        || block_count > BZIP2_MAX_BLOCKS
+        || block_count != evidence.block_crcs.len()
+    {
+        return Err(VerifyError::new(
+            "bzip2 block lists are outside the restricted profile",
+        ));
+    }
+    if source.len() < 15 {
+        return Err(VerifyError::new("bzip2 source is shorter than one block"));
+    }
+    if source[..3] != *b"BZh" || source[3] != evidence.level + b'0' {
+        return Err(VerifyError::new(
+            "bzip2 stream header disagrees with evidence",
+        ));
+    }
+
+    let tail_len = source.len().min(16);
+    let mut tail_value = 0_u128;
+    for byte in &source[source.len() - tail_len..] {
+        tail_value = (tail_value << 8) | u128::from(*byte);
+    }
+    let mut matching_shifts = 0_u32;
+    for pad in 0..8_u32 {
+        if u64::from(pad) + 80 > (tail_len as u64) * 8 {
+            break;
+        }
+        if (tail_value >> (pad + 32)) & 0xFFFF_FFFF_FFFF == u128::from(BZIP2_EOS_MAGIC) {
+            matching_shifts += 1;
+        }
+    }
+    if matching_shifts != 1 {
+        return Err(VerifyError::new("bzip2 footer recovery is not unique"));
+    }
+    let pad = u32::from(evidence.padding_bits);
+    if (tail_value >> (pad + 32)) & 0xFFFF_FFFF_FFFF != u128::from(BZIP2_EOS_MAGIC) {
+        return Err(VerifyError::new(
+            "bzip2 footer magic disagrees with the recorded padding",
+        ));
+    }
+    if ((tail_value >> pad) & 0xFFFF_FFFF) as u32 != evidence.combined_crc {
+        return Err(VerifyError::new(
+            "bzip2 combined CRC disagrees with evidence",
+        ));
+    }
+    if pad > 0 && tail_value & ((1 << pad) - 1) != 0 {
+        return Err(VerifyError::new("bzip2 footer padding bits are not zero"));
+    }
+    if evidence.payload_bits < 32 + 81 + 80 {
+        return Err(VerifyError::new("bzip2 payload is too short for one block"));
+    }
+    let footer_magic_start = evidence.payload_bits - 80;
+
+    let mut scanned = Vec::new();
+    let mut acc = 0_u64;
+    for (index, byte) in source.iter().enumerate() {
+        acc = (acc << 8) | u64::from(*byte);
+        let end_bits = (index as u64 + 1) * 8;
+        if end_bits < 80 {
+            continue;
+        }
+        for shift in (0..8_u64).rev() {
+            let start = end_bits - shift - 48;
+            if start < 32 || start + 48 > footer_magic_start {
+                continue;
+            }
+            if (acc >> shift) & 0xFFFF_FFFF_FFFF == BZIP2_BLOCK_MAGIC {
+                scanned.push(start);
+                if scanned.len() > block_count {
+                    return Err(VerifyError::new(
+                        "the bzip2 block-magic scan found more blocks than recorded",
+                    ));
+                }
+            }
+        }
+    }
+    if scanned != evidence.block_bit_offsets {
+        return Err(VerifyError::new(
+            "the bzip2 block-magic scan disagrees with the recorded offsets",
+        ));
+    }
+    if evidence.block_bit_offsets[0] != 32 {
+        return Err(VerifyError::new(
+            "the first bzip2 block does not start at bit 32",
+        ));
+    }
+
+    let mut fold = 0_u32;
+    for (offset, expected_crc) in evidence.block_bit_offsets.iter().zip(&evidence.block_crcs) {
+        if offset + 81 > footer_magic_start {
+            return Err(VerifyError::new(
+                "a bzip2 block frame overlaps the stream footer",
+            ));
+        }
+        let crc = u32::try_from(bzip2_bits(source, offset + 48, 32)?)
+            .map_err(|_| VerifyError::new("bzip2 block CRC extraction failed"))?;
+        if crc != *expected_crc {
+            return Err(VerifyError::new(
+                "a bzip2 block CRC disagrees with evidence",
+            ));
+        }
+        if bzip2_bits(source, offset + 80, 1)? != 0 {
+            return Err(VerifyError::new(
+                "a bzip2 block sets the deprecated randomised flag",
+            ));
+        }
+        fold = fold.rotate_left(1) ^ crc;
+    }
+    if fold != evidence.combined_crc {
+        return Err(VerifyError::new(
+            "the bzip2 combined CRC chain fold does not reproduce the footer",
+        ));
+    }
+
+    verify_digest(
+        &evidence.derived_output_sha256,
+        "bzip2 derived output digest",
+    )?;
+    if u64::try_from(derived.len()).ok() != Some(evidence.derived_output_len) {
+        return Err(VerifyError::new(
+            "bzip2 derived TAR length disagrees with evidence",
+        ));
+    }
+    if sha256_hex(derived) != evidence.derived_output_sha256 {
+        return Err(VerifyError::new(
+            "bzip2 derived TAR digest disagrees with evidence",
+        ));
+    }
+    if block_count == 1 && bzip2_crc32_bytes(derived) != evidence.combined_crc {
+        return Err(VerifyError::new(
+            "the single bzip2 block CRC does not match the derived TAR bytes",
+        ));
+    }
+    Ok(())
+}
+
+/// Read `count` (1..=48) bits big-endian starting at `bit_offset`.
+fn bzip2_bits(source: &[u8], bit_offset: u64, count: u32) -> Result<u64, VerifyError> {
+    let end = bit_offset
+        .checked_add(u64::from(count))
+        .ok_or_else(|| VerifyError::new("bzip2 bit read overflows"))?;
+    if count == 0 || count > 48 || end > (source.len() as u64) * 8 {
+        return Err(VerifyError::new("bzip2 bit read is out of bounds"));
+    }
+    let mut value = 0_u64;
+    for index in 0..u64::from(count) {
+        let bit = bit_offset + index;
+        let byte = source[usize::try_from(bit / 8)
+            .map_err(|_| VerifyError::new("bzip2 bit read is out of bounds"))?];
+        value = (value << 1) | u64::from(byte >> (7 - (bit % 8)) & 1);
+    }
+    Ok(value)
+}
+
+/// Independent bzip2-variant CRC-32: MSB-first (non-reflected) polynomial
+/// 0x04C11DB7 with all-ones initialization and final complement — the
+/// CRC-32/BZIP2 entry in the reveng catalogue (check value for b"123456789"
+/// is 0xfc891918). This is not the reflected zlib CRC32.
+fn bzip2_crc32_bytes(bytes: &[u8]) -> u32 {
+    let mut crc = u32::MAX;
+    for byte in bytes {
+        crc ^= u32::from(*byte) << 24;
+        for _ in 0..8 {
+            crc = (crc << 1) ^ (0x04c1_1db7 & 0_u32.wrapping_sub(crc >> 31));
+        }
+    }
+    !crc
 }
 
 fn crc32_ieee_bytes(bytes: &[u8]) -> u32 {
@@ -7795,6 +8542,8 @@ mod tests {
         include_bytes!("../../../crates/sealr/tests/conformance/tar-zstd-identity-v1.json");
     const TAR_XZ_VECTORS: &[u8] =
         include_bytes!("../../../crates/sealr/tests/conformance/tar-xz-identity-v1.json");
+    const TAR_BZIP2_VECTORS: &[u8] =
+        include_bytes!("../../../crates/sealr/tests/conformance/tar-bzip2-identity-v1.json");
     const TAR_LAYOUT_VECTOR: &[u8] =
         include_bytes!("../../../crates/sealr/tests/conformance/tar-layout-v2.json");
 
@@ -8526,6 +9275,166 @@ mod tests {
         vector["cases"][0]["source"]["sha256"] = serde_json::json!(sha256_hex(&source));
         let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
         assert!(error.to_string().contains("footer"));
+    }
+
+    #[test]
+    fn committed_tar_bzip2_vectors_verify_independently() {
+        let expected = VerificationSummary {
+            profiles: 1,
+            cases: 3,
+            layout_roots: 5,
+            content_roots: 4,
+        };
+        assert_eq!(
+            verify_tar_bzip2_identity_vector_json(TAR_BZIP2_VECTORS).unwrap(),
+            expected
+        );
+        assert_eq!(verify_manifest_json(TAR_BZIP2_VECTORS).unwrap(), expected);
+
+        let manifest: TarBzip2Manifest = serde_json::from_slice(TAR_BZIP2_VECTORS).unwrap();
+        let sources: HashSet<_> = manifest
+            .cases
+            .iter()
+            .map(|case| case.source.sha256.as_str())
+            .collect();
+        let layouts: HashSet<_> = manifest
+            .cases
+            .iter()
+            .map(|case| case.layout_root.sealr_tree_v11.as_str())
+            .collect();
+        assert_eq!(sources.len(), manifest.cases.len());
+        assert_eq!(layouts.len(), manifest.cases.len());
+        for case in &manifest.cases {
+            assert_eq!(
+                case.content_root.sealr_tree_v1,
+                manifest.derived_tar.content_root.sealr_tree_v1
+            );
+            assert_eq!(case.bzip2.block_bit_offsets.len(), 1);
+        }
+        assert_eq!(manifest.multiblock.bzip2.block_bit_offsets.len(), 3);
+        assert_ne!(
+            manifest.multiblock.content_root.sealr_tree_v1,
+            manifest.derived_tar.content_root.sealr_tree_v1
+        );
+    }
+
+    #[test]
+    fn tar_bzip2_profile_digest_is_reconstructed_without_sealr() {
+        let manifest: TarBzip2Manifest = serde_json::from_slice(TAR_BZIP2_VECTORS).unwrap();
+        verify_tar_bzip2_transform(&manifest.transform).unwrap();
+        verify_tar_bzip2_profile(
+            &manifest.profile,
+            &manifest.inner_profile,
+            &manifest.transform,
+        )
+        .unwrap();
+        assert_eq!(
+            sha256_hex(
+                &tar_bzip2_profile_canonical_bytes(&manifest.inner_profile, &manifest.transform)
+                    .unwrap()
+            ),
+            "f6711c0c98cff6e3a2c6b266d159413ef891c202b4898b4e1665081dce0f29ee"
+        );
+    }
+
+    #[test]
+    fn bzip2_crc32_matches_the_reference_catalogue_and_the_committed_stream() {
+        // CRC-32/BZIP2 check value from the reveng CRC catalogue.
+        assert_eq!(bzip2_crc32_bytes(b"123456789"), 0xfc89_1918);
+
+        let manifest: TarBzip2Manifest = serde_json::from_slice(TAR_BZIP2_VECTORS).unwrap();
+        let derived = decode_hex(&manifest.derived_tar.bytes_hex, "test derived TAR").unwrap();
+        let case = &manifest.cases[0];
+        assert_eq!(case.bzip2.block_crcs.len(), 1);
+        assert_eq!(bzip2_crc32_bytes(&derived), case.bzip2.combined_crc);
+        assert_eq!(case.bzip2.combined_crc, case.bzip2.block_crcs[0]);
+    }
+
+    #[test]
+    fn tar_bzip2_tampered_roots_wrapper_fields_and_checks_are_rejected() {
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_BZIP2_VECTORS).unwrap();
+        vector["cases"][0]["layout_root"]["sealrTreeV11"] = serde_json::json!("0".repeat(64));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("layout root mismatch"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_BZIP2_VECTORS).unwrap();
+        let crc = vector["cases"][0]["bzip2"]["block_crcs"][0]
+            .as_u64()
+            .unwrap();
+        vector["cases"][0]["bzip2"]["block_crcs"][0] = serde_json::json!(crc ^ 1);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("block CRC disagrees"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_BZIP2_VECTORS).unwrap();
+        vector["cases"][0]["bzip2"]["padding_bits"] = serde_json::json!(5);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("bzip2"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_BZIP2_VECTORS).unwrap();
+        vector["cases"][0]["bzip2"]["block_bit_offsets"][0] = serde_json::json!(40);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("scan disagrees"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_BZIP2_VECTORS).unwrap();
+        let combined = vector["cases"][0]["bzip2"]["combined_crc"]
+            .as_u64()
+            .unwrap();
+        vector["cases"][0]["bzip2"]["combined_crc"] = serde_json::json!(combined ^ 1);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("combined CRC"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_BZIP2_VECTORS).unwrap();
+        vector["profile"]["digest"]["sha256"] = serde_json::json!("0".repeat(64));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("profile digest"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_BZIP2_VECTORS).unwrap();
+        vector["cases"][0]["bzip2"]["derived_output_len"] = serde_json::json!(1);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("derived TAR length"));
+    }
+
+    #[test]
+    fn tar_bzip2_tampered_derived_and_multiblock_sections_are_rejected() {
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_BZIP2_VECTORS).unwrap();
+        let mut derived = decode_hex(
+            vector["derived_tar"]["bytes_hex"].as_str().unwrap(),
+            "test derived TAR",
+        )
+        .unwrap();
+        derived[512] ^= 1;
+        vector["derived_tar"]["bytes_hex"] = serde_json::json!(hex_bytes(&derived));
+        vector["derived_tar"]["source"]["sha256"] = serde_json::json!(sha256_hex(&derived));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("payload digest or CRC"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_BZIP2_VECTORS).unwrap();
+        let mut source = decode_hex(
+            vector["cases"][0]["source_bytes_hex"].as_str().unwrap(),
+            "test bzip2 source",
+        )
+        .unwrap();
+        let last = source.len() - 1;
+        source[last] ^= 1;
+        vector["cases"][0]["source_bytes_hex"] = serde_json::json!(hex_bytes(&source));
+        vector["cases"][0]["source"]["sha256"] = serde_json::json!(sha256_hex(&source));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("bzip2"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_BZIP2_VECTORS).unwrap();
+        let crc = vector["multiblock"]["bzip2"]["block_crcs"][1]
+            .as_u64()
+            .unwrap();
+        vector["multiblock"]["bzip2"]["block_crcs"][1] = serde_json::json!(crc ^ 1);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("multiblock"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_BZIP2_VECTORS).unwrap();
+        vector["multiblock"]["layout_root"]["sealrTreeV11"] = serde_json::json!("0".repeat(64));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("multiblock layout root mismatch"));
     }
 
     #[test]
