@@ -185,6 +185,46 @@ impl<'a> SnapshotSet<'a> {
         output: impl Read,
         max_output_bytes: u64,
     ) -> Result<SnapshotDomainId, Finding> {
+        let (output_domain, input_sha256) = self.prepare_transform(transforms, profile, input)?;
+        let snapshot = SourceSnapshot::private_derived_from_reader(output, max_output_bytes)?;
+        self.append_prepared_transform(
+            transforms,
+            profile,
+            input,
+            input_sha256,
+            output_domain,
+            snapshot,
+        )
+    }
+
+    /// Atomically retain an already bounded and verified private transform
+    /// output. Format adapters use this after a decoder has validated framing,
+    /// checksums, and exact input consumption while constructing the snapshot.
+    #[allow(dead_code)]
+    pub(crate) fn append_derived_snapshot(
+        &mut self,
+        transforms: &mut TransformGraph,
+        profile: TransformProfile,
+        input: DomainRange,
+        snapshot: SourceSnapshot<'a>,
+    ) -> Result<SnapshotDomainId, Finding> {
+        let (output_domain, input_sha256) = self.prepare_transform(transforms, profile, input)?;
+        self.append_prepared_transform(
+            transforms,
+            profile,
+            input,
+            input_sha256,
+            output_domain,
+            snapshot,
+        )
+    }
+
+    fn prepare_transform(
+        &self,
+        transforms: &TransformGraph,
+        profile: TransformProfile,
+        input: DomainRange,
+    ) -> Result<(SnapshotDomainId, String), Finding> {
         if !profile.validates() {
             return Err(Finding::error(
                 FindingCode::CoveringInconsistent,
@@ -212,7 +252,24 @@ impl<'a> SnapshotSet<'a> {
             ));
         }
         let input_sha256 = self.range_sha256(input)?;
-        let snapshot = SourceSnapshot::private_derived_from_reader(output, max_output_bytes)?;
+        Ok((output_domain, input_sha256))
+    }
+
+    fn append_prepared_transform(
+        &mut self,
+        transforms: &mut TransformGraph,
+        profile: TransformProfile,
+        input: DomainRange,
+        input_sha256: String,
+        output_domain: SnapshotDomainId,
+        snapshot: SourceSnapshot<'a>,
+    ) -> Result<SnapshotDomainId, Finding> {
+        if snapshot.kind() != SnapshotKind::PrivateFile || snapshot.path.is_some() {
+            return Err(Finding::error(
+                FindingCode::CoveringInconsistent,
+                "derived snapshot must be a private pathless file",
+            ));
+        }
         let output_len = snapshot.len();
         let output_sha256 = snapshot
             .digest()
@@ -1668,6 +1725,52 @@ mod tests {
         assert_eq!(invalid.code, FindingCode::CoveringInconsistent);
         assert_eq!(snapshots.len(), domain_count);
         assert_eq!(graph.records.len(), record_count);
+    }
+
+    #[test]
+    fn prepared_private_transform_appends_atomically_and_rejects_memory_output() {
+        let original = b"wrapped";
+        let output = b"decoded";
+        let mut snapshots = SnapshotSet::from_original(SourceSnapshot::borrowed(None, original));
+        let mut graph = TransformGraph::empty();
+        let private =
+            SourceSnapshot::private_derived_from_reader(Cursor::new(output), output.len() as u64)
+                .unwrap();
+
+        let domain = snapshots
+            .append_derived_snapshot(
+                &mut graph,
+                IDENTITY_PROFILE,
+                DomainRange::original(ByteRange {
+                    offset: 0,
+                    len: original.len() as u64,
+                }),
+                private,
+            )
+            .unwrap();
+
+        assert_eq!(domain, SnapshotDomainId(1));
+        assert!(graph.validates(&snapshots));
+
+        let memory = SourceSnapshot::owned(None, b"not private".to_vec());
+        let error = snapshots
+            .append_derived_snapshot(
+                &mut graph,
+                REVERSE_PROFILE,
+                DomainRange {
+                    domain,
+                    range: ByteRange {
+                        offset: 0,
+                        len: output.len() as u64,
+                    },
+                },
+                memory,
+            )
+            .unwrap_err();
+        assert_eq!(error.code, FindingCode::CoveringInconsistent);
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(graph.records().len(), 1);
+        assert!(graph.validates(&snapshots));
     }
 
     #[test]

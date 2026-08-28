@@ -12,7 +12,10 @@ use flate2::bufread::DeflateDecoder;
 
 use crate::findings::{Finding, FindingCode};
 use crate::ir::ByteRange;
-use crate::snapshot::{as_io_error, finding_from_io, SnapshotRangeReader, SourceSnapshot};
+use crate::snapshot::{
+    as_io_error, finding_from_io, DomainRange, SnapshotDomainId, SnapshotRangeReader, SnapshotSet,
+    SourceSnapshot, TransformGraph, TransformProfile,
+};
 
 const FIXED_HEADER_LEN: u64 = 10;
 const TRAILER_LEN: u64 = 8;
@@ -63,6 +66,18 @@ pub(crate) struct DecodedGzipMember {
     pub(crate) output: SourceSnapshot<'static>,
 }
 
+/// Verified wrapper evidence after the output has become a retained snapshot
+/// domain and the transformation graph has bound both byte identities.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TransformedGzipMember {
+    pub(crate) header: GzipHeader,
+    pub(crate) compressed_payload: ByteRange,
+    pub(crate) trailer: ByteRange,
+    pub(crate) declared_crc32: u32,
+    pub(crate) declared_isize: u32,
+    pub(crate) output_domain: SnapshotDomainId,
+}
+
 /// Internal failure classes kept distinct before they are mapped to the
 /// repository's stable finding vocabulary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -81,6 +96,7 @@ pub(crate) enum GzipErrorKind {
     DataChecksum,
     DeclaredSize,
     OutputLimit,
+    TransformAuthority,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -205,6 +221,47 @@ pub(crate) fn decode_single_member(
         declared_crc32: evidence.declared_crc32,
         declared_isize: evidence.declared_isize,
         output,
+    })
+}
+
+/// Decode the original domain and atomically append its verified private
+/// output plus the registered RFC 1952 transformation record.
+pub(crate) fn transform_single_member(
+    snapshots: &mut SnapshotSet<'_>,
+    transforms: &mut TransformGraph,
+    limits: GzipLimits,
+) -> Result<TransformedGzipMember, GzipError> {
+    let original_len = snapshots.original().len();
+    let decoded = decode_single_member(snapshots.original(), limits)?;
+    let DecodedGzipMember {
+        header,
+        compressed_payload,
+        trailer,
+        declared_crc32,
+        declared_isize,
+        output,
+    } = decoded;
+    let output_domain = snapshots
+        .append_derived_snapshot(
+            transforms,
+            TransformProfile::GzipRfc1952SingleMemberV1,
+            DomainRange::original(ByteRange {
+                offset: 0,
+                len: original_len,
+            }),
+            output,
+        )
+        .map_err(|finding| GzipError {
+            kind: GzipErrorKind::TransformAuthority,
+            finding,
+        })?;
+    Ok(TransformedGzipMember {
+        header,
+        compressed_payload,
+        trailer,
+        declared_crc32,
+        declared_isize,
+        output_domain,
     })
 }
 
@@ -689,6 +746,45 @@ mod tests {
         assert_eq!(decoded.output.kind(), SnapshotKind::PrivateFile);
         assert_eq!(
             decoded.output.read_vec(0, decoded.output.len()).unwrap(),
+            payload
+        );
+    }
+
+    #[test]
+    fn verified_member_becomes_one_identity_bound_derived_domain() {
+        let payload = b"portable ustar bytes";
+        let bytes = fixture(FLAG_HEADER_CRC, payload);
+        let source_len = bytes.len() as u64;
+        let mut snapshots = SnapshotSet::from_original(SourceSnapshot::borrowed(
+            Some("input.tar.gz".into()),
+            &bytes,
+        ));
+        let mut transforms = TransformGraph::empty();
+
+        let transformed =
+            transform_single_member(&mut snapshots, &mut transforms, LARGE_LIMITS).unwrap();
+
+        assert_ne!(transformed.output_domain, SnapshotDomainId::ORIGINAL);
+        assert_eq!(snapshots.len(), 2);
+        assert!(transforms.validates(&snapshots));
+        assert_eq!(transforms.records().len(), 1);
+        let record = &transforms.records()[0];
+        assert_eq!(record.profile, TransformProfile::GzipRfc1952SingleMemberV1);
+        assert_eq!(
+            record.input,
+            DomainRange::original(ByteRange {
+                offset: 0,
+                len: source_len
+            })
+        );
+        assert_eq!(record.output_domain, transformed.output_domain);
+        assert_eq!(record.output_len, payload.len() as u64);
+        assert_eq!(
+            snapshots
+                .domain(transformed.output_domain)
+                .unwrap()
+                .read_vec(0, payload.len() as u64)
+                .unwrap(),
             payload
         );
     }
