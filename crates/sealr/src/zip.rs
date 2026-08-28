@@ -18,6 +18,324 @@ const ZIP64_EOCD_SIG: u32 = 0x0606_4b50;
 const ZIP64_LOCATOR_SIG: u32 = 0x0706_4b50;
 const EOCD_MIN: usize = 22;
 
+const ZIP64_EXTRA_ID: u16 = 0x0001;
+const ZIP64_U32_SENTINEL: u32 = u32::MAX;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Zip64CentralValues {
+    uncompressed_size: u64,
+    compressed_size: u64,
+    local_header_offset: u64,
+    presence_mask: u8,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Zip64ExtraResolutionError {
+    InvalidLength,
+    MissingRequiredValue,
+    Ambiguous,
+    ValueMismatch,
+    NoncanonicalLegacyValue,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[allow(dead_code)]
+enum DataDescriptorWidth {
+    Zip32,
+    Zip64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ClassicEndFields {
+    entries_on_disk: u16,
+    total_entries: u16,
+    central_directory_size: u32,
+    central_directory_offset: u32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct ResolvedEndRecords {
+    total_entries: u64,
+    central_directory_size: u64,
+    central_directory_offset: u64,
+    zip64_eocd: Option<ByteRange>,
+    zip64_locator: Option<ByteRange>,
+}
+
+fn canonical_legacy_u16(legacy: u16, resolved: u64) -> bool {
+    if resolved < u64::from(u16::MAX) {
+        u64::from(legacy) == resolved
+    } else {
+        legacy == u16::MAX
+    }
+}
+
+fn canonical_legacy_u32(legacy: u32, resolved: u64) -> bool {
+    if resolved < u64::from(u32::MAX) {
+        u64::from(legacy) == resolved
+    } else {
+        legacy == u32::MAX
+    }
+}
+
+/// Resolves the optional ZIP64 end pair immediately before a classic EOCD.
+/// The first profile permits only the fixed 56-byte record and 20-byte
+/// locator, both single-disk and exactly adjacent.
+#[allow(dead_code)]
+fn resolve_zip64_end_records(
+    snapshot: &SourceSnapshot<'_>,
+    eocd_offset: u64,
+    classic: ClassicEndFields,
+) -> Result<ResolvedEndRecords, Finding> {
+    if classic.entries_on_disk != classic.total_entries {
+        return Err(Finding::error(
+            FindingCode::ZipDiffC3Count,
+            "classic EOCD per-disk and total entry counts disagree",
+        ));
+    }
+    let has_sentinel = classic.entries_on_disk == u16::MAX
+        || classic.total_entries == u16::MAX
+        || classic.central_directory_size == u32::MAX
+        || classic.central_directory_offset == u32::MAX;
+    let Some(locator_offset) = eocd_offset.checked_sub(20) else {
+        if has_sentinel {
+            return Err(Finding::error(
+                FindingCode::ZipDiffC5Zip64,
+                "ZIP64 legacy sentinel has no locator",
+            ));
+        }
+        return Ok(ResolvedEndRecords {
+            total_entries: u64::from(classic.total_entries),
+            central_directory_size: u64::from(classic.central_directory_size),
+            central_directory_offset: u64::from(classic.central_directory_offset),
+            zip64_eocd: None,
+            zip64_locator: None,
+        });
+    };
+    let mut locator = [0_u8; 20];
+    snapshot.read_exact_at(locator_offset, &mut locator)?;
+    if u32::from_le_bytes(locator[0..4].try_into().unwrap()) != ZIP64_LOCATOR_SIG {
+        if has_sentinel {
+            return Err(Finding::error(
+                FindingCode::ZipDiffC5Zip64,
+                "ZIP64 legacy sentinel has no locator",
+            ));
+        }
+        return Ok(ResolvedEndRecords {
+            total_entries: u64::from(classic.total_entries),
+            central_directory_size: u64::from(classic.central_directory_size),
+            central_directory_offset: u64::from(classic.central_directory_offset),
+            zip64_eocd: None,
+            zip64_locator: None,
+        });
+    }
+
+    let locator_disk = u32::from_le_bytes(locator[4..8].try_into().unwrap());
+    let zip64_eocd_offset = u64::from_le_bytes(locator[8..16].try_into().unwrap());
+    let total_disks = u32::from_le_bytes(locator[16..20].try_into().unwrap());
+    if locator_disk != 0 || total_disks != 1 {
+        return Err(Finding::error(
+            FindingCode::ZipDiffC3Count,
+            "ZIP64 locator describes a spanned archive",
+        ));
+    }
+    if zip64_eocd_offset.checked_add(56) != Some(locator_offset) {
+        return Err(Finding::error(
+            FindingCode::ZipDiffC4Offset,
+            "ZIP64 EOCD does not exactly abut its locator",
+        ));
+    }
+
+    let mut record = [0_u8; 56];
+    snapshot
+        .read_exact_at(zip64_eocd_offset, &mut record)
+        .map_err(|_| Finding::error(FindingCode::ZipDiffC4Offset, "ZIP64 EOCD extends past EOF"))?;
+    if u32::from_le_bytes(record[0..4].try_into().unwrap()) != ZIP64_EOCD_SIG {
+        return Err(Finding::error(
+            FindingCode::ZipDiffC5Zip64,
+            "ZIP64 locator does not point to a ZIP64 EOCD",
+        ));
+    }
+    if u64::from_le_bytes(record[4..12].try_into().unwrap()) != 44 {
+        return Err(Finding::error(
+            FindingCode::ZipDiffC5Zip64,
+            "ZIP64 EOCD extensible sector is denied",
+        ));
+    }
+    let version_needed = u16::from_le_bytes(record[14..16].try_into().unwrap());
+    if version_needed < 45 {
+        return Err(Finding::error(
+            FindingCode::ZipDiffC5Zip64,
+            "ZIP64 EOCD requires extraction version 4.5 or later",
+        ));
+    }
+    let this_disk = u32::from_le_bytes(record[16..20].try_into().unwrap());
+    let central_directory_disk = u32::from_le_bytes(record[20..24].try_into().unwrap());
+    if this_disk != 0 || central_directory_disk != 0 {
+        return Err(Finding::error(
+            FindingCode::ZipDiffC3Count,
+            "ZIP64 EOCD describes a spanned archive",
+        ));
+    }
+    let entries_on_disk = u64::from_le_bytes(record[24..32].try_into().unwrap());
+    let total_entries = u64::from_le_bytes(record[32..40].try_into().unwrap());
+    if entries_on_disk != total_entries {
+        return Err(Finding::error(
+            FindingCode::ZipDiffC3Count,
+            "ZIP64 per-disk and total entry counts disagree",
+        ));
+    }
+    let central_directory_size = u64::from_le_bytes(record[40..48].try_into().unwrap());
+    let central_directory_offset = u64::from_le_bytes(record[48..56].try_into().unwrap());
+    if central_directory_offset.checked_add(central_directory_size) != Some(zip64_eocd_offset) {
+        return Err(Finding::error(
+            FindingCode::ZipDiffC4Offset,
+            "ZIP64 central-directory geometry does not land on the ZIP64 EOCD",
+        ));
+    }
+    if !canonical_legacy_u16(classic.entries_on_disk, entries_on_disk)
+        || !canonical_legacy_u16(classic.total_entries, total_entries)
+        || !canonical_legacy_u32(classic.central_directory_size, central_directory_size)
+        || !canonical_legacy_u32(classic.central_directory_offset, central_directory_offset)
+    {
+        return Err(Finding::error(
+            FindingCode::ZipDiffC5Zip64,
+            "classic EOCD and ZIP64 EOCD values are not canonically identical",
+        ));
+    }
+
+    Ok(ResolvedEndRecords {
+        total_entries,
+        central_directory_size,
+        central_directory_offset,
+        zip64_eocd: Some(ByteRange {
+            offset: zip64_eocd_offset,
+            len: 56,
+        }),
+        zip64_locator: Some(ByteRange {
+            offset: locator_offset,
+            len: 20,
+        }),
+    })
+}
+
+/// Resolves the sentinel-driven ZIP64 values in a central-directory extra.
+///
+/// APPNOTE fixes the logical field order but major writers sometimes include
+/// exact redundant in-range values. There are only eight possible presence
+/// masks for the three supported fields, so enumerate them and require one
+/// complete interpretation instead of shifting fields heuristically.
+#[allow(dead_code)]
+fn resolve_zip64_central_values(
+    data: &[u8],
+    legacy_uncompressed_size: u32,
+    legacy_compressed_size: u32,
+    legacy_local_header_offset: u32,
+) -> Result<Zip64CentralValues, Zip64ExtraResolutionError> {
+    if data.is_empty() || data.len() > 24 || !data.len().is_multiple_of(8) {
+        return Err(Zip64ExtraResolutionError::InvalidLength);
+    }
+
+    let legacy = [
+        legacy_uncompressed_size,
+        legacy_compressed_size,
+        legacy_local_header_offset,
+    ];
+    let required_mask = legacy
+        .iter()
+        .enumerate()
+        .fold(0_u8, |mask, (index, value)| {
+            if *value == ZIP64_U32_SENTINEL {
+                mask | (1_u8 << index)
+            } else {
+                mask
+            }
+        });
+    let value_count = data.len() / 8;
+    let mut unique = None;
+    let mut matching_masks = 0_u8;
+
+    for presence_mask in 1_u8..8 {
+        if presence_mask.count_ones() as usize != value_count
+            || presence_mask & required_mask != required_mask
+        {
+            continue;
+        }
+
+        let mut cursor = 0_usize;
+        let mut resolved = legacy.map(u64::from);
+        let mut valid = true;
+        for index in 0..3 {
+            if presence_mask & (1_u8 << index) == 0 {
+                continue;
+            }
+            let value = u64::from_le_bytes(data[cursor..cursor + 8].try_into().unwrap());
+            cursor += 8;
+            if legacy[index] == ZIP64_U32_SENTINEL {
+                if value < u64::from(ZIP64_U32_SENTINEL) {
+                    valid = false;
+                    break;
+                }
+                resolved[index] = value;
+            } else if value != u64::from(legacy[index]) {
+                valid = false;
+                break;
+            }
+        }
+        if !valid || cursor != data.len() {
+            continue;
+        }
+
+        matching_masks = matching_masks.saturating_add(1);
+        unique = Some(Zip64CentralValues {
+            uncompressed_size: resolved[0],
+            compressed_size: resolved[1],
+            local_header_offset: resolved[2],
+            presence_mask,
+        });
+    }
+
+    match (matching_masks, unique) {
+        (0, _) if required_mask != 0 => Err(Zip64ExtraResolutionError::MissingRequiredValue),
+        (0, _) => Err(Zip64ExtraResolutionError::InvalidLength),
+        (1, Some(values)) => Ok(values),
+        _ => Err(Zip64ExtraResolutionError::Ambiguous),
+    }
+}
+
+/// Resolves the two size values permitted in a local ZIP64 extra field.
+/// Forced ZIP64 writers may saturate both legacy fields for small members.
+/// A gratuitously mixed forced representation is denied, while a mixed pair
+/// remains valid when one resolved size genuinely requires saturation.
+#[allow(dead_code)]
+fn validate_zip64_local_values(
+    data: &[u8],
+    legacy_uncompressed_size: u32,
+    legacy_compressed_size: u32,
+    expected_uncompressed_size: u64,
+    expected_compressed_size: u64,
+) -> Result<(), Zip64ExtraResolutionError> {
+    if data.len() != 16 {
+        return Err(Zip64ExtraResolutionError::InvalidLength);
+    }
+    let uncompressed_size = u64::from_le_bytes(data[0..8].try_into().unwrap());
+    let compressed_size = u64::from_le_bytes(data[8..16].try_into().unwrap());
+    if uncompressed_size != expected_uncompressed_size
+        || compressed_size != expected_compressed_size
+    {
+        return Err(Zip64ExtraResolutionError::ValueMismatch);
+    }
+
+    let forced = legacy_uncompressed_size == u32::MAX && legacy_compressed_size == u32::MAX;
+    let canonical = canonical_legacy_u32(legacy_uncompressed_size, uncompressed_size)
+        && canonical_legacy_u32(legacy_compressed_size, compressed_size);
+    if forced || canonical {
+        Ok(())
+    } else {
+        Err(Zip64ExtraResolutionError::NoncanonicalLegacyValue)
+    }
+}
+
 #[cfg(test)]
 thread_local! {
     static PARSE_CALLS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
@@ -504,12 +822,12 @@ fn classify_extra_fields(
             .on(String::from_utf8_lossy(name)));
         }
         if is_denied_extra_id(id) {
-            let code = if id == 0x0001 {
+            let code = if id == ZIP64_EXTRA_ID {
                 FindingCode::ZipDiffC5Zip64
             } else {
                 FindingCode::ZipDiffA3Name
             };
-            let label = if id == 0x0001 {
+            let label = if id == ZIP64_EXTRA_ID {
                 "ZIP64 extra field"
             } else {
                 "alternate Unicode path extra field"
@@ -534,6 +852,102 @@ fn classify_extra_fields(
         position = end;
     }
     Ok(records)
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Zip64ExtraData {
+    offset: usize,
+    len: usize,
+}
+
+/// Classifies the closed extra-field language for ZIP64 strict ASCII v1.
+/// Only one semantic ZIP64 field is permitted at either header site.
+#[allow(dead_code)]
+fn classify_zip64_extra_fields(
+    extra: &[u8],
+    extra_start: u64,
+    site: ExtraSite,
+    context: &str,
+    name: &[u8],
+) -> Result<(Vec<ExtraFieldRecord>, Option<Zip64ExtraData>), Finding> {
+    let mut position = 0_usize;
+    let mut zip64 = None;
+    let mut records = Vec::new();
+    while position < extra.len() {
+        if extra.len() - position < 4 {
+            return Err(Finding::error(
+                FindingCode::ZipExtra,
+                format!("truncated extra-field header in {context}"),
+            )
+            .on(String::from_utf8_lossy(name)));
+        }
+        let id = u16::from_le_bytes(extra[position..position + 2].try_into().unwrap());
+        let size_u16 = u16::from_le_bytes(extra[position + 2..position + 4].try_into().unwrap());
+        let size = usize::from(size_u16);
+        let data_offset = position.checked_add(4).ok_or_else(|| {
+            Finding::error(FindingCode::ZipExtra, "extra-field offset overflow")
+                .on(String::from_utf8_lossy(name))
+        })?;
+        let end = data_offset.checked_add(size).ok_or_else(|| {
+            Finding::error(FindingCode::ZipExtra, "extra-field length overflow")
+                .on(String::from_utf8_lossy(name))
+        })?;
+        if end > extra.len() {
+            return Err(Finding::error(
+                FindingCode::ZipExtra,
+                format!("extra field 0x{id:04x} overflows {context}"),
+            )
+            .on(String::from_utf8_lossy(name)));
+        }
+        if id != ZIP64_EXTRA_ID {
+            let code = if id == 0x7075 {
+                FindingCode::ZipDiffA3Name
+            } else {
+                FindingCode::ZipExtra
+            };
+            return Err(Finding::error(
+                code,
+                format!("extra field 0x{id:04x} is denied by ZIP64 strict ASCII v1 in {context}"),
+            )
+            .on(String::from_utf8_lossy(name)));
+        }
+        if zip64.is_some() {
+            return Err(Finding::error(
+                FindingCode::ZipExtra,
+                format!("duplicate ZIP64 extra field in {context}"),
+            )
+            .on(String::from_utf8_lossy(name)));
+        }
+        let header_offset = extra_start.checked_add(position as u64).ok_or_else(|| {
+            Finding::error(FindingCode::ZipDiffC4Offset, "ZIP64 extra offset overflow")
+                .on(String::from_utf8_lossy(name))
+        })?;
+        records.push(ExtraFieldRecord {
+            site,
+            id,
+            header_range: ByteRange {
+                offset: header_offset,
+                len: 4,
+            },
+            data_range: ByteRange {
+                offset: header_offset.checked_add(4).ok_or_else(|| {
+                    Finding::error(
+                        FindingCode::ZipDiffC4Offset,
+                        "ZIP64 extra data offset overflow",
+                    )
+                    .on(String::from_utf8_lossy(name))
+                })?,
+                len: u64::from(size_u16),
+            },
+            disposition: ExtraDisposition::Semantic,
+        });
+        zip64 = Some(Zip64ExtraData {
+            offset: data_offset,
+            len: size,
+        });
+        position = end;
+    }
+    Ok((records, zip64))
 }
 
 fn validate_general_purpose_flags(
@@ -820,9 +1234,34 @@ fn parse_data_descriptor(
     expected_comp: u32,
     expected_uncomp: u32,
 ) -> Result<u64, Finding> {
-    let mut descriptor = [0_u8; 16];
+    parse_data_descriptor_with_width(
+        snapshot,
+        offset,
+        expected_crc,
+        u64::from(expected_comp),
+        u64::from(expected_uncomp),
+        DataDescriptorWidth::Zip32,
+    )
+}
+
+#[allow(dead_code)]
+fn parse_data_descriptor_with_width(
+    snapshot: &SourceSnapshot<'_>,
+    offset: u64,
+    expected_crc: u32,
+    expected_comp: u64,
+    expected_uncomp: u64,
+    width: DataDescriptorWidth,
+) -> Result<u64, Finding> {
+    let value_bytes = match width {
+        DataDescriptorWidth::Zip32 => 4_usize,
+        DataDescriptorWidth::Zip64 => 8_usize,
+    };
+    let unsigned_len = 4_usize + value_bytes * 2;
+    let signed_len = unsigned_len + 4;
+    let mut descriptor = [0_u8; 24];
     snapshot
-        .read_exact_at(offset, &mut descriptor[..12])
+        .read_exact_at(offset, &mut descriptor[..unsigned_len])
         .map_err(|_| {
             Finding::error(
                 FindingCode::ZipDiffC4Offset,
@@ -831,39 +1270,55 @@ fn parse_data_descriptor(
         })?;
     let first = u32::from_le_bytes(descriptor[0..4].try_into().unwrap());
     let (values_offset, descriptor_len) = if first == DATA_DESCRIPTOR_SIG {
-        let suffix_offset = offset.checked_add(12).ok_or_else(|| {
+        let suffix_offset = offset.checked_add(unsigned_len as u64).ok_or_else(|| {
             Finding::error(
                 FindingCode::ZipDiffC4Offset,
                 "signed data descriptor offset overflow",
             )
         })?;
         snapshot
-            .read_exact_at(suffix_offset, &mut descriptor[12..16])
+            .read_exact_at(suffix_offset, &mut descriptor[unsigned_len..signed_len])
             .map_err(|_| {
                 Finding::error(
                     FindingCode::ZipDiffC4Offset,
                     "signed data descriptor extends past EOF",
                 )
             })?;
-        (4_usize, 16_u64)
+        (4_usize, signed_len as u64)
     } else {
-        (0_usize, 12_u64)
+        (0_usize, unsigned_len as u64)
     };
     let crc = u32::from_le_bytes(
         descriptor[values_offset..values_offset + 4]
             .try_into()
             .unwrap(),
     );
-    let comp = u32::from_le_bytes(
-        descriptor[values_offset + 4..values_offset + 8]
-            .try_into()
-            .unwrap(),
-    );
-    let uncomp = u32::from_le_bytes(
-        descriptor[values_offset + 8..values_offset + 12]
-            .try_into()
-            .unwrap(),
-    );
+    let sizes_offset = values_offset + 4;
+    let comp = match width {
+        DataDescriptorWidth::Zip32 => u64::from(u32::from_le_bytes(
+            descriptor[sizes_offset..sizes_offset + 4]
+                .try_into()
+                .unwrap(),
+        )),
+        DataDescriptorWidth::Zip64 => u64::from_le_bytes(
+            descriptor[sizes_offset..sizes_offset + 8]
+                .try_into()
+                .unwrap(),
+        ),
+    };
+    let uncomp_offset = sizes_offset + value_bytes;
+    let uncomp = match width {
+        DataDescriptorWidth::Zip32 => u64::from(u32::from_le_bytes(
+            descriptor[uncomp_offset..uncomp_offset + 4]
+                .try_into()
+                .unwrap(),
+        )),
+        DataDescriptorWidth::Zip64 => u64::from_le_bytes(
+            descriptor[uncomp_offset..uncomp_offset + 8]
+                .try_into()
+                .unwrap(),
+        ),
+    };
     if crc != expected_crc || comp != expected_comp || uncomp != expected_uncomp {
         return Err(Finding::error(
             FindingCode::ZipDiffA2Size,
@@ -1004,6 +1459,404 @@ mod tests {
             Ok(_) => panic!("test archive unexpectedly parsed"),
             Err(finding) => finding,
         }
+    }
+
+    fn zip64_values_for_mask(mask: u8, legacy: [u32; 3]) -> Vec<u8> {
+        let mut data = Vec::new();
+        for (index, value) in legacy.into_iter().enumerate() {
+            if mask & (1_u8 << index) == 0 {
+                continue;
+            }
+            let resolved = if value == ZIP64_U32_SENTINEL {
+                u64::from(ZIP64_U32_SENTINEL) + 17 + index as u64
+            } else {
+                u64::from(value)
+            };
+            data.extend_from_slice(&resolved.to_le_bytes());
+        }
+        data
+    }
+
+    fn empty_zip64_end(classic: ClassicEndFields) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&ZIP64_EOCD_SIG.to_le_bytes());
+        bytes.extend_from_slice(&44_u64.to_le_bytes());
+        bytes.extend_from_slice(&45_u16.to_le_bytes());
+        bytes.extend_from_slice(&45_u16.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_u64.to_le_bytes());
+        bytes.extend_from_slice(&0_u64.to_le_bytes());
+        bytes.extend_from_slice(&0_u64.to_le_bytes());
+        bytes.extend_from_slice(&0_u64.to_le_bytes());
+        assert_eq!(bytes.len(), 56);
+        bytes.extend_from_slice(&ZIP64_LOCATOR_SIG.to_le_bytes());
+        bytes.extend_from_slice(&0_u32.to_le_bytes());
+        bytes.extend_from_slice(&0_u64.to_le_bytes());
+        bytes.extend_from_slice(&1_u32.to_le_bytes());
+        assert_eq!(bytes.len(), 76);
+        bytes.extend_from_slice(&EOCD_SIG.to_le_bytes());
+        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        bytes.extend_from_slice(&classic.entries_on_disk.to_le_bytes());
+        bytes.extend_from_slice(&classic.total_entries.to_le_bytes());
+        bytes.extend_from_slice(&classic.central_directory_size.to_le_bytes());
+        bytes.extend_from_slice(&classic.central_directory_offset.to_le_bytes());
+        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        bytes
+    }
+
+    fn descriptor_bytes(
+        width: DataDescriptorWidth,
+        signed: bool,
+        crc: u32,
+        compressed_size: u64,
+        uncompressed_size: u64,
+    ) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        if signed {
+            bytes.extend_from_slice(&DATA_DESCRIPTOR_SIG.to_le_bytes());
+        }
+        bytes.extend_from_slice(&crc.to_le_bytes());
+        match width {
+            DataDescriptorWidth::Zip32 => {
+                bytes.extend_from_slice(&(compressed_size as u32).to_le_bytes());
+                bytes.extend_from_slice(&(uncompressed_size as u32).to_le_bytes());
+            }
+            DataDescriptorWidth::Zip64 => {
+                bytes.extend_from_slice(&compressed_size.to_le_bytes());
+                bytes.extend_from_slice(&uncompressed_size.to_le_bytes());
+            }
+        }
+        bytes
+    }
+
+    #[test]
+    fn zip64_local_sizes_accept_canonical_and_forced_representations() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&7_u64.to_le_bytes());
+        data.extend_from_slice(&5_u64.to_le_bytes());
+
+        assert_eq!(validate_zip64_local_values(&data, 7, 5, 7, 5), Ok(()));
+        assert_eq!(
+            validate_zip64_local_values(&data, u32::MAX, u32::MAX, 7, 5),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn zip64_local_sizes_reject_mixed_or_mismatched_representations() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&7_u64.to_le_bytes());
+        data.extend_from_slice(&5_u64.to_le_bytes());
+
+        assert_eq!(
+            validate_zip64_local_values(&data, u32::MAX, 5, 7, 5),
+            Err(Zip64ExtraResolutionError::NoncanonicalLegacyValue)
+        );
+        assert_eq!(
+            validate_zip64_local_values(&data, 7, 5, 8, 5),
+            Err(Zip64ExtraResolutionError::ValueMismatch)
+        );
+        assert_eq!(
+            validate_zip64_local_values(&data[..15], 7, 5, 7, 5),
+            Err(Zip64ExtraResolutionError::InvalidLength)
+        );
+    }
+
+    #[test]
+    fn zip64_descriptor_width_is_selected_for_signed_and_unsigned_forms() {
+        let crc = 0x1234_5678;
+        let compressed_size = u64::from(u32::MAX) + 17;
+        let uncompressed_size = u64::from(u32::MAX) + 33;
+        for signed in [false, true] {
+            let bytes = descriptor_bytes(
+                DataDescriptorWidth::Zip64,
+                signed,
+                crc,
+                compressed_size,
+                uncompressed_size,
+            );
+            let snapshot = SourceSnapshot::borrowed(None, &bytes);
+            let end = parse_data_descriptor_with_width(
+                &snapshot,
+                0,
+                crc,
+                compressed_size,
+                uncompressed_size,
+                DataDescriptorWidth::Zip64,
+            )
+            .unwrap();
+            assert_eq!(end, if signed { 24 } else { 20 });
+        }
+    }
+
+    #[test]
+    fn zip64_descriptor_rejects_a_selected_zip32_width() {
+        let bytes = descriptor_bytes(DataDescriptorWidth::Zip64, true, 7, 5, 9);
+        let snapshot = SourceSnapshot::borrowed(None, &bytes);
+
+        let finding =
+            parse_data_descriptor_with_width(&snapshot, 0, 7, 5, 9, DataDescriptorWidth::Zip32)
+                .unwrap_err();
+
+        assert_eq!(finding.code, FindingCode::ZipDiffA2Size);
+    }
+
+    #[test]
+    fn zip64_end_pair_is_fixed_adjacent_and_canonically_redundant() {
+        let classic = ClassicEndFields {
+            entries_on_disk: 0,
+            total_entries: 0,
+            central_directory_size: 0,
+            central_directory_offset: 0,
+        };
+        let bytes = empty_zip64_end(classic);
+        let snapshot = SourceSnapshot::borrowed(None, &bytes);
+
+        let resolved = resolve_zip64_end_records(&snapshot, 76, classic).unwrap();
+
+        assert_eq!(resolved.total_entries, 0);
+        assert_eq!(resolved.central_directory_size, 0);
+        assert_eq!(resolved.central_directory_offset, 0);
+        assert_eq!(resolved.zip64_eocd, Some(ByteRange { offset: 0, len: 56 }));
+        assert_eq!(
+            resolved.zip64_locator,
+            Some(ByteRange {
+                offset: 56,
+                len: 20,
+            })
+        );
+    }
+
+    #[test]
+    fn zip64_end_pair_rejects_noncanonical_small_value_sentinels() {
+        let classic = ClassicEndFields {
+            entries_on_disk: u16::MAX,
+            total_entries: u16::MAX,
+            central_directory_size: 0,
+            central_directory_offset: 0,
+        };
+        let bytes = empty_zip64_end(classic);
+        let snapshot = SourceSnapshot::borrowed(None, &bytes);
+
+        let finding = resolve_zip64_end_records(&snapshot, 76, classic).unwrap_err();
+
+        assert_eq!(finding.code, FindingCode::ZipDiffC5Zip64);
+    }
+
+    #[test]
+    fn zip64_end_pair_rejects_forged_locator_offset() {
+        let classic = ClassicEndFields {
+            entries_on_disk: 0,
+            total_entries: 0,
+            central_directory_size: 0,
+            central_directory_offset: 0,
+        };
+        let mut bytes = empty_zip64_end(classic);
+        bytes[64..72].copy_from_slice(&1_u64.to_le_bytes());
+        let snapshot = SourceSnapshot::borrowed(None, &bytes);
+
+        let finding = resolve_zip64_end_records(&snapshot, 76, classic).unwrap_err();
+
+        assert_eq!(finding.code, FindingCode::ZipDiffC4Offset);
+    }
+
+    #[test]
+    fn zip64_end_pair_rejects_an_extensible_sector() {
+        let classic = ClassicEndFields {
+            entries_on_disk: 0,
+            total_entries: 0,
+            central_directory_size: 0,
+            central_directory_offset: 0,
+        };
+        let mut bytes = empty_zip64_end(classic);
+        bytes[4..12].copy_from_slice(&45_u64.to_le_bytes());
+        let snapshot = SourceSnapshot::borrowed(None, &bytes);
+
+        let finding = resolve_zip64_end_records(&snapshot, 76, classic).unwrap_err();
+
+        assert_eq!(finding.code, FindingCode::ZipDiffC5Zip64);
+    }
+
+    #[test]
+    fn zip64_end_sentinel_without_pair_is_rejected() {
+        let bytes = zip_with_files(&[]);
+        let snapshot = SourceSnapshot::borrowed(None, &bytes);
+        let classic = ClassicEndFields {
+            entries_on_disk: u16::MAX,
+            total_entries: u16::MAX,
+            central_directory_size: 0,
+            central_directory_offset: 0,
+        };
+
+        let finding = resolve_zip64_end_records(&snapshot, 0, classic).unwrap_err();
+
+        assert_eq!(finding.code, FindingCode::ZipDiffC5Zip64);
+    }
+
+    #[test]
+    fn zip64_end_rejects_classic_per_disk_count_disagreement_first() {
+        let bytes = zip_with_files(&[]);
+        let snapshot = SourceSnapshot::borrowed(None, &bytes);
+        let classic = ClassicEndFields {
+            entries_on_disk: 1,
+            total_entries: 2,
+            central_directory_size: 0,
+            central_directory_offset: 0,
+        };
+
+        let finding = resolve_zip64_end_records(&snapshot, 0, classic).unwrap_err();
+
+        assert_eq!(finding.code, FindingCode::ZipDiffC3Count);
+    }
+
+    #[test]
+    fn zip64_central_presence_masks_have_one_exact_interpretation() {
+        for required_mask in 0_u8..8 {
+            let legacy = std::array::from_fn(|index| {
+                if required_mask & (1_u8 << index) != 0 {
+                    ZIP64_U32_SENTINEL
+                } else {
+                    101 + index as u32 * 100
+                }
+            });
+            for presence_mask in 1_u8..8 {
+                if presence_mask & required_mask != required_mask {
+                    continue;
+                }
+                let data = zip64_values_for_mask(presence_mask, legacy);
+                let resolved = resolve_zip64_central_values(&data, legacy[0], legacy[1], legacy[2])
+                    .expect("a complete unambiguous mask must resolve");
+                assert_eq!(resolved.presence_mask, presence_mask);
+                for (index, actual) in [
+                    resolved.uncompressed_size,
+                    resolved.compressed_size,
+                    resolved.local_header_offset,
+                ]
+                .into_iter()
+                .enumerate()
+                {
+                    let expected = if legacy[index] == ZIP64_U32_SENTINEL {
+                        u64::from(ZIP64_U32_SENTINEL) + 17 + index as u64
+                    } else {
+                        u64::from(legacy[index])
+                    };
+                    assert_eq!(actual, expected);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn zip64_central_resolver_accepts_exact_go_style_redundant_offset() {
+        let legacy = [ZIP64_U32_SENTINEL, ZIP64_U32_SENTINEL, 37];
+        let data = zip64_values_for_mask(0b111, legacy);
+
+        let resolved =
+            resolve_zip64_central_values(&data, legacy[0], legacy[1], legacy[2]).unwrap();
+
+        assert_eq!(resolved.presence_mask, 0b111);
+        assert_eq!(resolved.local_header_offset, 37);
+    }
+
+    #[test]
+    fn zip64_central_resolver_rejects_ambiguous_redundancy() {
+        let data = 7_u64.to_le_bytes();
+        let error = resolve_zip64_central_values(&data, 7, 7, 9).unwrap_err();
+        assert_eq!(error, Zip64ExtraResolutionError::Ambiguous);
+    }
+
+    #[test]
+    fn zip64_central_resolver_requires_canonical_sentinel_values() {
+        let data = 42_u64.to_le_bytes();
+        let error = resolve_zip64_central_values(&data, ZIP64_U32_SENTINEL, 12, 24).unwrap_err();
+        assert_eq!(error, Zip64ExtraResolutionError::MissingRequiredValue);
+    }
+
+    #[test]
+    fn zip64_central_resolver_rejects_non_field_lengths() {
+        for len in [0_usize, 1, 7, 9, 17, 25, 32] {
+            let data = vec![0_u8; len];
+            let error = resolve_zip64_central_values(&data, 1, 2, 3).unwrap_err();
+            assert_eq!(error, Zip64ExtraResolutionError::InvalidLength, "len {len}");
+        }
+    }
+
+    #[test]
+    fn zip64_extra_classifier_records_one_semantic_field_exactly() {
+        let mut extra = Vec::new();
+        extra.extend_from_slice(&ZIP64_EXTRA_ID.to_le_bytes());
+        extra.extend_from_slice(&16_u16.to_le_bytes());
+        extra.extend_from_slice(&[0_u8; 16]);
+
+        let (records, data) = classify_zip64_extra_fields(
+            &extra,
+            100,
+            ExtraSite::Central,
+            "central directory",
+            b"member",
+        )
+        .unwrap();
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].disposition, ExtraDisposition::Semantic);
+        assert_eq!(
+            records[0].header_range,
+            ByteRange {
+                offset: 100,
+                len: 4
+            }
+        );
+        assert_eq!(
+            records[0].data_range,
+            ByteRange {
+                offset: 104,
+                len: 16,
+            }
+        );
+        assert_eq!(data, Some(Zip64ExtraData { offset: 4, len: 16 }));
+    }
+
+    #[test]
+    fn zip64_extra_classifier_denies_every_other_identifier() {
+        for id in 0_u16..=u16::MAX {
+            if id == ZIP64_EXTRA_ID {
+                continue;
+            }
+            let mut extra = Vec::new();
+            extra.extend_from_slice(&id.to_le_bytes());
+            extra.extend_from_slice(&0_u16.to_le_bytes());
+            let finding =
+                classify_zip64_extra_fields(&extra, 0, ExtraSite::Local, "local header", b"member")
+                    .unwrap_err();
+            let expected = if id == 0x7075 {
+                FindingCode::ZipDiffA3Name
+            } else {
+                FindingCode::ZipExtra
+            };
+            assert_eq!(finding.code, expected, "extra field 0x{id:04x}");
+        }
+    }
+
+    #[test]
+    fn zip64_extra_classifier_rejects_duplicate_and_truncated_fields() {
+        let field = [1_u8, 0, 0, 0];
+        let duplicate = [field, field].concat();
+        let duplicate_finding =
+            classify_zip64_extra_fields(&duplicate, 0, ExtraSite::Local, "local header", b"member")
+                .unwrap_err();
+        assert_eq!(duplicate_finding.code, FindingCode::ZipExtra);
+
+        let truncated_finding = classify_zip64_extra_fields(
+            &[1, 0, 8, 0, 0],
+            0,
+            ExtraSite::Local,
+            "local header",
+            b"member",
+        )
+        .unwrap_err();
+        assert_eq!(truncated_finding.code, FindingCode::ZipExtra);
     }
 
     #[test]
