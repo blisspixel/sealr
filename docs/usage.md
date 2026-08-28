@@ -17,7 +17,7 @@ Portable raw ustar is selected explicitly and requires no filename-extension inf
 cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-ustar
 ```
 
-ZIP remains the compatibility default. `--format zip` and `--format tar-ustar` each invoke exactly one parser and use a policy that authorizes that selection.
+ZIP remains the compatibility default. Every `--format` value invokes exactly one parser and uses a policy that authorizes that selection.
 
 Strict single-member gzip-wrapped portable ustar is a separate current-main in-process preview under policy v4:
 
@@ -26,6 +26,14 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-usta
 ```
 
 The suffix is illustrative only. `--format tar-gzip-ustar` performs the selection; the gzip FNAME field and source filename never select the parser or supply a member path.
+
+Restricted raw POSIX PAX is a separate Alpha.11 in-process preview under policy v5:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-pax
+```
+
+`--format tar-pax` accepts only `sealr.profile.tar.pax-portable.v1`: exact portable-ustar physical headers plus bounded local or global extensions containing only canonical `path` and `size` records. It is not automatic PAX detection or general TAR compatibility. Unknown keywords, links, sparse files, GNU records, base-256 numbers, mixed dialects, and recovery behavior fail closed.
 
 Strict ZIP64 is a separate current-main in-process preview under policy v3:
 
@@ -51,6 +59,12 @@ For gzip-wrapped portable ustar:
 
 ```text
 cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-ustar --dest ./new-output
+```
+
+For restricted raw PAX:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-pax --dest ./new-output
 ```
 
 For strict ZIP64 in process:
@@ -80,7 +94,7 @@ establish the complete supervised boundary or the command exits unsuccessfully
 without invoking the in-process payload path. macOS and Windows return
 isolation unavailable if this option is selected.
 
-The authenticated worker currently carries semantic-record v2 ZIP32 plans only. Combining `--format tar-ustar`, `--format tar-gzip-ustar`, or `--format zip64` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it never falls back to in-process verification. ZIP64 and gzip-TAR worker support wait for later semantic records that bind their format-specific evidence.
+The authenticated worker currently carries semantic-record v2 ZIP32 plans only. Combining `--format tar-ustar`, `--format tar-gzip-ustar`, `--format tar-pax`, or `--format zip64` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it refuses before source access, never creates a destination effect, and never falls back to in-process verification. Worker support waits for later semantic records that bind each format-specific evidence model.
 
 ## Output contract
 
@@ -131,7 +145,7 @@ Arguments:
   <ARCHIVE>  Archive file
 
 Options:
-      --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar]
+      --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar, tar-gzip-ustar, tar-pax]
       --dest <DEST>                      Materialize into a new directory below an existing parent
       --worker-manifest <ABSOLUTE_PATH>  Use the exact packaged Linux worker bound by this manifest
   -h, --help                             Print help

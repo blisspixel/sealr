@@ -1,6 +1,6 @@
 # Interpretation theory
 
-> Status: research notes. This page names the mathematical object Sealr is aiming at. It is not a proof, not a qualification claim, and not a description of capabilities that Alpha.6 already has. Implemented predicates and the ideal function are distinguished throughout. The current executable contract is the [README](../README.md), [invariants](invariants.md), and [semantic model](semantic-model.md).
+> Status: research notes. This page names the mathematical object Sealr is aiming at. It is not a proof, not a qualification claim, and not a complete description of Alpha.11. Implemented predicates and the ideal function are distinguished throughout. The current executable contract is the [README](../README.md), [invariants](invariants.md), and [semantic model](semantic-model.md).
 
 Sealr is trying to give untrusted archive bytes a denotation: **at most one canonical IR per versioned profile, or no IR.** Git, Nix, and in-toto already know how to hash a tree you have. ZipDiff showed that ZIP, as deployed, does not uniquely produce one. The work is the missing compiler in the middle.
 
@@ -36,9 +36,9 @@ Effect is a different morphism. A failed destination does not retract the coveri
 | \(\mathbb{B} = \{0,\ldots,255\}\) | Bytes. |
 | \(b \in \mathbb{B}^n\) | A source snapshot, identified with the half-open interval \([0,n)\). |
 | \([i,j)\) | Byte range. Empty iff \(i=j\). Adjacent ranges meet: \([i,j) \cup [j,k) = [i,k)\). |
-| \(\pi\) | Versioned interpretation profile. Executable profiles: compatibility-default `sealr.profile.zip.strict-ascii.v1`, opt-in closed `sealr.profile.zip.strict-ascii.v2`, supported `sealr.profile.zip.portable-utf8.v1`, and research-preserving `sealr.profile.zip.wheel-utf8.v1`. |
+| \(\pi\) | Versioned interpretation profile. Executable profiles include the four separately named ZIP32 languages, strict `sealr.profile.zip64.strict-ascii.v1`, portable `sealr.profile.tar.ustar-portable.v1`, strict `sealr.profile.tar-gzip.ustar-portable.v1`, and restricted `sealr.profile.tar.pax-portable.v1`. |
 | \(I_\pi : \mathbb{B}^* \rightharpoonup \mathsf{IR}\) | Partial interpretation. Undefined means no admitted tree. |
-| \(L(\pi) = \mathrm{dom}(I_\pi)\) | The unique-parse language of the profile: a **strict subset** of APPNOTE. |
+| \(L(\pi) = \mathrm{dom}(I_\pi)\) | The unique-parse language of the profile: a strict subset of the selected container specification. |
 | \(\mathsf{H}\) | SHA-256, treated as a collision-resistant hash **assumption**, not a theorem. |
 | \(\mathsf{pre}(\ell, x)\) | Git-style preimage \(\ell \,\Vert\, \mathtt{SP} \,\Vert\, \mathrm{dec}(\lvert x\rvert) \,\Vert\, \mathtt{NUL} \,\Vert\, x\). |
 | \(R_\ell(x) = \mathsf{H}(\mathsf{pre}(\ell, x))\) | Domain-separated root. |
@@ -83,7 +83,7 @@ I_\pi : \mathbb{B}^* \rightharpoonup \mathsf{IR}
 Defined only when the covering exists, CDH/LFH/descriptor agreement holds, names jail, and codecs consume their payload intervals exactly. Undefined is classified:
 
 - `Malformed`: in-profile syntax, cover, or agreement failure;
-- `Unsupported`: ZIP64 outside the explicitly selected policy-v3 profile, encryption, methods other than Store/Deflate, spanned, non-ASCII names;
+- `Unsupported`: a recognized feature outside the explicitly selected profile, including encryption, unpromoted codecs, spanned ZIP, or TAR links, sparse forms, GNU records, and unknown PAX keywords;
 - `Indeterminate`: bytes never held, I/O, cancellation.
 
 Ideal \(I_\pi\) depends only on \((b,\pi)\). Alpha.6 still folds resource budget into `parse_zip` (`max_files`, `max_metadata_bytes`). That interference is named below.
@@ -122,9 +122,9 @@ A failed rename is `Interpreted + Admitted + Complete + Failed`, not a different
 
 ## Implemented versus ideal
 
-| Object | Ideal | Alpha.6 |
+| Object | Ideal | Alpha.11 preview |
 |---|---|---|
-| \(I_\pi\) | Partial function of \((b,\pi)\) only | Parser also sees budget; Unicode absent |
+| \(I_\pi\) | Partial function of \((b,\pi)\) only | Parsers also see resource budgets; supported ZIP Unicode and restricted PAX paths are explicit profiles |
 | Unique covering | At most one admitted partition of \([0,n)\) | Local-prefix partition + CD land + last exact-suffix EOCD |
 | Unique ZIP parse | False for ZIP-the-format | The ambiguous remainder is refused |
 | EOCD | Unique covering certificate | Unique *selected* EOCD under exact-suffix scan |
@@ -132,8 +132,8 @@ A failed rename is `Interpreted + Admitted + Complete + Failed`, not a different
 | Codec | Exact consumption as part of \(I_\pi\) | Deflate `total_in == payload.len()`; Store copies the slice |
 | Snapshot | Immutable for the job | Path input is copied and hashed once into a private file-backed snapshot; caller bytes remain memory-backed |
 | Execution authority | Effects separated from interpretation | Default path runs in process; explicit x86_64 Linux worker confines payload verification, stage writes, and later non-retained reads while the supervisor retains planning and publication |
-| Tree roots | Frozen encoding + golden ZIP vectors | Preview `sealrTreeV1`; empty-tree and walkthrough vectors |
-| Covering certificate | Independently checkable interval list including EOCD | Top-level and per-member ranges on IR plus codec-free `audit_covering` |
+| Tree roots | Frozen encoding plus independent vectors | Preview `sealrTreeV1` through `sealrTreeV5`, with format-neutral content remaining `sealrTreeV1` |
+| Covering certificate | Independently checkable source partition | Format-specific IR ranges plus independent ZIP, TAR, gzip-transform, ZIP64, and PAX covering audits |
 | Formal proofs | Lemmas below | None yet |
 
 ## Named conjectures
@@ -314,7 +314,7 @@ The current independent identity verifier checks committed covering certificates
 
 **What the math is, unproven:** compilation of untrusted container bytes under a versioned unique-parse grammar, with the covering as witness and the tree as a projection of that witness.
 
-**What is implemented:** recognizers for ZIP32 Store/Deflate, explicit strict ZIP64 Store/Deflate, raw portable ustar, and strict single-member gzip-wrapped portable ustar fragments of that language, format-native IR and preview roots, and corpora of known divergence witnesses. ZIP64 and gzip-wrapped ustar remain in-process only until later semantic records can bind their evidence.
+**What is implemented:** recognizers for ZIP32 Store/Deflate, explicit strict ZIP64 Store/Deflate, raw portable ustar, strict single-member gzip-wrapped portable ustar, and restricted raw POSIX PAX fragments of that language, format-native IR and preview roots, and corpora of known divergence witnesses. Restricted PAX has a fixed state machine over only `path` and `size`, with independent covering and provenance replay. ZIP64 and every TAR selection remain in process only until later semantic records can bind their evidence.
 
 The work is to make \(L(\pi)\) actually unique-parse, then to check certificates without parsing again.
 

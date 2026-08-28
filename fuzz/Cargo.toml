@@ -10,8 +10,8 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "=0.4.13"
-sealr = { path = "../crates/sealr", version = "=0.1.0-alpha.10", features = ["__internal-fuzzing"] }
-sealr-worker-protocol = { path = "../crates/sealr-protocol", version = "=0.1.0-alpha.10" }
+sealr = { path = "../crates/sealr", version = "=0.1.0-alpha.11", features = ["__internal-fuzzing"] }
+sealr-worker-protocol = { path = "../crates/sealr-protocol", version = "=0.1.0-alpha.11" }
 
 [[bin]]
 name = "protocol_decoders"
@@ -30,6 +30,13 @@ bench = false
 [[bin]]
 name = "tar_ustar_portable_v1"
 path = "fuzz_targets/tar_ustar_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_pax_portable_v1"
+path = "fuzz_targets/tar_pax_portable_v1.rs"
 test = false
 doc = false
 bench = false

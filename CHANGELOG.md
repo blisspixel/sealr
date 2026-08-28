@@ -6,6 +6,34 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+## [0.1.0-alpha.11] - 2026-08-28
+
+### Added
+
+- Added the explicitly selected `sealr.profile.tar.pax-portable.v1` restricted raw POSIX PAX preview. Its canonical profile digest is `db951f620acf54e67845144e138f9f16994439847a97601e20a424dfea7f4445`; policy v5 authorizes the separate `tar-pax` format with digest `d1268c72f284f8f1b7ce5e06ada17ef7cbbbc5768a876ee93d103ad21e77d019`.
+- Added a fixed PAX state machine over exact POSIX ustar physical headers. Local `x` and global `g` extensions may contain only one or two canonical `path` or `size` records. Local values override global values, which override underlying ustar values, and every effective field retains exact extension and record provenance.
+- Added `sealr.archive-ir.tar-pax.v1`, PAX-native extension and member evidence, and `sealrTreeV5` with layout label `sealr.tree.layout.tar-pax.v1`. The layout binds physical carrier geometry, exact records and raw values, underlying member names and sizes, effective values, and their provenance while preserving the format-neutral `sealrTreeV1` content identity.
+- Added an independent PAX covering and state-replay audit that reparses exact header framing, canonical records, hashes, ranges, adjacency, padding, terminators, global and local state, effective values, and provenance before a verified archive can be constructed.
+- Added explicit Rust and CLI selection through `ArchiveSelection::TarPax`, `TarPaxInterpretationProfile::PortableV1`, `ArchiveFormat::TarPax`, and `--format tar-pax`. Inspect, retention, later verified reads, and atomic materialization reuse the existing raw-payload core.
+- Extended the standalone no-Sealr-dependency identity verifier and conformance vectors to reconstruct the restricted profile, source covering, PAX precedence, `sealrTreeV5`, and the shared content root.
+- Added byte-exact controlled producer fixtures for GNU tar 1.35, libarchive 3.8.4 `paxr`, and CPython 3.12.10. Their pinned commands, source hashes, ordered records, provenance, layout roots, content roots, and verified payloads are replayed through the public API.
+- Added a dedicated bounded raw-PAX fuzz target with nine digest-pinned deterministic seeds, a pinned dictionary and generator, per-input and campaign resource bounds, and a separate scheduled Linux AddressSanitizer job. This is bounded discovery evidence, not a completeness claim.
+
+### Changed
+
+- Preserved every earlier interpretation, policy, IR, semantic-record, and tree encoding byte for byte. `apply()` and `--format zip` remain the ZIP32 compatibility default, raw ustar remains separate, and selecting PAX never causes detection, retry, or fallback.
+- Kept the release dependency graph unchanged. Restricted raw PAX adds no runtime dependency and does not introduce a general TAR or archive framework.
+- Extended exact-commit release promotion from six to seven bounded fuzz jobs, adding raw PAX without creating another protected main-branch check.
+- Moved the next format increment to a separate GNU long-name-only raw TAR profile, followed by gzip composition for the frozen PAX and GNU dialects, separately promoted zstd, XZ/LZMA2, and bzip2 wrappers, and a local 7z interpreter that starts with Copy.
+
+### Security
+
+- PAX extension payloads are capped at 65,536 bytes, the archive is capped at 1,024 extension headers, each extension is capped at two records, keyword discovery is capped at 16 bytes, and effective paths are capped at `min(8191, 256 * max_path_depth - 1)` before allocation or topology admission.
+- Unknown or duplicate keywords, empty values, noncanonical record lengths or decimal sizes, orphan or chained local headers, links, sparse files, devices, FIFOs, GNU records, mixed dialects, base-256 numbers, concatenation, recovery parsing, and nonzero hidden padding fail closed.
+- Aligned both independent PAX source auditors with the inherited portable-ustar rule that an underlying directory size is zero. Exact negative and positive controls preserve valid regular files whose PAX effective size differs from the underlying header.
+- The authenticated Linux worker refuses PAX before source access or destination effect and never falls back to in-process execution. Worker support waits for a later semantic record that binds the PAX-specific evidence.
+- This remains a development preview, not general PAX compatibility or a production security claim.
+
 ## [0.1.0-alpha.10] - 2026-08-28
 
 ### Added
@@ -322,7 +350,8 @@ First public development preview of the ZIP boundary.
 
 This preview is not a production-ready security boundary and has not received an external security audit. See the security limitations in the README and the reporting policy in `SECURITY.md` before evaluating it.
 
-[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.10...HEAD
+[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.11...HEAD
+[0.1.0-alpha.11]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.10...v0.1.0-alpha.11
 [0.1.0-alpha.10]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.9...v0.1.0-alpha.10
 [0.1.0-alpha.9]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.8...v0.1.0-alpha.9
 [0.1.0-alpha.8]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.7...v0.1.0-alpha.8

@@ -6,14 +6,16 @@ use std::path::Path;
 use std::fs;
 
 use crate::covering::{
-    audit_covering, audit_gzip_wrapper_covering, audit_tar_covering, audit_zip64_covering,
+    audit_covering, audit_gzip_wrapper_covering, audit_tar_covering, audit_tar_pax_covering,
+    audit_zip64_covering,
 };
 use crate::findings::{Finding, FindingCode, Severity};
 use crate::identity::OutcomeIdentities;
 use crate::ir::{
     ArchiveFormat, ArchiveIR, GzipWrapperEvidence, IrMember, MemberKind, MemberVerification,
-    NormalizationAction, TarArchiveCovering, TarGzipInterpretationProfile,
-    TarInterpretationProfile, ZipInterpretationProfile,
+    NormalizationAction, PaxExtensionEvidence, PaxRecordEvidence, TarArchiveCovering,
+    TarGzipInterpretationProfile, TarInterpretationProfile, TarPaxInterpretationProfile,
+    ZipInterpretationProfile,
 };
 use crate::jail::{jail_name_for_profile, portable_name_violation, profile_case_fold};
 use crate::materialize::{process_member_to_file, CapabilityMaterializer, MaterializationMeta};
@@ -23,7 +25,7 @@ use crate::outcome::{
 };
 use crate::policy::{
     hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget,
-    POLICY_FORMAT_TAR_GZIP_USTAR, POLICY_FORMAT_TAR_USTAR,
+    POLICY_FORMAT_TAR_GZIP_USTAR, POLICY_FORMAT_TAR_PAX, POLICY_FORMAT_TAR_USTAR,
 };
 use crate::quota::{QuotaError, QuotaState};
 use crate::snapshot::{
@@ -31,6 +33,7 @@ use crate::snapshot::{
     TransformProfile,
 };
 use crate::tar;
+use crate::tar_pax;
 use crate::verification::{digest_hex, planned_payload_reader, verify_payload, PayloadPlan};
 use crate::verified::{RetentionBuild, RetentionPlan, VerifiedArchive};
 use crate::zip::{self, ZipMember};
@@ -71,6 +74,7 @@ pub enum ArchiveSelection {
     Zip(ZipInterpretationProfile),
     TarUstar(TarInterpretationProfile),
     TarGzipUstar(TarGzipInterpretationProfile),
+    TarPax(TarPaxInterpretationProfile),
 }
 
 impl Default for ArchiveSelection {
@@ -125,6 +129,15 @@ impl ApplyOptions {
         self
     }
 
+    /// Select the restricted raw POSIX PAX profile explicitly.
+    pub fn with_tar_pax_interpretation_profile(
+        mut self,
+        profile: TarPaxInterpretationProfile,
+    ) -> Self {
+        self.selection = ArchiveSelection::TarPax(profile);
+        self
+    }
+
     /// Return the requested retention plan, when present.
     pub fn retention_plan(&self) -> Option<&RetentionPlan> {
         self.retention.as_ref()
@@ -144,7 +157,9 @@ impl ApplyOptions {
     pub fn zip_interpretation_profile(&self) -> Option<ZipInterpretationProfile> {
         match self.selection {
             ArchiveSelection::Zip(profile) => Some(profile),
-            ArchiveSelection::TarUstar(_) | ArchiveSelection::TarGzipUstar(_) => None,
+            ArchiveSelection::TarUstar(_)
+            | ArchiveSelection::TarGzipUstar(_)
+            | ArchiveSelection::TarPax(_) => None,
         }
     }
 
@@ -153,7 +168,7 @@ impl ApplyOptions {
         match self.selection {
             ArchiveSelection::Zip(_) => None,
             ArchiveSelection::TarUstar(profile) => Some(profile),
-            ArchiveSelection::TarGzipUstar(_) => None,
+            ArchiveSelection::TarGzipUstar(_) | ArchiveSelection::TarPax(_) => None,
         }
     }
 
@@ -161,7 +176,19 @@ impl ApplyOptions {
     pub fn tar_gzip_interpretation_profile(&self) -> Option<TarGzipInterpretationProfile> {
         match self.selection {
             ArchiveSelection::TarGzipUstar(profile) => Some(profile),
-            ArchiveSelection::Zip(_) | ArchiveSelection::TarUstar(_) => None,
+            ArchiveSelection::Zip(_)
+            | ArchiveSelection::TarUstar(_)
+            | ArchiveSelection::TarPax(_) => None,
+        }
+    }
+
+    /// Return the selected restricted PAX interpretation, when requested.
+    pub fn tar_pax_interpretation_profile(&self) -> Option<TarPaxInterpretationProfile> {
+        match self.selection {
+            ArchiveSelection::TarPax(profile) => Some(profile),
+            ArchiveSelection::Zip(_)
+            | ArchiveSelection::TarUstar(_)
+            | ArchiveSelection::TarGzipUstar(_) => None,
         }
     }
 
@@ -176,6 +203,7 @@ impl ApplyOptions {
             ArchiveSelection::Zip(profile) => profile.archive_format(),
             ArchiveSelection::TarUstar(_) => crate::ArchiveFormat::TarUstar,
             ArchiveSelection::TarGzipUstar(_) => crate::ArchiveFormat::TarGzipUstar,
+            ArchiveSelection::TarPax(_) => crate::ArchiveFormat::TarPax,
         }
     }
 }
@@ -344,6 +372,9 @@ pub fn apply_with_options(req: Request<'_>, options: &ApplyOptions) -> Outcome {
         ArchiveSelection::TarGzipUstar(profile) => {
             return apply_tar_gzip_with_options(&req, options, profile);
         }
+        ArchiveSelection::TarPax(profile) => {
+            return apply_tar_pax_with_options(&req, options, profile);
+        }
         ArchiveSelection::Zip(_) => {}
     }
     let ArchiveSelection::Zip(profile) = options.selection else {
@@ -438,6 +469,63 @@ fn apply_tar_with_options(
         TarPlanProfile::Raw(profile),
         controls,
         controls.budget.max_metadata_bytes,
+        source_digest,
+        identities_base,
+        initial_materialization,
+    )
+}
+
+fn apply_tar_pax_with_options(
+    req: &Request<'_>,
+    options: &ApplyOptions,
+    profile: TarPaxInterpretationProfile,
+) -> Outcome {
+    let policy = req.policy;
+    let initial_materialization =
+        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
+    let controls = match policy.compile_for_format(POLICY_FORMAT_TAR_PAX) {
+        Ok(controls) => controls,
+        Err(finding) => {
+            return reject_only(
+                (None, SourceDigest::unavailable(), policy.clone()),
+                vec![finding.clone()],
+                None,
+                initial_materialization,
+                SemanticAxes::policy_compile_failed(&finding),
+                SnapshotKind::Unavailable,
+                OutcomeIdentities::unavailable_for_tar_pax(SourceDigest::unavailable(), profile),
+            );
+        }
+    };
+    let snapshot = match read_source(&req.source, controls.budget) {
+        Ok(snapshot) => snapshot,
+        Err(failure) => {
+            let admission = if failure.finding.code == FindingCode::QuotaArchive {
+                AdmissionStatus::Denied
+            } else {
+                AdmissionStatus::NotEvaluated
+            };
+            let digest = failure.digest.clone();
+            return reject_only(
+                (failure.path, failure.digest, policy.clone()),
+                vec![failure.finding.clone()],
+                None,
+                initial_materialization,
+                SemanticAxes::source_failure(&failure.finding, admission),
+                failure.snapshot_kind,
+                OutcomeIdentities::unavailable_for_tar_pax(digest, profile),
+            );
+        }
+    };
+    let source_digest = snapshot.digest().clone();
+    let identities_base =
+        OutcomeIdentities::unavailable_for_tar_pax(source_digest.clone(), profile);
+    plan_tar_pax(
+        req,
+        options,
+        SnapshotSet::from_original(snapshot),
+        profile,
+        controls,
         source_digest,
         identities_base,
         initial_materialization,
@@ -913,6 +1001,312 @@ fn plan_tar_domains(
     match execute_ready_archive(req, options, ready, initial_materialization) {
         Ok(outcome) => outcome,
         Err(_) => unreachable!("ready TAR execution does not reacquire the source"),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn plan_tar_pax(
+    req: &Request<'_>,
+    options: &ApplyOptions,
+    snapshots: SnapshotSet<'_>,
+    profile: TarPaxInterpretationProfile,
+    controls: CompiledControls,
+    source_digest: SourceDigest,
+    identities_base: OutcomeIdentities,
+    initial_materialization: MaterializationMeta,
+) -> Outcome {
+    let policy = req.policy;
+    let snapshot = snapshots.original();
+    let observed_magic = if tar::recognizes_ustar(snapshot) {
+        "tar"
+    } else {
+        "unknown"
+    };
+    let parsed = match tar_pax::parse_pax_portable_v1(
+        snapshot,
+        controls.budget.max_files,
+        controls.budget.max_metadata_bytes,
+    ) {
+        Ok(parsed) => parsed,
+        Err(finding) => {
+            let axes = parse_failure_axes(&finding);
+            return finish(
+                (snapshot.path_owned(), source_digest, snapshot.kind()),
+                observed_magic,
+                policy,
+                vec![finding],
+                Vec::new(),
+                initial_materialization,
+                axes,
+                identities_base,
+            );
+        }
+    };
+
+    let tar_pax::PaxArchive {
+        members: parsed_members,
+        extensions: parsed_extensions,
+        member_records,
+        terminator,
+        trailing_zeros,
+        metadata_bytes: _,
+    } = parsed;
+    let covering = TarArchiveCovering {
+        member_records,
+        terminator,
+        trailing_zeros,
+    };
+    let extensions = parsed_extensions
+        .into_iter()
+        .map(|extension| PaxExtensionEvidence {
+            raw_name_bytes: extension.raw_name,
+            kind: extension.kind,
+            header: extension.header,
+            payload: extension.payload,
+            padding: extension.padding,
+            mode: extension.mode,
+            mtime: extension.mtime,
+            header_checksum: extension.header_checksum,
+            header_sha256: extension.header_sha256,
+            payload_sha256: extension.payload_sha256,
+            records: extension
+                .records
+                .into_iter()
+                .map(|record| PaxRecordEvidence {
+                    record: record.record,
+                    value: record.value_range,
+                    keyword: record.keyword,
+                    raw_value_bytes: record.raw_value_bytes,
+                    parsed_size: match record.value {
+                        tar_pax::PaxRecordValue::Path(_) => None,
+                        tar_pax::PaxRecordValue::Size(size) => Some(size),
+                    },
+                })
+                .collect(),
+        })
+        .collect();
+
+    let budget = controls.budget;
+    let mut findings = Vec::new();
+    let mut planned = Vec::new();
+    let mut dest_seen: BTreeMap<String, bool> = BTreeMap::new();
+    let mut fold_seen: BTreeMap<String, bool> = BTreeMap::new();
+    let mut declared_total = QuotaState::new(budget.max_total_bytes);
+
+    for member in parsed_members {
+        if member.size > budget.max_member_bytes {
+            findings.push(
+                Finding::error(FindingCode::QuotaMember, "declared member too large")
+                    .on(&member.name),
+            );
+            continue;
+        }
+        if let Some(max_ratio) = budget.max_ratio {
+            if ratio_exceeds(member.size, member.size, max_ratio) {
+                findings.push(
+                    Finding::error(
+                        FindingCode::QuotaRatio,
+                        format!(
+                            "declared {}:{} exceeds {max_ratio}:1",
+                            member.size, member.size
+                        ),
+                    )
+                    .on(&member.name),
+                );
+                continue;
+            }
+        }
+        match declared_total.consume(member.size) {
+            Ok(_) => {}
+            Err(QuotaError::Overflow) => {
+                findings.push(Finding::error(
+                    FindingCode::QuotaOverflow,
+                    "declared uncompressed total overflowed u64",
+                ));
+                break;
+            }
+            Err(QuotaError::Exceeded { .. }) => {
+                findings.push(Finding::error(
+                    FindingCode::QuotaTotal,
+                    "declared total too large",
+                ));
+                break;
+            }
+        }
+
+        let mut actions = Vec::new();
+        let jailed_name = if member.is_dir {
+            match member.name.strip_suffix('/') {
+                Some(name) => {
+                    actions.push(NormalizationAction::StripDirectoryTrailingSlash);
+                    name
+                }
+                None => member.name.as_str(),
+            }
+        } else {
+            &member.name
+        };
+        match jail_name_for_profile(
+            jailed_name,
+            budget.max_path_depth,
+            ZipInterpretationProfile::PortableUtf8V1,
+        ) {
+            Ok(jailed) => {
+                if let Some(detail) = portable_name_violation(&jailed) {
+                    findings.push(
+                        Finding::error(FindingCode::PathInvalidChar, detail).on(&member.name),
+                    );
+                    continue;
+                }
+                actions.extend(jailed.actions);
+                let parts = jailed.components;
+                let joined = parts.join("/");
+                let fold = profile_case_fold(&joined, ZipInterpretationProfile::PortableUtf8V1);
+                if dest_seen.contains_key(&joined) {
+                    findings.push(
+                        Finding::error(FindingCode::PathConflict, "duplicate destination path")
+                            .on(&member.name),
+                    );
+                    continue;
+                }
+                if fold_seen.contains_key(&fold) {
+                    findings.push(
+                        Finding::error(FindingCode::PathCaseFold, "case-fold collision")
+                            .on(&member.name),
+                    );
+                    continue;
+                }
+                if let Some(conflict) = path_conflict(&dest_seen, &joined, member.is_dir) {
+                    findings.push(
+                        Finding::error(
+                            FindingCode::PathConflict,
+                            format!("file/directory conflict with {conflict}"),
+                        )
+                        .on(&member.name),
+                    );
+                    continue;
+                }
+                if let Some(conflict) = path_conflict(&fold_seen, &fold, member.is_dir) {
+                    findings.push(
+                        Finding::error(
+                            FindingCode::PathCaseFold,
+                            format!("case-fold topology conflict with {conflict}"),
+                        )
+                        .on(&member.name),
+                    );
+                    continue;
+                }
+                dest_seen.insert(joined, member.is_dir);
+                fold_seen.insert(fold, member.is_dir);
+                planned.push((member, parts, actions));
+            }
+            Err(finding) => findings.push(finding),
+        }
+    }
+
+    if findings
+        .iter()
+        .any(|finding| finding.severity == Severity::Error)
+    {
+        let cause = first_error(&findings);
+        return finish(
+            (
+                snapshots.original().path_owned(),
+                source_digest,
+                snapshots.original().kind(),
+            ),
+            "tar",
+            policy,
+            findings,
+            Vec::new(),
+            initial_materialization,
+            SemanticAxes::denied_at_admission(&cause),
+            identities_base,
+        );
+    }
+
+    let payloads = planned
+        .iter()
+        .map(|(member, _, _)| PayloadPlan::from_tar_pax(member))
+        .collect();
+    let members = planned
+        .into_iter()
+        .map(|(member, components, actions)| {
+            let base_size = member.header_size;
+            let effective_raw_name_bytes = member.name.as_bytes().to_vec();
+            let effective_name = member.name.clone();
+            let path_source = member.sources.path;
+            let size_source = member.sources.size;
+            let tar_member = tar::TarMember {
+                raw_name: member.raw_name,
+                name: effective_name.clone(),
+                size: member.size,
+                mode: member.mode,
+                mtime: member.mtime,
+                header_checksum: member.header_checksum,
+                header_sha256: member.header_sha256,
+                header: member.header,
+                payload: member.payload,
+                padding: member.padding,
+                is_dir: member.is_dir,
+            };
+            IrMember::from_tar_pax_planned(
+                tar_member,
+                base_size,
+                effective_raw_name_bytes,
+                effective_name,
+                components,
+                actions,
+                path_source,
+                size_source,
+            )
+        })
+        .collect();
+    let ir = ArchiveIR::with_tar_pax(
+        profile,
+        source_digest.clone(),
+        covering,
+        extensions,
+        members,
+    );
+    if let Err(finding) = audit_tar_pax_covering(snapshots.original(), &ir) {
+        findings.push(finding);
+        let cause = first_error(&findings);
+        let outcome = finish(
+            (
+                snapshots.original().path_owned(),
+                source_digest,
+                snapshots.original().kind(),
+            ),
+            "tar",
+            policy,
+            findings,
+            Vec::new(),
+            initial_materialization,
+            SemanticAxes::structure_stop(
+                InterpretationStatus::Malformed,
+                AdmissionStatus::Denied,
+                &cause,
+            ),
+            identities_base,
+        );
+        return with_ir(outcome, ir);
+    }
+    let ready = ReadyArchive {
+        snapshots,
+        transforms: TransformGraph::empty(),
+        ir,
+        payloads,
+        findings,
+        budget,
+        member_sync: controls.effect.member_sync,
+        source_digest,
+        identities_base,
+        magic: "tar",
+    };
+    match execute_ready_archive(req, options, ready, initial_materialization) {
+        Ok(outcome) => outcome,
+        Err(_) => unreachable!("ready PAX execution does not reacquire the source"),
     }
 }
 
@@ -1601,7 +1995,10 @@ fn validate_ready_archive(
         ));
     }
     match ir.format() {
-        ArchiveFormat::Zip32 | ArchiveFormat::Zip64 | ArchiveFormat::TarUstar => {
+        ArchiveFormat::Zip32
+        | ArchiveFormat::Zip64
+        | ArchiveFormat::TarUstar
+        | ArchiveFormat::TarPax => {
             if !transforms.validates(snapshots) || snapshots.len() != 1 || !transforms.is_empty() {
                 return Err(ready_inconsistent(
                     "raw archive unexpectedly contains a derived transform graph",
@@ -2307,6 +2704,7 @@ pub(crate) fn member_view(member: &IrMember) -> MemberView {
         crate::ir::MemberEvidence::Tar(tar) | crate::ir::MemberEvidence::TarGzip(tar) => {
             ("raw", tar.payload.len, 0)
         }
+        crate::ir::MemberEvidence::TarPax(tar) => ("raw", tar.tar.payload.len, 0),
     };
     MemberView {
         path: member.canonical_path.clone(),

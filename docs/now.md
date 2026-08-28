@@ -1,6 +1,6 @@
 # Why this is practical now
 
-Reviewed 2026-08-22.
+Reviewed 2026-08-28.
 
 The problem is old: archives encode content and filesystem topology, and extraction bugs repeatedly cross trust boundaries. What changed is that several pieces needed for a measurable boundary now exist together.
 
@@ -14,7 +14,7 @@ That gives sealr a concrete regression gate. The library does not need to run 50
 
 The Linux kernel's [Landlock interface](https://docs.kernel.org/userspace-api/landlock.html) lets an unprivileged process restrict its own ambient filesystem rights and, on newer ABIs, selected network rights. It is stackable with existing access control and exposes a runtime ABI so software can report exactly which controls are available.
 
-This makes a small worker process practical as planned work. The proposed design has a trusted supervisor create and retain the immutable archive snapshot, open the destination parent, and create the private stage, then give the worker only bounded read-only snapshot and stage capabilities. The worker would close every unrelated inherited descriptor, install its restrictions before reading the first header, and never receive publication authority. The Phase 0.1 Linux gate requires filesystem rights through `REFER` and `TRUNCATE`, currently Landlock ABI 3. Landlock would limit blast radius, while userspace path and quota invariants remain mandatory. Network and syscall confinement remain separate measured claims.
+This makes a small worker process practical. The current explicit x86_64 Linux path has a trusted supervisor create and retain the immutable archive snapshot, open the destination parent, and create the private stage, then give the worker only bounded source and stage capabilities. The worker closes unrelated inherited descriptors, installs Landlock ABI 3 and measured seccomp restrictions before source transfer, and never receives publication authority. This reduces authority for supported ZIP32 payload verification, stage writes, and later reads; structural planning remains in the supervisor. It is not a general process, network, IPC, same-user, or production-containment claim.
 
 ## Capability-oriented filesystem APIs are mature enough to use
 
@@ -36,7 +36,7 @@ The [Rust Fuzz Book](https://rust-fuzz.github.io/book/) documents cargo-fuzz and
 
 Source digests, policy digests, structured findings, and a view digest can be returned for both allow and reject. in-toto, DSSE, Sigstore, SBOM formats, and GitHub artifact attestations provide established envelopes and signing workflows once sealr's unsigned receipt bytes are stable.
 
-Separate outcome axes, a named `SourceSnapshot`, `sealr.archive-ir.v1`, typed policy compilation, and preview `sealrTreeV1` layout and content identities now exist. Inspect and materialize consume that IR. Current main also wraps a completely verified IR and its exact snapshot in an opaque `VerifiedArchive`, allowing bounded canonical-member reads without reopening the source or running another structural parser. Explicit exact paths can be retained under independent bounds during the original verification stream. A separate identity verifier checks the committed profile and tree vectors without depending on Sealr or executing codecs. Canonical evidence JSON (RFC 8785), the broader evidence verifier, and signing follow those identities. The supervised worker consumes the same tree contract.
+Separate outcome axes, named immutable snapshot domains, typed policy compilation, format-specific IRs, and preview tree identities now exist. Alpha.11 adds `sealr.archive-ir.tar-pax.v1` and `sealrTreeV5` for restricted raw POSIX PAX while preserving the format-neutral content identity. Inspect and materialize consume one IR. Current main also wraps a completely verified IR and its exact snapshot in an opaque `VerifiedArchive`, allowing bounded canonical-member reads without reopening the source or running another structural parser. Explicit exact paths can be retained under independent bounds during the original verification stream. A separate identity verifier checks the committed ZIP32, ZIP64, ustar, gzip-TAR, and PAX profile and tree vectors without depending on Sealr or executing codecs. Canonical evidence JSON (RFC 8785), the broader evidence verifier, and signing follow those identities. The supervised worker consumes the ZIP32 tree contract and refuses unsupported selections without fallback.
 
 ## Acceleration is optional
 
@@ -52,10 +52,10 @@ The pieces now line up:
 |---|---|
 | Known differential classes | ZipDiff paper and constructions |
 | Small trusted core | Safe Rust parser and jail plus isolated reviewed platform adapters |
-| Reduced ambient authority | Planned Linux Landlock worker; Windows isolation boundary under evaluation |
+| Reduced ambient authority | Explicit x86_64 Linux Landlock ABI 3 plus seccomp worker for supported ZIP32 operations; other selections fail closed |
 | Path-relative output | Directory-capability filesystem API |
 | Unknown-input discovery | cargo-fuzz with corpus seeds |
 | Bounded proofs | Kani on path and quota properties |
 | Auditable result | Versioned view and receipt |
 
-The roadmap therefore prioritizes justified trust in one ZIP interpretation before format breadth or acceleration. Common ZIP and TAR codecs are a later adapter destination on that same boundary, not a reason to grow the trusted computing base now. Usefulness is a dependent that consumes the admitted tree, not a larger CLI. See [usefulness.md](usefulness.md) and [ROADMAP.md](../ROADMAP.md).
+The roadmap therefore expands format breadth only through narrow profiles on the same boundary. Restricted raw PAX adds no dependency; next is a separate GNU long-name-only profile, then gzip composition, then one independently reviewed codec at a time. This order is not a reason to grow the trusted computing base casually. Usefulness is a dependent that consumes the admitted tree, not a larger CLI. See [usefulness.md](usefulness.md) and [ROADMAP.md](../ROADMAP.md).

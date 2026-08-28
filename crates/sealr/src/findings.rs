@@ -64,6 +64,8 @@ pub enum FindingCode {
     TarTruncated,
     TarType,
     TarFeatureUnsupported,
+    TarPaxRecord,
+    TarPaxState,
     FormatUnsupported,
     FormatMagic,
     GzipExtra,
@@ -136,6 +138,8 @@ impl FindingCode {
             Self::TarTruncated => "tar.truncated",
             Self::TarType => "tar.type",
             Self::TarFeatureUnsupported => "tar.feature_unsupported",
+            Self::TarPaxRecord => "tar.pax.record",
+            Self::TarPaxState => "tar.pax.state",
             Self::FormatUnsupported => "format.unsupported",
             Self::FormatMagic => "format.magic",
             Self::GzipExtra => "gzip.extra",
@@ -186,5 +190,16 @@ impl Finding {
     pub fn on(mut self, member: impl Into<String>) -> Self {
         self.member = Some(member.into());
         self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FindingCode;
+
+    #[test]
+    fn pax_finding_codes_are_stable() {
+        assert_eq!(FindingCode::TarPaxRecord.as_str(), "tar.pax.record");
+        assert_eq!(FindingCode::TarPaxState.as_str(), "tar.pax.state");
     }
 }

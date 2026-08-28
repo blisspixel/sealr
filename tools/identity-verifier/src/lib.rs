@@ -2,8 +2,9 @@
 //!
 //! This crate deliberately does not depend on `sealr`. It reads committed
 //! evidence facts, validates their semantic coherence, and independently
-//! reproduces profile, layout, and content digests. It never parses or inflates
-//! an archive.
+//! reproduces profile, layout, and content digests. It parses only the closed
+//! source-bearing formats represented by a manifest and never inflates an
+//! archive or performs filesystem effects.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -32,6 +33,11 @@ const TAR_GZIP_PROFILE_SCHEMA: &str = "sealr.profile.tar-gzip.ustar-portable.v1"
 const TAR_GZIP_IR_SCHEMA: &str = "sealr.archive-ir.tar-gzip-ustar.v1";
 const TAR_GZIP_TREE_ENCODING: &str = "sealrTreeV4";
 const TAR_GZIP_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gzip-ustar.v1";
+const TAR_PAX_MANIFEST_SCHEMA: &str = "sealr.tar-pax-identity-conformance.v1";
+const TAR_PAX_PROFILE_SCHEMA: &str = "sealr.profile.tar.pax-portable.v1";
+const TAR_PAX_IR_SCHEMA: &str = "sealr.archive-ir.tar-pax.v1";
+const TAR_PAX_TREE_ENCODING: &str = "sealrTreeV5";
+const TAR_PAX_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-pax.v1";
 const TAR_PORTABLE_PROFILE_SCHEMA: &str = "sealr.profile.tar.ustar-portable.v1";
 const TAR_PORTABLE_PROFILE_DIGEST: &str =
     "3c87c5ec4c1ad5377eb60ebb308e9e394aaf7a4133dddf5587829b4510af1700";
@@ -39,6 +45,8 @@ const GZIP_TRANSFORM_ID: &str = "sealr.transform.gzip.rfc1952-single-member.v1";
 const GZIP_TRANSFORM_DEFINITION: &[u8] = b"algorithm=rfc1952-gzip;members=exactly-one;reserved-flags=zero;extra-fields=exact-subfield-framing-si2-nonzero-unique-ids;trailing-data=forbidden;header-crc=verify-when-present;data-crc32=verify;isize=verify;payload=rfc1951-deflate;output=bounded";
 const GZIP_DECODER_PARAMETERS: &[u8] = b"rfc1951-window-bits=15;preset-dictionary=none";
 const MAX_DERIVED_TAR_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_PAX_EXTENSION_BYTES: u64 = 64 * 1024;
+const MAX_PAX_EXTENSIONS: usize = 1024;
 
 const FILE: u8 = 1;
 const DIRECTORY: u8 = 2;
@@ -49,6 +57,13 @@ const DISP_SEMANTIC: u8 = 2;
 const DISP_DENIED: u8 = 3;
 const NORM_STRIP_DIR_SLASH: u8 = 1;
 const NORM_DROP_DOT: u8 = 2;
+const PAX_EXTENSION_GLOBAL: u8 = 1;
+const PAX_EXTENSION_LOCAL: u8 = 2;
+const PAX_KEYWORD_PATH: u8 = 1;
+const PAX_KEYWORD_SIZE: u8 = 2;
+const PAX_SOURCE_USTAR: u8 = 0;
+const PAX_SOURCE_GLOBAL: u8 = 1;
+const PAX_SOURCE_LOCAL: u8 = 2;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VerificationSummary {
@@ -331,6 +346,139 @@ struct GzipWrapperVector {
 struct TarGzipLayoutRoot {
     #[serde(rename = "sealrTreeV4")]
     sealr_tree_v4: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarPaxManifest {
+    schema: String,
+    archive_ir_schema: String,
+    profile: TarPaxProfileVector,
+    layout_encoding: String,
+    layout_label: String,
+    content_encoding: String,
+    content_label: String,
+    cases: Vec<TarPaxCase>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarPaxProfileVector {
+    id: String,
+    digest: DigestHex,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarPaxCase {
+    id: String,
+    source_bytes_hex: String,
+    source: DigestHex,
+    archive_ir: TarPaxArchiveIr,
+    layout_preimage_hex: String,
+    layout_root: TarPaxLayoutRoot,
+    content_root: TarContentRoot,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarPaxArchiveIr {
+    schema: String,
+    profile: String,
+    profile_digest: String,
+    source_digest: DigestHex,
+    format: String,
+    tar_covering: TarCovering,
+    pax_extensions: Vec<TarPaxExtension>,
+    members: Vec<TarPaxMember>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarPaxExtension {
+    raw_name_bytes: Vec<u8>,
+    kind: TarPaxExtensionKind,
+    header: ByteRange,
+    payload: ByteRange,
+    padding: ByteRange,
+    mode: u32,
+    mtime: u64,
+    header_checksum: u32,
+    header_sha256: String,
+    payload_sha256: String,
+    records: Vec<TarPaxRecord>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum TarPaxExtensionKind {
+    Global,
+    Local,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarPaxRecord {
+    record: ByteRange,
+    value: ByteRange,
+    keyword: TarPaxKeyword,
+    raw_value_bytes: Vec<u8>,
+    parsed_size: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum TarPaxKeyword {
+    Path,
+    Size,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarPaxMember {
+    raw_name_bytes: Vec<u8>,
+    decoded_name: String,
+    canonical_path: String,
+    components: Vec<String>,
+    kind: MemberKind,
+    declared_uncomp_size: u64,
+    tar_pax: TarPaxMemberEvidence,
+    actual_uncomp_size: u64,
+    actual_crc: u32,
+    content_sha256: String,
+    verification: MemberVerification,
+    normalization_actions: Vec<NormalizationAction>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarPaxMemberEvidence {
+    tar: TarGzipMemberEvidence,
+    base_name_bytes: Vec<u8>,
+    base_size: u64,
+    path_source: TarPaxValueSource,
+    size_source: TarPaxValueSource,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(tag = "source", rename_all = "kebab-case", deny_unknown_fields)]
+enum TarPaxValueSource {
+    Ustar,
+    Global {
+        extension_index: u32,
+        record_index: u32,
+    },
+    Local {
+        extension_index: u32,
+        record_index: u32,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarPaxLayoutRoot {
+    #[serde(rename = "sealrTreeV5")]
+    sealr_tree_v5: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -674,6 +822,37 @@ struct TarGzipProfileDefinition {
     inner_profile_sha256: String,
 }
 
+#[derive(Serialize)]
+struct TarPaxProfileDefinition {
+    schema: &'static str,
+    status: &'static str,
+    format: &'static str,
+    base_profile: &'static str,
+    base_profile_sha256: String,
+    extension_types: [&'static str; 2],
+    extension_carrier_names: &'static str,
+    underlying_member_names: &'static str,
+    extension_materialization: &'static str,
+    record_encoding: &'static str,
+    length_encoding: &'static str,
+    record_consumption: &'static str,
+    keywords: [&'static str; 2],
+    duplicate_keywords: &'static str,
+    unknown_keywords: &'static str,
+    empty_values: &'static str,
+    path_values: &'static str,
+    size_values: &'static str,
+    precedence: &'static str,
+    global_state: &'static str,
+    local_state: &'static str,
+    max_extension_payload_bytes: u32,
+    max_extension_headers: u16,
+    max_records_per_extension: u8,
+    max_keyword_scan_bytes: u8,
+    max_effective_path_bytes: &'static str,
+    denied_features: [&'static str; 10],
+}
+
 pub fn verify_manifest_json(bytes: &[u8]) -> Result<VerificationSummary, VerifyError> {
     if bytes.len() > MAX_MANIFEST_BYTES {
         return Err(VerifyError::new(format!(
@@ -690,8 +869,22 @@ pub fn verify_manifest_json(bytes: &[u8]) -> Result<VerificationSummary, VerifyE
         }
         ZIP64_MANIFEST_SCHEMA => verify_zip64_identity_vector_json(bytes),
         TAR_GZIP_MANIFEST_SCHEMA => verify_tar_gzip_identity_vector_json(bytes),
+        TAR_PAX_MANIFEST_SCHEMA => verify_tar_pax_identity_vector_json(bytes),
         schema => Err(VerifyError::new(format!("unsupported schema {schema:?}"))),
     }
+}
+
+pub fn verify_tar_pax_identity_vector_json(
+    bytes: &[u8],
+) -> Result<VerificationSummary, VerifyError> {
+    if bytes.len() > MAX_MANIFEST_BYTES {
+        return Err(VerifyError::new(format!(
+            "TAR/PAX manifest exceeds {MAX_MANIFEST_BYTES} bytes"
+        )));
+    }
+    let manifest: TarPaxManifest = serde_json::from_slice(bytes)
+        .map_err(|error| VerifyError::new(format!("TAR/PAX JSON: {error}")))?;
+    verify_tar_pax_manifest(&manifest)
 }
 
 pub fn verify_tar_gzip_identity_vector_json(
@@ -926,6 +1119,891 @@ fn verify_zip64_manifest(manifest: &Zip64Manifest) -> Result<VerificationSummary
         layout_roots: manifest.cases.len(),
         content_roots: manifest.cases.len(),
     })
+}
+
+#[derive(Clone)]
+struct ParsedPaxValue {
+    raw: Vec<u8>,
+    parsed_size: Option<u64>,
+    source: TarPaxValueSource,
+}
+
+#[derive(Clone, Default)]
+struct ParsedPaxOverrides {
+    path: Option<ParsedPaxValue>,
+    size: Option<ParsedPaxValue>,
+}
+
+struct ParsedPaxHeader {
+    raw_name: Vec<u8>,
+    mode: u32,
+    size: u64,
+    mtime: u64,
+    checksum: u32,
+    sha256: String,
+    typeflag: u8,
+}
+
+fn verify_tar_pax_manifest(manifest: &TarPaxManifest) -> Result<VerificationSummary, VerifyError> {
+    const EXPECTED_CASE_IDS: [&str; 2] = ["local-path-size", "global-local-precedence"];
+    if manifest.schema != TAR_PAX_MANIFEST_SCHEMA
+        || manifest.archive_ir_schema != TAR_PAX_IR_SCHEMA
+        || manifest.layout_encoding != TAR_PAX_TREE_ENCODING
+        || manifest.layout_label != TAR_PAX_LAYOUT_LABEL
+        || manifest.content_encoding != TREE_ENCODING
+        || manifest.content_label != CONTENT_LABEL
+    {
+        return Err(VerifyError::new("unsupported TAR/PAX manifest contract"));
+    }
+    if manifest.cases.len() != EXPECTED_CASE_IDS.len()
+        || manifest
+            .cases
+            .iter()
+            .zip(EXPECTED_CASE_IDS)
+            .any(|(case, expected)| case.id != expected)
+    {
+        return Err(VerifyError::new(
+            "TAR/PAX v1 manifest must contain exactly the two canonical ordered cases",
+        ));
+    }
+    verify_tar_pax_profile(&manifest.profile)?;
+    let mut sources = HashSet::new();
+    for case in &manifest.cases {
+        if !sources.insert(case.source.sha256.as_str()) {
+            return Err(VerifyError::new(
+                "TAR/PAX canonical cases must bind distinct sources",
+            ));
+        }
+        verify_tar_pax_case(case, &manifest.profile)
+            .map_err(|error| error.context(&format!("case {:?}", case.id)))?;
+    }
+    Ok(VerificationSummary {
+        profiles: 1,
+        cases: manifest.cases.len(),
+        layout_roots: manifest.cases.len(),
+        content_roots: manifest.cases.len(),
+    })
+}
+
+fn verify_tar_pax_profile(profile: &TarPaxProfileVector) -> Result<(), VerifyError> {
+    if profile.id != TAR_PAX_PROFILE_SCHEMA {
+        return Err(VerifyError::new("unsupported TAR/PAX profile identity"));
+    }
+    verify_digest(&profile.digest.sha256, "TAR/PAX profile digest")?;
+    let canonical = serde_json::to_vec(&TarPaxProfileDefinition {
+        schema: TAR_PAX_PROFILE_SCHEMA,
+        status: "supported-preview",
+        format: "posix-pax",
+        base_profile: TAR_PORTABLE_PROFILE_SCHEMA,
+        base_profile_sha256: TAR_PORTABLE_PROFILE_DIGEST.to_owned(),
+        extension_types: ["global-g", "local-x"],
+        extension_carrier_names: "structurally-valid-ustar-text-not-destination-validated",
+        underlying_member_names:
+            "structurally-valid-ustar-text-destination-validated-only-when-effective",
+        extension_materialization: "metadata-only-never-a-member",
+        record_encoding: "decimal-length-space-keyword-equals-value-newline",
+        length_encoding: "canonical-ascii-decimal-no-leading-zero-max-20-digits",
+        record_consumption: "declared-length-exact-and-entire-payload-consumed",
+        keywords: ["path", "size"],
+        duplicate_keywords: "denied-within-one-extension",
+        unknown_keywords: "denied",
+        empty_values: "denied",
+        path_values: "strict-utf8-portable-path-v1",
+        size_values: "canonical-ascii-decimal-u64",
+        precedence: "local-over-global-over-ustar",
+        global_state: "fixed-path-and-size-fields-last-global-value-persists",
+        local_state: "at-most-one-pending-header-consumed-by-exactly-one-file-or-directory",
+        max_extension_payload_bytes: 64 * 1024,
+        max_extension_headers: 1024,
+        max_records_per_extension: 2,
+        max_keyword_scan_bytes: 16,
+        max_effective_path_bytes: "min-8191-and-256-times-policy-max-path-depth-minus-1",
+        denied_features: [
+            "gnu-long-name",
+            "gnu-long-link",
+            "sparse-file",
+            "hard-link",
+            "symbolic-link",
+            "device-or-fifo",
+            "base-256-numbers",
+            "mixed-pax-and-gnu-state",
+            "orphan-local-header",
+            "concatenated-archive",
+        ],
+    })
+    .map_err(|error| VerifyError::new(format!("TAR/PAX profile serialization: {error}")))?;
+    let actual = sha256_hex(&canonical);
+    if actual != profile.digest.sha256 {
+        return Err(VerifyError::new(format!(
+            "TAR/PAX profile digest does not match its canonical definition: calculated {actual}"
+        )));
+    }
+    Ok(())
+}
+
+fn verify_tar_pax_case(
+    case: &TarPaxCase,
+    profile: &TarPaxProfileVector,
+) -> Result<(), VerifyError> {
+    let source = decode_hex(&case.source_bytes_hex, "TAR/PAX source bytes")?;
+    if source.len() > MAX_DERIVED_TAR_BYTES as usize {
+        return Err(VerifyError::new(format!(
+            "TAR/PAX source exceeds the {MAX_DERIVED_TAR_BYTES}-byte verifier cap"
+        )));
+    }
+    verify_digest(&case.source.sha256, "TAR/PAX source digest")?;
+    if sha256_hex(&source) != case.source.sha256 {
+        return Err(VerifyError::new(
+            "TAR/PAX source bytes do not match their digest",
+        ));
+    }
+    let ir = &case.archive_ir;
+    if ir.schema != TAR_PAX_IR_SCHEMA
+        || ir.profile != profile.id
+        || ir.profile_digest != profile.digest.sha256
+        || ir.source_digest.sha256 != case.source.sha256
+        || ir.format != "tar-pax"
+    {
+        return Err(VerifyError::new(
+            "TAR/PAX IR source, format, or profile identity does not match the case",
+        ));
+    }
+    verify_tar_pax_source(&source, ir)?;
+
+    let actual_preimage = encode_tar_pax_layout(ir)?;
+    let committed_preimage = decode_hex(&case.layout_preimage_hex, "TAR/PAX layout preimage")?;
+    if actual_preimage != committed_preimage {
+        return Err(VerifyError::new(
+            "TAR/PAX layout preimage does not match reconstructed evidence",
+        ));
+    }
+    verify_digest(&case.layout_root.sealr_tree_v5, "TAR/PAX layout root")?;
+    if sha256_hex(&actual_preimage) != case.layout_root.sealr_tree_v5 {
+        return Err(VerifyError::new("TAR/PAX layout root mismatch"));
+    }
+    let content_preimage = encode_tar_pax_content(ir)?;
+    verify_digest(&case.content_root.sealr_tree_v1, "TAR/PAX content root")?;
+    if sha256_hex(&content_preimage) != case.content_root.sealr_tree_v1 {
+        return Err(VerifyError::new("TAR/PAX content root mismatch"));
+    }
+    Ok(())
+}
+
+fn verify_tar_pax_source(source: &[u8], ir: &TarPaxArchiveIr) -> Result<(), VerifyError> {
+    if source.len() < 1024 || !source.len().is_multiple_of(512) {
+        return Err(VerifyError::new(
+            "TAR/PAX source is not a complete block-aligned archive",
+        ));
+    }
+    if ir.pax_extensions.len() > MAX_PAX_EXTENSIONS || ir.members.len() > MAX_MEMBERS_PER_CASE {
+        return Err(VerifyError::new("TAR/PAX evidence exceeds verifier limits"));
+    }
+    let source_len = u64::try_from(source.len())
+        .map_err(|_| VerifyError::new("TAR/PAX source length exceeds u64"))?;
+    let mut offset = 0_u64;
+    let mut extension_index = 0_usize;
+    let mut member_index = 0_usize;
+    let mut global = ParsedPaxOverrides::default();
+    let mut local: Option<ParsedPaxOverrides> = None;
+    let mut paths = HashSet::new();
+
+    loop {
+        let header_range = ByteRange { offset, len: 512 };
+        let header = range_bytes(source, header_range, "TAR/PAX header")?;
+        if header.iter().all(|byte| *byte == 0) {
+            if local.is_some() {
+                return Err(VerifyError::new("orphan local PAX extension"));
+            }
+            break;
+        }
+        let parsed = parse_tar_pax_header(header)?;
+        match parsed.typeflag {
+            b'g' | b'x' => {
+                if local.is_some() {
+                    return Err(VerifyError::new(
+                        "local PAX extension is not immediately followed by a member",
+                    ));
+                }
+                let extension = ir.pax_extensions.get(extension_index).ok_or_else(|| {
+                    VerifyError::new("source contains an undeclared PAX extension")
+                })?;
+                let kind = if parsed.typeflag == b'g' {
+                    TarPaxExtensionKind::Global
+                } else {
+                    TarPaxExtensionKind::Local
+                };
+                if extension.kind != kind || parsed.size > MAX_PAX_EXTENSION_BYTES {
+                    return Err(VerifyError::new(
+                        "PAX extension kind or bounded payload size is invalid",
+                    ));
+                }
+                let payload_offset = offset
+                    .checked_add(512)
+                    .ok_or_else(|| VerifyError::new("PAX payload offset overflow"))?;
+                let padding_len = (512 - (parsed.size % 512)) % 512;
+                let payload = ByteRange {
+                    offset: payload_offset,
+                    len: parsed.size,
+                };
+                let padding = ByteRange {
+                    offset: checked_range_end(payload, "PAX extension payload")?,
+                    len: padding_len,
+                };
+                verify_tar_pax_extension(
+                    source,
+                    extension,
+                    extension_index,
+                    header_range,
+                    payload,
+                    padding,
+                    &parsed,
+                )?;
+                let update = parsed_pax_overrides(extension, extension_index)?;
+                match kind {
+                    TarPaxExtensionKind::Global => merge_pax_overrides(&mut global, update),
+                    TarPaxExtensionKind::Local => local = Some(update),
+                }
+                offset = checked_range_end(padding, "PAX extension record")?;
+                extension_index += 1;
+            }
+            0 | b'0' | b'5' => {
+                let member = ir
+                    .members
+                    .get(member_index)
+                    .ok_or_else(|| VerifyError::new("source contains an undeclared PAX member"))?;
+                let local_values = local.take();
+                let (effective_name, path_source) =
+                    resolve_pax_path(&parsed.raw_name, &global, local_values.as_ref())?;
+                let (effective_size, size_source) =
+                    resolve_pax_size(parsed.size, &global, local_values.as_ref())?;
+                if !paths.insert(effective_name.clone()) {
+                    return Err(VerifyError::new(
+                        "TAR/PAX source resolves more than one member to the same path",
+                    ));
+                }
+                let payload = ByteRange {
+                    offset: offset
+                        .checked_add(512)
+                        .ok_or_else(|| VerifyError::new("PAX member payload offset overflow"))?,
+                    len: effective_size,
+                };
+                let padding = ByteRange {
+                    offset: checked_range_end(payload, "PAX member payload")?,
+                    len: (512 - (effective_size % 512)) % 512,
+                };
+                verify_tar_pax_member(
+                    source,
+                    member,
+                    header_range,
+                    payload,
+                    padding,
+                    &parsed,
+                    &effective_name,
+                    path_source,
+                    size_source,
+                )?;
+                offset = checked_range_end(padding, "PAX member record")?;
+                member_index += 1;
+            }
+            typeflag => {
+                return Err(VerifyError::new(format!(
+                    "unsupported PAX typeflag 0x{typeflag:02x}"
+                )));
+            }
+        }
+    }
+
+    if extension_index != ir.pax_extensions.len() || member_index != ir.members.len() {
+        return Err(VerifyError::new(
+            "declared PAX extensions or members are not present in the source",
+        ));
+    }
+    let terminator = ByteRange { offset, len: 1024 };
+    let trailing = ByteRange {
+        offset: checked_range_end(terminator, "PAX terminator")?,
+        len: source_len
+            .checked_sub(checked_range_end(terminator, "PAX terminator")?)
+            .ok_or_else(|| VerifyError::new("PAX terminator extends beyond source"))?,
+    };
+    if ir.tar_covering.member_records
+        != (ByteRange {
+            offset: 0,
+            len: offset,
+        })
+        || ir.tar_covering.terminator != terminator
+        || ir.tar_covering.trailing_zeros != trailing
+        || range_bytes(source, terminator, "PAX terminator")?
+            .iter()
+            .any(|byte| *byte != 0)
+        || range_bytes(source, trailing, "PAX trailing zeros")?
+            .iter()
+            .any(|byte| *byte != 0)
+    {
+        return Err(VerifyError::new(
+            "TAR/PAX covering does not exactly bind the terminator and trailing blocks",
+        ));
+    }
+    Ok(())
+}
+
+fn parse_tar_pax_header(header: &[u8]) -> Result<ParsedPaxHeader, VerifyError> {
+    if header.len() != 512 || header[257..263] != *b"ustar\0" || header[263..265] != *b"00" {
+        return Err(VerifyError::new(
+            "PAX record header is not exact POSIX ustar",
+        ));
+    }
+    if header[500..].iter().any(|byte| *byte != 0) || header[157..257].iter().any(|byte| *byte != 0)
+    {
+        return Err(VerifyError::new(
+            "PAX record has nonzero reserved or linkname bytes",
+        ));
+    }
+    if header[148..154]
+        .iter()
+        .any(|byte| !(b'0'..=b'7').contains(byte))
+        || header[154] != 0
+        || header[155] != b' '
+    {
+        return Err(VerifyError::new(
+            "PAX checksum field is not six octal digits, NUL, space",
+        ));
+    }
+    let declared = parse_tar_octal(&header[148..156], "PAX checksum")?;
+    let actual = header
+        .iter()
+        .enumerate()
+        .try_fold(0_u32, |sum, (index, byte)| {
+            sum.checked_add(u32::from(if (148..156).contains(&index) {
+                b' '
+            } else {
+                *byte
+            }))
+            .ok_or_else(|| VerifyError::new("PAX header checksum overflows u32"))
+        })?;
+    if declared != u64::from(actual) {
+        return Err(VerifyError::new(
+            "PAX header checksum does not match source bytes",
+        ));
+    }
+    let mode = parse_tar_octal(&header[100..108], "PAX mode")?;
+    let _uid = parse_tar_octal(&header[108..116], "PAX uid")?;
+    let _gid = parse_tar_octal(&header[116..124], "PAX gid")?;
+    let size = parse_tar_octal(&header[124..136], "PAX size")?;
+    if header[156] == b'5' && size != 0 {
+        return Err(VerifyError::new(
+            "PAX directory has a nonzero underlying size",
+        ));
+    }
+    let mtime = parse_tar_octal(&header[136..148], "PAX mtime")?;
+    if mode > 0o7777
+        || parse_tar_device_number(&header[329..337], "PAX devmajor")? != 0
+        || parse_tar_device_number(&header[337..345], "PAX devminor")? != 0
+    {
+        return Err(VerifyError::new(
+            "PAX numeric header fields are outside the profile",
+        ));
+    }
+    verify_tar_owner_text(&header[265..297], "PAX uname")?;
+    verify_tar_owner_text(&header[297..329], "PAX gname")?;
+    let name = tar_text_field(&header[..100], "PAX name", false)?;
+    let prefix = tar_text_field(&header[345..500], "PAX prefix", true)?;
+    let mut raw_name = Vec::new();
+    if !prefix.is_empty() {
+        raw_name.extend_from_slice(prefix);
+        raw_name.push(b'/');
+    }
+    raw_name.extend_from_slice(name);
+    Ok(ParsedPaxHeader {
+        raw_name,
+        mode: u32::try_from(mode).map_err(|_| VerifyError::new("PAX mode exceeds u32"))?,
+        size,
+        mtime,
+        checksum: actual,
+        sha256: sha256_hex(header),
+        typeflag: header[156],
+    })
+}
+
+fn verify_tar_pax_extension(
+    source: &[u8],
+    extension: &TarPaxExtension,
+    extension_index: usize,
+    header: ByteRange,
+    payload: ByteRange,
+    padding: ByteRange,
+    parsed: &ParsedPaxHeader,
+) -> Result<(), VerifyError> {
+    if extension.raw_name_bytes != parsed.raw_name
+        || extension.header != header
+        || extension.payload != payload
+        || extension.padding != padding
+        || extension.mode != parsed.mode
+        || extension.mtime != parsed.mtime
+        || extension.header_checksum != parsed.checksum
+        || extension.header_sha256 != parsed.sha256
+    {
+        return Err(VerifyError::new(
+            "PAX extension evidence disagrees with its source header or geometry",
+        ));
+    }
+    verify_digest(&extension.header_sha256, "PAX extension header digest")?;
+    verify_digest(&extension.payload_sha256, "PAX extension payload digest")?;
+    let payload_bytes = range_bytes(source, payload, "PAX extension payload")?;
+    if sha256_hex(payload_bytes) != extension.payload_sha256
+        || range_bytes(source, padding, "PAX extension padding")?
+            .iter()
+            .any(|byte| *byte != 0)
+    {
+        return Err(VerifyError::new(
+            "PAX extension payload digest or zero padding is invalid",
+        ));
+    }
+    verify_tar_pax_records(payload_bytes, payload.offset, extension, extension_index)
+}
+
+fn verify_tar_pax_records(
+    payload: &[u8],
+    payload_offset: u64,
+    extension: &TarPaxExtension,
+    extension_index: usize,
+) -> Result<(), VerifyError> {
+    if extension.records.is_empty() || extension.records.len() > 2 {
+        return Err(VerifyError::new(
+            "PAX extension must contain one or two records",
+        ));
+    }
+    let mut cursor = 0_usize;
+    let mut saw_path = false;
+    let mut saw_size = false;
+    for (record_index, evidence) in extension.records.iter().enumerate() {
+        let length_start = cursor;
+        while cursor < payload.len() && payload[cursor].is_ascii_digit() {
+            cursor += 1;
+            if cursor - length_start > 20 {
+                return Err(VerifyError::new("PAX record length exceeds 20 digits"));
+            }
+        }
+        if cursor == length_start
+            || cursor == payload.len()
+            || payload[cursor] != b' '
+            || (cursor - length_start > 1 && payload[length_start] == b'0')
+        {
+            return Err(VerifyError::new(
+                "PAX record length syntax is not canonical",
+            ));
+        }
+        let length = parse_pax_decimal(&payload[length_start..cursor], "PAX record length")?;
+        let length = usize::try_from(length)
+            .map_err(|_| VerifyError::new("PAX record length exceeds usize"))?;
+        let record_end = length_start
+            .checked_add(length)
+            .ok_or_else(|| VerifyError::new("PAX record end overflows usize"))?;
+        if record_end > payload.len() || length == 0 || payload[record_end - 1] != b'\n' {
+            return Err(VerifyError::new(
+                "PAX record does not consume its declared newline-terminated bytes",
+            ));
+        }
+        cursor += 1;
+        let keyword_start = cursor;
+        while cursor < record_end && payload[cursor] != b'=' {
+            cursor += 1;
+            if cursor - keyword_start > 16 {
+                return Err(VerifyError::new("PAX keyword exceeds scan bound"));
+            }
+        }
+        if cursor == keyword_start || cursor >= record_end {
+            return Err(VerifyError::new("PAX record has no keyword or equals sign"));
+        }
+        let keyword = match &payload[keyword_start..cursor] {
+            b"path" if !saw_path => {
+                saw_path = true;
+                TarPaxKeyword::Path
+            }
+            b"size" if !saw_size => {
+                saw_size = true;
+                TarPaxKeyword::Size
+            }
+            b"path" | b"size" => {
+                return Err(VerifyError::new("PAX extension repeats a keyword"));
+            }
+            _ => return Err(VerifyError::new("PAX extension uses an unknown keyword")),
+        };
+        cursor += 1;
+        let value_start = cursor;
+        let value_end = record_end - 1;
+        if value_start == value_end {
+            return Err(VerifyError::new("PAX record has an empty value"));
+        }
+        let value = &payload[value_start..value_end];
+        let parsed_size = match keyword {
+            TarPaxKeyword::Path => {
+                verify_portable_pax_path(value)?;
+                None
+            }
+            TarPaxKeyword::Size => Some(parse_pax_decimal(value, "PAX size value")?),
+        };
+        let length_start = u64::try_from(length_start)
+            .map_err(|_| VerifyError::new("PAX record offset exceeds u64"))?;
+        let length =
+            u64::try_from(length).map_err(|_| VerifyError::new("PAX record length exceeds u64"))?;
+        let value_start = u64::try_from(value_start)
+            .map_err(|_| VerifyError::new("PAX value offset exceeds u64"))?;
+        let value_len = u64::try_from(value.len())
+            .map_err(|_| VerifyError::new("PAX value length exceeds u64"))?;
+        let absolute_record = ByteRange {
+            offset: payload_offset
+                .checked_add(length_start)
+                .ok_or_else(|| VerifyError::new("PAX record offset overflows u64"))?,
+            len: length,
+        };
+        let absolute_value = ByteRange {
+            offset: payload_offset
+                .checked_add(value_start)
+                .ok_or_else(|| VerifyError::new("PAX value offset overflows u64"))?,
+            len: value_len,
+        };
+        if evidence.record != absolute_record
+            || evidence.value != absolute_value
+            || evidence.keyword != keyword
+            || evidence.raw_value_bytes != value
+            || evidence.parsed_size != parsed_size
+        {
+            return Err(VerifyError::new(format!(
+                "PAX extension {extension_index} record {record_index} evidence disagrees with source bytes"
+            )));
+        }
+        cursor = record_end;
+    }
+    if cursor != payload.len() {
+        return Err(VerifyError::new(
+            "PAX records do not consume the exact extension payload",
+        ));
+    }
+    Ok(())
+}
+
+fn parse_pax_decimal(bytes: &[u8], label: &str) -> Result<u64, VerifyError> {
+    if bytes.is_empty()
+        || !bytes.iter().all(u8::is_ascii_digit)
+        || (bytes.len() > 1 && bytes[0] == b'0')
+    {
+        return Err(VerifyError::new(format!(
+            "{label} is not canonical ASCII decimal"
+        )));
+    }
+    bytes.iter().try_fold(0_u64, |value, byte| {
+        value
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(u64::from(*byte - b'0')))
+            .ok_or_else(|| VerifyError::new(format!("{label} overflows u64")))
+    })
+}
+
+fn verify_portable_pax_path(bytes: &[u8]) -> Result<(), VerifyError> {
+    let path =
+        std::str::from_utf8(bytes).map_err(|_| VerifyError::new("PAX path is not strict UTF-8"))?;
+    if path.is_empty()
+        || path.len() > 8191
+        || path.starts_with('/')
+        || path.ends_with('/')
+        || path.contains('\\')
+        || path
+            .chars()
+            .any(|character| character == '\0' || character.is_control())
+        || path.split('/').any(|component| {
+            component.is_empty() || component == "." || component == ".." || component.len() > 255
+        })
+    {
+        return Err(VerifyError::new(
+            "PAX path is outside the portable destination grammar",
+        ));
+    }
+    Ok(())
+}
+
+fn parsed_pax_overrides(
+    extension: &TarPaxExtension,
+    extension_index: usize,
+) -> Result<ParsedPaxOverrides, VerifyError> {
+    let mut update = ParsedPaxOverrides::default();
+    for (record_index, record) in extension.records.iter().enumerate() {
+        let source = match extension.kind {
+            TarPaxExtensionKind::Global => TarPaxValueSource::Global {
+                extension_index: u32::try_from(extension_index)
+                    .map_err(|_| VerifyError::new("PAX extension index exceeds u32"))?,
+                record_index: u32::try_from(record_index)
+                    .map_err(|_| VerifyError::new("PAX record index exceeds u32"))?,
+            },
+            TarPaxExtensionKind::Local => TarPaxValueSource::Local {
+                extension_index: u32::try_from(extension_index)
+                    .map_err(|_| VerifyError::new("PAX extension index exceeds u32"))?,
+                record_index: u32::try_from(record_index)
+                    .map_err(|_| VerifyError::new("PAX record index exceeds u32"))?,
+            },
+        };
+        let value = ParsedPaxValue {
+            raw: record.raw_value_bytes.clone(),
+            parsed_size: record.parsed_size,
+            source,
+        };
+        match record.keyword {
+            TarPaxKeyword::Path => update.path = Some(value),
+            TarPaxKeyword::Size => update.size = Some(value),
+        }
+    }
+    Ok(update)
+}
+
+fn merge_pax_overrides(current: &mut ParsedPaxOverrides, update: ParsedPaxOverrides) {
+    if update.path.is_some() {
+        current.path = update.path;
+    }
+    if update.size.is_some() {
+        current.size = update.size;
+    }
+}
+
+fn resolve_pax_path(
+    base: &[u8],
+    global: &ParsedPaxOverrides,
+    local: Option<&ParsedPaxOverrides>,
+) -> Result<(Vec<u8>, TarPaxValueSource), VerifyError> {
+    let value = local
+        .and_then(|values| values.path.as_ref())
+        .or(global.path.as_ref());
+    match value {
+        Some(value) => Ok((value.raw.clone(), value.source)),
+        None => {
+            verify_portable_pax_path(base)?;
+            Ok((base.to_vec(), TarPaxValueSource::Ustar))
+        }
+    }
+}
+
+fn resolve_pax_size(
+    base: u64,
+    global: &ParsedPaxOverrides,
+    local: Option<&ParsedPaxOverrides>,
+) -> Result<(u64, TarPaxValueSource), VerifyError> {
+    let value = local
+        .and_then(|values| values.size.as_ref())
+        .or(global.size.as_ref());
+    match value {
+        Some(value) => Ok((
+            value
+                .parsed_size
+                .ok_or_else(|| VerifyError::new("PAX size source does not name a size record"))?,
+            value.source,
+        )),
+        None => Ok((base, TarPaxValueSource::Ustar)),
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_tar_pax_member(
+    source: &[u8],
+    member: &TarPaxMember,
+    header: ByteRange,
+    payload: ByteRange,
+    padding: ByteRange,
+    parsed: &ParsedPaxHeader,
+    effective_name: &[u8],
+    path_source: TarPaxValueSource,
+    size_source: TarPaxValueSource,
+) -> Result<(), VerifyError> {
+    let decoded = std::str::from_utf8(effective_name)
+        .map_err(|_| VerifyError::new("effective PAX member name is not UTF-8"))?;
+    verify_portable_pax_path(effective_name)?;
+    let is_directory = parsed.typeflag == b'5';
+    if is_directory && payload.len != 0 {
+        return Err(VerifyError::new(
+            "PAX directory has a nonzero effective size",
+        ));
+    }
+    let tar = &member.tar_pax.tar;
+    if member.raw_name_bytes != effective_name
+        || member.decoded_name != decoded
+        || member.canonical_path != decoded
+        || member.components != decoded.split('/').collect::<Vec<_>>()
+        || matches!(member.kind, MemberKind::Directory) != is_directory
+        || member.declared_uncomp_size != payload.len
+        || tar.header != header
+        || tar.payload != payload
+        || tar.padding != padding
+        || tar.mode != parsed.mode
+        || tar.mtime != parsed.mtime
+        || tar.header_checksum != parsed.checksum
+        || tar.header_sha256 != parsed.sha256
+        || member.tar_pax.base_name_bytes != parsed.raw_name
+        || member.tar_pax.base_size != parsed.size
+        || member.tar_pax.path_source != path_source
+        || member.tar_pax.size_source != size_source
+        || member.actual_uncomp_size != payload.len
+        || !matches!(member.verification, MemberVerification::Verified)
+        || !member.normalization_actions.is_empty()
+    {
+        return Err(VerifyError::new(
+            "PAX member evidence disagrees with source bytes or resolved state",
+        ));
+    }
+    verify_digest(&tar.header_sha256, "PAX member header digest")?;
+    verify_digest(&member.content_sha256, "PAX member content digest")?;
+    let payload_bytes = range_bytes(source, payload, "PAX member payload")?;
+    if sha256_hex(payload_bytes) != member.content_sha256
+        || crc32_ieee_bytes(payload_bytes) != member.actual_crc
+        || range_bytes(source, padding, "PAX member padding")?
+            .iter()
+            .any(|byte| *byte != 0)
+    {
+        return Err(VerifyError::new(
+            "PAX member content digest, CRC, or padding is invalid",
+        ));
+    }
+    Ok(())
+}
+
+fn encode_tar_pax_layout(ir: &TarPaxArchiveIr) -> Result<Vec<u8>, VerifyError> {
+    let mut body = Vec::new();
+    encode_range(&mut body, ir.tar_covering.member_records);
+    encode_range(&mut body, ir.tar_covering.terminator);
+    encode_range(&mut body, ir.tar_covering.trailing_zeros);
+    push_u32(
+        &mut body,
+        u32::try_from(ir.pax_extensions.len())
+            .map_err(|_| VerifyError::new("PAX extension count exceeds u32"))?,
+    );
+    for extension in &ir.pax_extensions {
+        body.push(match extension.kind {
+            TarPaxExtensionKind::Global => PAX_EXTENSION_GLOBAL,
+            TarPaxExtensionKind::Local => PAX_EXTENSION_LOCAL,
+        });
+        push_bytes(&mut body, &extension.raw_name_bytes)?;
+        encode_range(&mut body, extension.header);
+        encode_range(&mut body, extension.payload);
+        encode_range(&mut body, extension.padding);
+        push_u32(&mut body, extension.mode);
+        push_u64(&mut body, extension.mtime);
+        push_u32(&mut body, extension.header_checksum);
+        body.extend_from_slice(&decode_digest(
+            &extension.header_sha256,
+            "PAX extension header digest",
+        )?);
+        body.extend_from_slice(&decode_digest(
+            &extension.payload_sha256,
+            "PAX extension payload digest",
+        )?);
+        push_u32(
+            &mut body,
+            u32::try_from(extension.records.len())
+                .map_err(|_| VerifyError::new("PAX record count exceeds u32"))?,
+        );
+        for record in &extension.records {
+            body.push(match record.keyword {
+                TarPaxKeyword::Path => PAX_KEYWORD_PATH,
+                TarPaxKeyword::Size => PAX_KEYWORD_SIZE,
+            });
+            encode_range(&mut body, record.record);
+            encode_range(&mut body, record.value);
+            push_bytes(&mut body, &record.raw_value_bytes)?;
+            match record.parsed_size {
+                Some(size) => {
+                    body.push(1);
+                    push_u64(&mut body, size);
+                }
+                None => body.push(0),
+            }
+        }
+    }
+    let mut members: Vec<_> = ir.members.iter().collect();
+    members.sort_by(|left, right| {
+        left.canonical_path
+            .as_bytes()
+            .cmp(right.canonical_path.as_bytes())
+    });
+    push_u32(
+        &mut body,
+        u32::try_from(members.len())
+            .map_err(|_| VerifyError::new("PAX member count exceeds u32"))?,
+    );
+    for member in members {
+        push_bytes(&mut body, member.canonical_path.as_bytes())?;
+        body.push(kind_tag(&member.kind));
+        push_bytes(&mut body, &member.raw_name_bytes)?;
+        push_bytes(&mut body, &member.tar_pax.base_name_bytes)?;
+        push_u64(&mut body, member.declared_uncomp_size);
+        push_u64(&mut body, member.tar_pax.base_size);
+        encode_range(&mut body, member.tar_pax.tar.header);
+        encode_range(&mut body, member.tar_pax.tar.payload);
+        encode_range(&mut body, member.tar_pax.tar.padding);
+        push_u32(&mut body, member.tar_pax.tar.mode);
+        push_u64(&mut body, member.tar_pax.tar.mtime);
+        push_u32(&mut body, member.tar_pax.tar.header_checksum);
+        body.extend_from_slice(&decode_digest(
+            &member.tar_pax.tar.header_sha256,
+            "PAX member header digest",
+        )?);
+        encode_pax_value_source(&mut body, member.tar_pax.path_source);
+        encode_pax_value_source(&mut body, member.tar_pax.size_source);
+        push_u32(
+            &mut body,
+            u32::try_from(member.normalization_actions.len())
+                .map_err(|_| VerifyError::new("PAX normalization count exceeds u32"))?,
+        );
+        encode_normalization_actions(&mut body, &member.normalization_actions);
+    }
+    Ok(preimage(TAR_PAX_LAYOUT_LABEL, &body))
+}
+
+fn encode_pax_value_source(output: &mut Vec<u8>, source: TarPaxValueSource) {
+    match source {
+        TarPaxValueSource::Ustar => output.push(PAX_SOURCE_USTAR),
+        TarPaxValueSource::Global {
+            extension_index,
+            record_index,
+        } => {
+            output.push(PAX_SOURCE_GLOBAL);
+            push_u32(output, extension_index);
+            push_u32(output, record_index);
+        }
+        TarPaxValueSource::Local {
+            extension_index,
+            record_index,
+        } => {
+            output.push(PAX_SOURCE_LOCAL);
+            push_u32(output, extension_index);
+            push_u32(output, record_index);
+        }
+    }
+}
+
+fn encode_tar_pax_content(ir: &TarPaxArchiveIr) -> Result<Vec<u8>, VerifyError> {
+    let mut members: Vec<_> = ir.members.iter().collect();
+    members.sort_by(|left, right| {
+        left.canonical_path
+            .as_bytes()
+            .cmp(right.canonical_path.as_bytes())
+    });
+    let mut body = Vec::new();
+    push_u32(
+        &mut body,
+        u32::try_from(members.len())
+            .map_err(|_| VerifyError::new("PAX content member count exceeds u32"))?,
+    );
+    for member in members {
+        if !matches!(member.verification, MemberVerification::Verified) {
+            return Err(VerifyError::new(
+                "PAX content identity contains an unverified member",
+            ));
+        }
+        push_bytes(&mut body, member.canonical_path.as_bytes())?;
+        body.push(kind_tag(&member.kind));
+        push_u64(&mut body, member.actual_uncomp_size);
+        body.extend_from_slice(&decode_digest(
+            &member.content_sha256,
+            "PAX member content digest",
+        )?);
+    }
+    Ok(preimage(CONTENT_LABEL, &body))
 }
 
 fn verify_zip64_profile(profile: &Zip64ProfileVector) -> Result<(), VerifyError> {
@@ -3760,6 +4838,8 @@ mod tests {
         include_bytes!("../../../crates/sealr/tests/conformance/zip64-identity-v1.json");
     const TAR_GZIP_VECTORS: &[u8] =
         include_bytes!("../../../crates/sealr/tests/conformance/tar-gzip-identity-v1.json");
+    const TAR_PAX_VECTORS: &[u8] =
+        include_bytes!("../../../crates/sealr/tests/conformance/tar-pax-identity-v1.json");
     const TAR_LAYOUT_VECTOR: &[u8] =
         include_bytes!("../../../crates/sealr/tests/conformance/tar-layout-v2.json");
 
@@ -3817,6 +4897,132 @@ mod tests {
             manifest.cases[0].content_root.sealr_tree_v1,
             manifest.derived_tar.content_root.sealr_tree_v1
         );
+    }
+
+    #[test]
+    fn committed_tar_pax_vectors_verify_source_state_and_both_roots_independently() {
+        let expected = VerificationSummary {
+            profiles: 1,
+            cases: 2,
+            layout_roots: 2,
+            content_roots: 2,
+        };
+        assert_eq!(
+            verify_tar_pax_identity_vector_json(TAR_PAX_VECTORS).unwrap(),
+            expected
+        );
+        assert_eq!(verify_manifest_json(TAR_PAX_VECTORS).unwrap(), expected);
+
+        let manifest: TarPaxManifest = serde_json::from_slice(TAR_PAX_VECTORS).unwrap();
+        assert_eq!(
+            manifest.profile.digest.sha256,
+            "db951f620acf54e67845144e138f9f16994439847a97601e20a424dfea7f4445"
+        );
+        assert_eq!(
+            manifest.cases[0].layout_root.sealr_tree_v5,
+            "df37178d11acabacd11f384ebf8b77fef80bef65ba6a923d94d7b32d53c03442"
+        );
+        assert_eq!(
+            manifest.cases[0].content_root.sealr_tree_v1,
+            "82e62b2a1eeea4f2e70a0a7fdc9a869a68ad8d4b552940759a74ddc352596789"
+        );
+        assert_eq!(
+            manifest.cases[1].layout_root.sealr_tree_v5,
+            "8361957ae88f826d3d9b11604057a08f2b027ecfa498f8c37ac6a593818472a8"
+        );
+        assert_eq!(
+            manifest.cases[1].content_root.sealr_tree_v1,
+            "a2e2aa8b8b14dc562e94a4e09533c456e206ccb1f5bcea9c2d8be7ff1fa5ba94"
+        );
+    }
+
+    #[test]
+    fn tar_pax_profile_digest_is_reconstructed_without_sealr() {
+        let manifest: TarPaxManifest = serde_json::from_slice(TAR_PAX_VECTORS).unwrap();
+        verify_tar_pax_profile(&manifest.profile).unwrap();
+    }
+
+    #[test]
+    fn tar_pax_tampered_source_and_state_references_are_rejected() {
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_PAX_VECTORS).unwrap();
+        let mut source = decode_hex(
+            vector["cases"][0]["source_bytes_hex"].as_str().unwrap(),
+            "test PAX source",
+        )
+        .unwrap();
+        source[0] ^= 1;
+        let source_sha = sha256_hex(&source);
+        vector["cases"][0]["source_bytes_hex"] = serde_json::json!(hex_bytes(&source));
+        vector["cases"][0]["source"]["sha256"] = serde_json::json!(source_sha.clone());
+        vector["cases"][0]["archive_ir"]["source_digest"]["sha256"] = serde_json::json!(source_sha);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("checksum"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_PAX_VECTORS).unwrap();
+        vector["cases"][1]["archive_ir"]["members"][0]["tar_pax"]["path_source"]
+            ["extension_index"] = serde_json::json!(0);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("resolved state"));
+    }
+
+    #[test]
+    fn tar_pax_record_geometry_profile_and_layout_mutations_are_rejected() {
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_PAX_VECTORS).unwrap();
+        vector["cases"][0]["archive_ir"]["pax_extensions"][0]["records"][0]["value"]["offset"] =
+            serde_json::json!(521);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("record 0 evidence"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_PAX_VECTORS).unwrap();
+        vector["profile"]["digest"]["sha256"] = serde_json::json!("0".repeat(64));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("profile digest"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_PAX_VECTORS).unwrap();
+        vector["cases"][0]["layout_root"]["sealrTreeV5"] = serde_json::json!("0".repeat(64));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("layout root mismatch"));
+    }
+
+    #[test]
+    fn tar_pax_header_enforces_underlying_directory_size() {
+        fn header(size: u64, typeflag: u8) -> [u8; 512] {
+            fn octal(field: &mut [u8], value: u64) {
+                field.fill(b'0');
+                let value = format!("{value:o}");
+                let end = field.len() - 1;
+                field[end - value.len()..end].copy_from_slice(value.as_bytes());
+                field[end] = 0;
+            }
+
+            let mut header = [0_u8; 512];
+            header[..3].copy_from_slice(b"dir");
+            octal(&mut header[100..108], 0o755);
+            octal(&mut header[108..116], 0);
+            octal(&mut header[116..124], 0);
+            octal(&mut header[124..136], size);
+            octal(&mut header[136..148], 0);
+            header[148..156].fill(b' ');
+            header[156] = typeflag;
+            header[257..263].copy_from_slice(b"ustar\0");
+            header[263..265].copy_from_slice(b"00");
+            octal(&mut header[329..337], 0);
+            octal(&mut header[337..345], 0);
+            let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
+            header[148..154].copy_from_slice(format!("{checksum:06o}").as_bytes());
+            header[154] = 0;
+            header[155] = b' ';
+            header
+        }
+
+        let Err(error) = parse_tar_pax_header(&header(1, b'5')) else {
+            panic!("nonzero underlying directory size must be rejected");
+        };
+        assert!(error
+            .to_string()
+            .contains("PAX directory has a nonzero underlying size"));
+        parse_tar_pax_header(&header(0, b'5')).expect("zero-size directory remains canonical");
+        parse_tar_pax_header(&header(1, b'0')).expect("nonzero regular file remains canonical");
     }
 
     #[test]

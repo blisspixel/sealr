@@ -1,0 +1,91 @@
+{
+  "schema": "sealr.tar-pax-fuzz-seeds.v1",
+  "target": "tar_pax_portable_v1",
+  "toolchain": "nightly-2026-08-01",
+  "cargoFuzzVersion": "0.13.2",
+  "libfuzzerSysVersion": "0.4.13",
+  "bounds": {
+    "maxInputBytes": 4194304,
+    "maxTotalSeconds": 600,
+    "perInputTimeoutSeconds": 5,
+    "rssLimitMiB": 1024,
+    "jobs": 1
+  },
+  "failureArtifact": {
+    "directoryName": "sealr-tar-pax-fuzz-artifacts",
+    "uploadOn": "failure",
+    "retentionDays": 7
+  },
+  "dictionary": {
+    "path": "fuzz/dictionaries/tar_pax_portable_v1_dictionary",
+    "bytes": 173,
+    "sha256": "cce78803c34817aebdb27cd62be6c8908dae1f4084925e183eedc2b4c69e5348"
+  },
+  "targetSource": {
+    "path": "fuzz/fuzz_targets/tar_pax_portable_v1.rs",
+    "bytes": 126,
+    "sha256": "f404e35b5c034f2af1dbcfd5d7c1b0c90618e363ac3994134cae7816dc673e18"
+  },
+  "generator": "fuzz/generate_tar_pax_fuzz_seeds.ps1",
+  "generatorSource": {
+    "path": "fuzz/generate_tar_pax_fuzz_seeds.ps1",
+    "bytes": 8628,
+    "sha256": "72cd0863f83a2edb613defbe22f5281e1dc1ca1eadf1dd4abcfb88691050d7c7"
+  },
+  "seeds": [
+    {
+      "path": "fuzz/corpus/tar_pax_portable_v1/invalid-extension-over-cap",
+      "bytes": 67584,
+      "sha256": "bc8f0a1a23bff9815dca5d57f5c07a320c4b56dd80e7f665f6ef1c5d481337ee",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_pax_portable_v1/invalid-malformed-record-length",
+      "bytes": 2560,
+      "sha256": "359e3e4c903ccabef4cf4967d64c8efd5854fcd4a5df78257386fc2f0b4dcb9e",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_pax_portable_v1/invalid-orphan-local",
+      "bytes": 2048,
+      "sha256": "9c557a21c683fc4239d5818006c1a531da2ec6b8d6726be6817693811e56262c",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_pax_portable_v1/unsupported-keyword",
+      "bytes": 2560,
+      "sha256": "a7201d45c4e7e56a803799a887b07fec414adc54ef67503f03936878c974174d",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_pax_portable_v1/valid-empty-ustar-subset",
+      "bytes": 1024,
+      "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_pax_portable_v1/valid-global-local-precedence",
+      "bytes": 5120,
+      "sha256": "a4eb4763039c7743716aa19e980401197612c3f23e978f381166c0cf4f15e611",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_pax_portable_v1/valid-local-path-size",
+      "bytes": 3072,
+      "sha256": "4f9a311c5a7bffc404801fc46256057f5c424275d53fe737368c5ad5a53452d2",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_pax_portable_v1/valid-ordinary-ustar-subset",
+      "bytes": 2048,
+      "sha256": "a306cbe9f23dbfd62fb9c16c74af3180c3c4ac1a37597d197f9c8ede5e8a8c80",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_pax_portable_v1/valid-quota-boundary-two-files",
+      "bytes": 2048,
+      "sha256": "733c2b7b068c0cc275b9420b739dbed01d9c1669b4f8aced369fd2c29973a525",
+      "generated": true
+    }
+  ]
+}

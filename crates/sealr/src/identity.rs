@@ -11,8 +11,9 @@ use serde::Serialize;
 
 use crate::ir::{
     ArchiveFormat, ArchiveIR, ExtraDisposition, ExtraSite, IrMember, MemberKind,
-    MemberVerification, NormalizationAction, TarGzipInterpretationProfile,
-    TarInterpretationProfile, ZipInterpretationProfile,
+    MemberVerification, NormalizationAction, PaxExtensionKind, PaxKeyword, PaxValueSource,
+    TarGzipInterpretationProfile, TarInterpretationProfile, TarPaxInterpretationProfile,
+    ZipInterpretationProfile,
 };
 use crate::outcome::{DigestHex, SourceDigest, VerificationStatus};
 use crate::policy::hex_sha256;
@@ -22,10 +23,12 @@ pub const TREE_ENCODING_ID: &str = "sealrTreeV1";
 pub const TREE_ENCODING_V2_ID: &str = "sealrTreeV2";
 pub const TREE_ENCODING_V3_ID: &str = "sealrTreeV3";
 pub const TREE_ENCODING_V4_ID: &str = "sealrTreeV4";
+pub const TREE_ENCODING_V5_ID: &str = "sealrTreeV5";
 const LAYOUT_LABEL: &str = "sealr.tree.layout.v1";
 const TAR_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-ustar.v1";
 const ZIP64_LAYOUT_LABEL: &str = "sealr.tree.layout.zip64.v1";
 const TAR_GZIP_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gzip-ustar.v1";
+const TAR_PAX_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-pax.v1";
 const CONTENT_LABEL: &str = "sealr.tree.content.v1";
 const FILE: u8 = 1;
 const DIRECTORY: u8 = 2;
@@ -36,6 +39,13 @@ const DISP_SEMANTIC: u8 = 2;
 const DISP_DENIED: u8 = 3;
 const NORM_STRIP_DIR_SLASH: u8 = 1;
 const NORM_DROP_DOT: u8 = 2;
+const PAX_EXTENSION_GLOBAL: u8 = 1;
+const PAX_EXTENSION_LOCAL: u8 = 2;
+const PAX_KEYWORD_PATH: u8 = 1;
+const PAX_KEYWORD_SIZE: u8 = 2;
+const PAX_SOURCE_USTAR: u8 = 0;
+const PAX_SOURCE_GLOBAL: u8 = 1;
+const PAX_SOURCE_LOCAL: u8 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -44,6 +54,7 @@ pub enum TreeRoot {
     SealrTreeV2 { hex: String },
     SealrTreeV3 { hex: String },
     SealrTreeV4 { hex: String },
+    SealrTreeV5 { hex: String },
     Unavailable,
 }
 
@@ -76,12 +87,19 @@ impl TreeRoot {
         }
     }
 
+    pub fn from_v5_bytes(bytes: &[u8]) -> Self {
+        Self::SealrTreeV5 {
+            hex: hex_sha256(bytes),
+        }
+    }
+
     pub fn hex(&self) -> Option<&str> {
         match self {
             Self::SealrTreeV1 { hex } => Some(hex),
             Self::SealrTreeV2 { hex } => Some(hex),
             Self::SealrTreeV3 { hex } => Some(hex),
             Self::SealrTreeV4 { hex } => Some(hex),
+            Self::SealrTreeV5 { hex } => Some(hex),
             Self::Unavailable => None,
         }
     }
@@ -108,6 +126,11 @@ impl Serialize for TreeRoot {
             Self::SealrTreeV4 { hex } => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 map.serialize_entry(TREE_ENCODING_V4_ID, hex)?;
+                map.end()
+            }
+            Self::SealrTreeV5 { hex } => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry(TREE_ENCODING_V5_ID, hex)?;
                 map.end()
             }
             Self::Unavailable => {
@@ -151,6 +174,13 @@ impl OutcomeIdentities {
     pub fn unavailable_for_tar_gzip(
         source: SourceDigest,
         profile: TarGzipInterpretationProfile,
+    ) -> Self {
+        Self::unavailable_for_named(source, profile.id(), profile.digest())
+    }
+
+    pub fn unavailable_for_tar_pax(
+        source: SourceDigest,
+        profile: TarPaxInterpretationProfile,
     ) -> Self {
         Self::unavailable_for_named(source, profile.id(), profile.digest())
     }
@@ -262,6 +292,94 @@ pub fn encode_tar_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
         return None;
     }
     tar_layout_body(ir, ArchiveFormat::TarUstar).map(|body| preimage(TAR_LAYOUT_LABEL, &body))
+}
+
+/// Canonical physical-layout encoding for the restricted POSIX PAX profile.
+pub fn encode_tar_pax_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
+    if ir.format() != ArchiveFormat::TarPax {
+        return None;
+    }
+    let covering = ir.tar_covering()?;
+    let extensions = ir.pax_extensions()?;
+    let members = sorted_members(ir);
+    let mut body = Vec::new();
+    encode_range(&mut body, covering.member_records);
+    encode_range(&mut body, covering.terminator);
+    encode_range(&mut body, covering.trailing_zeros);
+    push_u32(&mut body, u32::try_from(extensions.len()).ok()?);
+    for extension in extensions {
+        body.push(match extension.kind {
+            PaxExtensionKind::Global => PAX_EXTENSION_GLOBAL,
+            PaxExtensionKind::Local => PAX_EXTENSION_LOCAL,
+        });
+        push_bytes(&mut body, &extension.raw_name_bytes);
+        encode_range(&mut body, extension.header);
+        encode_range(&mut body, extension.payload);
+        encode_range(&mut body, extension.padding);
+        push_u32(&mut body, extension.mode);
+        push_u64(&mut body, extension.mtime);
+        push_u32(&mut body, extension.header_checksum);
+        body.extend_from_slice(&parse_hex32(&extension.header_sha256)?);
+        body.extend_from_slice(&parse_hex32(&extension.payload_sha256)?);
+        push_u32(&mut body, u32::try_from(extension.records.len()).ok()?);
+        for record in &extension.records {
+            body.push(match record.keyword {
+                PaxKeyword::Path => PAX_KEYWORD_PATH,
+                PaxKeyword::Size => PAX_KEYWORD_SIZE,
+            });
+            encode_range(&mut body, record.record);
+            encode_range(&mut body, record.value);
+            push_bytes(&mut body, &record.raw_value_bytes);
+            match record.parsed_size {
+                Some(size) => {
+                    body.push(1);
+                    push_u64(&mut body, size);
+                }
+                None => body.push(0),
+            }
+        }
+    }
+    push_u32(&mut body, u32::try_from(members.len()).ok()?);
+    for member in members {
+        if member.format() != ArchiveFormat::TarPax {
+            return None;
+        }
+        let evidence = member.tar_pax_evidence()?;
+        push_bytes(&mut body, member.canonical_path.as_bytes());
+        body.push(match member.kind {
+            MemberKind::File => FILE,
+            MemberKind::Directory => DIRECTORY,
+        });
+        push_bytes(&mut body, &member.raw_name_bytes);
+        push_bytes(&mut body, &evidence.base_name_bytes);
+        push_u64(&mut body, member.declared_uncomp_size);
+        push_u64(&mut body, evidence.base_size);
+        encode_range(&mut body, evidence.tar.header);
+        encode_range(&mut body, evidence.tar.payload);
+        encode_range(&mut body, evidence.tar.padding);
+        push_u32(&mut body, evidence.tar.mode);
+        push_u64(&mut body, evidence.tar.mtime);
+        push_u32(&mut body, evidence.tar.header_checksum);
+        body.extend_from_slice(&parse_hex32(&evidence.tar.header_sha256)?);
+        encode_pax_value_source(&mut body, evidence.path_source);
+        encode_pax_value_source(&mut body, evidence.size_source);
+        push_u32(
+            &mut body,
+            u32::try_from(member.normalization_actions.len()).ok()?,
+        );
+        for action in &member.normalization_actions {
+            match action {
+                NormalizationAction::StripDirectoryTrailingSlash => {
+                    body.push(NORM_STRIP_DIR_SLASH);
+                }
+                NormalizationAction::DropDotComponent { component_index } => {
+                    body.push(NORM_DROP_DOT);
+                    push_u32(&mut body, *component_index);
+                }
+            }
+        }
+    }
+    Some(preimage(TAR_PAX_LAYOUT_LABEL, &body))
 }
 
 fn tar_layout_body(ir: &ArchiveIR, expected_format: ArchiveFormat) -> Option<Vec<u8>> {
@@ -410,6 +528,28 @@ fn encode_optional_range(out: &mut Vec<u8>, range: Option<crate::ir::ByteRange>)
     }
 }
 
+fn encode_pax_value_source(out: &mut Vec<u8>, source: PaxValueSource) {
+    match source {
+        PaxValueSource::Ustar => out.push(PAX_SOURCE_USTAR),
+        PaxValueSource::Global {
+            extension_index,
+            record_index,
+        } => {
+            out.push(PAX_SOURCE_GLOBAL);
+            push_u32(out, extension_index);
+            push_u32(out, record_index);
+        }
+        PaxValueSource::Local {
+            extension_index,
+            record_index,
+        } => {
+            out.push(PAX_SOURCE_LOCAL);
+            push_u32(out, extension_index);
+            push_u32(out, record_index);
+        }
+    }
+}
+
 fn encode_layout_member(out: &mut Vec<u8>, member: &IrMember) {
     let evidence = member
         .zip_evidence()
@@ -531,6 +671,9 @@ pub fn layout_root(ir: &ArchiveIR) -> TreeRoot {
             .unwrap_or_else(TreeRoot::unavailable),
         ArchiveFormat::TarGzipUstar => encode_tar_gzip_layout(ir)
             .map(|bytes| TreeRoot::from_v4_bytes(&bytes))
+            .unwrap_or_else(TreeRoot::unavailable),
+        ArchiveFormat::TarPax => encode_tar_pax_layout(ir)
+            .map(|bytes| TreeRoot::from_v5_bytes(&bytes))
             .unwrap_or_else(TreeRoot::unavailable),
     }
 }

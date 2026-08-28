@@ -140,6 +140,68 @@ fn write_tar_fixture(path: &Path) {
     fs::write(path, tar_fixture_bytes()).expect("TAR fixture should be writable");
 }
 
+fn pax_record(keyword: &str, value: &str) -> Vec<u8> {
+    let suffix = format!(" {keyword}={value}\n");
+    let mut length = suffix.len() + 1;
+    loop {
+        let exact = suffix.len() + length.to_string().len();
+        if exact == length {
+            return format!("{length}{suffix}").into_bytes();
+        }
+        length = exact;
+    }
+}
+
+fn tar_header(name: &[u8], size: u64, typeflag: u8) -> [u8; 512] {
+    assert!(
+        name.len() <= 100,
+        "fixture name should fit the ustar name field"
+    );
+    let mut header = [0_u8; 512];
+    header[..name.len()].copy_from_slice(name);
+    write_octal(&mut header[100..108], 0o644);
+    write_octal(&mut header[108..116], 0);
+    write_octal(&mut header[116..124], 0);
+    write_octal(&mut header[124..136], size);
+    write_octal(&mut header[136..148], 0);
+    header[148..156].fill(b' ');
+    header[156] = typeflag;
+    header[257..263].copy_from_slice(b"ustar\0");
+    header[263..265].copy_from_slice(b"00");
+    write_octal(&mut header[329..337], 0);
+    write_octal(&mut header[337..345], 0);
+    let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
+    let encoded = format!("{checksum:06o}");
+    header[148..154].copy_from_slice(encoded.as_bytes());
+    header[154] = 0;
+    header[155] = b' ';
+    header
+}
+
+fn append_tar_record(bytes: &mut Vec<u8>, header: [u8; 512], payload: &[u8]) {
+    bytes.extend_from_slice(&header);
+    bytes.extend_from_slice(payload);
+    bytes.resize(bytes.len().next_multiple_of(512), 0);
+}
+
+fn write_tar_pax_fixture(path: &Path) {
+    let body = b"nominal\n";
+    let extension = pax_record("path", "mission/status.txt");
+    let mut bytes = Vec::new();
+    append_tar_record(
+        &mut bytes,
+        tar_header(b"PaxHeader", extension.len() as u64, b'x'),
+        &extension,
+    );
+    append_tar_record(
+        &mut bytes,
+        tar_header(b"placeholder", body.len() as u64, b'0'),
+        body,
+    );
+    bytes.resize(bytes.len() + 1024, 0);
+    fs::write(path, bytes).expect("PAX TAR fixture should be writable");
+}
+
 fn crc32(bytes: &[u8]) -> u32 {
     let mut crc = u32::MAX;
     for byte in bytes {
@@ -240,6 +302,7 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert!(help_text.contains("zip64"));
     assert!(help_text.contains("tar-ustar"));
     assert!(help_text.contains("tar-gzip-ustar"));
+    assert!(help_text.contains("tar-pax"));
     assert!(help_text.contains("--worker-manifest <ABSOLUTE_PATH>"));
     assert!(help_text.contains("--version"));
 
@@ -328,6 +391,85 @@ fn explicit_tar_gzip_format_inspects_and_materializes() {
         fs::read(destination.join("mission/status.txt")).unwrap(),
         b"nominal\n"
     );
+}
+
+#[test]
+fn explicit_tar_pax_format_inspects_materializes_and_is_not_autodetected() {
+    let run = RunDirectory::create("tar-pax");
+    let archive = run.path.join("mission.pax.tar");
+    write_tar_pax_fixture(&archive);
+
+    let inspect = sealr(&[Path::new("--format"), Path::new("tar-pax"), &archive]);
+    assert_eq!(
+        inspect.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&inspect.stdout),
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    let view = json(&inspect.stdout, "PAX TAR stdout");
+    let receipt = json(&inspect.stderr, "PAX TAR stderr");
+    assert_eq!(view["source"]["magic"], "tar");
+    assert_eq!(view["members"].as_array().map(Vec::len), Some(1));
+    assert_eq!(view["members"][0]["path"], "mission/status.txt");
+    assert_eq!(view["members"][0]["method"], "raw");
+    assert_eq!(view["members"][0]["uncomp_bytes"], 8);
+    assert_eq!(view["policy"]["id"], "sealr:policy/default/v5");
+    assert_eq!(
+        receipt["identities"]["interpretation"]["id"],
+        "sealr.profile.tar.pax-portable.v1"
+    );
+    assert_eq!(
+        receipt["identities"]["interpretation"]["digest"]["sha256"],
+        "db951f620acf54e67845144e138f9f16994439847a97601e20a424dfea7f4445"
+    );
+    assert!(receipt["identities"]["layout"].get("sealrTreeV5").is_some());
+    assert!(receipt["identities"]["layout"].get("sealrTreeV1").is_none());
+    assert!(receipt["identities"]["content"]
+        .get("sealrTreeV1")
+        .is_some());
+    assert_eq!(receipt["policy"], view["policy"]);
+
+    let destination = run.path.join("materialized");
+    let materialize = sealr(&[
+        Path::new("--format"),
+        Path::new("tar-pax"),
+        &archive,
+        Path::new("--dest"),
+        &destination,
+    ]);
+    assert_eq!(
+        materialize.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&materialize.stdout),
+        String::from_utf8_lossy(&materialize.stderr)
+    );
+    assert_eq!(
+        fs::read(destination.join("mission/status.txt")).unwrap(),
+        b"nominal\n"
+    );
+    assert!(!destination.join("PaxHeader").exists());
+    assert!(!destination.join("placeholder").exists());
+
+    for format in [
+        None,
+        Some("tar-ustar"),
+        Some("tar-gzip-ustar"),
+        Some("zip64"),
+    ] {
+        let output = match format {
+            Some(format) => sealr(&[Path::new("--format"), Path::new(format), &archive]),
+            None => sealr(&[&archive]),
+        };
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "PAX fixture should not be detected under format selection {format:?}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[test]

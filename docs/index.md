@@ -1,6 +1,6 @@
 # Documentation
 
-Start with the [README](../README.md) for the published Alpha.10 boundary and a short walkthrough. This index separates current contracts from plans and research notes.
+Start with the [README](../README.md) for the published Alpha.11 boundary and a short walkthrough. This index separates current contracts from plans and research notes.
 
 ## Start and integrate
 
@@ -8,7 +8,7 @@ Start with the [README](../README.md) for the published Alpha.10 boundary and a 
 |---|---|
 | [Usage](usage.md) | Current CLI behavior and examples |
 | [API contract](api.md) | Current Rust and JSON surface, plus clearly marked target notation |
-| [Current release notes](releases/v0.1.0-alpha.10.md) | Alpha.10 contents and limitations |
+| [Current release notes](releases/v0.1.0-alpha.11.md) | Alpha.11 contents and limitations |
 | [Release verification](release-verification.md) | Verify checksums, provenance, tag, and immutable release state |
 | [Distribution contract](distribution-contract.md) | Exact source-package scope, compatibility policy, and native archive floors |
 
@@ -29,6 +29,8 @@ Start with the [README](../README.md) for the published Alpha.10 boundary and a 
 | [Portable UTF-8 ZIP32 profile v1](profiles/zip-portable-utf8-v1.md) | Supported Unicode flag, extra-field, NFC, component, and collision contract |
 | [Portable POSIX ustar profile v1](profiles/tar-ustar-portable-v1.md) | Explicit zero-dependency TAR language, evidence, identity, producer, and fuzz contract |
 | [Strict ASCII ZIP64 profile v1](profiles/zip64-strict-ascii-v1.md) | Explicit policy-v3 in-process ZIP64 language, identity, and worker limitation |
+| [Gzip-wrapped portable ustar profile v1](profiles/tar-gzip-ustar-portable-v1.md) | Explicit policy-v4 single-member wrapper, transform, two-domain evidence, and limits |
+| [Restricted POSIX PAX profile v1](profiles/tar-pax-portable-v1.md) | Explicit policy-v5 two-key PAX language, fixed precedence, provenance, and `sealrTreeV5` contract |
 | [Python wheel consumer v1](profiles/python-wheel-v1.md) | Supported bounded wheel artifact and scheme-relative plan evaluator |
 | [Differentials](differentials.md) | Single-interpretation rules and the ZipDiff corpus |
 | [Reduced-authority execution](sandbox.md) | Supervisor and worker design |
@@ -60,7 +62,7 @@ Repository vulnerability reporting and supported-version policy are in [SECURITY
 | Document | Purpose |
 |---|---|
 | [Roadmap](../ROADMAP.md) | Long-range capability order and release gates |
-| [Near-term execution plan](near-term.md) | Release-sized work packages through Alpha.10 and the next acceptance gates |
+| [Near-term execution plan](near-term.md) | Release-sized work packages through Alpha.11 and the next acceptance gates |
 | [Vision](vision.md) | Durable category and priorities |
 | [Usefulness test](usefulness.md) | Proof that a downstream consumer stops reparsing |
 | [Competitive context](competitive.md) | Category boundaries and alternatives |

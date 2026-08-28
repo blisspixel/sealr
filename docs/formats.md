@@ -1,6 +1,6 @@
 # Format strategy
 
-> Current implementation: classic ZIP32 with Store and Deflate, an explicit in-process strict ZIP64 preview under policy v3, raw portable POSIX ustar, and strict single-member gzip-wrapped portable ustar under policy v4. Rich TAR dialects, additional compressed wrappers, and the other tracked families remain profile-specific work. Format sequencing is governed by the [roadmap](../ROADMAP.md) and the detailed [format support architecture](format-support.md).
+> Current implementation: classic ZIP32 with Store and Deflate, an explicit in-process strict ZIP64 preview under policy v3, raw portable POSIX ustar, strict single-member gzip-wrapped portable ustar under policy v4, and restricted raw POSIX PAX under policy v5. GNU TAR, additional compressed wrappers, and the other tracked families remain profile-specific work. Format sequencing is governed by the [roadmap](../ROADMAP.md) and the detailed [format support architecture](format-support.md).
 
 ## Current archive profiles
 
@@ -19,6 +19,8 @@ The separately identified [strict ZIP64 profile](profiles/zip64-strict-ascii-v1.
 The separately identified [portable ustar profile](profiles/tar-ustar-portable-v1.md) validates exact ustar magic, version, checksums, bounded octal fields, record geometry, padding, and termination. It accepts regular files and directories only, uses TAR-native IR evidence and `sealrTreeV2` layout identity, and shares the portable path, quota, verification, retention, read, and atomic materialization core.
 
 The separately identified [gzip-wrapped portable ustar profile](profiles/tar-gzip-ustar-portable-v1.md) authorizes exactly one RFC 1952 member with Deflate payload, closed optional-field grammar, no trailing input, and verified FHCRC when present, CRC32, ISIZE, exact compressed consumption, output, and expansion bounds. It keeps the original gzip and decoded TAR as distinct immutable snapshot domains, uses wrapper-native plus TAR-native evidence, requires one exact transform and composite audit, and publishes `sealrTreeV4`. It adds no runtime dependency.
+
+The separately identified [restricted POSIX PAX profile](profiles/tar-pax-portable-v1.md) is selected as `ArchiveFormat::TarPax`, serialized as `tar-pax`, and authorized only by policy v5. It accepts exact portable-ustar physical headers plus bounded `x` and `g` extension payloads containing only canonical `path` and `size` records. A fixed four-field state model resolves local, then global, then underlying ustar values and preserves exact provenance in `sealr.archive-ir.tar-pax.v1`. An independent audit reparses the source covering and replays precedence before `sealrTreeV5` is available. It adds no runtime dependency and does not widen raw ustar or imply general PAX compatibility.
 
 The [API contract](api.md), [safety specification](safety.md), and [finding registry](findings.md) are normative for current behavior.
 
@@ -63,7 +65,9 @@ The first layer constructs one archive tree. The second assigns Python packaging
 | Raw portable POSIX ustar | Alpha.9 supported preview | Explicit selection, policy v2 authorization, no new runtime dependency, TAR-native evidence, independent roots, external producer corpus, native package and fuzz gates |
 | Strict ZIP64 | Alpha.10 in-process preview | Explicit policy v3 selection, exact saturated legacy and redundant ZIP64 field agreement, `sealrTreeV3`, and worker refusal pending semantic-record v3 |
 | gzip-wrapped portable ustar | Alpha.10 in-process preview | Explicit policy v4 selection, two immutable domains, exact single-member RFC 1952 consumption and checksums, existing `flate2`, `sealrTreeV4`, and worker refusal pending a later semantic record |
-| PAX and GNU TAR dialects | Next separate profiles | Raw PAX first, then GNU long-name-only; bounded keyword precedence and extension provenance, with links, sparse files, base-256 numbers, and mixed dialects denied |
+| Restricted raw POSIX PAX | Alpha.11 in-process preview | Explicit policy v5 selection, only canonical `path` and `size` records, exact precedence provenance, `sealrTreeV5`, zero new dependencies, and fail-closed worker refusal |
+| GNU long-name TAR dialect | Next separate profile | Exact GNU magic plus one `L` carrier consumed by one following ordinary member; long links, sparse files, base-256 numbers, PAX mixing, and recovery denied |
+| gzip-wrapped restricted PAX and GNU TAR | After each raw profile is frozen | Reuse the exact Alpha.10 transform while publishing separate composition identities and preserving content identity |
 | zstd, xz/LZMA, bzip2, and LZ4 frame wrappers | Independently promoted in that order | One measured decoder at a time with exact input, memory, work, checksum, and dependency evidence |
 | ZIP Zstd, XZ/LZMA, BZip2, Deflate64 adapters | After each codec promotion | Same exact-consumption, bounded-window, and dependency rules as Deflate; no second parser |
 | Wheel-oriented UTF-8 ZIP profile | Alpha.7 research evidence preserved | Exact research bytes remain available for historical verification |
@@ -72,7 +76,7 @@ The first layer constructs one archive tree. The second assigns Python packaging
 | APK | ZIP-derived structural plus consumer profile | APK signing block and signature semantics cannot pass through ordinary unique-covering ZIP unchanged |
 | OCI layers | TAR dialect plus stateful consumer | Whiteouts, links, metadata, and prior-tree application specified independently |
 | cpio, ar, deb, RPM, and CAB | Tracked structural and composed profiles | Local parsers, promoted codecs only, equivalent covering, identity, package, and fuzz evidence |
-| 7z | Tracked Tier 1 container | Local bounded coder-graph parser, Copy first, reviewed LZMA adapter later, no full extractor crate |
+| 7z | Tracked Tier 1 container | Local bounded coder-graph parser, Copy first, reviewed LZMA/LZMA2 adapter later, no full extractor crate |
 | RAR4 and RAR5 | Separate research gates | Store-first structure, licensing decision, solid and volume authority model, and equivalent assurance evidence |
 | Encrypted or spanned archives | Refused in the current direction | Separate key, volume, and streaming trust models would be required |
 
