@@ -907,6 +907,99 @@ try {
         throw 'packaged gzip-wrapped GNU long-name materialization did not preserve the effective admitted tree'
     }
 
+    # Zstandard CLI v1.5.7 default-level output for the conformance derived TAR
+    # holding mission/plan.txt with `verify twice, decode once`.
+    $zstdHex = '28b52ffd640007a5030062c5121880a96dc0ffd67f1bf321d16a06b6620b6de647c162f42' +
+        '2038a129f1e8cf43843d126fa1683558a6866f59b3abd0e3f43c424598ac944438c94ff7fa6e0ffad15' +
+        '0d4887600824deb5b6100e004fc10f92c40c35149a94c11c58d301c0907b01a0133cf00e83dc50ab023' +
+        '8562e1326b004ca51b2db'
+    $zstdBytes = [System.Convert]::FromHexString($zstdHex)
+    if ($zstdBytes.Length -ne 130) {
+        throw "native-package zstd-wrapped ustar fixture length changed: $($zstdBytes.Length)"
+    }
+    $zstdArchivePath = Join-Path $temporaryRoot 'portable-ustar.tar.zst'
+    [System.IO.File]::WriteAllBytes($zstdArchivePath, $zstdBytes)
+    $zstdSourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zstdArchivePath).Hash.ToLowerInvariant()
+    if ($zstdSourceHash -cne '4a467796ef2cd9a9e1a6ed670fa1d1ef15174b95be29b087af7339c32b078dcb') {
+        throw "native-package zstd-wrapped ustar fixture identity changed: $zstdSourceHash"
+    }
+
+    $zstdInspect = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-zstd-ustar', $zstdArchivePath) `
+        -Role 'packaged zstd-wrapped ustar inspect'
+    if ($zstdInspect.ExitCode -ne 0) {
+        throw "packaged zstd-wrapped ustar inspect failed: $($zstdInspect.Stderr)"
+    }
+    $zstdView = $zstdInspect.Stdout | ConvertFrom-Json
+    $zstdReceipt = $zstdInspect.Stderr | ConvertFrom-Json
+    if ($zstdView.schema -cne 'sealr.view.v1' -or
+        $zstdReceipt.schema -cne 'sealr.receipt.v2' -or
+        $zstdView.source.magic -cne 'zst' -or
+        $zstdView.interpretation.status -cne 'interpreted' -or
+        $zstdView.admission.status -cne 'admitted' -or
+        $zstdView.verification.status -cne 'complete' -or
+        $zstdView.effect.status -cne 'not-requested' -or
+        @($zstdView.members).Count -ne 1 -or
+        $zstdView.members[0].path -cne 'mission/plan.txt' -or
+        $zstdView.members[0].method -cne 'raw' -or
+        $zstdView.members[0].uncomp_bytes -ne 25 -or
+        $zstdReceipt.policy.id -cne 'sealr:policy/default/v8' -or
+        $zstdReceipt.policy.digest.sha256 -cne 'd0cfdf4d40e3a88c8e80170494b23e91761802304265e41ce19cb616fa8a1c42' -or
+        $zstdReceipt.identities.interpretation.id -cne 'sealr.profile.tar-zstd.ustar-portable.v1' -or
+        $zstdReceipt.identities.interpretation.digest.sha256 -cne 'c7d2e708f2f5258eddfb99fbf13661bd2f671a2daa4a45bc1d9603d30d472ae7' -or
+        $zstdReceipt.identities.layout.sealrTreeV9 -cne '8638eff6b2507614edc81eaccf4c3168e245febe0d1ee0eeb7651b018233fb63' -or
+        $zstdReceipt.identities.content.sealrTreeV1 -cne 'bc8f6d6f7870aeab647cff08db25471a729bd2a41e095d49d6254c49afc34278') {
+        throw 'packaged zstd-wrapped ustar inspect returned unexpected semantic evidence'
+    }
+
+    $zstdDefault = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @($zstdArchivePath) `
+        -Role 'packaged zstd-wrapped ustar compatibility-default refusal'
+    $zstdDefaultView = $zstdDefault.Stdout | ConvertFrom-Json
+    $zstdDefaultReceipt = $zstdDefault.Stderr | ConvertFrom-Json
+    if ($zstdDefault.ExitCode -ne 2 -or
+        $zstdDefaultView.verdict -cne 'rejected' -or
+        $zstdDefaultView.source.magic -cne 'unknown' -or
+        $zstdDefaultView.policy.id -cne 'sealr:policy/default/v1' -or
+        $zstdDefaultView.interpretation.status -cne 'unsupported' -or
+        $zstdDefaultView.admission.status -cne 'not-evaluated' -or
+        @($zstdDefaultView.members).Count -ne 0 -or
+        $zstdDefaultReceipt.identities.interpretation.id -cne 'sealr.profile.zip.strict-ascii.v1' -or
+        $zstdDefaultReceipt.identities.layout.status -cne 'unavailable' -or
+        $zstdDefaultReceipt.identities.content.status -cne 'unavailable') {
+        throw 'packaged compatibility default unexpectedly recognized zstd-wrapped ustar'
+    }
+
+    $zstdDestination = Join-Path $temporaryRoot 'zstd-ustar-output'
+    $zstdMaterialize = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-zstd-ustar', $zstdArchivePath, '--dest', $zstdDestination) `
+        -Role 'packaged zstd-wrapped ustar materialization'
+    if ($zstdMaterialize.ExitCode -ne 0) {
+        throw "packaged zstd-wrapped ustar materialization failed: $($zstdMaterialize.Stderr)"
+    }
+    $zstdMaterializedView = $zstdMaterialize.Stdout | ConvertFrom-Json
+    $zstdMaterializedReceipt = $zstdMaterialize.Stderr | ConvertFrom-Json
+    $zstdFiles = @(Get-ChildItem -LiteralPath $zstdDestination -Recurse -Force -File | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($zstdDestination, $_.FullName).Replace('\', '/')
+        })
+    $zstdDirectories = @(Get-ChildItem -LiteralPath $zstdDestination -Recurse -Force -Directory | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($zstdDestination, $_.FullName).Replace('\', '/')
+        })
+    $leakedStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+    if (-not $zstdMaterializedView.wrote -or
+        $zstdMaterializedView.effect.status -cne 'committed' -or
+        $zstdMaterializedReceipt.identities.layout.sealrTreeV9 -cne $zstdReceipt.identities.layout.sealrTreeV9 -or
+        $zstdMaterializedReceipt.identities.content.sealrTreeV1 -cne $zstdReceipt.identities.content.sealrTreeV1 -or
+        $zstdFiles.Count -ne 1 -or $zstdFiles[0] -cne 'mission/plan.txt' -or
+        $zstdDirectories.Count -ne 1 -or $zstdDirectories[0] -cne 'mission' -or
+        [System.IO.File]::ReadAllText((Join-Path $zstdDestination 'mission/plan.txt')) -cne 'verify twice, decode once' -or
+        $leakedStages.Count -ne 0) {
+        throw 'packaged zstd-wrapped ustar materialization did not preserve the effective admitted tree'
+    }
+
     if ($TargetTriple -ne $windowsTarget) {
         foreach ($relative in $expectedFiles) {
             $expectedMode = if ($relative -in @($binaryName, 'libexec/sealr/sealr-worker')) { '755' } else { '644' }
@@ -1041,6 +1134,25 @@ try {
             (Test-Path -LiteralPath $gzipGnuWorkerDestination) -or
             $workerStages.Count -ne 0) {
             throw 'packaged gzip-wrapped GNU long-name worker selection did not fail closed without fallback'
+        }
+        $zstdWorkerDestination = Join-Path $temporaryRoot 'zstd-ustar-worker-output'
+        $zstdWorker = Invoke-Captured `
+            -FilePath $packagedCli `
+            -Arguments @(
+                '--format', 'tar-zstd-ustar',
+                '--worker-manifest', $manifestPath,
+                $zstdArchivePath,
+                '--dest', $zstdWorkerDestination
+            ) `
+            -Role 'packaged zstd-wrapped ustar worker refusal'
+        $workerStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+        if ($zstdWorker.ExitCode -ne 1 -or
+            -not [string]::IsNullOrEmpty($zstdWorker.Stdout) -or
+            $zstdWorker.Stderr -notmatch 'isolation unavailable' -or
+            $zstdWorker.Stderr -notmatch 'zstd-wrapped TAR' -or
+            (Test-Path -LiteralPath $zstdWorkerDestination) -or
+            $workerStages.Count -ne 0) {
+            throw 'packaged zstd-wrapped ustar worker selection did not fail closed without fallback'
         }
         $elfHeader = readelf --file-header $helper | Out-String
         if ($LASTEXITCODE -ne 0 -or

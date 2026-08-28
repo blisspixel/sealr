@@ -8,6 +8,13 @@ The project is in initial development. Compatibility may change between preview 
 
 ### Added
 
+- Added the explicitly selected `sealr.profile.tar-zstd.ustar-portable.v1` zstd-wrapped portable ustar profile — the first promoted codec adapter beyond Deflate. Its canonical profile digest is `c7d2e708f2f5258eddfb99fbf13661bd2f671a2daa4a45bc1d9603d30d472ae7`, and it binds the new `sealr.transform.zstd.rfc8878-single-frame.v1` transform (digest `86745123584dc79e454f8f1bbf5a1bd1b75d1334902fd629e8eee8f251aa9d19`, decoder-parameter digest `a4a46d31cf8acbbfe043745ba1df4f43b7a955efc28ee8913804a99bae79d503`) and the exact frozen inner ustar profile digest.
+- Added the two reviewed Gate B runtime packages the codec dependency gates budget allows: `ruzstd` 0.9.0 (decoder only, `dict_builder` off) and `twox-hash` 2.1.4 (`xxhash64` only). The pinned per-target dependency contract records the exact +2 package delta, unchanged build-script set, and empty `links` set on all three release floors.
+- Added policy v8 with id `sealr:policy/default/v8` and digest `d0cfdf4d40e3a88c8e80170494b23e91761802304265e41ce19cb616fa8a1c42`, authorizing the separate `tar-zstd-ustar` format while preserving every earlier policy schema byte for byte.
+- Added `sealr.archive-ir.tar-zstd-ustar.v1` with exact wrapper evidence — descriptor flags, window descriptor and effective window, optional frame content size, header, block-payload, and trailer ranges, and the declared XXH64 checksum — plus `sealrTreeV9` with label `sealr.tree.layout.tar-zstd-ustar.v1`, preserving the format-neutral `sealrTreeV1` content identity so raw, gzip-wrapped, and zstd-wrapped encodings of one TAR share one content root.
+- Added the restricted RFC 8878 single-frame language: exactly one standard frame, skippable frames and dictionaries denied, reserved and unused descriptor bits zero, an 8 MiB effective-window ceiling enforced before decoder allocation, frame content size and XXH64 content checksum verified when present with Sealr owning the comparison, bounded incremental block decoding, and exact full-source consumption with concatenation and trailing bytes rejected.
+- Added a byte-exact independent header parse that is cross-checked against the decoder's interpretation — consumed header length, content size, checksum state, and total consumption must agree or the outcome fails closed as an integrity finding — plus an independent wrapper covering audit and a ready-boundary composite audit that re-hashes the derived snapshot with XXH64.
+- Added explicit Rust and CLI selection through `TarZstdInterpretationProfile::UstarPortableV1`, `ArchiveFormat::TarZstdUstar`, and `--format tar-zstd-ustar`, `codec.zstd.invalid_frame` and `codec.zstd.trailing_input` finding codes, and `sealr.tar-zstd-identity-conformance.v1` vectors carrying pinned Zstandard CLI 1.5.7 producer bytes replayed through the public production path.
 - Added the explicitly selected `sealr.profile.tar-gzip.pax-portable.v1` gzip-wrapped restricted PAX composition. Its canonical profile digest is `6cc91b2b8563b5b070b44bf357a5c62e5d9dda0aedc374d7a08cd80da9c5434f`, and it binds the frozen `sealr.transform.gzip.rfc1952-single-member.v1` wrapper digests and the exact frozen inner PAX profile digest.
 - Added the explicitly selected `sealr.profile.tar-gzip.gnu-longname-portable.v1` gzip-wrapped restricted GNU long-name composition. Its canonical profile digest is `622943e9629c4acc7cfeb446eb9f2d16bb245db589c1a200e885a9d69a02295a`, and it binds the same frozen wrapper digests and the exact frozen inner GNU profile digest.
 - Added policy v7 with id `sealr:policy/default/v7` and digest `92d576984b718e8a02bc6044090f8e2b335dbd1abd136d53e5b02d0ffbd978ef`. It authorizes the separate `tar-gzip-pax` and `tar-gzip-gnu-longname` formats, requires the explicit `max_derived_archive_bytes` cap, and preserves every earlier policy schema byte for byte.
@@ -24,9 +31,10 @@ The project is in initial development. Compatibility may change between preview 
 
 ### Security
 
-- Each composition wraps only its frozen raw dialect. A gzip wrapper cannot widen, alias, retry, or fall back between inner languages, and every wrapper failure keeps admission not-evaluated instead of guessing a recovery interpretation.
+- Each composition wraps only its frozen raw dialect. A wrapper cannot widen, alias, retry, or fall back between inner languages, and every wrapper failure keeps admission not-evaluated instead of guessing a recovery interpretation.
 - Denied GNU `K` long links, sparse files, GNU base-256 numbers, mixed PAX/GNU state, orphan carriers, links, devices, and concatenation.
-- The authenticated Linux worker fails closed on `tar-gnu-longname`, `tar-gzip-pax`, and `tar-gzip-gnu-longname` without fallback until a later semantic record supports the composed evidence.
+- The zstd window ceiling bounds decoder allocation for hostile frames, `zstd --long` output beyond 8 MiB is rejected exactly as the reference decompressor requires opt-in, and the version floor `ruzstd` 0.9.0 postdates both the RUSTSEC-2024-0400 fix and the first-frame window-cap correction.
+- The authenticated Linux worker fails closed on `tar-gnu-longname`, `tar-gzip-pax`, `tar-gzip-gnu-longname`, and `tar-zstd-ustar` without fallback until a later semantic record supports the wrapped evidence.
 
 ## [0.1.0-alpha.11] - 2026-08-28
 

@@ -52,6 +52,14 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-gnu-
 
 Each composition accepts exactly one strict RFC 1952 gzip member whose bounded decoded output satisfies the complete frozen raw dialect. No composition detects, retries, or aliases another selection, and the gzip FNAME field never selects the parser or supplies a member path.
 
+The zstd-wrapped portable ustar profile is a separate current-main in-process preview under policy v8, and the first promoted codec beyond Deflate:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.tar.zst --format tar-zstd-ustar
+```
+
+`--format tar-zstd-ustar` accepts exactly one strict RFC 8878 frame whose bounded decoded output is exact portable ustar. Skippable frames, dictionaries, windows beyond 8 MiB, concatenation, and trailing bytes fail closed.
+
 Strict ZIP64 is a separate current-main in-process preview under policy v3:
 
 ```text
@@ -90,6 +98,7 @@ For restricted GNU long-name TAR and the gzip compositions:
 cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-gnu-longname --dest ./new-output
 cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-pax --dest ./new-output
 cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-gnu-longname --dest ./new-output
+cargo run --locked -p sealr-cli -- path/to/archive.tar.zst --format tar-zstd-ustar --dest ./new-output
 ```
 
 For strict ZIP64 in process:
@@ -119,7 +128,7 @@ establish the complete supervised boundary or the command exits unsuccessfully
 without invoking the in-process payload path. macOS and Windows return
 isolation unavailable if this option is selected.
 
-The authenticated worker currently carries semantic-record v2 ZIP32 plans only. Combining `--format tar-ustar`, `--format tar-gzip-ustar`, `--format tar-pax`, `--format tar-gnu-longname`, `--format tar-gzip-pax`, `--format tar-gzip-gnu-longname`, or `--format zip64` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it refuses before source access, never creates a destination effect, and never falls back to in-process verification. Worker support waits for later semantic records that bind each format-specific evidence model.
+The authenticated worker currently carries semantic-record v2 ZIP32 plans only. Combining `--format tar-ustar`, `--format tar-gzip-ustar`, `--format tar-pax`, `--format tar-gnu-longname`, `--format tar-gzip-pax`, `--format tar-gzip-gnu-longname`, `--format tar-zstd-ustar`, or `--format zip64` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it refuses before source access, never creates a destination effect, and never falls back to in-process verification. Worker support waits for later semantic records that bind each format-specific evidence model.
 
 ## Output contract
 
@@ -170,7 +179,7 @@ Arguments:
   <ARCHIVE>  Archive file
 
 Options:
-      --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar, tar-gzip-ustar, tar-pax, tar-gnu-longname, tar-gzip-pax, tar-gzip-gnu-longname]
+      --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar, tar-gzip-ustar, tar-pax, tar-gnu-longname, tar-gzip-pax, tar-gzip-gnu-longname, tar-zstd-ustar]
       --dest <DEST>                      Materialize into a new directory below an existing parent
       --worker-manifest <ABSOLUTE_PATH>  Use the exact packaged Linux worker bound by this manifest
   -h, --help                             Print help

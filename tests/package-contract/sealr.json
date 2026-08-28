@@ -57,6 +57,7 @@
     "src/wheel/model.rs",
     "src/wheel/parse.rs",
     "src/zip.rs",
+    "src/zstd.rs",
     "tests/bounded_path_memory.rs",
     "tests/conformance/identity-v1.json",
     "tests/conformance/semantic-shadow-v1.json",
@@ -73,6 +74,7 @@
     "tests/conformance/tar-pax-profile-v1.json",
     "tests/conformance/tar-producers-v1.json",
     "tests/conformance/tar-ustar-portable-v1.json",
+    "tests/conformance/tar-zstd-identity-v1.json",
     "tests/conformance/zip64-identity-v1.json",
     "tests/golden_identity.rs",
     "tests/public_api.rs",
@@ -82,6 +84,7 @@
     "tests/tar_gzip_public_api.rs",
     "tests/tar_pax_public_api.rs",
     "tests/tar_public_api.rs",
+    "tests/tar_zstd_public_api.rs",
     "tests/wheel_consumer_api.rs",
     "tests/zip64_public_api.rs"
   ]

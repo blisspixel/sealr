@@ -55,12 +55,23 @@ const TAR_GZIP_GNU_LONGNAME_PROFILE_SCHEMA: &str =
 const TAR_GZIP_GNU_LONGNAME_IR_SCHEMA: &str = "sealr.archive-ir.tar-gzip-gnu-longname.v1";
 const TAR_GZIP_GNU_LONGNAME_TREE_ENCODING: &str = "sealrTreeV8";
 const TAR_GZIP_GNU_LONGNAME_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gzip-gnu-longname.v1";
+const TAR_ZSTD_MANIFEST_SCHEMA: &str = "sealr.tar-zstd-identity-conformance.v1";
+const TAR_ZSTD_PROFILE_SCHEMA: &str = "sealr.profile.tar-zstd.ustar-portable.v1";
+const TAR_ZSTD_IR_SCHEMA: &str = "sealr.archive-ir.tar-zstd-ustar.v1";
+const TAR_ZSTD_TREE_ENCODING: &str = "sealrTreeV9";
+const TAR_ZSTD_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-zstd-ustar.v1";
 const TAR_PORTABLE_PROFILE_SCHEMA: &str = "sealr.profile.tar.ustar-portable.v1";
 const TAR_PORTABLE_PROFILE_DIGEST: &str =
     "3c87c5ec4c1ad5377eb60ebb308e9e394aaf7a4133dddf5587829b4510af1700";
 const GZIP_TRANSFORM_ID: &str = "sealr.transform.gzip.rfc1952-single-member.v1";
 const GZIP_TRANSFORM_DEFINITION: &[u8] = b"algorithm=rfc1952-gzip;members=exactly-one;reserved-flags=zero;extra-fields=exact-subfield-framing-si2-nonzero-unique-ids;trailing-data=forbidden;header-crc=verify-when-present;data-crc32=verify;isize=verify;payload=rfc1951-deflate;output=bounded";
 const GZIP_DECODER_PARAMETERS: &[u8] = b"rfc1951-window-bits=15;preset-dictionary=none";
+const ZSTD_TRANSFORM_ID: &str = "sealr.transform.zstd.rfc8878-single-frame.v1";
+const ZSTD_TRANSFORM_DEFINITION: &[u8] = b"algorithm=rfc8878-zstd;frames=exactly-one;skippable-frames=forbidden;reserved-descriptor-bit=zero;unused-descriptor-bit=zero;dictionary=forbidden;window-size-max-bytes=8388608;frame-content-size=verify-when-present;content-checksum-xxh64=verify-when-present;trailing-data=forbidden;payload=rfc8878-blocks;output=bounded";
+const ZSTD_DECODER_PARAMETERS: &[u8] =
+    b"rfc8878-max-window-bytes=8388608;dictionary=none;block-decoding=bounded-incremental";
+const ZSTD_MAX_WINDOW_BYTES: u64 = 8 * 1024 * 1024;
+const ZSTD_MIN_WINDOW_BYTES: u64 = 1024;
 const MAX_DERIVED_TAR_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_PAX_EXTENSION_BYTES: u64 = 64 * 1024;
 const MAX_PAX_EXTENSIONS: usize = 1024;
@@ -700,6 +711,58 @@ struct TarGzipGnuLongNameLayoutRoot {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct TarZstdManifest {
+    schema: String,
+    archive_ir_schema: String,
+    profile: TarGzipProfileVector,
+    transform: TarGzipTransformVector,
+    inner_profile: TarGzipProfileVector,
+    layout_encoding: String,
+    layout_label: String,
+    content_encoding: String,
+    content_label: String,
+    derived_tar: TarGzipDerivedTar,
+    cases: Vec<TarZstdCase>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarZstdCase {
+    id: String,
+    source_bytes_hex: String,
+    source: DigestHex,
+    zstd: ZstdWrapperVector,
+    layout_preimage_hex: String,
+    layout_root: TarZstdLayoutRoot,
+    content_root: TarContentRoot,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ZstdWrapperVector {
+    descriptor: u8,
+    single_segment: bool,
+    checksum_flag: bool,
+    window_descriptor: Option<u8>,
+    window_size: u64,
+    frame_content_size: Option<u64>,
+    header: ByteRange,
+    compressed_payload: ByteRange,
+    trailer: ByteRange,
+    declared_checksum: Option<u32>,
+    derived_output_len: u64,
+    derived_output_sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarZstdLayoutRoot {
+    #[serde(rename = "sealrTreeV9")]
+    sealr_tree_v9: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ProfileVector {
     id: String,
     digest: DigestHex,
@@ -1040,6 +1103,24 @@ struct TarGzipProfileDefinition {
 }
 
 #[derive(Serialize)]
+struct TarZstdProfileDefinition {
+    schema: &'static str,
+    status: &'static str,
+    format: &'static str,
+    wrapper_profile: &'static str,
+    wrapper_profile_sha256: String,
+    decoder_parameters_sha256: String,
+    zstd_frames: &'static str,
+    zstd_descriptor: &'static str,
+    zstd_window: &'static str,
+    zstd_integrity: &'static str,
+    zstd_trailing_input: &'static str,
+    derived_output: &'static str,
+    inner_profile: &'static str,
+    inner_profile_sha256: String,
+}
+
+#[derive(Serialize)]
 struct TarPaxProfileDefinition {
     schema: &'static str,
     status: &'static str,
@@ -1137,8 +1218,22 @@ pub fn verify_manifest_json(bytes: &[u8]) -> Result<VerificationSummary, VerifyE
         TAR_GZIP_GNU_LONGNAME_MANIFEST_SCHEMA => {
             verify_tar_gzip_gnu_longname_identity_vector_json(bytes)
         }
+        TAR_ZSTD_MANIFEST_SCHEMA => verify_tar_zstd_identity_vector_json(bytes),
         schema => Err(VerifyError::new(format!("unsupported schema {schema:?}"))),
     }
+}
+
+pub fn verify_tar_zstd_identity_vector_json(
+    bytes: &[u8],
+) -> Result<VerificationSummary, VerifyError> {
+    if bytes.len() > MAX_MANIFEST_BYTES {
+        return Err(VerifyError::new(format!(
+            "TAR/zstd manifest exceeds {MAX_MANIFEST_BYTES} bytes"
+        )));
+    }
+    let manifest: TarZstdManifest = serde_json::from_slice(bytes)
+        .map_err(|error| VerifyError::new(format!("TAR/zstd JSON: {error}")))?;
+    verify_tar_zstd_manifest(&manifest)
 }
 
 pub fn verify_tar_gzip_pax_identity_vector_json(
@@ -3362,16 +3457,7 @@ fn verify_tar_gzip_transform(transform: &TarGzipTransformVector) -> Result<(), V
         &transform.decoder_parameters_digest.sha256,
         "gzip decoder-parameter digest",
     )?;
-    let id_len = u64::try_from(transform.id.len())
-        .map_err(|_| VerifyError::new("gzip transform id length exceeds u64"))?;
-    let definition_len = u64::try_from(definition.len())
-        .map_err(|_| VerifyError::new("gzip transform definition length exceeds u64"))?;
-    let mut profile_preimage = Vec::new();
-    profile_preimage.extend_from_slice(b"sealr.transform-profile.v1\0");
-    profile_preimage.extend_from_slice(&id_len.to_be_bytes());
-    profile_preimage.extend_from_slice(transform.id.as_bytes());
-    profile_preimage.extend_from_slice(&definition_len.to_be_bytes());
-    profile_preimage.extend_from_slice(&definition);
+    let profile_preimage = transform_profile_preimage(&transform.id, &definition, "gzip")?;
     if sha256_hex(&profile_preimage) != transform.digest.sha256
         || sha256_hex(&decoder_parameters) != transform.decoder_parameters_digest.sha256
     {
@@ -3380,6 +3466,53 @@ fn verify_tar_gzip_transform(transform: &TarGzipTransformVector) -> Result<(), V
         ));
     }
     Ok(())
+}
+
+fn verify_tar_zstd_transform(transform: &TarGzipTransformVector) -> Result<(), VerifyError> {
+    if transform.id != ZSTD_TRANSFORM_ID {
+        return Err(VerifyError::new("unsupported zstd transform id"));
+    }
+    let definition = decode_hex(&transform.definition_hex, "zstd transform definition")?;
+    let decoder_parameters =
+        decode_hex(&transform.decoder_parameters_hex, "zstd decoder parameters")?;
+    if definition != ZSTD_TRANSFORM_DEFINITION || decoder_parameters != ZSTD_DECODER_PARAMETERS {
+        return Err(VerifyError::new(
+            "zstd transform constants differ from the closed verifier registry",
+        ));
+    }
+    verify_digest(&transform.digest.sha256, "zstd transform digest")?;
+    verify_digest(
+        &transform.decoder_parameters_digest.sha256,
+        "zstd decoder-parameter digest",
+    )?;
+    let profile_preimage = transform_profile_preimage(&transform.id, &definition, "zstd")?;
+    if sha256_hex(&profile_preimage) != transform.digest.sha256
+        || sha256_hex(&decoder_parameters) != transform.decoder_parameters_digest.sha256
+    {
+        return Err(VerifyError::new(
+            "zstd transform or decoder parameters do not match their digest",
+        ));
+    }
+    Ok(())
+}
+
+fn transform_profile_preimage(
+    id: &str,
+    definition: &[u8],
+    label: &str,
+) -> Result<Vec<u8>, VerifyError> {
+    let id_len = u64::try_from(id.len())
+        .map_err(|_| VerifyError::new(format!("{label} transform id length exceeds u64")))?;
+    let definition_len = u64::try_from(definition.len()).map_err(|_| {
+        VerifyError::new(format!("{label} transform definition length exceeds u64"))
+    })?;
+    let mut profile_preimage = Vec::new();
+    profile_preimage.extend_from_slice(b"sealr.transform-profile.v1\0");
+    profile_preimage.extend_from_slice(&id_len.to_be_bytes());
+    profile_preimage.extend_from_slice(id.as_bytes());
+    profile_preimage.extend_from_slice(&definition_len.to_be_bytes());
+    profile_preimage.extend_from_slice(definition);
+    Ok(profile_preimage)
 }
 
 fn verify_tar_gzip_profile(
@@ -3469,6 +3602,54 @@ fn tar_gzip_composed_profile_canonical_bytes(
     };
     serde_json::to_vec(&definition)
         .map_err(|error| VerifyError::new(format!("{format} profile serialization: {error}")))
+}
+
+fn verify_tar_zstd_profile(
+    profile: &TarGzipProfileVector,
+    inner: &TarGzipProfileVector,
+    transform: &TarGzipTransformVector,
+) -> Result<(), VerifyError> {
+    if profile.id != TAR_ZSTD_PROFILE_SCHEMA
+        || inner.id != TAR_PORTABLE_PROFILE_SCHEMA
+        || inner.digest.sha256 != TAR_PORTABLE_PROFILE_DIGEST
+    {
+        return Err(VerifyError::new(
+            "unsupported TAR/zstd or inner TAR profile identity",
+        ));
+    }
+    verify_digest(&profile.digest.sha256, "TAR/zstd profile digest")?;
+    verify_digest(&inner.digest.sha256, "inner TAR profile digest")?;
+    let canonical = tar_zstd_profile_canonical_bytes(inner, transform)?;
+    if sha256_hex(&canonical) != profile.digest.sha256 {
+        return Err(VerifyError::new(
+            "TAR/zstd profile digest does not match reconstructed canonical bytes",
+        ));
+    }
+    Ok(())
+}
+
+fn tar_zstd_profile_canonical_bytes(
+    inner: &TarGzipProfileVector,
+    transform: &TarGzipTransformVector,
+) -> Result<Vec<u8>, VerifyError> {
+    let definition = TarZstdProfileDefinition {
+        schema: TAR_ZSTD_PROFILE_SCHEMA,
+        status: "supported-preview",
+        format: "tar-zstd-ustar",
+        wrapper_profile: ZSTD_TRANSFORM_ID,
+        wrapper_profile_sha256: transform.digest.sha256.clone(),
+        decoder_parameters_sha256: transform.decoder_parameters_digest.sha256.clone(),
+        zstd_frames: "exactly-one-standard-frame-no-skippable",
+        zstd_descriptor: "reserved-and-unused-bits-zero-dictionary-forbidden",
+        zstd_window: "effective-window-at-most-8388608-bytes",
+        zstd_integrity: "xxh64-checksum-and-frame-content-size-verified-when-present",
+        zstd_trailing_input: "denied-including-concatenated-and-skippable-frames",
+        derived_output: "private-immutable-bounded-and-sha256-bound",
+        inner_profile: TAR_PORTABLE_PROFILE_SCHEMA,
+        inner_profile_sha256: inner.digest.sha256.clone(),
+    };
+    serde_json::to_vec(&definition)
+        .map_err(|error| VerifyError::new(format!("tar-zstd-ustar profile serialization: {error}")))
 }
 
 fn verify_tar_gzip_derived_tar(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, VerifyError> {
@@ -3786,6 +3967,143 @@ fn verify_tar_gzip_case(
         return Err(VerifyError::new("TAR/gzip layout root mismatch"));
     }
     verify_digest(&case.content_root.sealr_tree_v1, "TAR/gzip content root")?;
+    if case.content_root.sealr_tree_v1 != manifest.derived_tar.content_root.sealr_tree_v1 {
+        return Err(VerifyError::new("wrapped and raw TAR content roots differ"));
+    }
+    Ok(())
+}
+
+fn verify_tar_zstd_manifest(
+    manifest: &TarZstdManifest,
+) -> Result<VerificationSummary, VerifyError> {
+    if manifest.schema != TAR_ZSTD_MANIFEST_SCHEMA
+        || manifest.archive_ir_schema != TAR_ZSTD_IR_SCHEMA
+        || manifest.layout_encoding != TAR_ZSTD_TREE_ENCODING
+        || manifest.layout_label != TAR_ZSTD_LAYOUT_LABEL
+        || manifest.content_encoding != TREE_ENCODING
+        || manifest.content_label != CONTENT_LABEL
+    {
+        return Err(VerifyError::new("unsupported TAR/zstd manifest contract"));
+    }
+    const EXPECTED_CASE_IDS: [&str; 2] = ["zstd-cli-default", "raw-blocks-minimal"];
+    if manifest.cases.len() != EXPECTED_CASE_IDS.len()
+        || manifest
+            .cases
+            .iter()
+            .map(|case| case.id.as_str())
+            .ne(EXPECTED_CASE_IDS)
+    {
+        return Err(VerifyError::new(
+            "TAR/zstd v1 manifest must contain exactly the two canonical ordered cases",
+        ));
+    }
+    verify_tar_zstd_transform(&manifest.transform)?;
+    verify_tar_zstd_profile(
+        &manifest.profile,
+        &manifest.inner_profile,
+        &manifest.transform,
+    )?;
+    let derived = verify_tar_gzip_derived_tar(&manifest.derived_tar)?;
+    let raw_layout = encode_tar_gzip_inner_layout(&manifest.derived_tar)?;
+    let committed_raw_preimage = decode_hex(
+        &manifest.derived_tar.raw_layout_preimage_hex,
+        "raw TAR layout preimage",
+    )?;
+    if raw_layout != committed_raw_preimage {
+        return Err(VerifyError::new(
+            "raw TAR layout preimage does not match derived evidence",
+        ));
+    }
+    verify_digest(
+        &manifest.derived_tar.raw_layout_root.sealr_tree_v2,
+        "raw TAR layout root",
+    )?;
+    if sha256_hex(&raw_layout) != manifest.derived_tar.raw_layout_root.sealr_tree_v2 {
+        return Err(VerifyError::new("raw TAR layout root mismatch"));
+    }
+    let content_preimage = encode_tar_gzip_content(&manifest.derived_tar)?;
+    verify_digest(
+        &manifest.derived_tar.content_root.sealr_tree_v1,
+        "derived TAR content root",
+    )?;
+    if sha256_hex(&content_preimage) != manifest.derived_tar.content_root.sealr_tree_v1 {
+        return Err(VerifyError::new("derived TAR content root mismatch"));
+    }
+
+    let mut source_digests = HashSet::new();
+    let mut layout_roots = HashSet::new();
+    let mut compressed_payload_digests = HashSet::new();
+    for case in &manifest.cases {
+        verify_tar_zstd_case(case, manifest, &derived)
+            .map_err(|error| error.context(&format!("TAR/zstd case {}", case.id)))?;
+        source_digests.insert(case.source.sha256.as_str());
+        layout_roots.insert(case.layout_root.sealr_tree_v9.as_str());
+        let source = decode_hex(&case.source_bytes_hex, "zstd source bytes")?;
+        compressed_payload_digests.insert(sha256_hex(range_bytes(
+            &source,
+            case.zstd.compressed_payload,
+            "zstd compressed payload",
+        )?));
+    }
+    if source_digests.len() < 2 || layout_roots.len() < 2 || compressed_payload_digests.len() < 2 {
+        return Err(VerifyError::new(
+            "TAR/zstd cases do not prove distinct encodings and source/layout separation",
+        ));
+    }
+    if manifest.derived_tar.raw_layout_root.sealr_tree_v2
+        == manifest.cases[0].layout_root.sealr_tree_v9
+    {
+        return Err(VerifyError::new(
+            "raw TAR and wrapped TAR layouts are not separated",
+        ));
+    }
+
+    Ok(VerificationSummary {
+        profiles: 1,
+        cases: manifest.cases.len(),
+        layout_roots: manifest.cases.len() + 1,
+        content_roots: manifest.cases.len() + 1,
+    })
+}
+
+fn verify_tar_zstd_case(
+    case: &TarZstdCase,
+    manifest: &TarZstdManifest,
+    derived: &[u8],
+) -> Result<(), VerifyError> {
+    let source = decode_hex(&case.source_bytes_hex, "zstd source bytes")?;
+    let source_len = u64::try_from(source.len())
+        .map_err(|_| VerifyError::new("zstd source length exceeds u64"))?;
+    if source_len > MAX_DERIVED_TAR_BYTES {
+        return Err(VerifyError::new(format!(
+            "zstd source exceeds the {MAX_DERIVED_TAR_BYTES}-byte verifier cap"
+        )));
+    }
+    verify_digest(&case.source.sha256, "zstd source digest")?;
+    if sha256_hex(&source) != case.source.sha256 {
+        return Err(VerifyError::new(
+            "zstd source bytes do not match their digest",
+        ));
+    }
+    verify_zstd_wrapper(
+        &source,
+        &case.zstd,
+        derived,
+        &manifest.derived_tar.source.sha256,
+    )?;
+
+    let actual_preimage = encode_tar_zstd_layout(case, manifest)?;
+    let committed_preimage = decode_hex(&case.layout_preimage_hex, "TAR/zstd layout preimage")?;
+    if actual_preimage != committed_preimage {
+        return Err(VerifyError::new(
+            "TAR/zstd layout preimage does not match reconstructed evidence",
+        ));
+    }
+    verify_digest(&case.layout_root.sealr_tree_v9, "TAR/zstd layout root")?;
+    if sha256_hex(&actual_preimage) != case.layout_root.sealr_tree_v9 {
+        return Err(VerifyError::new("TAR/zstd layout root mismatch"));
+    }
+    verify_digest(&case.content_root.sealr_tree_v1, "TAR/zstd content root")?;
     if case.content_root.sealr_tree_v1 != manifest.derived_tar.content_root.sealr_tree_v1 {
         return Err(VerifyError::new("wrapped and raw TAR content roots differ"));
     }
@@ -4411,6 +4729,182 @@ fn verify_gzip_c_string(
     Ok(end)
 }
 
+fn verify_zstd_wrapper(
+    source: &[u8],
+    evidence: &ZstdWrapperVector,
+    derived: &[u8],
+    derived_source_sha256: &str,
+) -> Result<(), VerifyError> {
+    const MAGIC: u32 = 0xfd2f_b528;
+    const SKIPPABLE_MAGIC_BASE: u32 = 0x184d_2a50;
+    const SKIPPABLE_MAGIC_MASK: u32 = 0xffff_fff0;
+    const DESCRIPTOR_RESERVED_BIT: u8 = 0b0000_1000;
+    const DESCRIPTOR_UNUSED_BIT: u8 = 0b0001_0000;
+    const DESCRIPTOR_DICTIONARY_BITS: u8 = 0b0000_0011;
+    const DESCRIPTOR_SINGLE_SEGMENT_BIT: u8 = 0b0010_0000;
+    const DESCRIPTOR_CHECKSUM_BIT: u8 = 0b0000_0100;
+
+    let source_len =
+        u64::try_from(source.len()).map_err(|_| VerifyError::new("zstd source exceeds u64"))?;
+    let header_end = checked_range_end(evidence.header, "zstd header")?;
+    let payload_end = checked_range_end(evidence.compressed_payload, "zstd compressed payload")?;
+    let trailer_end = checked_range_end(evidence.trailer, "zstd trailer")?;
+    if evidence.header.offset != 0
+        || evidence.compressed_payload.offset != header_end
+        || evidence.compressed_payload.len < 3
+        || evidence.trailer.offset != payload_end
+        || evidence.trailer.len != if evidence.checksum_flag { 4 } else { 0 }
+        || trailer_end != source_len
+    {
+        return Err(VerifyError::new(
+            "zstd ranges do not exactly partition one source frame",
+        ));
+    }
+    let fixed = source
+        .get(..5)
+        .ok_or_else(|| VerifyError::new("zstd fixed header is truncated"))?;
+    let magic = le_u32(fixed, 0);
+    if magic & SKIPPABLE_MAGIC_MASK == SKIPPABLE_MAGIC_BASE {
+        return Err(VerifyError::new(
+            "zstd source begins with a denied skippable frame",
+        ));
+    }
+    if magic != MAGIC {
+        return Err(VerifyError::new(
+            "zstd source does not begin with the standard frame magic",
+        ));
+    }
+    let descriptor = fixed[4];
+    if descriptor != evidence.descriptor
+        || descriptor & DESCRIPTOR_RESERVED_BIT != 0
+        || descriptor & DESCRIPTOR_UNUSED_BIT != 0
+        || descriptor & DESCRIPTOR_DICTIONARY_BITS != 0
+    {
+        return Err(VerifyError::new(
+            "zstd frame descriptor sets denied bits or disagrees with evidence",
+        ));
+    }
+    let single_segment = descriptor & DESCRIPTOR_SINGLE_SEGMENT_BIT != 0;
+    let checksum_flag = descriptor & DESCRIPTOR_CHECKSUM_BIT != 0;
+    if single_segment != evidence.single_segment || checksum_flag != evidence.checksum_flag {
+        return Err(VerifyError::new(
+            "zstd descriptor flags disagree with evidence",
+        ));
+    }
+
+    let mut cursor = 5_u64;
+    let window_descriptor = if single_segment {
+        None
+    } else {
+        let byte = range_bytes(
+            source,
+            ByteRange {
+                offset: cursor,
+                len: 1,
+            },
+            "zstd window descriptor",
+        )?[0];
+        cursor += 1;
+        Some(byte)
+    };
+    if window_descriptor != evidence.window_descriptor {
+        return Err(VerifyError::new(
+            "zstd window descriptor disagrees with evidence",
+        ));
+    }
+
+    let fcs_len = match (descriptor >> 6, single_segment) {
+        (0, false) => 0_u64,
+        (0, true) => 1,
+        (1, _) => 2,
+        (2, _) => 4,
+        (3, _) => 8,
+        _ => unreachable!("a two-bit flag has four values"),
+    };
+    let frame_content_size = if fcs_len == 0 {
+        None
+    } else {
+        let field = range_bytes(
+            source,
+            ByteRange {
+                offset: cursor,
+                len: fcs_len,
+            },
+            "zstd frame content size",
+        )?;
+        cursor += fcs_len;
+        let mut raw = [0_u8; 8];
+        raw[..field.len()].copy_from_slice(field);
+        let mut value = u64::from_le_bytes(raw);
+        if fcs_len == 2 {
+            value += 256;
+        }
+        Some(value)
+    };
+    if frame_content_size != evidence.frame_content_size || cursor != header_end {
+        return Err(VerifyError::new(
+            "zstd frame content size or header length disagrees with evidence",
+        ));
+    }
+
+    let derived_len = u64::try_from(derived.len())
+        .map_err(|_| VerifyError::new("derived TAR length exceeds u64"))?;
+    if let Some(declared) = frame_content_size {
+        if declared != derived_len {
+            return Err(VerifyError::new(
+                "zstd frame content size disagrees with the derived TAR length",
+            ));
+        }
+    }
+
+    let window_size = match window_descriptor {
+        Some(window) => {
+            let window_base = 1_u64 << (10 + u64::from(window >> 3));
+            window_base + (window_base / 8) * u64::from(window & 0x07)
+        }
+        None => frame_content_size.ok_or_else(|| {
+            VerifyError::new("single-segment zstd frames must declare a content size")
+        })?,
+    };
+    if window_size != evidence.window_size
+        || window_size > ZSTD_MAX_WINDOW_BYTES
+        || (!single_segment && window_size < ZSTD_MIN_WINDOW_BYTES)
+    {
+        return Err(VerifyError::new(
+            "zstd window size is outside the audited bounds",
+        ));
+    }
+
+    if checksum_flag {
+        let declared = evidence
+            .declared_checksum
+            .ok_or_else(|| VerifyError::new("zstd checksum flag has no declared checksum"))?;
+        let trailer = range_bytes(source, evidence.trailer, "zstd trailer")?;
+        let derived_checksum = u32::try_from(xxh64(derived, 0) & u64::from(u32::MAX))
+            .expect("masked XXH64 low bits always fit u32");
+        if le_u32(trailer, 0) != declared || derived_checksum != declared {
+            return Err(VerifyError::new(
+                "zstd trailer checksum disagrees with evidence or the derived TAR XXH64",
+            ));
+        }
+    } else if evidence.declared_checksum.is_some() {
+        return Err(VerifyError::new(
+            "zstd evidence declares a checksum the frame lacks",
+        ));
+    }
+
+    let derived_sha = sha256_hex(derived);
+    if evidence.derived_output_len != derived_len
+        || evidence.derived_output_sha256 != derived_sha
+        || evidence.derived_output_sha256 != derived_source_sha256
+    {
+        return Err(VerifyError::new(
+            "zstd derived TAR length or SHA-256 disagrees with evidence",
+        ));
+    }
+    Ok(())
+}
+
 fn encode_tar_gzip_layout(
     case: &TarGzipCase,
     manifest: &TarGzipManifest,
@@ -4507,6 +5001,66 @@ fn gzip_wrapper_layout_body(
     Ok(body)
 }
 
+fn encode_tar_zstd_layout(
+    case: &TarZstdCase,
+    manifest: &TarZstdManifest,
+) -> Result<Vec<u8>, VerifyError> {
+    let mut body = zstd_wrapper_layout_body(&case.zstd, &case.source.sha256, &manifest.transform)?;
+    push_bytes(
+        &mut body,
+        &tar_gzip_inner_layout_body(&manifest.derived_tar)?,
+    )?;
+    Ok(preimage(TAR_ZSTD_LAYOUT_LABEL, &body))
+}
+
+fn zstd_wrapper_layout_body(
+    zstd: &ZstdWrapperVector,
+    source_sha256: &str,
+    transform: &TarGzipTransformVector,
+) -> Result<Vec<u8>, VerifyError> {
+    let mut body = Vec::new();
+    push_bytes(&mut body, transform.id.as_bytes())?;
+    body.extend_from_slice(&decode_digest(
+        &transform.digest.sha256,
+        "zstd transform digest",
+    )?);
+    body.extend_from_slice(&decode_digest(
+        &transform.decoder_parameters_digest.sha256,
+        "zstd decoder-parameter digest",
+    )?);
+    push_u16(&mut body, 0);
+    encode_range(
+        &mut body,
+        ByteRange {
+            offset: 0,
+            len: checked_range_end(zstd.trailer, "zstd source range")?,
+        },
+    );
+    body.extend_from_slice(&decode_digest(source_sha256, "zstd source digest")?);
+    push_u16(&mut body, 1);
+    push_u64(&mut body, zstd.derived_output_len);
+    body.extend_from_slice(&decode_digest(
+        &zstd.derived_output_sha256,
+        "zstd derived output digest",
+    )?);
+    body.push(zstd.descriptor);
+    body.push(u8::from(zstd.single_segment));
+    body.push(u8::from(zstd.checksum_flag));
+    push_optional_u8(&mut body, zstd.window_descriptor);
+    push_u64(&mut body, zstd.window_size);
+    push_optional_u64(&mut body, zstd.frame_content_size);
+    encode_range(&mut body, zstd.header);
+    encode_range(&mut body, zstd.compressed_payload);
+    encode_range(&mut body, zstd.trailer);
+    push_optional_u32(&mut body, zstd.declared_checksum);
+    push_u64(&mut body, zstd.derived_output_len);
+    body.extend_from_slice(&decode_digest(
+        &zstd.derived_output_sha256,
+        "zstd derived output digest",
+    )?);
+    Ok(body)
+}
+
 fn encode_tar_gzip_inner_layout(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, VerifyError> {
     Ok(preimage(
         TAR_LAYOUT_LABEL,
@@ -4589,6 +5143,81 @@ fn crc32_ieee_bytes(bytes: &[u8]) -> u32 {
         }
     }
     !crc
+}
+
+const XXH64_PRIME_1: u64 = 0x9e37_79b1_85eb_ca87;
+const XXH64_PRIME_2: u64 = 0xc2b2_ae3d_27d4_eb4f;
+const XXH64_PRIME_3: u64 = 0x1656_67b1_9e37_79f9;
+const XXH64_PRIME_4: u64 = 0x85eb_ca77_c2b2_ae63;
+const XXH64_PRIME_5: u64 = 0x27d4_eb2f_1656_67c5;
+
+/// Independent XXH64 per the xxHash specification (Cyan4973/xxHash,
+/// doc/xxhash_spec.md), used to check the RFC 8878 content checksum without a
+/// decompressor. Validated against the published sanity digests in the
+/// python-xxhash README (ifduyue/python-xxhash: XXH64("")=ef46db3751d8e999,
+/// XXH64("xxhash")=32dd38952c4bc720, XXH64("xxhash", seed 20141025)=
+/// b559b98d844e0635) and the committed `zstd`-CLI frame checksum.
+fn xxh64(bytes: &[u8], seed: u64) -> u64 {
+    let (stripes, remainder) = bytes.as_chunks::<32>();
+    let mut hash = if stripes.is_empty() {
+        seed.wrapping_add(XXH64_PRIME_5)
+    } else {
+        let mut accumulators = [
+            seed.wrapping_add(XXH64_PRIME_1).wrapping_add(XXH64_PRIME_2),
+            seed.wrapping_add(XXH64_PRIME_2),
+            seed,
+            seed.wrapping_sub(XXH64_PRIME_1),
+        ];
+        for stripe in stripes {
+            for (lane, accumulator) in accumulators.iter_mut().enumerate() {
+                *accumulator = xxh64_round(*accumulator, le_u64(stripe, lane * 8));
+            }
+        }
+        let mut hash = accumulators[0]
+            .rotate_left(1)
+            .wrapping_add(accumulators[1].rotate_left(7))
+            .wrapping_add(accumulators[2].rotate_left(12))
+            .wrapping_add(accumulators[3].rotate_left(18));
+        for accumulator in accumulators {
+            hash = (hash ^ xxh64_round(0, accumulator))
+                .wrapping_mul(XXH64_PRIME_1)
+                .wrapping_add(XXH64_PRIME_4);
+        }
+        hash
+    };
+    hash = hash.wrapping_add(u64::try_from(bytes.len()).expect("slice length always fits u64"));
+    let (words, remainder) = remainder.as_chunks::<8>();
+    for word in words {
+        hash = (hash ^ xxh64_round(0, le_u64(word, 0)))
+            .rotate_left(27)
+            .wrapping_mul(XXH64_PRIME_1)
+            .wrapping_add(XXH64_PRIME_4);
+    }
+    let (half_words, remainder) = remainder.as_chunks::<4>();
+    for half_word in half_words {
+        hash = (hash ^ u64::from(le_u32(half_word, 0)).wrapping_mul(XXH64_PRIME_1))
+            .rotate_left(23)
+            .wrapping_mul(XXH64_PRIME_2)
+            .wrapping_add(XXH64_PRIME_3);
+    }
+    for byte in remainder {
+        hash = (hash ^ u64::from(*byte).wrapping_mul(XXH64_PRIME_5))
+            .rotate_left(11)
+            .wrapping_mul(XXH64_PRIME_1);
+    }
+    hash ^= hash >> 33;
+    hash = hash.wrapping_mul(XXH64_PRIME_2);
+    hash ^= hash >> 29;
+    hash = hash.wrapping_mul(XXH64_PRIME_3);
+    hash ^= hash >> 32;
+    hash
+}
+
+fn xxh64_round(accumulator: u64, input: u64) -> u64 {
+    accumulator
+        .wrapping_add(input.wrapping_mul(XXH64_PRIME_2))
+        .rotate_left(31)
+        .wrapping_mul(XXH64_PRIME_1)
 }
 
 fn verify_zip64_covering(source: &[u8], ir: &Zip64ArchiveIr) -> Result<(), VerifyError> {
@@ -5474,6 +6103,33 @@ fn encode_optional_range(output: &mut Vec<u8>, range: Option<ByteRange>) {
     if let Some(range) = range {
         output.push(1);
         encode_range(output, range);
+    } else {
+        output.push(0);
+    }
+}
+
+fn push_optional_u8(output: &mut Vec<u8>, value: Option<u8>) {
+    if let Some(value) = value {
+        output.push(1);
+        output.push(value);
+    } else {
+        output.push(0);
+    }
+}
+
+fn push_optional_u32(output: &mut Vec<u8>, value: Option<u32>) {
+    if let Some(value) = value {
+        output.push(1);
+        push_u32(output, value);
+    } else {
+        output.push(0);
+    }
+}
+
+fn push_optional_u64(output: &mut Vec<u8>, value: Option<u64>) {
+    if let Some(value) = value {
+        output.push(1);
+        push_u64(output, value);
     } else {
         output.push(0);
     }
@@ -6408,6 +7064,8 @@ mod tests {
     const TAR_GZIP_GNU_LONGNAME_VECTORS: &[u8] = include_bytes!(
         "../../../crates/sealr/tests/conformance/tar-gzip-gnu-longname-identity-v1.json"
     );
+    const TAR_ZSTD_VECTORS: &[u8] =
+        include_bytes!("../../../crates/sealr/tests/conformance/tar-zstd-identity-v1.json");
     const TAR_LAYOUT_VECTOR: &[u8] =
         include_bytes!("../../../crates/sealr/tests/conformance/tar-layout-v2.json");
 
@@ -6944,6 +7602,140 @@ mod tests {
             serde_json::json!(3);
         let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
         assert!(error.to_string().contains("resolved state"));
+    }
+
+    #[test]
+    fn committed_tar_zstd_vectors_verify_independently() {
+        let expected = VerificationSummary {
+            profiles: 1,
+            cases: 2,
+            layout_roots: 3,
+            content_roots: 3,
+        };
+        assert_eq!(
+            verify_tar_zstd_identity_vector_json(TAR_ZSTD_VECTORS).unwrap(),
+            expected
+        );
+        assert_eq!(verify_manifest_json(TAR_ZSTD_VECTORS).unwrap(), expected);
+
+        let manifest: TarZstdManifest = serde_json::from_slice(TAR_ZSTD_VECTORS).unwrap();
+        assert_ne!(
+            manifest.cases[0].source.sha256,
+            manifest.cases[1].source.sha256
+        );
+        assert_ne!(
+            manifest.cases[0].layout_root.sealr_tree_v9,
+            manifest.cases[1].layout_root.sealr_tree_v9
+        );
+        assert_eq!(
+            manifest.cases[0].content_root.sealr_tree_v1,
+            manifest.cases[1].content_root.sealr_tree_v1
+        );
+        assert_eq!(
+            manifest.cases[0].content_root.sealr_tree_v1,
+            manifest.derived_tar.content_root.sealr_tree_v1
+        );
+        assert!(manifest.cases[0].zstd.single_segment && manifest.cases[0].zstd.checksum_flag);
+        assert!(!manifest.cases[1].zstd.single_segment && !manifest.cases[1].zstd.checksum_flag);
+    }
+
+    #[test]
+    fn tar_zstd_profile_digest_is_reconstructed_without_sealr() {
+        let manifest: TarZstdManifest = serde_json::from_slice(TAR_ZSTD_VECTORS).unwrap();
+        verify_tar_zstd_transform(&manifest.transform).unwrap();
+        verify_tar_zstd_profile(
+            &manifest.profile,
+            &manifest.inner_profile,
+            &manifest.transform,
+        )
+        .unwrap();
+        assert_eq!(
+            sha256_hex(
+                &tar_zstd_profile_canonical_bytes(&manifest.inner_profile, &manifest.transform)
+                    .unwrap()
+            ),
+            "c7d2e708f2f5258eddfb99fbf13661bd2f671a2daa4a45bc1d9603d30d472ae7"
+        );
+    }
+
+    #[test]
+    fn xxh64_matches_the_reference_vectors() {
+        // Published sanity digests from the python-xxhash README
+        // (https://github.com/ifduyue/python-xxhash): XXH64("") =
+        // ef46db3751d8e999, XXH64("xxhash") = 32dd38952c4bc720, and
+        // XXH64("xxhash", seed 20141025) = b559b98d844e0635. XXH64("a") is the
+        // widely mirrored one-byte sanity value.
+        assert_eq!(xxh64(b"", 0), 0xef46_db37_51d8_e999);
+        assert_eq!(xxh64(b"a", 0), 0xd24e_c4f1_a98c_6e5b);
+        assert_eq!(xxh64(b"xxhash", 0), 0x32dd_3895_2c4b_c720);
+        assert_eq!(xxh64(b"xxhash", 20141025), 0xb559_b98d_844e_0635);
+
+        let manifest: TarZstdManifest = serde_json::from_slice(TAR_ZSTD_VECTORS).unwrap();
+        let derived = decode_hex(&manifest.derived_tar.bytes_hex, "test derived TAR").unwrap();
+        assert_eq!(
+            u32::try_from(xxh64(&derived, 0) & u64::from(u32::MAX)).unwrap(),
+            manifest.cases[0].zstd.declared_checksum.unwrap()
+        );
+    }
+
+    #[test]
+    fn tar_zstd_tampered_roots_and_wrapper_fields_are_rejected() {
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_ZSTD_VECTORS).unwrap();
+        vector["cases"][0]["layout_root"]["sealrTreeV9"] = serde_json::json!("0".repeat(64));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("layout root mismatch"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_ZSTD_VECTORS).unwrap();
+        vector["cases"][0]["zstd"]["declared_checksum"] = serde_json::json!(1);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("trailer checksum disagrees"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_ZSTD_VECTORS).unwrap();
+        vector["cases"][0]["zstd"]["descriptor"] = serde_json::json!(0x6c);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("frame descriptor"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_ZSTD_VECTORS).unwrap();
+        vector["cases"][1]["zstd"]["window_size"] = serde_json::json!(4096);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("window size"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_ZSTD_VECTORS).unwrap();
+        vector["profile"]["digest"]["sha256"] = serde_json::json!("0".repeat(64));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("profile digest"));
+    }
+
+    #[test]
+    fn tar_zstd_tampered_derived_bytes_frame_magic_and_window_are_rejected() {
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_ZSTD_VECTORS).unwrap();
+        let mut derived = decode_hex(
+            vector["derived_tar"]["bytes_hex"].as_str().unwrap(),
+            "test derived TAR",
+        )
+        .unwrap();
+        derived[512] ^= 1;
+        vector["derived_tar"]["bytes_hex"] = serde_json::json!(hex_bytes(&derived));
+        vector["derived_tar"]["source"]["sha256"] = serde_json::json!(sha256_hex(&derived));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("payload digest or CRC"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_ZSTD_VECTORS).unwrap();
+        let mut source = decode_hex(
+            vector["cases"][0]["source_bytes_hex"].as_str().unwrap(),
+            "test zstd source",
+        )
+        .unwrap();
+        source[..4].copy_from_slice(&0x184d_2a50_u32.to_le_bytes());
+        vector["cases"][0]["source_bytes_hex"] = serde_json::json!(hex_bytes(&source));
+        vector["cases"][0]["source"]["sha256"] = serde_json::json!(sha256_hex(&source));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("skippable frame"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_ZSTD_VECTORS).unwrap();
+        vector["cases"][1]["zstd"]["window_descriptor"] = serde_json::json!(16);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("window descriptor disagrees"));
     }
 
     #[test]

@@ -73,6 +73,8 @@ pub enum FindingCode {
     GzipExtra,
     CodecDeflateInvalidStream,
     CodecDeflateTrailingInput,
+    CodecZstdInvalidFrame,
+    CodecZstdTrailingInput,
     CrcMismatch,
     MethodUnsupported,
 }
@@ -149,6 +151,8 @@ impl FindingCode {
             Self::GzipExtra => "gzip.extra",
             Self::CodecDeflateInvalidStream => "codec.deflate.invalid_stream",
             Self::CodecDeflateTrailingInput => "codec.deflate.trailing_input",
+            Self::CodecZstdInvalidFrame => "codec.zstd.invalid_frame",
+            Self::CodecZstdTrailingInput => "codec.zstd.trailing_input",
             Self::CrcMismatch => "crc.mismatch",
             Self::MethodUnsupported => "method.unsupported",
         }

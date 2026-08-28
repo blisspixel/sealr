@@ -152,6 +152,19 @@ The gzip-wrapped PAX and GNU compositions reuse the exact Alpha.10 wrapper threa
 | Identity collapse across encodings | Source identity names the compressed bytes, layout identity (`sealrTreeV7`/`sealrTreeV8`) binds wrapper fields plus the complete inner layout, and only content identity is shared with the raw dialect. |
 | Decompression resource abuse | `max_derived_archive_bytes` bounds the decoded TAR, `max_ratio` bounds expansion against the recorded Deflate payload, and the wrapper metadata is charged against `max_metadata_bytes` before the inner parse. |
 
+### Zstd wrapper threats
+
+The zstd-wrapped ustar profile is the first codec promotion, so its threat model adds decoder-trust concerns beyond the composition pattern. `Policy::default_v8()` must authorize `tar-zstd-ustar`, and selection is explicit. Its profile digest is `c7d2e708f2f5258eddfb99fbf13661bd2f671a2daa4a45bc1d9603d30d472ae7`.
+
+| Attack | Zstd wrapper control |
+|---|---|
+| Window-driven allocation abuse | The effective window — descriptor formula or single-segment content size — is capped at 8 MiB before decoder allocation, and `--long`-style frames are rejected exactly as the reference decompressor requires opt-in. |
+| Dictionary or skippable-frame smuggling | Any `Dictionary_ID` and every skippable frame fail closed; no dictionary is ever registered with the decoder. |
+| Header interpretation divergence | Sealr parses the frame header byte-exactly for evidence, then cross-checks the decoder's consumed length, content size, and checksum state; any disagreement is an integrity failure, never a silent preference. |
+| Checksum or size lies | The XXH64 checksum and `Frame_Content_Size` are verified when present, Sealr owns the comparisons, and the ready boundary independently re-hashes the derived snapshot before any destination stage exists. |
+| Concatenation and trailing bytes | Exactly one frame must consume the complete source; magic-prefixed trailing bytes are unsupported concatenation and everything else is malformed. |
+| Decoder implementation faults | The reviewed `ruzstd` 0.9.0 floor postdates RUSTSEC-2024-0400 and the first-frame window-cap fix; its remaining `unsafe` ring buffer is a named review item, bounded incremental decoding avoids the crate's multi-frame conveniences, and a dedicated fuzz campaign exercises the wrapper. |
+
 ### Wheel consumer threats
 
 Wheel evaluation adds a second semantic layer above the ZIP container. The controls below are supported Alpha.8 preview behavior in `sealr::wheel`; the Alpha.7 laboratory preserves the external installer proof. Their full contract is in [Python wheel consumer profile v1](profiles/python-wheel-v1.md).

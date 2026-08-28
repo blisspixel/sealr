@@ -3,12 +3,13 @@ use std::io::{Cursor, Write};
 
 use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelLimits, CONSUMER_PROFILE_ID};
 use sealr::{
-    apply_supervised, apply_with_options, ApplyOptions, ArchiveFormat, LinuxWorker,
-    MemberReadErrorKind, Policy, Request, RetentionPlan, RetentionStatus, Source,
+    apply_supervised, apply_with_options, AdmissionStatus, ApplyOptions, ArchiveFormat,
+    LinuxWorker, MemberReadErrorKind, Policy, Request, RetentionPlan, RetentionStatus, Source,
     TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
-    TarPaxInterpretationProfile, TreeRoot, VerifiedArchive, ZipInterpretationProfile,
-    TAR_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_PAX_PORTABLE_V1,
-    TAR_PAX_PORTABLE_V1, TAR_USTAR_PORTABLE_V1, ZIP_STRICT_ASCII_V2,
+    TarPaxInterpretationProfile, TarZstdInterpretationProfile, TreeRoot, VerificationStatus,
+    VerifiedArchive, ZipInterpretationProfile, TAR_GNU_LONGNAME_PORTABLE_V1,
+    TAR_GZIP_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_PAX_PORTABLE_V1, TAR_PAX_PORTABLE_V1,
+    TAR_USTAR_PORTABLE_V1, TAR_ZSTD_USTAR_PORTABLE_V1, ZIP_STRICT_ASCII_V2,
 };
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
@@ -424,6 +425,66 @@ fn main() {
         Some(b"nominal".as_slice())
     );
     assert_eq!(gzip_gnu_archive.read_member(&gnu_path, 7).unwrap(), b"nominal");
+
+    let zstd_policy = Policy::default_v8();
+    let zstd_options = ApplyOptions::new()
+        .with_tar_zstd_interpretation_profile(TarZstdInterpretationProfile::UstarPortableV1)
+        .with_retention(
+            RetentionPlan::new(8, 8)
+                .with_path("retained.txt")
+                .expect("canonical zstd-wrapped TAR retention path"),
+        );
+    let zstd_tar = portable_tar();
+    let zstd_outcome = {
+        let zstd_bytes = zstd_wrapped(&zstd_tar);
+        apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("portable.tar.zst"),
+                    data: &zstd_bytes,
+                },
+                policy: &zstd_policy,
+                dest: None,
+            },
+            &zstd_options,
+        )
+    };
+    assert!(
+        matches!(zstd_outcome.admission, AdmissionStatus::Admitted),
+        "{:?}",
+        zstd_outcome.view.findings
+    );
+    assert!(matches!(
+        zstd_outcome.verification,
+        VerificationStatus::Complete
+    ));
+    let zstd_ir = zstd_outcome.archive_ir().expect("zstd-wrapped ustar IR");
+    assert_eq!(zstd_ir.format(), ArchiveFormat::TarZstdUstar);
+    assert_eq!(zstd_ir.profile(), TAR_ZSTD_USTAR_PORTABLE_V1);
+    let zstd_wrapper = zstd_ir
+        .zstd_evidence()
+        .expect("zstd-wrapped ustar wrapper evidence");
+    assert_eq!(zstd_wrapper.derived_output_len, zstd_tar.len() as u64);
+    assert!(matches!(
+        zstd_outcome.receipt.identities.layout,
+        TreeRoot::SealrTreeV9 { .. }
+    ));
+    let zstd_archive = zstd_outcome
+        .into_verified_archive()
+        .expect("zstd-wrapped portable ustar must expose verified authority");
+    assert_eq!(
+        zstd_archive.retention_status("retained.txt"),
+        RetentionStatus::Retained
+    );
+    assert_eq!(
+        zstd_archive.retained_member("retained.txt"),
+        Some(b"retained".as_slice())
+    );
+    assert_eq!(zstd_archive.read_member("later.txt", 5).unwrap(), b"later");
+    assert_eq!(
+        zstd_archive.read_member("later.txt", 4).unwrap_err().kind(),
+        MemberReadErrorKind::LimitExceeded
+    );
 }
 
 fn portable_tar() -> Vec<u8> {
@@ -482,6 +543,19 @@ fn gzip_wrapped(tar: &[u8]) -> Vec<u8> {
     bytes.extend_from_slice(tar);
     bytes.extend_from_slice(&crc32(tar).to_le_bytes());
     bytes.extend_from_slice(&(tar.len() as u32).to_le_bytes());
+    bytes
+}
+
+// A handcrafted RFC 8878 zstd frame carrying its derived TAR as one raw
+// (uncompressed) block with no content checksum, so the exact wrapper bytes
+// remain reviewable without a compression dependency.
+fn zstd_wrapped(tar: &[u8]) -> Vec<u8> {
+    let mut bytes = 0xFD2F_B528_u32.to_le_bytes().to_vec();
+    bytes.push(0x00);
+    bytes.push(0x08);
+    let block_header = ((tar.len() as u32) << 3) | 1;
+    bytes.extend_from_slice(&block_header.to_le_bytes()[..3]);
+    bytes.extend_from_slice(tar);
     bytes
 }
 

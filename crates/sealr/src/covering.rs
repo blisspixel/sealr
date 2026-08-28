@@ -712,6 +712,142 @@ fn gzip_isize(len: u64) -> u32 {
     u32::try_from(len % (u64::from(u32::MAX) + 1)).expect("gzip ISIZE modulo always fits u32")
 }
 
+/// Independently replay the restricted RFC 8878 wrapper grammar over the
+/// original snapshot without invoking a decompressor.
+pub(crate) fn audit_zstd_wrapper_covering(
+    snapshot: &SourceSnapshot<'_>,
+    evidence: &crate::ir::ZstdWrapperEvidence,
+) -> Result<(), Finding> {
+    const MAGIC: u32 = 0xFD2F_B528;
+    const MAX_WINDOW_BYTES: u64 = 8 * 1024 * 1024;
+    const MIN_WINDOW_BYTES: u64 = 1024;
+    let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
+
+    let header_end = checked_range_end(evidence.header, "zstd header overflow")?;
+    let payload_end = checked_range_end(evidence.compressed_payload, "zstd payload overflow")?;
+    let trailer_end = checked_range_end(evidence.trailer, "zstd trailer overflow")?;
+    if evidence.header.offset != 0
+        || evidence.compressed_payload.offset != header_end
+        || evidence.trailer.offset != payload_end
+        || trailer_end != snapshot.len()
+        || evidence.compressed_payload.len < 3
+    {
+        return Err(fail(
+            "zstd wrapper ranges do not exactly partition the snapshot",
+        ));
+    }
+
+    let mut fixed = [0_u8; 5];
+    snapshot
+        .read_exact_at(0, &mut fixed)
+        .map_err(|_| fail("zstd frame header is outside the original snapshot"))?;
+    if u32::from_le_bytes([fixed[0], fixed[1], fixed[2], fixed[3]]) != MAGIC {
+        return Err(fail("recorded source does not begin with the zstd magic"));
+    }
+    let descriptor = fixed[4];
+    if descriptor != evidence.descriptor
+        || descriptor & 0b0001_1000 != 0
+        || descriptor & 0b0000_0011 != 0
+    {
+        return Err(fail("zstd frame descriptor disagrees with the evidence"));
+    }
+    let single_segment = descriptor & 0b0010_0000 != 0;
+    let checksum_flag = descriptor & 0b0000_0100 != 0;
+    if single_segment != evidence.single_segment || checksum_flag != evidence.checksum_flag {
+        return Err(fail("zstd descriptor flags disagree with the evidence"));
+    }
+    if evidence.trailer.len != if checksum_flag { 4 } else { 0 } {
+        return Err(fail("zstd trailer length disagrees with the checksum flag"));
+    }
+
+    let mut cursor = 5_u64;
+    let window_descriptor = if single_segment {
+        None
+    } else {
+        let mut window = [0_u8; 1];
+        snapshot
+            .read_exact_at(cursor, &mut window)
+            .map_err(|_| fail("zstd window descriptor is outside the snapshot"))?;
+        cursor += 1;
+        Some(window[0])
+    };
+    if window_descriptor != evidence.window_descriptor {
+        return Err(fail("zstd window descriptor disagrees with the evidence"));
+    }
+
+    let fcs_len = match (descriptor >> 6, single_segment) {
+        (0, false) => 0_u64,
+        (0, true) => 1,
+        (1, _) => 2,
+        (2, _) => 4,
+        (3, _) => 8,
+        _ => unreachable!("a two-bit flag has four values"),
+    };
+    let frame_content_size = if fcs_len == 0 {
+        None
+    } else {
+        let mut fcs_bytes = [0_u8; 8];
+        snapshot
+            .read_exact_at(cursor, &mut fcs_bytes[..fcs_len as usize])
+            .map_err(|_| fail("zstd frame content size is outside the snapshot"))?;
+        cursor += fcs_len;
+        let mut value = u64::from_le_bytes(fcs_bytes);
+        if fcs_len == 2 {
+            value += 256;
+        }
+        Some(value)
+    };
+    if frame_content_size != evidence.frame_content_size || cursor != evidence.header.len {
+        return Err(fail(
+            "zstd frame content size or header length disagrees with the evidence",
+        ));
+    }
+    if let Some(declared) = frame_content_size {
+        if declared != evidence.derived_output_len {
+            return Err(fail(
+                "zstd frame content size disagrees with the derived output length",
+            ));
+        }
+    }
+
+    let window_size = match window_descriptor {
+        Some(window) => {
+            let window_base = 1_u64 << (10 + u64::from(window >> 3));
+            window_base + (window_base / 8) * u64::from(window & 0x7)
+        }
+        None => frame_content_size
+            .ok_or_else(|| fail("single-segment zstd frames must declare a content size"))?,
+    };
+    if window_size != evidence.window_size
+        || window_size > MAX_WINDOW_BYTES
+        || (!single_segment && window_size < MIN_WINDOW_BYTES)
+    {
+        return Err(fail("zstd window size is outside the audited bounds"));
+    }
+
+    if checksum_flag {
+        let mut trailer = [0_u8; 4];
+        snapshot
+            .read_exact_at(evidence.trailer.offset, &mut trailer)
+            .map_err(|_| fail("zstd checksum trailer is outside the snapshot"))?;
+        if Some(u32::from_le_bytes(trailer)) != evidence.declared_checksum {
+            return Err(fail("zstd checksum trailer disagrees with the evidence"));
+        }
+    } else if evidence.declared_checksum.is_some() {
+        return Err(fail("zstd evidence declares a checksum the frame lacks"));
+    }
+
+    if evidence.derived_output_sha256.len() != 64
+        || !evidence
+            .derived_output_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(fail("zstd derived-output identity is malformed"));
+    }
+    Ok(())
+}
+
 fn audit_gzip_c_string(
     snapshot: &SourceSnapshot<'_>,
     cursor: u64,
@@ -751,7 +887,7 @@ pub(crate) fn audit_tar_covering(
     let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
     if !matches!(
         ir.format(),
-        ArchiveFormat::TarUstar | ArchiveFormat::TarGzipUstar
+        ArchiveFormat::TarUstar | ArchiveFormat::TarGzipUstar | ArchiveFormat::TarZstdUstar
     ) {
         return Err(fail("TAR covering audit received a non-TAR IR"));
     }
@@ -765,6 +901,16 @@ pub(crate) fn audit_tar_covering(
                 .ok_or_else(|| fail("gzip-wrapped TAR IR has no wrapper evidence"))?;
             if gzip.derived_output_len != snapshot.len()
                 || snapshot.digest().sha256() != Some(gzip.derived_output_sha256.as_str())
+            {
+                return Err(fail("derived TAR identity does not match its snapshot"));
+            }
+        }
+        ArchiveFormat::TarZstdUstar => {
+            let zstd = ir
+                .zstd_evidence()
+                .ok_or_else(|| fail("zstd-wrapped TAR IR has no wrapper evidence"))?;
+            if zstd.derived_output_len != snapshot.len()
+                || snapshot.digest().sha256() != Some(zstd.derived_output_sha256.as_str())
             {
                 return Err(fail("derived TAR identity does not match its snapshot"));
             }
@@ -2813,6 +2959,7 @@ mod tests {
             ArchiveEvidence::TarGnuLongName(evidence) => &mut evidence.tar,
             ArchiveEvidence::TarGzipPax(evidence) => &mut evidence.pax.tar,
             ArchiveEvidence::TarGzipGnuLongName(evidence) => &mut evidence.gnu.tar,
+            ArchiveEvidence::TarZstd(evidence) => &mut evidence.tar,
             ArchiveEvidence::Zip(_) | ArchiveEvidence::Zip64(_) | ArchiveEvidence::TarGzip(_) => {
                 panic!("expected TAR evidence")
             }
@@ -2828,7 +2975,8 @@ mod tests {
             | ArchiveEvidence::TarPax(_)
             | ArchiveEvidence::TarGnuLongName(_)
             | ArchiveEvidence::TarGzipPax(_)
-            | ArchiveEvidence::TarGzipGnuLongName(_) => {
+            | ArchiveEvidence::TarGzipGnuLongName(_)
+            | ArchiveEvidence::TarZstd(_) => {
                 panic!("expected ZIP evidence")
             }
         }
@@ -2843,7 +2991,8 @@ mod tests {
             | ArchiveEvidence::TarPax(_)
             | ArchiveEvidence::TarGnuLongName(_)
             | ArchiveEvidence::TarGzipPax(_)
-            | ArchiveEvidence::TarGzipGnuLongName(_) => {
+            | ArchiveEvidence::TarGzipGnuLongName(_)
+            | ArchiveEvidence::TarZstd(_) => {
                 panic!("expected ZIP64 evidence")
             }
         }
@@ -2857,6 +3006,7 @@ mod tests {
             }
             MemberEvidence::TarGnuLongName(evidence)
             | MemberEvidence::TarGzipGnuLongName(evidence) => &mut evidence.tar,
+            MemberEvidence::TarZstd(evidence) => evidence,
             MemberEvidence::Zip(_) | MemberEvidence::Zip64(_) | MemberEvidence::TarGzip(_) => {
                 panic!("expected TAR member evidence")
             }
@@ -2872,7 +3022,8 @@ mod tests {
             | ArchiveEvidence::Tar(_)
             | ArchiveEvidence::TarGzip(_)
             | ArchiveEvidence::TarGnuLongName(_)
-            | ArchiveEvidence::TarGzipGnuLongName(_) => panic!("expected PAX archive evidence"),
+            | ArchiveEvidence::TarGzipGnuLongName(_)
+            | ArchiveEvidence::TarZstd(_) => panic!("expected PAX archive evidence"),
         }
     }
 
@@ -2884,7 +3035,8 @@ mod tests {
             | MemberEvidence::Tar(_)
             | MemberEvidence::TarGzip(_)
             | MemberEvidence::TarGnuLongName(_)
-            | MemberEvidence::TarGzipGnuLongName(_) => panic!("expected PAX member evidence"),
+            | MemberEvidence::TarGzipGnuLongName(_)
+            | MemberEvidence::TarZstd(_) => panic!("expected PAX member evidence"),
         }
     }
 
@@ -2897,7 +3049,8 @@ mod tests {
             | ArchiveEvidence::Tar(_)
             | ArchiveEvidence::TarGzip(_)
             | ArchiveEvidence::TarPax(_)
-            | ArchiveEvidence::TarGzipPax(_) => panic!("expected GNU long-name archive evidence"),
+            | ArchiveEvidence::TarGzipPax(_)
+            | ArchiveEvidence::TarZstd(_) => panic!("expected GNU long-name archive evidence"),
         }
     }
 
@@ -2913,7 +3066,8 @@ mod tests {
             | MemberEvidence::Tar(_)
             | MemberEvidence::TarGzip(_)
             | MemberEvidence::TarPax(_)
-            | MemberEvidence::TarGzipPax(_) => panic!("expected GNU long-name member evidence"),
+            | MemberEvidence::TarGzipPax(_)
+            | MemberEvidence::TarZstd(_) => panic!("expected GNU long-name member evidence"),
         }
     }
 
@@ -2926,7 +3080,8 @@ mod tests {
             | MemberEvidence::TarPax(_)
             | MemberEvidence::TarGnuLongName(_)
             | MemberEvidence::TarGzipPax(_)
-            | MemberEvidence::TarGzipGnuLongName(_) => {
+            | MemberEvidence::TarGzipGnuLongName(_)
+            | MemberEvidence::TarZstd(_) => {
                 panic!("expected ZIP member evidence")
             }
         }
@@ -2941,7 +3096,8 @@ mod tests {
             | MemberEvidence::TarPax(_)
             | MemberEvidence::TarGnuLongName(_)
             | MemberEvidence::TarGzipPax(_)
-            | MemberEvidence::TarGzipGnuLongName(_) => {
+            | MemberEvidence::TarGzipGnuLongName(_)
+            | MemberEvidence::TarZstd(_) => {
                 panic!("expected ZIP64 member evidence")
             }
         }

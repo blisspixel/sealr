@@ -8,6 +8,7 @@ use std::fs;
 use crate::covering::{
     audit_covering, audit_gzip_wrapper_covering, audit_tar_covering,
     audit_tar_gnu_longname_covering, audit_tar_pax_covering, audit_zip64_covering,
+    audit_zstd_wrapper_covering,
 };
 use crate::findings::{Finding, FindingCode, Severity};
 use crate::identity::OutcomeIdentities;
@@ -15,7 +16,8 @@ use crate::ir::{
     ArchiveFormat, ArchiveIR, GnuLongNameCarrierEvidence, GzipWrapperEvidence, IrMember,
     MemberKind, MemberVerification, NormalizationAction, PaxExtensionEvidence, PaxRecordEvidence,
     TarArchiveCovering, TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile,
-    TarInterpretationProfile, TarPaxInterpretationProfile, ZipInterpretationProfile,
+    TarInterpretationProfile, TarPaxInterpretationProfile, TarZstdInterpretationProfile,
+    ZipInterpretationProfile, ZstdWrapperEvidence,
 };
 use crate::jail::{jail_name_for_profile, portable_name_violation, profile_case_fold};
 use crate::materialize::{process_member_to_file, CapabilityMaterializer, MaterializationMeta};
@@ -39,6 +41,7 @@ use crate::verification::{digest_hex, planned_payload_reader, verify_payload, Pa
 use crate::verified::{RetentionBuild, RetentionPlan, VerifiedArchive};
 use crate::zip::{self, ZipMember};
 use crate::{gzip, gzip::GzipErrorKind};
+use crate::{zstd, zstd::ZstdErrorKind};
 use crc32fast::Hasher as Crc;
 use serde::Serialize;
 
@@ -77,6 +80,7 @@ pub enum ArchiveSelection {
     TarGzipUstar(TarGzipInterpretationProfile),
     TarPax(TarPaxInterpretationProfile),
     TarGnuLongName(TarGnuLongNameInterpretationProfile),
+    TarZstdUstar(TarZstdInterpretationProfile),
 }
 
 impl Default for ArchiveSelection {
@@ -154,6 +158,15 @@ impl ApplyOptions {
         self
     }
 
+    /// Select one strict single-frame zstd-wrapped raw TAR dialect explicitly.
+    pub fn with_tar_zstd_interpretation_profile(
+        mut self,
+        profile: TarZstdInterpretationProfile,
+    ) -> Self {
+        self.selection = ArchiveSelection::TarZstdUstar(profile);
+        self
+    }
+
     /// Return the requested retention plan, when present.
     pub fn retention_plan(&self) -> Option<&RetentionPlan> {
         self.retention.as_ref()
@@ -176,7 +189,8 @@ impl ApplyOptions {
             ArchiveSelection::TarUstar(_)
             | ArchiveSelection::TarGzipUstar(_)
             | ArchiveSelection::TarPax(_)
-            | ArchiveSelection::TarGnuLongName(_) => None,
+            | ArchiveSelection::TarGnuLongName(_)
+            | ArchiveSelection::TarZstdUstar(_) => None,
         }
     }
 
@@ -187,7 +201,8 @@ impl ApplyOptions {
             ArchiveSelection::TarUstar(profile) => Some(profile),
             ArchiveSelection::TarGzipUstar(_)
             | ArchiveSelection::TarPax(_)
-            | ArchiveSelection::TarGnuLongName(_) => None,
+            | ArchiveSelection::TarGnuLongName(_)
+            | ArchiveSelection::TarZstdUstar(_) => None,
         }
     }
 
@@ -197,6 +212,19 @@ impl ApplyOptions {
             ArchiveSelection::TarGzipUstar(profile) => Some(profile),
             ArchiveSelection::Zip(_)
             | ArchiveSelection::TarUstar(_)
+            | ArchiveSelection::TarPax(_)
+            | ArchiveSelection::TarGnuLongName(_)
+            | ArchiveSelection::TarZstdUstar(_) => None,
+        }
+    }
+
+    /// Return the selected zstd-wrapped TAR interpretation, when requested.
+    pub fn tar_zstd_interpretation_profile(&self) -> Option<TarZstdInterpretationProfile> {
+        match self.selection {
+            ArchiveSelection::TarZstdUstar(profile) => Some(profile),
+            ArchiveSelection::Zip(_)
+            | ArchiveSelection::TarUstar(_)
+            | ArchiveSelection::TarGzipUstar(_)
             | ArchiveSelection::TarPax(_)
             | ArchiveSelection::TarGnuLongName(_) => None,
         }
@@ -209,7 +237,8 @@ impl ApplyOptions {
             ArchiveSelection::Zip(_)
             | ArchiveSelection::TarUstar(_)
             | ArchiveSelection::TarGzipUstar(_)
-            | ArchiveSelection::TarGnuLongName(_) => None,
+            | ArchiveSelection::TarGnuLongName(_)
+            | ArchiveSelection::TarZstdUstar(_) => None,
         }
     }
 
@@ -222,7 +251,8 @@ impl ApplyOptions {
             ArchiveSelection::Zip(_)
             | ArchiveSelection::TarUstar(_)
             | ArchiveSelection::TarGzipUstar(_)
-            | ArchiveSelection::TarPax(_) => None,
+            | ArchiveSelection::TarPax(_)
+            | ArchiveSelection::TarZstdUstar(_) => None,
         }
     }
 
@@ -239,6 +269,7 @@ impl ApplyOptions {
             ArchiveSelection::TarGzipUstar(profile) => profile.archive_format(),
             ArchiveSelection::TarPax(_) => crate::ArchiveFormat::TarPax,
             ArchiveSelection::TarGnuLongName(_) => crate::ArchiveFormat::TarGnuLongName,
+            ArchiveSelection::TarZstdUstar(profile) => profile.archive_format(),
         }
     }
 }
@@ -412,6 +443,9 @@ pub fn apply_with_options(req: Request<'_>, options: &ApplyOptions) -> Outcome {
         }
         ArchiveSelection::TarGnuLongName(profile) => {
             return apply_tar_gnu_longname_with_options(&req, options, profile);
+        }
+        ArchiveSelection::TarZstdUstar(profile) => {
+            return apply_tar_zstd_with_options(&req, options, profile);
         }
         ArchiveSelection::Zip(_) => {}
     }
@@ -867,9 +901,236 @@ fn apply_tar_gzip_with_options(
     }
 }
 
+fn apply_tar_zstd_with_options(
+    req: &Request<'_>,
+    options: &ApplyOptions,
+    profile: TarZstdInterpretationProfile,
+) -> Outcome {
+    let policy = req.policy;
+    let initial_materialization =
+        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
+    let controls = match policy.compile_for_format(profile.policy_format()) {
+        Ok(controls) => controls,
+        Err(finding) => {
+            return reject_only(
+                (None, SourceDigest::unavailable(), policy.clone()),
+                vec![finding.clone()],
+                None,
+                initial_materialization,
+                SemanticAxes::policy_compile_failed(&finding),
+                SnapshotKind::Unavailable,
+                OutcomeIdentities::unavailable_for_tar_zstd(SourceDigest::unavailable(), profile),
+            );
+        }
+    };
+    let snapshot = match read_source(&req.source, controls.budget) {
+        Ok(snapshot) => snapshot,
+        Err(failure) => {
+            let admission = if failure.finding.code == FindingCode::QuotaArchive {
+                AdmissionStatus::Denied
+            } else {
+                AdmissionStatus::NotEvaluated
+            };
+            let digest = failure.digest.clone();
+            return reject_only(
+                (failure.path, failure.digest, policy.clone()),
+                vec![failure.finding.clone()],
+                None,
+                initial_materialization,
+                SemanticAxes::source_failure(&failure.finding, admission),
+                failure.snapshot_kind,
+                OutcomeIdentities::unavailable_for_tar_zstd(digest, profile),
+            );
+        }
+    };
+    let source_digest = snapshot.digest().clone();
+    let identities_base =
+        OutcomeIdentities::unavailable_for_tar_zstd(source_digest.clone(), profile);
+    let mut snapshots = SnapshotSet::from_original(snapshot);
+    let mut transforms = TransformGraph::empty();
+    let transformed = match zstd::transform_single_frame(
+        &mut snapshots,
+        &mut transforms,
+        zstd::ZstdLimits {
+            max_metadata_bytes: controls.budget.max_metadata_bytes,
+            max_output_bytes: controls.budget.max_derived_archive_bytes,
+        },
+    ) {
+        Ok(transformed) => transformed,
+        Err(error) => {
+            let axes = zstd_failure_axes(&error);
+            let finding = error.into_finding();
+            let original = snapshots.original();
+            let observed_magic = observed_zstd_magic(original);
+            return finish(
+                (original.path_owned(), source_digest, original.kind()),
+                observed_magic,
+                policy,
+                vec![finding],
+                Vec::new(),
+                initial_materialization,
+                axes,
+                identities_base,
+            );
+        }
+    };
+    if transformed.output_domain != SnapshotDomainId::FIRST_DERIVED {
+        let finding = Finding::error(
+            FindingCode::CoveringInconsistent,
+            "zstd transform did not produce the expected derived snapshot domain",
+        );
+        let original = snapshots.original();
+        return finish(
+            (original.path_owned(), source_digest, original.kind()),
+            "zst",
+            policy,
+            vec![finding.clone()],
+            Vec::new(),
+            initial_materialization,
+            SemanticAxes::structure_stop(
+                InterpretationStatus::Indeterminate,
+                AdmissionStatus::NotEvaluated,
+                &finding,
+            ),
+            identities_base,
+        );
+    }
+    if let Some(max_ratio) = controls.budget.max_ratio {
+        if ratio_exceeds(
+            transformed.output_len,
+            transformed.compressed_payload.len,
+            max_ratio,
+        ) {
+            let finding = Finding::error(
+                FindingCode::QuotaRatio,
+                format!(
+                    "derived zstd output {}:{} exceeds {max_ratio}:1",
+                    transformed.output_len, transformed.compressed_payload.len
+                ),
+            );
+            let original = snapshots.original();
+            return finish(
+                (original.path_owned(), source_digest, original.kind()),
+                "zst",
+                policy,
+                vec![finding.clone()],
+                Vec::new(),
+                initial_materialization,
+                SemanticAxes::structure_stop(
+                    InterpretationStatus::Interpreted,
+                    AdmissionStatus::Denied,
+                    &finding,
+                ),
+                identities_base,
+            );
+        }
+    }
+    let wrapper = ZstdWrapperEvidence {
+        descriptor: transformed.header.descriptor,
+        single_segment: transformed.header.single_segment,
+        checksum_flag: transformed.header.checksum_flag,
+        window_descriptor: transformed.header.window_descriptor,
+        window_size: transformed.header.window_size,
+        frame_content_size: transformed.header.frame_content_size,
+        header: transformed.header.header,
+        compressed_payload: transformed.compressed_payload,
+        trailer: transformed.trailer,
+        declared_checksum: transformed.declared_checksum,
+        derived_output_len: transformed.output_len,
+        derived_output_sha256: transformed.output_sha256,
+    };
+    if let Err(finding) = audit_zstd_wrapper_covering(snapshots.original(), &wrapper) {
+        let original = snapshots.original();
+        return finish(
+            (original.path_owned(), source_digest, original.kind()),
+            "zst",
+            policy,
+            vec![finding.clone()],
+            Vec::new(),
+            initial_materialization,
+            SemanticAxes::structure_stop(
+                InterpretationStatus::Indeterminate,
+                AdmissionStatus::NotEvaluated,
+                &finding,
+            ),
+            identities_base,
+        );
+    }
+    let wrapper_metadata = wrapper
+        .header
+        .len
+        .checked_add(wrapper.trailer.len)
+        .expect("audited zstd wrapper metadata fits u64");
+    let tar_metadata_budget = controls
+        .budget
+        .max_metadata_bytes
+        .checked_sub(wrapper_metadata)
+        .expect("zstd decoder already enforced the wrapper metadata cap");
+    plan_tar_domains(
+        req,
+        options,
+        snapshots,
+        transforms,
+        SnapshotDomainId::FIRST_DERIVED,
+        TarPlanProfile::Zstd(profile, Box::new(wrapper)),
+        controls,
+        tar_metadata_budget,
+        source_digest,
+        identities_base,
+        initial_materialization,
+    )
+}
+
+fn observed_zstd_magic(source: &SourceSnapshot<'_>) -> &'static str {
+    if source.len() < 4 {
+        return "unknown";
+    }
+    let mut magic = [0_u8; 4];
+    match source.read_exact_at(0, &mut magic) {
+        Ok(()) if u32::from_le_bytes(magic) == 0xFD2F_B528 => "zst",
+        _ => "unknown",
+    }
+}
+
+fn zstd_failure_axes(error: &zstd::ZstdError) -> SemanticAxes {
+    let finding = error.finding();
+    let (interpretation, admission) = match error.kind {
+        ZstdErrorKind::Source => (
+            InterpretationStatus::Indeterminate,
+            AdmissionStatus::NotEvaluated,
+        ),
+        ZstdErrorKind::SkippableFrame
+        | ZstdErrorKind::ReservedBits
+        | ZstdErrorKind::Dictionary
+        | ZstdErrorKind::WindowBounds
+        | ZstdErrorKind::ConcatenatedFrame => (
+            InterpretationStatus::Unsupported,
+            AdmissionStatus::NotEvaluated,
+        ),
+        ZstdErrorKind::HeaderLimit | ZstdErrorKind::OutputLimit => {
+            (InterpretationStatus::Interpreted, AdmissionStatus::Denied)
+        }
+        ZstdErrorKind::TransformAuthority | ZstdErrorKind::DecoderDisagreement => (
+            InterpretationStatus::Indeterminate,
+            AdmissionStatus::NotEvaluated,
+        ),
+        ZstdErrorKind::Magic
+        | ZstdErrorKind::Truncated
+        | ZstdErrorKind::FrameStream
+        | ZstdErrorKind::TrailingInput
+        | ZstdErrorKind::DataChecksum
+        | ZstdErrorKind::DeclaredSize => (
+            InterpretationStatus::Malformed,
+            AdmissionStatus::NotEvaluated,
+        ),
+    };
+    SemanticAxes::structure_stop(interpretation, admission, finding)
+}
+
 enum TarPlanProfile {
     Raw(TarInterpretationProfile),
     Gzip(TarGzipInterpretationProfile, Box<GzipWrapperEvidence>),
+    Zstd(TarZstdInterpretationProfile, Box<ZstdWrapperEvidence>),
 }
 
 enum PaxPlanProfile {
@@ -900,13 +1161,14 @@ fn plan_tar_domains(
     let magic = match &profile {
         TarPlanProfile::Raw(_) => "tar",
         TarPlanProfile::Gzip(_, _) => "gz",
+        TarPlanProfile::Zstd(_, _) => "zst",
     };
     let tar_snapshot = snapshots
         .domain(tar_domain)
         .expect("selected TAR domain exists before planning");
     let recognized_tar = tar::recognizes_ustar(tar_snapshot);
     let observed_magic = match &profile {
-        TarPlanProfile::Gzip(_, _) => magic,
+        TarPlanProfile::Gzip(_, _) | TarPlanProfile::Zstd(_, _) => magic,
         TarPlanProfile::Raw(_) if recognized_tar => magic,
         TarPlanProfile::Raw(_) => "unknown",
     };
@@ -1076,24 +1338,24 @@ fn plan_tar_domains(
         );
     }
 
-    let wrapped = matches!(&profile, TarPlanProfile::Gzip(_, _));
+    let wrapped = !matches!(&profile, TarPlanProfile::Raw(_));
     let payloads = planned
         .iter()
-        .map(|(member, _, _)| {
-            if wrapped {
-                PayloadPlan::from_tar_gzip(member)
-            } else {
-                PayloadPlan::from_tar(member)
-            }
+        .map(|(member, _, _)| match &profile {
+            TarPlanProfile::Raw(_) => PayloadPlan::from_tar(member),
+            TarPlanProfile::Gzip(_, _) => PayloadPlan::from_tar_gzip(member),
+            TarPlanProfile::Zstd(_, _) => PayloadPlan::from_tar_zstd(member),
         })
         .collect();
     let members = planned
         .into_iter()
-        .map(|(member, components, actions)| {
-            if wrapped {
+        .map(|(member, components, actions)| match &profile {
+            TarPlanProfile::Raw(_) => IrMember::from_tar_planned(member, components, actions),
+            TarPlanProfile::Gzip(_, _) => {
                 IrMember::from_tar_gzip_planned(member, components, actions)
-            } else {
-                IrMember::from_tar_planned(member, components, actions)
+            }
+            TarPlanProfile::Zstd(_, _) => {
+                IrMember::from_tar_zstd_planned(member, components, actions)
             }
         })
         .collect();
@@ -1103,6 +1365,9 @@ fn plan_tar_domains(
         }
         TarPlanProfile::Gzip(profile, wrapper) => {
             ArchiveIR::with_tar_gzip(profile, source_digest.clone(), *wrapper, covering, members)
+        }
+        TarPlanProfile::Zstd(profile, wrapper) => {
+            ArchiveIR::with_tar_zstd(profile, source_digest.clone(), *wrapper, covering, members)
         }
     };
     let tar_snapshot = snapshots
@@ -2486,13 +2751,20 @@ fn validate_ready_archive(
             audit_tar_gzip_composite(snapshots, transforms, ir)?;
             Ok(ReadyArchiveAuthority { _private: () })
         }
+        ArchiveFormat::TarZstdUstar => {
+            audit_tar_zstd_composite(snapshots, transforms, ir)?;
+            Ok(ReadyArchiveAuthority { _private: () })
+        }
     }
 }
 
-const fn format_is_gzip_wrapped(format: ArchiveFormat) -> bool {
+const fn format_is_transform_wrapped(format: ArchiveFormat) -> bool {
     matches!(
         format,
-        ArchiveFormat::TarGzipUstar | ArchiveFormat::TarGzipPax | ArchiveFormat::TarGzipGnuLongName
+        ArchiveFormat::TarGzipUstar
+            | ArchiveFormat::TarGzipPax
+            | ArchiveFormat::TarGzipGnuLongName
+            | ArchiveFormat::TarZstdUstar
     )
 }
 
@@ -2547,9 +2819,10 @@ fn audit_tar_gzip_composite(
         | ArchiveFormat::Zip64
         | ArchiveFormat::TarUstar
         | ArchiveFormat::TarPax
-        | ArchiveFormat::TarGnuLongName => {
+        | ArchiveFormat::TarGnuLongName
+        | ArchiveFormat::TarZstdUstar => {
             return Err(ready_inconsistent(
-                "composite gzip audit received a raw archive format",
+                "composite gzip audit received a non-gzip archive format",
             ));
         }
     }
@@ -2582,6 +2855,89 @@ fn audit_tar_gzip_composite(
 
 fn gzip_isize(len: u64) -> u32 {
     u32::try_from(len % (u64::from(u32::MAX) + 1)).expect("gzip ISIZE modulo always fits u32")
+}
+
+fn audit_tar_zstd_composite(
+    snapshots: &SnapshotSet<'_>,
+    transforms: &TransformGraph,
+    ir: &ArchiveIR,
+) -> Result<(), Finding> {
+    if snapshots.len() != 2 || transforms.records().len() != 1 || !transforms.validates(snapshots) {
+        return Err(ready_inconsistent(
+            "zstd-wrapped TAR requires exactly two snapshots and one valid transform",
+        ));
+    }
+    let original = snapshots.original();
+    let derived = snapshots
+        .domain(SnapshotDomainId::FIRST_DERIVED)
+        .ok_or_else(|| ready_inconsistent("zstd-derived TAR snapshot is absent"))?;
+    let wrapper = ir
+        .zstd_evidence()
+        .ok_or_else(|| ready_inconsistent("zstd-wrapped TAR has no wrapper evidence"))?;
+    let record = &transforms.records()[0];
+    let original_sha256 = original
+        .digest()
+        .sha256()
+        .ok_or_else(|| ready_inconsistent("original zstd snapshot digest is unavailable"))?;
+    if record.profile != TransformProfile::ZstdRfc8878SingleFrameV1
+        || record.input
+            != (DomainRange {
+                domain: SnapshotDomainId::ORIGINAL,
+                range: crate::ir::ByteRange {
+                    offset: 0,
+                    len: original.len(),
+                },
+            })
+        || record.input_sha256 != original_sha256
+        || record.output_domain != SnapshotDomainId::FIRST_DERIVED
+        || record.output_len != derived.len()
+        || record.output_len != wrapper.derived_output_len
+        || derived.digest().sha256() != Some(record.output_sha256.as_str())
+        || record.output_sha256 != wrapper.derived_output_sha256
+    {
+        return Err(ready_inconsistent(
+            "zstd transform graph does not exactly bind the outer and derived snapshots",
+        ));
+    }
+    audit_zstd_wrapper_covering(original, wrapper)?;
+    audit_tar_covering(derived, ir)?;
+
+    if let Some(declared) = wrapper.frame_content_size {
+        if declared != derived.len() {
+            return Err(ready_inconsistent(
+                "zstd frame content size does not match the terminal derived TAR snapshot",
+            ));
+        }
+    }
+    if let Some(declared) = wrapper.declared_checksum {
+        use core::hash::Hasher as _;
+        let mut reader = derived.reader(0, derived.len())?;
+        let mut hasher = twox_hash::XxHash64::with_seed(0);
+        let mut buffer = [0_u8; 64 * 1024];
+        loop {
+            let read = reader.read(&mut buffer).map_err(|error| {
+                crate::snapshot::finding_from_io(&error).unwrap_or_else(|| {
+                    ready_inconsistent(format!(
+                        "could not audit zstd-derived TAR integrity: {error}"
+                    ))
+                })
+            })?;
+            if read == 0 {
+                break;
+            }
+            hasher.write(&buffer[..read]);
+        }
+        if (hasher.finish() & 0xFFFF_FFFF) as u32 != declared {
+            return Err(ready_inconsistent(
+                "zstd content checksum does not match the terminal derived TAR snapshot",
+            ));
+        }
+    } else if wrapper.checksum_flag {
+        return Err(ready_inconsistent(
+            "zstd checksum flag is set without a declared checksum",
+        ));
+    }
+    Ok(())
 }
 
 fn validate_verified_archive_authority(
@@ -2637,7 +2993,7 @@ fn execute_ready_archive(
     let ready_authority = match ready_validation {
         Ok(authority) => authority,
         Err(finding) => {
-            let axes = if format_is_gzip_wrapped(ir.format()) {
+            let axes = if format_is_transform_wrapped(ir.format()) {
                 SemanticAxes::structure_stop(
                     InterpretationStatus::Indeterminate,
                     AdmissionStatus::NotEvaluated,
@@ -3197,9 +3553,9 @@ pub(crate) fn member_view(member: &IrMember) -> MemberView {
             zip64.zip.declared_comp_size,
             zip64.zip.declared_crc,
         ),
-        crate::ir::MemberEvidence::Tar(tar) | crate::ir::MemberEvidence::TarGzip(tar) => {
-            ("raw", tar.payload.len, 0)
-        }
+        crate::ir::MemberEvidence::Tar(tar)
+        | crate::ir::MemberEvidence::TarGzip(tar)
+        | crate::ir::MemberEvidence::TarZstd(tar) => ("raw", tar.payload.len, 0),
         crate::ir::MemberEvidence::TarPax(tar) | crate::ir::MemberEvidence::TarGzipPax(tar) => {
             ("raw", tar.tar.payload.len, 0)
         }
@@ -3626,6 +3982,89 @@ mod tar_gzip_ready_tests {
         )
         .unwrap();
         (snapshots, transforms)
+    }
+
+    fn zstd_single_segment(tar: &[u8]) -> Vec<u8> {
+        let mut source = 0xFD2F_B528_u32.to_le_bytes().to_vec();
+        source.push(0xA0);
+        source.extend_from_slice(&(tar.len() as u32).to_le_bytes());
+        let block_header = ((tar.len() as u32) << 3) | 1;
+        source.extend_from_slice(&block_header.to_le_bytes()[..3]);
+        source.extend_from_slice(tar);
+        source
+    }
+
+    #[test]
+    fn ready_composite_binds_the_zstd_variant_to_its_derived_domain() {
+        let tar = tar();
+        let source = zstd_single_segment(&tar);
+        let policy = Policy::default_v8();
+        let outcome = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("composition.tar.zst"),
+                    data: &source,
+                },
+                policy: &policy,
+                dest: None,
+            },
+            &ApplyOptions::new().with_tar_zstd_interpretation_profile(
+                TarZstdInterpretationProfile::UstarPortableV1,
+            ),
+        );
+        assert!(
+            matches!(outcome.admission, AdmissionStatus::Admitted),
+            "{:?}",
+            outcome.view.findings
+        );
+        let ir = outcome.archive_ir().cloned().expect("admitted IR");
+        assert_eq!(ir.format(), ArchiveFormat::TarZstdUstar);
+        let payloads: Vec<PayloadPlan> = ir.members().iter().map(PayloadPlan::from_ir).collect();
+
+        let snapshot = SourceSnapshot::borrowed(None, &source);
+        let mut snapshots = SnapshotSet::from_original(snapshot);
+        let mut transforms = TransformGraph::empty();
+        zstd::transform_single_frame(
+            &mut snapshots,
+            &mut transforms,
+            zstd::ZstdLimits {
+                max_metadata_bytes: 1024 * 1024,
+                max_output_bytes: 1024 * 1024,
+            },
+        )
+        .unwrap();
+        validate_ready_archive(&snapshots, &transforms, &ir, &payloads).unwrap();
+
+        let mut drifted = ir.clone();
+        match &mut drifted.evidence {
+            crate::ir::ArchiveEvidence::TarZstd(evidence) => {
+                evidence.zstd.derived_output_sha256 = "00".repeat(32);
+            }
+            _ => panic!("expected zstd-wrapped evidence"),
+        }
+        assert_eq!(
+            validate_ready_archive(&snapshots, &transforms, &drifted, &payloads)
+                .unwrap_err()
+                .code,
+            FindingCode::CoveringInconsistent
+        );
+
+        let mut variant_drift = ir.clone();
+        let raw_variant = match &variant_drift.members[0].evidence {
+            crate::ir::MemberEvidence::TarZstd(evidence) => {
+                crate::ir::MemberEvidence::Tar(evidence.clone())
+            }
+            _ => panic!("expected zstd-wrapped member evidence"),
+        };
+        variant_drift.members[0].evidence = raw_variant;
+        assert!(
+            validate_ready_archive(&snapshots, &transforms, &variant_drift, &payloads).is_err()
+        );
+        assert!(crate::identity::layout_root(&variant_drift).hex().is_none());
+
+        assert!(
+            validate_ready_archive(&snapshots, &TransformGraph::empty(), &ir, &payloads).is_err()
+        );
     }
 
     #[test]

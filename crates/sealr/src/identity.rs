@@ -13,7 +13,8 @@ use crate::ir::{
     ArchiveFormat, ArchiveIR, ExtraDisposition, ExtraSite, GnuLongNamePathSource, IrMember,
     MemberKind, MemberVerification, NormalizationAction, PaxExtensionKind, PaxKeyword,
     PaxValueSource, TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile,
-    TarInterpretationProfile, TarPaxInterpretationProfile, ZipInterpretationProfile,
+    TarInterpretationProfile, TarPaxInterpretationProfile, TarZstdInterpretationProfile,
+    ZipInterpretationProfile,
 };
 use crate::outcome::{DigestHex, SourceDigest, VerificationStatus};
 use crate::policy::hex_sha256;
@@ -27,6 +28,7 @@ pub const TREE_ENCODING_V5_ID: &str = "sealrTreeV5";
 pub const TREE_ENCODING_V6_ID: &str = "sealrTreeV6";
 pub const TREE_ENCODING_V7_ID: &str = "sealrTreeV7";
 pub const TREE_ENCODING_V8_ID: &str = "sealrTreeV8";
+pub const TREE_ENCODING_V9_ID: &str = "sealrTreeV9";
 const LAYOUT_LABEL: &str = "sealr.tree.layout.v1";
 const TAR_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-ustar.v1";
 const ZIP64_LAYOUT_LABEL: &str = "sealr.tree.layout.zip64.v1";
@@ -35,6 +37,7 @@ const TAR_PAX_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-pax.v1";
 const TAR_GNU_LONGNAME_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gnu-longname.v1";
 const TAR_GZIP_PAX_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gzip-pax.v1";
 const TAR_GZIP_GNU_LONGNAME_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gzip-gnu-longname.v1";
+const TAR_ZSTD_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-zstd-ustar.v1";
 const CONTENT_LABEL: &str = "sealr.tree.content.v1";
 const FILE: u8 = 1;
 const DIRECTORY: u8 = 2;
@@ -66,6 +69,7 @@ pub enum TreeRoot {
     SealrTreeV6 { hex: String },
     SealrTreeV7 { hex: String },
     SealrTreeV8 { hex: String },
+    SealrTreeV9 { hex: String },
     Unavailable,
 }
 
@@ -122,6 +126,12 @@ impl TreeRoot {
         }
     }
 
+    pub fn from_v9_bytes(bytes: &[u8]) -> Self {
+        Self::SealrTreeV9 {
+            hex: hex_sha256(bytes),
+        }
+    }
+
     pub fn hex(&self) -> Option<&str> {
         match self {
             Self::SealrTreeV1 { hex } => Some(hex),
@@ -132,6 +142,7 @@ impl TreeRoot {
             Self::SealrTreeV6 { hex } => Some(hex),
             Self::SealrTreeV7 { hex } => Some(hex),
             Self::SealrTreeV8 { hex } => Some(hex),
+            Self::SealrTreeV9 { hex } => Some(hex),
             Self::Unavailable => None,
         }
     }
@@ -178,6 +189,11 @@ impl Serialize for TreeRoot {
             Self::SealrTreeV8 { hex } => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 map.serialize_entry(TREE_ENCODING_V8_ID, hex)?;
+                map.end()
+            }
+            Self::SealrTreeV9 { hex } => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry(TREE_ENCODING_V9_ID, hex)?;
                 map.end()
             }
             Self::Unavailable => {
@@ -235,6 +251,13 @@ impl OutcomeIdentities {
     pub fn unavailable_for_tar_gnu_longname(
         source: SourceDigest,
         profile: TarGnuLongNameInterpretationProfile,
+    ) -> Self {
+        Self::unavailable_for_named(source, profile.id(), profile.digest())
+    }
+
+    pub fn unavailable_for_tar_zstd(
+        source: SourceDigest,
+        profile: TarZstdInterpretationProfile,
     ) -> Self {
         Self::unavailable_for_named(source, profile.id(), profile.digest())
     }
@@ -641,6 +664,53 @@ pub fn encode_tar_gzip_gnu_longname_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
     Some(preimage(TAR_GZIP_GNU_LONGNAME_LAYOUT_LABEL, &body))
 }
 
+fn encode_zstd_wrapper_header(ir: &ArchiveIR) -> Option<Vec<u8>> {
+    let zstd = ir.zstd_evidence()?;
+    let transform = TransformProfile::ZstdRfc8878SingleFrameV1;
+    let mut body = Vec::new();
+    push_bytes(&mut body, transform.id().as_bytes());
+    body.extend_from_slice(&parse_hex32(transform.digest())?);
+    body.extend_from_slice(&parse_hex32(transform.decoder_parameters_digest())?);
+    push_u16(&mut body, 0);
+    encode_range(
+        &mut body,
+        crate::ir::ByteRange {
+            offset: 0,
+            len: zstd.trailer.offset.checked_add(zstd.trailer.len)?,
+        },
+    );
+    body.extend_from_slice(&parse_hex32(ir.source_digest().sha256()?)?);
+    push_u16(&mut body, 1);
+    push_u64(&mut body, zstd.derived_output_len);
+    body.extend_from_slice(&parse_hex32(&zstd.derived_output_sha256)?);
+    body.push(zstd.descriptor);
+    body.push(u8::from(zstd.single_segment));
+    body.push(u8::from(zstd.checksum_flag));
+    push_optional_u8(&mut body, zstd.window_descriptor);
+    push_u64(&mut body, zstd.window_size);
+    push_optional_u64(&mut body, zstd.frame_content_size);
+    encode_range(&mut body, zstd.header);
+    encode_range(&mut body, zstd.compressed_payload);
+    encode_range(&mut body, zstd.trailer);
+    push_optional_u32(&mut body, zstd.declared_checksum);
+    push_u64(&mut body, zstd.derived_output_len);
+    body.extend_from_slice(&parse_hex32(&zstd.derived_output_sha256)?);
+    Some(body)
+}
+
+/// Canonical wrapper-plus-inner-layout encoding for strict zstd-wrapped ustar.
+pub fn encode_tar_zstd_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
+    if ir.format() != ArchiveFormat::TarZstdUstar {
+        return None;
+    }
+    let mut body = encode_zstd_wrapper_header(ir)?;
+    push_bytes(
+        &mut body,
+        &tar_layout_body(ir, ArchiveFormat::TarZstdUstar)?,
+    );
+    Some(preimage(TAR_ZSTD_LAYOUT_LABEL, &body))
+}
+
 pub fn encode_zip64_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
     let covering = ir.zip64_covering()?;
     let members = sorted_members(ir);
@@ -690,6 +760,36 @@ fn encode_optional_range(out: &mut Vec<u8>, range: Option<crate::ir::ByteRange>)
         Some(range) => {
             out.push(1);
             encode_range(out, range);
+        }
+        None => out.push(0),
+    }
+}
+
+fn push_optional_u8(out: &mut Vec<u8>, value: Option<u8>) {
+    match value {
+        Some(value) => {
+            out.push(1);
+            out.push(value);
+        }
+        None => out.push(0),
+    }
+}
+
+fn push_optional_u32(out: &mut Vec<u8>, value: Option<u32>) {
+    match value {
+        Some(value) => {
+            out.push(1);
+            push_u32(out, value);
+        }
+        None => out.push(0),
+    }
+}
+
+fn push_optional_u64(out: &mut Vec<u8>, value: Option<u64>) {
+    match value {
+        Some(value) => {
+            out.push(1);
+            push_u64(out, value);
         }
         None => out.push(0),
     }
@@ -850,6 +950,9 @@ pub fn layout_root(ir: &ArchiveIR) -> TreeRoot {
             .unwrap_or_else(TreeRoot::unavailable),
         ArchiveFormat::TarGzipGnuLongName => encode_tar_gzip_gnu_longname_layout(ir)
             .map(|bytes| TreeRoot::from_v8_bytes(&bytes))
+            .unwrap_or_else(TreeRoot::unavailable),
+        ArchiveFormat::TarZstdUstar => encode_tar_zstd_layout(ir)
+            .map(|bytes| TreeRoot::from_v9_bytes(&bytes))
             .unwrap_or_else(TreeRoot::unavailable),
     }
 }

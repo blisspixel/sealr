@@ -113,6 +113,16 @@ impl PayloadPlan {
                 uncompressed_size: member.declared_uncomp_size,
                 integrity: PayloadIntegrity::None,
             },
+            MemberEvidence::TarZstd(tar) => Self {
+                source: DomainRange {
+                    domain: SnapshotDomainId::FIRST_DERIVED,
+                    range: tar.payload,
+                },
+                codec: PayloadCodec::Raw,
+                compressed_size: tar.payload.len,
+                uncompressed_size: member.declared_uncomp_size,
+                integrity: PayloadIntegrity::None,
+            },
         }
     }
 
@@ -137,6 +147,19 @@ impl PayloadPlan {
     }
 
     pub(crate) fn from_tar_gzip(member: &crate::tar::TarMember) -> Self {
+        Self {
+            source: DomainRange {
+                domain: SnapshotDomainId::FIRST_DERIVED,
+                range: member.payload,
+            },
+            codec: PayloadCodec::Raw,
+            compressed_size: member.payload.len,
+            uncompressed_size: member.size,
+            integrity: PayloadIntegrity::None,
+        }
+    }
+
+    pub(crate) fn from_tar_zstd(member: &crate::tar::TarMember) -> Self {
         Self {
             source: DomainRange {
                 domain: SnapshotDomainId::FIRST_DERIVED,

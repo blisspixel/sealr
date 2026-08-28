@@ -1275,6 +1275,8 @@ fn finding_code_tag(code: FindingCode) -> u16 {
         FindingCode::TarPaxState => 68,
         FindingCode::TarGnuLongName => 69,
         FindingCode::TarGnuState => 70,
+        FindingCode::CodecZstdInvalidFrame => 71,
+        FindingCode::CodecZstdTrailingInput => 72,
     }
 }
 
@@ -1351,6 +1353,8 @@ fn finding_code_from_tag(tag: u16, offset: usize) -> Result<FindingCode, RecordE
         68 => FindingCode::TarPaxState,
         69 => FindingCode::TarGnuLongName,
         70 => FindingCode::TarGnuState,
+        71 => FindingCode::CodecZstdInvalidFrame,
+        72 => FindingCode::CodecZstdTrailingInput,
         _ => {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidEnum,
@@ -4738,6 +4742,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn zstd_finding_codes_append_stable_wire_tags() {
+        assert_eq!(finding_code_tag(FindingCode::CodecZstdInvalidFrame), 71);
+        assert_eq!(finding_code_tag(FindingCode::CodecZstdTrailingInput), 72);
+        assert_eq!(
+            finding_code_from_tag(71, 0).unwrap(),
+            FindingCode::CodecZstdInvalidFrame
+        );
+        assert_eq!(
+            finding_code_from_tag(72, 0).unwrap(),
+            FindingCode::CodecZstdTrailingInput
+        );
+    }
+
     fn test_zip_evidence(member: &IrMember) -> &ZipMemberEvidence {
         member
             .zip_evidence()
@@ -4764,7 +4782,8 @@ mod tests {
             | ArchiveEvidence::TarPax(_)
             | ArchiveEvidence::TarGnuLongName(_)
             | ArchiveEvidence::TarGzipPax(_)
-            | ArchiveEvidence::TarGzipGnuLongName(_) => {
+            | ArchiveEvidence::TarGzipGnuLongName(_)
+            | ArchiveEvidence::TarZstd(_) => {
                 panic!("semantic-record test archive must carry ZIP evidence")
             }
         }

@@ -26,6 +26,7 @@ mod verification;
 #[cfg(any(target_os = "linux", feature = "__internal-worker-lab", test))]
 #[allow(dead_code)]
 mod worker_protocol;
+mod zstd;
 // Private Alpha.6 semantic records back the supported Linux supervisor while
 // their codec and types remain outside the public API.
 #[allow(dead_code)]
@@ -139,9 +140,10 @@ pub use findings::{Finding, FindingCode, Severity};
 pub use identity::{
     content_root, encode_tar_gnu_longname_layout, encode_tar_gzip_gnu_longname_layout,
     encode_tar_gzip_layout, encode_tar_gzip_pax_layout, encode_tar_layout, encode_tar_pax_layout,
-    encode_zip64_layout, layout_root, OutcomeIdentities, TreeRoot, TREE_ENCODING_ID,
-    TREE_ENCODING_V2_ID, TREE_ENCODING_V3_ID, TREE_ENCODING_V4_ID, TREE_ENCODING_V5_ID,
-    TREE_ENCODING_V6_ID, TREE_ENCODING_V7_ID, TREE_ENCODING_V8_ID,
+    encode_tar_zstd_layout, encode_zip64_layout, layout_root, OutcomeIdentities, TreeRoot,
+    TREE_ENCODING_ID, TREE_ENCODING_V2_ID, TREE_ENCODING_V3_ID, TREE_ENCODING_V4_ID,
+    TREE_ENCODING_V5_ID, TREE_ENCODING_V6_ID, TREE_ENCODING_V7_ID, TREE_ENCODING_V8_ID,
+    TREE_ENCODING_V9_ID,
 };
 pub use ir::{
     tar_gnu_longname_portable_v1_canonical_bytes, tar_gnu_longname_portable_v1_digest,
@@ -150,6 +152,7 @@ pub use ir::{
     tar_gzip_ustar_portable_v1_canonical_bytes, tar_gzip_ustar_portable_v1_digest,
     tar_pax_portable_v1_canonical_bytes, tar_pax_portable_v1_digest,
     tar_ustar_portable_v1_canonical_bytes, tar_ustar_portable_v1_digest,
+    tar_zstd_ustar_portable_v1_canonical_bytes, tar_zstd_ustar_portable_v1_digest,
     zip64_strict_ascii_v1_canonical_bytes, zip64_strict_ascii_v1_digest,
     zip_portable_utf8_v1_canonical_bytes, zip_portable_utf8_v1_digest,
     zip_strict_ascii_v1_canonical_bytes, zip_strict_ascii_v1_digest,
@@ -163,13 +166,15 @@ pub use ir::{
     TarGnuLongNameInterpretationProfile, TarGnuLongNameMemberEvidence, TarGzipArchiveEvidence,
     TarGzipGnuLongNameArchiveEvidence, TarGzipInterpretationProfile, TarGzipPaxArchiveEvidence,
     TarInterpretationProfile, TarMemberEvidence, TarPaxArchiveEvidence,
-    TarPaxInterpretationProfile, TarPaxMemberEvidence, Zip64ArchiveCovering,
-    Zip64DataDescriptorWidth, Zip64LocalValueShape, Zip64MemberEvidence, ZipInterpretationProfile,
-    ZipMemberEvidence, ARCHIVE_IR_SCHEMA, TAR_ARCHIVE_IR_SCHEMA,
+    TarPaxInterpretationProfile, TarPaxMemberEvidence, TarZstdArchiveEvidence,
+    TarZstdInterpretationProfile, Zip64ArchiveCovering, Zip64DataDescriptorWidth,
+    Zip64LocalValueShape, Zip64MemberEvidence, ZipInterpretationProfile, ZipMemberEvidence,
+    ZstdWrapperEvidence, ARCHIVE_IR_SCHEMA, TAR_ARCHIVE_IR_SCHEMA,
     TAR_GNU_LONGNAME_ARCHIVE_IR_SCHEMA, TAR_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_ARCHIVE_IR_SCHEMA,
     TAR_GZIP_GNU_LONGNAME_ARCHIVE_IR_SCHEMA, TAR_GZIP_GNU_LONGNAME_PORTABLE_V1,
     TAR_GZIP_PAX_ARCHIVE_IR_SCHEMA, TAR_GZIP_PAX_PORTABLE_V1, TAR_GZIP_USTAR_PORTABLE_V1,
-    TAR_PAX_ARCHIVE_IR_SCHEMA, TAR_PAX_PORTABLE_V1, TAR_USTAR_PORTABLE_V1, ZIP64_ARCHIVE_IR_SCHEMA,
+    TAR_PAX_ARCHIVE_IR_SCHEMA, TAR_PAX_PORTABLE_V1, TAR_USTAR_PORTABLE_V1,
+    TAR_ZSTD_ARCHIVE_IR_SCHEMA, TAR_ZSTD_USTAR_PORTABLE_V1, ZIP64_ARCHIVE_IR_SCHEMA,
     ZIP64_STRICT_ASCII_V1, ZIP_PORTABLE_UTF8_V1, ZIP_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2,
     ZIP_WHEEL_UTF8_V1,
 };
@@ -186,7 +191,7 @@ pub use policy::{
     hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget,
     POLICY_FORMAT_TAR_GNU_LONGNAME, POLICY_FORMAT_TAR_GZIP_GNU_LONGNAME,
     POLICY_FORMAT_TAR_GZIP_PAX, POLICY_FORMAT_TAR_GZIP_USTAR, POLICY_FORMAT_TAR_PAX,
-    POLICY_FORMAT_TAR_USTAR, POLICY_FORMAT_ZIP, POLICY_FORMAT_ZIP64,
+    POLICY_FORMAT_TAR_USTAR, POLICY_FORMAT_TAR_ZSTD_USTAR, POLICY_FORMAT_ZIP, POLICY_FORMAT_ZIP64,
 };
 pub use snapshot::SnapshotKind;
 pub use supervised::{

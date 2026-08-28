@@ -33,10 +33,12 @@ crc32fast.workspace = true
 flate2.workspace = true
 getrandom.workspace = true
 pep440_rs.workspace = true
+ruzstd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+twox-hash.workspace = true
 unicode-general-category.workspace = true
 unicode-normalization.workspace = true
 
@@ -54,4 +56,5 @@ windows-sys.workspace = true
 libc.workspace = true
 
 [dev-dependencies]
+twox-hash.workspace = true
 zip.workspace = true

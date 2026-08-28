@@ -176,6 +176,10 @@ fn supervised_zip_profile(
             SupervisionErrorKind::IsolationUnavailable,
             "restricted GNU long-name TAR requires a future semantic-record worker contract",
         )),
+        ArchiveSelection::TarZstdUstar(_) => Err(SupervisionError::new(
+            SupervisionErrorKind::IsolationUnavailable,
+            "zstd-wrapped TAR requires a future semantic-record worker contract",
+        )),
     }
 }
 
@@ -186,7 +190,7 @@ mod selection_tests {
     use crate::{Policy, Source};
     use crate::{
         TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile,
-        TarInterpretationProfile, TarPaxInterpretationProfile,
+        TarInterpretationProfile, TarPaxInterpretationProfile, TarZstdInterpretationProfile,
     };
 
     #[test]
@@ -230,6 +234,12 @@ mod selection_tests {
             assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
             assert!(error.to_string().contains("semantic-record v3"));
         }
+
+        let tar_zstd = ApplyOptions::new()
+            .with_tar_zstd_interpretation_profile(TarZstdInterpretationProfile::UstarPortableV1);
+        let error = supervised_zip_profile(&tar_zstd).unwrap_err();
+        assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
+        assert!(error.to_string().contains("zstd-wrapped TAR"));
     }
 
     #[cfg(not(target_os = "linux"))]

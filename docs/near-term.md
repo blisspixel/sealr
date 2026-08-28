@@ -1,6 +1,6 @@
 # Near-term execution plan
 
-> Status: active plan after the Alpha.11 restricted raw POSIX PAX increment, the restricted GNU long-name profile, and the gzip-wrapped PAX and GNU compositions on current main. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
+> Status: active plan after the Alpha.11 restricted raw POSIX PAX increment, the restricted GNU long-name profile, the gzip-wrapped PAX and GNU compositions, and the first promoted codec (zstd-wrapped ustar) on current main. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
 
 The next work should produce thin, independently reviewable trust increments. Each increment must finish with a useful artifact, explicit evidence, and a bounded claim. Work that merely makes the codebase larger does not count as progress.
 
@@ -56,9 +56,18 @@ The narrow GNU long-name-only raw profile landed after Alpha.11 because GNU `L` 
 4. The ready boundary's composite audit requires exactly two snapshots, one exact full-source transform record, the independent wrapper covering over domain zero, the frozen inner dialect covering and state replay over the derived domain, and complete cross-layer identity binding before any destination stage exists.
 5. Conformance vectors replayed through the public production path bind wrapper evidence, derived bytes, inner evidence, layout preimages, and the shared content root; the authenticated worker refuses both compositions without fallback; and zero new runtime dependencies were added.
 
-### Next: codec promotion
+### Zstd codec-promotion gates: complete on current main
 
-Promote zstd, XZ/LZMA2, and bzip2 wrappers one at a time under the [codec dependency gates](codec-dependency-gates.md). Each codec must justify the smallest practical pure-Rust graph, preserve exact compressed-input consumption and bounded windows, and must not introduce a general extractor framework. A local bounded 7z interpreter starts with Copy before reusing the reviewed LZMA layer.
+1. The [executed ruzstd Gate B review](codec-dependency-gates.md#executed-gate-b-promotion-ruzstd-for-the-zstd-tar-wrapper) added exactly two runtime packages (`ruzstd` 0.9.0, `twox-hash` 2.1.4) with no build scripts, no `links` packages, MIT licenses, and updated per-target dependency-contract digests.
+2. `sealr.profile.tar-zstd.ustar-portable.v1` (digest `c7d2e708f2f5258eddfb99fbf13661bd2f671a2daa4a45bc1d9603d30d472ae7`) binds the new `sealr.transform.zstd.rfc8878-single-frame.v1` transform digests and the frozen inner ustar digest; policy v8 (digest `d0cfdf4d40e3a88c8e80170494b23e91761802304265e41ce19cb616fa8a1c42`) authorizes the separate `tar-zstd-ustar` format.
+3. The restricted language admits exactly one standard frame with skippable frames and dictionaries denied, reserved and unused descriptor bits zero, an 8 MiB pre-allocation window ceiling, checksum and content size verified when present with Sealr owning every comparison, and exact full-source consumption.
+4. Sealr's byte-exact header parse is cross-checked against the decoder's interpretation, an independent wrapper covering audit replays the grammar codec-free, and the ready-boundary composite audit re-hashes the derived snapshot with XXH64 before any destination stage exists.
+5. `sealrTreeV9` conformance vectors carry pinned Zstandard CLI 1.5.7 producer bytes replayed through the public path, raw and cross-wrapper content parity is asserted, and the worker refuses the selection without fallback.
+6. Remaining zstd assurance items stay open by name: targeted review and Miri over ruzstd's unsafe ring buffer, measured decoder memory ceilings at the window cap, broader producer fixtures (Arch/dpkg/RPM payloads), and ZIP method 93 reuse of the adapter.
+
+### Next: continued codec promotion
+
+Promote XZ/LZMA2 and then bzip2 wrappers one at a time under the [codec dependency gates](codec-dependency-gates.md). Each codec must justify the smallest practical pure-Rust graph, preserve exact compressed-input consumption and bounded windows, and must not introduce a general extractor framework. A local bounded 7z interpreter starts with Copy before reusing the reviewed LZMA layer.
 
 ### Alpha.9 portable ustar gates
 
@@ -93,8 +102,8 @@ Together, these completed increments freeze what the worker may mean, how read o
 | Alpha.9 | Portable ustar and multi-format core | Explicit selection and policy authorization, zero-dependency raw ustar, TAR-native evidence, independent roots, producer corpus, package and fuzz gates |
 | Alpha.10 | Strict ZIP64 and gzip TAR | Policy v3 and v4 selections, zero new dependencies, ZIP64-native and two-domain evidence, independently reconstructed roots, package paths, bounded fuzz, and fail-closed worker refusal |
 | Alpha.11 | Restricted raw POSIX PAX | Explicit policy v5 selection, two-key closed grammar, exact precedence provenance, independent audit and `sealrTreeV5`, zero new dependencies, fail-closed worker refusal |
-| Current main | GNU long-name TAR and gzip compositions | Separate GNU `L`-only raw language under policy v6 with `sealrTreeV6`, then distinct gzip compositions for the frozen PAX and GNU profiles under policy v7 with `sealrTreeV7` and `sealrTreeV8` |
-| Next | Separately promoted codec wrappers | zstd, then XZ/LZMA2, then bzip2, each through the codec dependency gates before any 7z structure work |
+| Current main | GNU long-name TAR, gzip compositions, and the zstd codec | Separate GNU `L`-only raw language under policy v6 with `sealrTreeV6`; distinct gzip compositions under policy v7 with `sealrTreeV7` and `sealrTreeV8`; and the first promoted codec, zstd-wrapped ustar under policy v8 with `sealrTreeV9` and the executed ruzstd Gate B review |
+| Next | Continued codec promotion | XZ/LZMA2, then bzip2, each through the codec dependency gates before any 7z structure work |
 
 Version labels are delivery targets, not permission to cut a release with a red gate. If an increment changes identity or interpretation, it receives a new profile or schema identifier and preserves prior identifiers as immutable historical contracts.
 
@@ -291,7 +300,7 @@ The existing `CI` workflow remains the only required promotion authority. Schedu
 Two implementation lanes can proceed in parallel without inventing another meaning:
 
 - **Semantic and consumer lane:** targeted benign Unicode, `.data`, and descriptor-bearing wheel evidence; stable identity and API review; and a separately versioned legacy CP437 profile only where compatibility evidence justifies it.
-- **Systems and format lane:** with GNU long-name raw TAR and both gzip compositions landed, promote zstd, XZ/LZMA2, and bzip2 separately; build local 7z structure with Copy before LZMA; and add cpio, ar/deb, CAB, RPM, and RAR5 through their own gates. ZIP64 and TAR worker-record parity, authenticated abandoned-stage recovery, explicit durability levels, and platform-specific worker research continue in parallel. ISO 9660, UDF, and filesystem images remain a separate program.
+- **Systems and format lane:** with GNU long-name raw TAR, both gzip compositions, and the zstd wrapper landed, promote XZ/LZMA2 and bzip2 separately; build local 7z structure with Copy before LZMA; and add cpio, ar/deb, CAB, RPM, and RAR5 through their own gates. ZIP64 and TAR worker-record parity, authenticated abandoned-stage recovery, explicit durability levels, and platform-specific worker research continue in parallel. ISO 9660, UDF, and filesystem images remain a separate program.
 
 Both lanes consume the same identities, findings discipline, conformance bundles, and format-neutral verification and materialization boundary. Each TAR dialect and additional codec remains separately gated; raw portable ustar and restricted raw PAX do not silently authorize GNU or compressed variants.
 
