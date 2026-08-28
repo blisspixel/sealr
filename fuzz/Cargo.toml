@@ -48,4 +48,11 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "tar_gzip_ustar_portable_v1"
+path = "fuzz_targets/tar_gzip_ustar_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
