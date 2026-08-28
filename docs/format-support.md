@@ -28,9 +28,9 @@ The matrix separates structural parsing, payload decoding, advanced dialect feat
 | RAR5 | separate local structural profile | Store first | Bounded vint headers, solid state, filters, services, volumes, encryption | Research gate | Required before promotion | Decoder and license decision required |
 | RAR4 | separate local structural profile | Store first | Volumes, solid state, services, recovery, redirections, encryption | Research gate | Required before promotion | Decoder and license decision required |
 
-JAR, wheel, and NuGet are consumer profiles over ZIP. APK is ZIP-derived but needs a distinct structural profile because its signing block sits before the central directory. OCI layers require a TAR dialect plus a stateful layer applier for whiteouts, links, ownership, modes, extended attributes, and prior-tree effects. They are not equivalent to generic raw-TAR extraction. Compression aliases such as `.tgz` select an explicit wrapper plus TAR profile; they do not cause suffix sniffing.
+JAR, wheel, NuGet, Office Open XML, and OpenDocument are consumer profiles over ZIP. APK is ZIP-derived but needs a distinct structural profile because its signing block sits before the central directory. OCI and Docker layers require a TAR dialect plus a stateful layer applier for whiteouts, links, ownership, modes, extended attributes, and prior-tree effects. They are not equivalent to generic raw-TAR extraction. XAR and macOS package files require a later package-specific structural and signature gate. Compression aliases such as `.tgz` select an explicit wrapper plus TAR profile; they do not cause suffix sniffing.
 
-Disk images, filesystem images, self-extracting executables, and installer execution are different authority problems. They require separate product decisions and are not silently grouped under archive extraction.
+ISO, DMG, WIM, SquashFS, MSI, disk and filesystem images, self-extracting executables, and installer execution are different authority problems. They require separate product decisions and are not silently grouped under archive extraction. LHA/LZH, ACE, ARC, Unix `.Z`, lzip, Brotli-wrapped TAR, and similar legacy or niche formats remain Tier 3 research until measured corpus demand justifies their trusted-code cost.
 
 ## One execution core
 
