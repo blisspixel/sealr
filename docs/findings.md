@@ -73,6 +73,7 @@ Unknown error codes must be treated as rejection by consumers.
 | Code | Meaning |
 |---|---|
 | `quota.archive` | Compressed input exceeds `max_archive_bytes`. |
+| `quota.derived` | A wrapper's immutable decoded archive would exceed `max_derived_archive_bytes`. |
 | `quota.files` | Entry count exceeds `max_files`. |
 | `quota.member` | Declared or actual member size exceeds its cap. |
 | `quota.total` | Declared or actual running total exceeds its cap. |
@@ -108,11 +109,11 @@ Unknown error codes must be treated as rejection by consumers.
 | `codec.deflate.trailing_input` | One valid DEFLATE stream ended before the declared compressed payload ended. Trailing bytes and concatenated streams are rejected. |
 | `crc.mismatch` | Expanded member CRC32 disagrees with the archive. |
 
-### Internal transforms
+### Gzip wrapper
 
 | Code | Meaning |
 |---|---|
-| `gzip.extra` | The internal bounded gzip transform encountered malformed `FEXTRA` subfield framing, a declared subfield length that exceeds `XLEN`, trailing remainder bytes, or the reserved SI2 value zero. This code is exercised by transform and fuzz infrastructure; gzip is not yet a public archive selection. |
+| `gzip.extra` | The strict gzip wrapper encountered malformed `FEXTRA` subfield framing, a declared subfield length that exceeds `XLEN`, trailing remainder bytes, the reserved SI2 value zero, or a duplicate SI1/SI2 identifier. |
 
 ### TAR structure
 

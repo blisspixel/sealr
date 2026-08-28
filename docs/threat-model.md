@@ -137,7 +137,7 @@ You et al. §7.2, seven strategies:
 | **Normalize** (extract + repack to an unambiguous ZIP) | Phase 3. Powerful; must not become a second parser. Normalize **with this engine**, then the output is the artifact. |
 | Identify ambiguous patterns | **Current strict default.** Known ambiguous or malformed structure is denied. A future compatibility profile must be separately versioned rather than acting as an insecure fallback. |
 | Incorporate multiple parsers | Research/CI only (ZipDiff corpus). Not in the hot path. |
-| Fix unique/outlier behaviors | A versioned interpretation specification and executable behavior must agree. Current main has six preview profile identities: four ZIP32 profiles, one explicit strict ZIP64 profile, and portable ustar. None is yet stable. |
+| Fix unique/outlier behaviors | A versioned interpretation specification and executable behavior must agree. Current main has seven preview profile identities: four ZIP32 profiles, one explicit strict ZIP64 profile, raw portable ustar, and strict gzip-wrapped portable ustar. None is yet stable. |
 | Better format design | Later (next-gen container). |
 
 Default posture: **reject ambiguity**. Future SFX or APK support would require separate named interpretation and consumer profiles recorded in evidence, never an `--insecure` fallback.
@@ -146,6 +146,6 @@ Default posture: **reject ambiguity**. Future SFX or APK support would require s
 
 ## What we are not
 
-Sealr is not an antivirus or package inventory system. It does not claim CRC is a signature and does not run competing parsers during an invocation. Current main explicitly selects exactly one ZIP32, strict ZIP64, or portable ustar parser with versioned rules and returns a structured finding at the deterministic refusal point. ZIP64 is in-process only under policy v3; supervised selection fails closed until semantic-record v3. A rejected view may be partial and must not be treated as a complete inventory.
+Sealr is not an antivirus or package inventory system. It does not claim CRC is a signature and does not run competing parsers during an invocation. Current main explicitly selects exactly one ZIP32, strict ZIP64, raw portable ustar, or strict gzip-wrapped portable ustar path with versioned rules and returns a structured finding at the deterministic refusal point. ZIP64 and gzip-wrapped ustar are in-process only under policy v3 and v4 respectively; supervised selection fails closed until later semantic records can bind their evidence. A rejected view may be partial and must not be treated as a complete inventory.
 
 Property tests, fuzzing, model checking, native race stress, and release provenance support different claims. None alone establishes unique interpretation, complete filesystem race freedom, or a formally verified extractor. Every assurance result is scoped to its input domain, model, platform, tool version, and stated assumptions.

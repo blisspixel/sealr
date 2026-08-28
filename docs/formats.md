@@ -1,8 +1,8 @@
 # Format strategy
 
-> Current implementation: classic ZIP32 with Store and Deflate, an explicit in-process strict ZIP64 preview under policy v3, and an explicitly selected raw portable POSIX ustar profile for regular files and directories. gzip exists only as internal bounded transform and fuzz infrastructure. Rich TAR dialects, public compressed wrappers, and the other tracked families remain profile-specific work. Format sequencing is governed by the [roadmap](../ROADMAP.md) and the detailed [format support architecture](format-support.md).
+> Current implementation: classic ZIP32 with Store and Deflate, an explicit in-process strict ZIP64 preview under policy v3, raw portable POSIX ustar, and strict single-member gzip-wrapped portable ustar under policy v4. Rich TAR dialects, additional compressed wrappers, and the other tracked families remain profile-specific work. Format sequencing is governed by the [roadmap](../ROADMAP.md) and the detailed [format support architecture](format-support.md).
 
-## Current ZIP profiles
+## Current archive profiles
 
 Sealr exposes four separately identified ZIP32 interpretations. The compatibility default accepts ASCII or explicitly flagged strict UTF-8 names. Strict ASCII v2 rejects non-ASCII names. Portable UTF-8 v1 is the supported Unicode profile. Wheel UTF-8 v1 preserves the narrower Alpha.7 research language. None changes the default. All four share these structural rules:
 
@@ -17,6 +17,8 @@ Sealr exposes four separately identified ZIP32 interpretations. The compatibilit
 The separately identified [strict ZIP64 profile](profiles/zip64-strict-ascii-v1.md) is selected explicitly and authorized by policy v3. It reuses Store and Deflate but has its own sentinel, extra-field, end-record, locator, descriptor, IR, covering, and `sealrTreeV3` rules. ZIP32 selection never retries or aliases to it, and authenticated worker execution fails closed until semantic-record v3.
 
 The separately identified [portable ustar profile](profiles/tar-ustar-portable-v1.md) validates exact ustar magic, version, checksums, bounded octal fields, record geometry, padding, and termination. It accepts regular files and directories only, uses TAR-native IR evidence and `sealrTreeV2` layout identity, and shares the portable path, quota, verification, retention, read, and atomic materialization core.
+
+The separately identified [gzip-wrapped portable ustar profile](profiles/tar-gzip-ustar-portable-v1.md) authorizes exactly one RFC 1952 member with Deflate payload, closed optional-field grammar, no trailing input, and verified FHCRC when present, CRC32, ISIZE, exact compressed consumption, output, and expansion bounds. It keeps the original gzip and decoded TAR as distinct immutable snapshot domains, uses wrapper-native plus TAR-native evidence, requires one exact transform and composite audit, and publishes `sealrTreeV4`. It adds no runtime dependency.
 
 The [API contract](api.md), [safety specification](safety.md), and [finding registry](findings.md) are normative for current behavior.
 
@@ -60,8 +62,8 @@ The first layer constructs one archive tree. The second assigns Python packaging
 | Portable UTF-8 ZIP path and tree profile | Alpha.8 supported preview | Strict UTF-8 NFC, explicit flagging, no extras, component ceilings, target collision model, and independent vector |
 | Raw portable POSIX ustar | Alpha.9 supported preview | Explicit selection, policy v2 authorization, no new runtime dependency, TAR-native evidence, independent roots, external producer corpus, native package and fuzz gates |
 | Strict ZIP64 | Current-main in-process preview | Explicit policy v3 selection, exact saturated legacy and redundant ZIP64 field agreement, `sealrTreeV3`, and worker refusal pending semantic-record v3 |
-| gzip-wrapped TAR | Internal transform and fuzz infrastructure; public profile next | Bounded derived snapshot, exact RFC 1952 consumption and checksum, existing `flate2`, outer plus inner identities |
-| PAX and GNU TAR dialects | Separate later profiles | Bounded keyword precedence, long-name behavior, link and sparse decisions, and no implicit widening of portable ustar |
+| gzip-wrapped portable ustar | Current-main in-process preview | Explicit policy v4 selection, two immutable domains, exact single-member RFC 1952 consumption and checksums, existing `flate2`, `sealrTreeV4`, and worker refusal pending a later semantic record |
+| PAX and GNU TAR dialects | Next separate profiles | Raw PAX first, then GNU long-name-only; bounded keyword precedence and extension provenance, with links, sparse files, base-256 numbers, and mixed dialects denied |
 | zstd, xz/LZMA, bzip2, and LZ4 frame wrappers | Independently promoted in that order | One measured decoder at a time with exact input, memory, work, checksum, and dependency evidence |
 | ZIP Zstd, XZ/LZMA, BZip2, Deflate64 adapters | After each codec promotion | Same exact-consumption, bounded-window, and dependency rules as Deflate; no second parser |
 | Wheel-oriented UTF-8 ZIP profile | Alpha.7 research evidence preserved | Exact research bytes remain available for historical verification |

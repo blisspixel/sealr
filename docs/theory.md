@@ -314,7 +314,7 @@ The current independent identity verifier checks committed covering certificates
 
 **What the math is, unproven:** compilation of untrusted container bytes under a versioned unique-parse grammar, with the covering as witness and the tree as a projection of that witness.
 
-**What is implemented:** recognizers for ZIP32 Store/Deflate, explicit strict ZIP64 Store/Deflate, and raw portable ustar fragments of that language, format-native IR and preview roots, and corpora of known divergence witnesses. ZIP64 remains in-process only until semantic-record v3.
+**What is implemented:** recognizers for ZIP32 Store/Deflate, explicit strict ZIP64 Store/Deflate, raw portable ustar, and strict single-member gzip-wrapped portable ustar fragments of that language, format-native IR and preview roots, and corpora of known divergence witnesses. ZIP64 and gzip-wrapped ustar remain in-process only until later semantic records can bind their evidence.
 
 The work is to make \(L(\pi)\) actually unique-parse, then to check certificates without parsing again.
 

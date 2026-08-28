@@ -25,7 +25,7 @@ Until then, keep every admitted language strict and fail closed. Format work cou
 
 - Inspect and materialize share one interpretation. No recovery parser, no second opinion on the same bytes.
 - Policy is data in the receipt. No `--insecure`, no “just this once.”
-- Unknown structure, ZIP64 outside the explicit policy-v3 profile, encryption, rich TAR extensions, public compressed wrappers, and unsupported methods fail closed. The ZIP compatibility default requires explicit strict UTF-8 flagging for non-ASCII paths, strict ASCII v2 rejects them, portable UTF-8 v1 admits only its pinned Unicode 16.0 repertoire in NFC, and raw portable ustar uses that same closed path contract. Authenticated worker ZIP64 selection also fails closed until semantic-record v3.
+- Unknown structure, ZIP64 outside the explicit policy-v3 profile, gzip-wrapped TAR outside the explicit policy-v4 profile, encryption, rich TAR extensions, additional compressed wrappers, and unsupported methods fail closed. The ZIP compatibility default requires explicit strict UTF-8 flagging for non-ASCII paths, strict ASCII v2 rejects them, portable UTF-8 v1 admits only its pinned Unicode 16.0 repertoire in NFC, and raw plus gzip-wrapped portable ustar use that same closed path contract. Authenticated worker ZIP64 and gzip-TAR selections also fail closed until later semantic records bind their evidence.
 - Rejection still returns a view and a receipt. Silence is a bug.
 - A digest of the archive is not a digest of the tree. Semantic identity (layout root, content root, versioned IR) has to land before anyone should reuse the result.
 - Cross-platform sameness is the product. If Windows writes a different tree, that is a fail, not a port quirk.

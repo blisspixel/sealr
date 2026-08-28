@@ -19,6 +19,14 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-ustar
 
 ZIP remains the compatibility default. `--format zip` and `--format tar-ustar` each invoke exactly one parser and use a policy that authorizes that selection.
 
+Strict single-member gzip-wrapped portable ustar is a separate current-main in-process preview under policy v4:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-ustar
+```
+
+The suffix is illustrative only. `--format tar-gzip-ustar` performs the selection; the gzip FNAME field and source filename never select the parser or supply a member path.
+
 Strict ZIP64 is a separate current-main in-process preview under policy v3:
 
 ```text
@@ -37,6 +45,12 @@ For portable ustar:
 
 ```text
 cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-ustar --dest ./new-output
+```
+
+For gzip-wrapped portable ustar:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-ustar --dest ./new-output
 ```
 
 For strict ZIP64 in process:
@@ -66,7 +80,7 @@ establish the complete supervised boundary or the command exits unsuccessfully
 without invoking the in-process payload path. macOS and Windows return
 isolation unavailable if this option is selected.
 
-The authenticated worker currently carries semantic-record v2 ZIP32 plans only. Combining `--format tar-ustar` or `--format zip64` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it never falls back to in-process verification. ZIP64 worker support waits for semantic-record v3.
+The authenticated worker currently carries semantic-record v2 ZIP32 plans only. Combining `--format tar-ustar`, `--format tar-gzip-ustar`, or `--format zip64` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it never falls back to in-process verification. ZIP64 and gzip-TAR worker support wait for later semantic records that bind their format-specific evidence.
 
 ## Output contract
 
