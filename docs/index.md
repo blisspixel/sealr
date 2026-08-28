@@ -52,6 +52,7 @@ Repository vulnerability reporting and supported-version policy are in [SECURITY
 | [Interpretation theory](theory.md) | Research notes, conjectures, and proof obligations |
 | [Format strategy](formats.md) | Format and codec sequencing |
 | [Format support architecture](format-support.md) | Major container, wrapper, consumer, dependency, and promotion matrix |
+| [Codec dependency gates](codec-dependency-gates.md) | Exact zero-dependency, pure-Rust codec, complex-engine, and legal-boundary decisions |
 | [Attestations](attestations.md) | Evidence authentication boundaries |
 
 ## Plans and product direction
