@@ -165,6 +165,21 @@ The zstd-wrapped ustar profile is the first codec promotion, so its threat model
 | Concatenation and trailing bytes | Exactly one frame must consume the complete source; magic-prefixed trailing bytes are unsupported concatenation and everything else is malformed. |
 | Decoder implementation faults | The reviewed `ruzstd` 0.9.0 floor postdates RUSTSEC-2024-0400 and the first-frame window-cap fix; its remaining `unsafe` ring buffer is a named review item, bounded incremental decoding avoids the crate's multi-frame conveniences, and a dedicated fuzz campaign exercises the wrapper. |
 
+### Xz wrapper threats
+
+The xz-wrapped ustar profile is the second codec promotion. `Policy::default_v9()` must authorize `tar-xz-ustar`, and selection is explicit. Its profile digest is `16ec815ab3b2c3c5f877ec04e592d1dd1a6ec41f2c7d843dd7aa2bc6b50cfd05`.
+
+| Attack | Xz wrapper control |
+|---|---|
+| Dictionary-driven allocation abuse | The LZMA2 dictionary is capped at 8 MiB from the properties byte before decoder allocation, and the decoder's own 8256 KiB memory limit stands as an independent second wall; `xz -9`'s 64 MiB dictionary is rejected. |
+| Filter-chain smuggling | Exactly one filter per block, and it must be LZMA2; delta, BCJ, and every other chain fail closed before any decoding of that block's payload. |
+| Integrity disclaimers | Check `None` is rejected outright; CRC32, CRC64, and SHA-256 are each verified twice — by the decoder during streaming and by Sealr's own implementation over the final derived bytes. |
+| Container interpretation divergence | The decoder parses the container while streaming; Sealr independently parses footer-and-index first over the decoder-established consumed range and re-verifies every header CRC32, size relation, and check value, failing closed on any disagreement. |
+| Index, backward-size, and reserved-bit lies | The index must exactly tile the recorded blocks, the footer's stored backward size must equal the real index length, and every reserved bit must be zero — three verifications the upstream decoder does not perform on its own. |
+| Declared-size lies | Declared compressed and uncompressed block sizes must appear both-or-neither and match the observed values exactly; a mismatch is a recorded quota-lie finding, not a tolerated hint. |
+| Stream padding and concatenation | Exactly one stream must consume the complete source; the format's legal stream padding and concatenated streams are rejected rather than silently skipped. |
+| Decoder implementation faults | `lzma-rust2` 0.20.0 is pinned with `default-features = false` so the crate compiles under `forbid(unsafe_code)`, the sans-I/O core is driven incrementally with reader conveniences avoided, and a dedicated fuzz campaign exercises the wrapper. |
+
 ### Wheel consumer threats
 
 Wheel evaluation adds a second semantic layer above the ZIP container. The controls below are supported Alpha.8 preview behavior in `sealr::wheel`; the Alpha.7 laboratory preserves the external installer proof. Their full contract is in [Python wheel consumer profile v1](profiles/python-wheel-v1.md).
