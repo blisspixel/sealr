@@ -858,11 +858,27 @@ pub(crate) fn audit_tar_pax_covering(
     ir: &ArchiveIR,
 ) -> Result<(), Finding> {
     let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
-    if ir.format() != ArchiveFormat::TarPax {
+    if !matches!(
+        ir.format(),
+        ArchiveFormat::TarPax | ArchiveFormat::TarGzipPax
+    ) {
         return Err(fail("PAX covering audit received a non-PAX IR"));
     }
-    if ir.source_digest != *snapshot.digest() {
-        return Err(fail("source digest does not match the PAX snapshot"));
+    match ir.format() {
+        ArchiveFormat::TarPax if ir.source_digest != *snapshot.digest() => {
+            return Err(fail("source digest does not match the PAX snapshot"));
+        }
+        ArchiveFormat::TarGzipPax => {
+            let gzip = ir
+                .gzip_evidence()
+                .ok_or_else(|| fail("gzip-wrapped PAX IR has no wrapper evidence"))?;
+            if gzip.derived_output_len != snapshot.len()
+                || snapshot.digest().sha256() != Some(gzip.derived_output_sha256.as_str())
+            {
+                return Err(fail("derived PAX identity does not match its snapshot"));
+            }
+        }
+        _ => {}
     }
     let archive = ir
         .tar_pax_evidence()
@@ -1102,7 +1118,10 @@ fn audit_one_pax_member(
     let fail = |detail: &'static str| {
         Finding::error(FindingCode::CoveringInconsistent, detail).on(&member.decoded_name)
     };
-    if member.format() != ArchiveFormat::TarPax {
+    if !matches!(
+        member.format(),
+        ArchiveFormat::TarPax | ArchiveFormat::TarGzipPax
+    ) {
         return Err(fail(
             "PAX member evidence variant does not match the archive format",
         ));
@@ -1376,11 +1395,27 @@ pub(crate) fn audit_tar_gnu_longname_covering(
     ir: &ArchiveIR,
 ) -> Result<(), Finding> {
     let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
-    if ir.format() != ArchiveFormat::TarGnuLongName {
+    if !matches!(
+        ir.format(),
+        ArchiveFormat::TarGnuLongName | ArchiveFormat::TarGzipGnuLongName
+    ) {
         return Err(fail("GNU TAR covering audit received a non-GNU IR"));
     }
-    if ir.source_digest != *snapshot.digest() {
-        return Err(fail("source digest does not match the GNU TAR snapshot"));
+    match ir.format() {
+        ArchiveFormat::TarGnuLongName if ir.source_digest != *snapshot.digest() => {
+            return Err(fail("source digest does not match the GNU TAR snapshot"));
+        }
+        ArchiveFormat::TarGzipGnuLongName => {
+            let gzip = ir
+                .gzip_evidence()
+                .ok_or_else(|| fail("gzip-wrapped GNU TAR IR has no wrapper evidence"))?;
+            if gzip.derived_output_len != snapshot.len()
+                || snapshot.digest().sha256() != Some(gzip.derived_output_sha256.as_str())
+            {
+                return Err(fail("derived GNU TAR identity does not match its snapshot"));
+            }
+        }
+        _ => {}
     }
     let archive = ir
         .tar_gnu_longname_evidence()
@@ -1501,7 +1536,10 @@ pub(crate) fn audit_tar_gnu_longname_covering(
                 .members
                 .get(member_index)
                 .ok_or_else(|| fail("GNU source has an unrecorded ordinary member"))?;
-            if member.format() != ArchiveFormat::TarGnuLongName {
+            if !matches!(
+                member.format(),
+                ArchiveFormat::TarGnuLongName | ArchiveFormat::TarGzipGnuLongName
+            ) {
                 return Err(fail("GNU member evidence carries the wrong format"));
             }
             let evidence = member
@@ -2773,6 +2811,8 @@ mod tests {
             ArchiveEvidence::Tar(covering) => covering,
             ArchiveEvidence::TarPax(evidence) => &mut evidence.tar,
             ArchiveEvidence::TarGnuLongName(evidence) => &mut evidence.tar,
+            ArchiveEvidence::TarGzipPax(evidence) => &mut evidence.pax.tar,
+            ArchiveEvidence::TarGzipGnuLongName(evidence) => &mut evidence.gnu.tar,
             ArchiveEvidence::Zip(_) | ArchiveEvidence::Zip64(_) | ArchiveEvidence::TarGzip(_) => {
                 panic!("expected TAR evidence")
             }
@@ -2786,7 +2826,9 @@ mod tests {
             | ArchiveEvidence::Tar(_)
             | ArchiveEvidence::TarGzip(_)
             | ArchiveEvidence::TarPax(_)
-            | ArchiveEvidence::TarGnuLongName(_) => {
+            | ArchiveEvidence::TarGnuLongName(_)
+            | ArchiveEvidence::TarGzipPax(_)
+            | ArchiveEvidence::TarGzipGnuLongName(_) => {
                 panic!("expected ZIP evidence")
             }
         }
@@ -2799,7 +2841,9 @@ mod tests {
             | ArchiveEvidence::Tar(_)
             | ArchiveEvidence::TarGzip(_)
             | ArchiveEvidence::TarPax(_)
-            | ArchiveEvidence::TarGnuLongName(_) => {
+            | ArchiveEvidence::TarGnuLongName(_)
+            | ArchiveEvidence::TarGzipPax(_)
+            | ArchiveEvidence::TarGzipGnuLongName(_) => {
                 panic!("expected ZIP64 evidence")
             }
         }
@@ -2808,8 +2852,11 @@ mod tests {
     fn tar_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut TarMemberEvidence {
         match &mut ir.members[index].evidence {
             MemberEvidence::Tar(evidence) => evidence,
-            MemberEvidence::TarPax(evidence) => &mut evidence.tar,
-            MemberEvidence::TarGnuLongName(evidence) => &mut evidence.tar,
+            MemberEvidence::TarPax(evidence) | MemberEvidence::TarGzipPax(evidence) => {
+                &mut evidence.tar
+            }
+            MemberEvidence::TarGnuLongName(evidence)
+            | MemberEvidence::TarGzipGnuLongName(evidence) => &mut evidence.tar,
             MemberEvidence::Zip(_) | MemberEvidence::Zip64(_) | MemberEvidence::TarGzip(_) => {
                 panic!("expected TAR member evidence")
             }
@@ -2819,33 +2866,38 @@ mod tests {
     fn pax_archive_mut(ir: &mut ArchiveIR) -> &mut crate::ir::TarPaxArchiveEvidence {
         match &mut ir.evidence {
             ArchiveEvidence::TarPax(evidence) => evidence,
+            ArchiveEvidence::TarGzipPax(evidence) => &mut evidence.pax,
             ArchiveEvidence::Zip(_)
             | ArchiveEvidence::Zip64(_)
             | ArchiveEvidence::Tar(_)
             | ArchiveEvidence::TarGzip(_)
-            | ArchiveEvidence::TarGnuLongName(_) => panic!("expected PAX archive evidence"),
+            | ArchiveEvidence::TarGnuLongName(_)
+            | ArchiveEvidence::TarGzipGnuLongName(_) => panic!("expected PAX archive evidence"),
         }
     }
 
     fn pax_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut crate::ir::TarPaxMemberEvidence {
         match &mut ir.members[index].evidence {
-            MemberEvidence::TarPax(evidence) => evidence,
+            MemberEvidence::TarPax(evidence) | MemberEvidence::TarGzipPax(evidence) => evidence,
             MemberEvidence::Zip(_)
             | MemberEvidence::Zip64(_)
             | MemberEvidence::Tar(_)
             | MemberEvidence::TarGzip(_)
-            | MemberEvidence::TarGnuLongName(_) => panic!("expected PAX member evidence"),
+            | MemberEvidence::TarGnuLongName(_)
+            | MemberEvidence::TarGzipGnuLongName(_) => panic!("expected PAX member evidence"),
         }
     }
 
     fn gnu_archive_mut(ir: &mut ArchiveIR) -> &mut crate::ir::TarGnuLongNameArchiveEvidence {
         match &mut ir.evidence {
             ArchiveEvidence::TarGnuLongName(evidence) => evidence,
+            ArchiveEvidence::TarGzipGnuLongName(evidence) => &mut evidence.gnu,
             ArchiveEvidence::Zip(_)
             | ArchiveEvidence::Zip64(_)
             | ArchiveEvidence::Tar(_)
             | ArchiveEvidence::TarGzip(_)
-            | ArchiveEvidence::TarPax(_) => panic!("expected GNU long-name archive evidence"),
+            | ArchiveEvidence::TarPax(_)
+            | ArchiveEvidence::TarGzipPax(_) => panic!("expected GNU long-name archive evidence"),
         }
     }
 
@@ -2854,12 +2906,14 @@ mod tests {
         index: usize,
     ) -> &mut crate::ir::TarGnuLongNameMemberEvidence {
         match &mut ir.members[index].evidence {
-            MemberEvidence::TarGnuLongName(evidence) => evidence,
+            MemberEvidence::TarGnuLongName(evidence)
+            | MemberEvidence::TarGzipGnuLongName(evidence) => evidence,
             MemberEvidence::Zip(_)
             | MemberEvidence::Zip64(_)
             | MemberEvidence::Tar(_)
             | MemberEvidence::TarGzip(_)
-            | MemberEvidence::TarPax(_) => panic!("expected GNU long-name member evidence"),
+            | MemberEvidence::TarPax(_)
+            | MemberEvidence::TarGzipPax(_) => panic!("expected GNU long-name member evidence"),
         }
     }
 
@@ -2870,7 +2924,9 @@ mod tests {
             | MemberEvidence::Tar(_)
             | MemberEvidence::TarGzip(_)
             | MemberEvidence::TarPax(_)
-            | MemberEvidence::TarGnuLongName(_) => {
+            | MemberEvidence::TarGnuLongName(_)
+            | MemberEvidence::TarGzipPax(_)
+            | MemberEvidence::TarGzipGnuLongName(_) => {
                 panic!("expected ZIP member evidence")
             }
         }
@@ -2883,7 +2939,9 @@ mod tests {
             | MemberEvidence::Tar(_)
             | MemberEvidence::TarGzip(_)
             | MemberEvidence::TarPax(_)
-            | MemberEvidence::TarGnuLongName(_) => {
+            | MemberEvidence::TarGnuLongName(_)
+            | MemberEvidence::TarGzipPax(_)
+            | MemberEvidence::TarGzipGnuLongName(_) => {
                 panic!("expected ZIP64 member evidence")
             }
         }

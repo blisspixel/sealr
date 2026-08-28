@@ -45,3 +45,11 @@ Effective member paths (whether from the standard 100-byte name field or an `L` 
 - Mixed GNU and PAX states
 - Multi-volume and concatenated archives
 - Device files, FIFOs, and links
+
+## Evidence and identities
+
+The IR schema is `sealr.archive-ir.tar-gnu-longname.v1`. Archive evidence records the complete source covering plus every ordered `L` carrier: its raw name bytes, header, payload, path, and padding ranges, mode, modification time, checksum, header SHA-256, exact path bytes, and payload SHA-256. Every member records its underlying header name and an exact header-or-carrier path provenance.
+
+An independent covering audit reparses every header from the source, replays the single-depth carrier state without the structural parser, and requires exact agreement with the claimed evidence before readiness. Layout identity is `sealrTreeV6` under label `sealr.tree.layout.tar-gnu-longname.v1`; it binds the covering, ordered carriers, member geometry, effective names, and provenance. Content identity remains the format-neutral `sealrTreeV1` over verified paths and bytes. The standalone identity verifier reconstructs the canonical profile bytes, the covering, the carrier replay, and both roots without linking Sealr.
+
+Policy v6 (`sealr:policy/default/v6`, digest `aefc8a1baa113d7face30857ef64fe8f47c647fae863a72810b80380f8fd4178`) authorizes the separate `tar-gnu-longname` format. Selection is explicit through `TarGnuLongNameInterpretationProfile::PortableV1` or `--format tar-gnu-longname`; no other selection aliases to it.

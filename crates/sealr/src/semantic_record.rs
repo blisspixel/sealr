@@ -4762,7 +4762,9 @@ mod tests {
             | ArchiveEvidence::Tar(_)
             | ArchiveEvidence::TarGzip(_)
             | ArchiveEvidence::TarPax(_)
-            | ArchiveEvidence::TarGnuLongName(_) => {
+            | ArchiveEvidence::TarGnuLongName(_)
+            | ArchiveEvidence::TarGzipPax(_)
+            | ArchiveEvidence::TarGzipGnuLongName(_) => {
                 panic!("semantic-record test archive must carry ZIP evidence")
             }
         }

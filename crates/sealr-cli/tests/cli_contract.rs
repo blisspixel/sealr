@@ -184,7 +184,7 @@ fn append_tar_record(bytes: &mut Vec<u8>, header: [u8; 512], payload: &[u8]) {
     bytes.resize(bytes.len().next_multiple_of(512), 0);
 }
 
-fn write_tar_pax_fixture(path: &Path) {
+fn tar_pax_fixture_bytes() -> Vec<u8> {
     let body = b"nominal\n";
     let extension = pax_record("path", "mission/status.txt");
     let mut bytes = Vec::new();
@@ -199,7 +199,11 @@ fn write_tar_pax_fixture(path: &Path) {
         body,
     );
     bytes.resize(bytes.len() + 1024, 0);
-    fs::write(path, bytes).expect("PAX TAR fixture should be writable");
+    bytes
+}
+
+fn write_tar_pax_fixture(path: &Path) {
+    fs::write(path, tar_pax_fixture_bytes()).expect("PAX TAR fixture should be writable");
 }
 
 fn old_gnu_header(name: &[u8], size: u64, typeflag: u8) -> [u8; 512] {
@@ -221,7 +225,7 @@ fn old_gnu_header(name: &[u8], size: u64, typeflag: u8) -> [u8; 512] {
     header
 }
 
-fn write_tar_gnu_longname_fixture(path: &Path) -> String {
+fn tar_gnu_longname_fixture_bytes() -> (Vec<u8>, String) {
     let member_path = format!("mission/{}/status.txt", "segment".repeat(15));
     let body = b"nominal\n";
     let mut carrier_payload = member_path.as_bytes().to_vec();
@@ -238,6 +242,11 @@ fn write_tar_gnu_longname_fixture(path: &Path) -> String {
         body,
     );
     bytes.resize(bytes.len() + 1024, 0);
+    (bytes, member_path)
+}
+
+fn write_tar_gnu_longname_fixture(path: &Path) -> String {
+    let (bytes, member_path) = tar_gnu_longname_fixture_bytes();
     fs::write(path, bytes).expect("GNU long-name TAR fixture should be writable");
     member_path
 }
@@ -253,16 +262,32 @@ fn crc32(bytes: &[u8]) -> u32 {
     !crc
 }
 
-fn write_tar_gzip_fixture(path: &Path) {
-    let tar = tar_fixture_bytes();
+fn gzip_fixture_bytes(tar: &[u8]) -> Vec<u8> {
     let len = u16::try_from(tar.len()).expect("CLI TAR fixture fits one stored Deflate block");
     let mut bytes = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255, 0x01];
     bytes.extend_from_slice(&len.to_le_bytes());
     bytes.extend_from_slice(&(!len).to_le_bytes());
-    bytes.extend_from_slice(&tar);
-    bytes.extend_from_slice(&crc32(&tar).to_le_bytes());
+    bytes.extend_from_slice(tar);
+    bytes.extend_from_slice(&crc32(tar).to_le_bytes());
     bytes.extend_from_slice(&(tar.len() as u32).to_le_bytes());
-    fs::write(path, bytes).expect("gzip-wrapped TAR fixture should be writable");
+    bytes
+}
+
+fn write_tar_gzip_fixture(path: &Path) {
+    fs::write(path, gzip_fixture_bytes(&tar_fixture_bytes()))
+        .expect("gzip-wrapped TAR fixture should be writable");
+}
+
+fn write_tar_gzip_pax_fixture(path: &Path) {
+    fs::write(path, gzip_fixture_bytes(&tar_pax_fixture_bytes()))
+        .expect("gzip-wrapped PAX TAR fixture should be writable");
+}
+
+fn write_tar_gzip_gnu_longname_fixture(path: &Path) -> String {
+    let (tar, member_path) = tar_gnu_longname_fixture_bytes();
+    fs::write(path, gzip_fixture_bytes(&tar))
+        .expect("gzip-wrapped GNU long-name TAR fixture should be writable");
+    member_path
 }
 
 fn write_zip64_fixture(path: &Path) {
@@ -344,6 +369,8 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert!(help_text.contains("tar-gzip-ustar"));
     assert!(help_text.contains("tar-pax"));
     assert!(help_text.contains("tar-gnu-longname"));
+    assert!(help_text.contains("tar-gzip-pax"));
+    assert!(help_text.contains("tar-gzip-gnu-longname"));
     assert!(help_text.contains("--worker-manifest <ABSOLUTE_PATH>"));
     assert!(help_text.contains("--version"));
 
@@ -497,6 +524,8 @@ fn explicit_tar_pax_format_inspects_materializes_and_is_not_autodetected() {
         None,
         Some("tar-ustar"),
         Some("tar-gzip-ustar"),
+        Some("tar-gzip-pax"),
+        Some("tar-gzip-gnu-longname"),
         Some("zip64"),
     ] {
         let output = match format {
@@ -567,7 +596,14 @@ fn explicit_tar_gnu_longname_inspects_materializes_and_is_not_autodetected() {
     assert!(!destination.join("producer-carrier").exists());
     assert!(!destination.join("opaque-base").exists());
 
-    for format in [None, Some("tar-ustar"), Some("tar-pax"), Some("zip64")] {
+    for format in [
+        None,
+        Some("tar-ustar"),
+        Some("tar-pax"),
+        Some("tar-gzip-pax"),
+        Some("tar-gzip-gnu-longname"),
+        Some("zip64"),
+    ] {
         let output = match format {
             Some(format) => sealr(&[Path::new("--format"), Path::new(format), &archive]),
             None => sealr(&[&archive]),
@@ -576,6 +612,186 @@ fn explicit_tar_gnu_longname_inspects_materializes_and_is_not_autodetected() {
             output.status.code(),
             Some(2),
             "GNU fixture should not be detected under format selection {format:?}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn explicit_tar_gzip_pax_format_inspects_and_materializes() {
+    let run = RunDirectory::create("tar-gzip-pax");
+    let archive = run.path.join("mission.pax.tar.gz");
+    write_tar_gzip_pax_fixture(&archive);
+
+    let inspect = sealr(&[Path::new("--format"), Path::new("tar-gzip-pax"), &archive]);
+    assert_eq!(
+        inspect.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&inspect.stdout),
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    let view = json(&inspect.stdout, "gzip PAX stdout");
+    let receipt = json(&inspect.stderr, "gzip PAX stderr");
+    assert_eq!(view["verdict"], "allowed");
+    assert_eq!(view["source"]["magic"], "gz");
+    assert_eq!(view["members"].as_array().map(Vec::len), Some(1));
+    assert_eq!(view["members"][0]["path"], "mission/status.txt");
+    assert_eq!(view["members"][0]["method"], "raw");
+    assert_eq!(view["members"][0]["uncomp_bytes"], 8);
+    assert_eq!(view["policy"]["id"], "sealr:policy/default/v7");
+    assert_eq!(
+        view["policy"]["digest"]["sha256"],
+        "92d576984b718e8a02bc6044090f8e2b335dbd1abd136d53e5b02d0ffbd978ef"
+    );
+    assert_eq!(
+        receipt["identities"]["interpretation"]["id"],
+        "sealr.profile.tar-gzip.pax-portable.v1"
+    );
+    assert_eq!(
+        receipt["identities"]["interpretation"]["digest"]["sha256"],
+        "6cc91b2b8563b5b070b44bf357a5c62e5d9dda0aedc374d7a08cd80da9c5434f"
+    );
+    assert!(receipt["identities"]["layout"].get("sealrTreeV7").is_some());
+    assert!(receipt["identities"]["layout"].get("sealrTreeV5").is_none());
+    assert!(receipt["identities"]["content"]
+        .get("sealrTreeV1")
+        .is_some());
+    assert_eq!(receipt["policy"], view["policy"]);
+
+    let destination = run.path.join("materialized");
+    let materialize = sealr(&[
+        Path::new("--format"),
+        Path::new("tar-gzip-pax"),
+        &archive,
+        Path::new("--dest"),
+        &destination,
+    ]);
+    assert_eq!(
+        materialize.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&materialize.stdout),
+        String::from_utf8_lossy(&materialize.stderr)
+    );
+    assert_eq!(
+        fs::read(destination.join("mission/status.txt")).unwrap(),
+        b"nominal\n"
+    );
+    assert!(!destination.join("PaxHeader").exists());
+    assert!(!destination.join("placeholder").exists());
+
+    for format in [
+        None,
+        Some("zip"),
+        Some("zip64"),
+        Some("tar-ustar"),
+        Some("tar-gzip-ustar"),
+        Some("tar-pax"),
+        Some("tar-gnu-longname"),
+        Some("tar-gzip-gnu-longname"),
+    ] {
+        let output = match format {
+            Some(format) => sealr(&[Path::new("--format"), Path::new(format), &archive]),
+            None => sealr(&[&archive]),
+        };
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "gzip-wrapped PAX fixture should not be admitted under format selection {format:?}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn explicit_tar_gzip_gnu_longname_format_inspects_and_materializes() {
+    let run = RunDirectory::create("tar-gzip-gnu-longname");
+    let archive = run.path.join("mission.gnu.tar.gz");
+    let member_path = write_tar_gzip_gnu_longname_fixture(&archive);
+
+    let inspect = sealr(&[
+        Path::new("--format"),
+        Path::new("tar-gzip-gnu-longname"),
+        &archive,
+    ]);
+    assert_eq!(
+        inspect.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&inspect.stdout),
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    let view = json(&inspect.stdout, "gzip GNU stdout");
+    let receipt = json(&inspect.stderr, "gzip GNU stderr");
+    assert_eq!(view["verdict"], "allowed");
+    assert_eq!(view["source"]["magic"], "gz");
+    assert_eq!(view["members"].as_array().map(Vec::len), Some(1));
+    assert_eq!(view["members"][0]["path"], member_path);
+    assert_eq!(view["members"][0]["method"], "raw");
+    assert_eq!(view["members"][0]["uncomp_bytes"], 8);
+    assert_eq!(view["policy"]["id"], "sealr:policy/default/v7");
+    assert_eq!(
+        view["policy"]["digest"]["sha256"],
+        "92d576984b718e8a02bc6044090f8e2b335dbd1abd136d53e5b02d0ffbd978ef"
+    );
+    assert_eq!(
+        receipt["identities"]["interpretation"]["id"],
+        "sealr.profile.tar-gzip.gnu-longname-portable.v1"
+    );
+    assert_eq!(
+        receipt["identities"]["interpretation"]["digest"]["sha256"],
+        "622943e9629c4acc7cfeb446eb9f2d16bb245db589c1a200e885a9d69a02295a"
+    );
+    assert!(receipt["identities"]["layout"].get("sealrTreeV8").is_some());
+    assert!(receipt["identities"]["layout"].get("sealrTreeV6").is_none());
+    assert!(receipt["identities"]["content"]
+        .get("sealrTreeV1")
+        .is_some());
+    assert_eq!(receipt["policy"], view["policy"]);
+
+    let destination = run.path.join("materialized");
+    let materialize = sealr(&[
+        Path::new("--format"),
+        Path::new("tar-gzip-gnu-longname"),
+        &archive,
+        Path::new("--dest"),
+        &destination,
+    ]);
+    assert_eq!(
+        materialize.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&materialize.stdout),
+        String::from_utf8_lossy(&materialize.stderr)
+    );
+    assert_eq!(
+        fs::read(destination.join(&member_path)).unwrap(),
+        b"nominal\n"
+    );
+    assert!(!destination.join("producer-carrier").exists());
+    assert!(!destination.join("opaque-base").exists());
+
+    for format in [
+        None,
+        Some("zip"),
+        Some("zip64"),
+        Some("tar-ustar"),
+        Some("tar-gzip-ustar"),
+        Some("tar-pax"),
+        Some("tar-gnu-longname"),
+        Some("tar-gzip-pax"),
+    ] {
+        let output = match format {
+            Some(format) => sealr(&[Path::new("--format"), Path::new(format), &archive]),
+            None => sealr(&[&archive]),
+        };
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "gzip-wrapped GNU fixture should not be admitted under format selection {format:?}: stdout={} stderr={}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );

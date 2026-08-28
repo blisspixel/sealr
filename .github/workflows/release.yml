@@ -229,6 +229,8 @@ jobs:
             "Bounded RFC 1952 gzip"
             "Bounded public TAR gzip ustar"
             "Bounded strict ZIP64"
+            "Bounded gzip-wrapped restricted PAX TAR"
+            "Bounded gzip-wrapped GNU long-name TAR"
           )
           for required in "${required_fuzz_jobs[@]}"; do
             count="$(jq --arg name "${required}" '[.jobs[] | select(.name == $name)] | length' <<<"${jobs_json}")"

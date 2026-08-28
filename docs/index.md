@@ -31,6 +31,9 @@ Start with the [README](../README.md) for the published Alpha.11 boundary and a 
 | [Strict ASCII ZIP64 profile v1](profiles/zip64-strict-ascii-v1.md) | Explicit policy-v3 in-process ZIP64 language, identity, and worker limitation |
 | [Gzip-wrapped portable ustar profile v1](profiles/tar-gzip-ustar-portable-v1.md) | Explicit policy-v4 single-member wrapper, transform, two-domain evidence, and limits |
 | [Restricted POSIX PAX profile v1](profiles/tar-pax-portable-v1.md) | Explicit policy-v5 two-key PAX language, fixed precedence, provenance, and `sealrTreeV5` contract |
+| [Restricted GNU long-name profile v1](profiles/tar-gnu-longname-portable-v1.md) | Explicit policy-v6 `L`-carrier-only old-GNU language, provenance, and `sealrTreeV6` contract |
+| [Gzip-wrapped restricted PAX profile v1](profiles/tar-gzip-pax-portable-v1.md) | Explicit policy-v7 composition of the frozen wrapper and PAX languages with `sealrTreeV7` |
+| [Gzip-wrapped GNU long-name profile v1](profiles/tar-gzip-gnu-longname-portable-v1.md) | Explicit policy-v7 composition of the frozen wrapper and GNU languages with `sealrTreeV8` |
 | [Python wheel consumer v1](profiles/python-wheel-v1.md) | Supported bounded wheel artifact and scheme-relative plan evaluator |
 | [Differentials](differentials.md) | Single-interpretation rules and the ZipDiff corpus |
 | [Reduced-authority execution](sandbox.md) | Supervisor and worker design |

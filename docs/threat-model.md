@@ -127,6 +127,31 @@ Raw PAX is a third explicitly selected TAR parser path, not a wider ustar mode o
 | Mixed TAR dialect interpretation | Deny GNU carriers, links, sparse files, devices, FIFOs, base-256 numbers, concatenation, recovery behavior, and every unknown type. |
 | Parser and audit shared mistake | Independently reparse physical headers, canonical records, exact covering, padding, state transitions, effective values, and provenance before readiness. |
 
+### Restricted GNU long-name threats
+
+Raw GNU long-name TAR is a fourth explicitly selected TAR parser path with exact old-GNU magic. `Policy::default_v6()` must authorize `tar-gnu-longname`, and selection is explicit. Its profile digest is `08fe2698806da997bc42e7e13a45cbf412a4a7056dec39c62456202680b91fa4`.
+
+| Attack | Restricted GNU control |
+|---|---|
+| Carrier state confusion | One bounded `L` carrier must be consumed by exactly the next ordinary member; chained, orphan, or trailing carriers fail closed. |
+| Carrier payload effects | The carrier payload requires strict UTF-8 with exactly one terminating NUL and passes the complete portable path contract; the carrier's own name is structural evidence only. |
+| Hidden alternate path | The checksum-covered underlying header name is preserved as evidence, exact header-or-carrier provenance is recorded, and both are bound into `sealrTreeV6`. |
+| Mixed dialect interpretation | `K` long links, sparse maps, base-256 numbers, PAX records, devices, links, concatenation, and recovery behavior are denied before any carrier state exists. |
+| Carrier metadata bomb | Carrier payloads are capped at 8,192 bytes and archives at 1,024 carriers, in addition to `max_metadata_bytes`. |
+| Parser and audit shared mistake | An independent audit reparses every header and replays the single-depth carrier state before readiness. |
+
+### Gzip composition threats
+
+The gzip-wrapped PAX and GNU compositions reuse the exact Alpha.10 wrapper threat model over a frozen inner dialect. `Policy::default_v7()` must authorize `tar-gzip-pax` or `tar-gzip-gnu-longname`, and each composition is selected explicitly.
+
+| Attack | Composition control |
+|---|---|
+| Wrapper hiding an unsettled inner language | Compositions exist only for raw dialects whose conformance is frozen; the inner language is byte-for-byte the raw profile. |
+| Inner-dialect aliasing through the wrapper | Each composition invokes exactly one inner parser against the derived domain; no detection, retry, or fallback between ustar, PAX, and GNU exists. |
+| Derived-domain substitution | The ready boundary requires exactly two snapshots and one full-source transform whose recorded output length and SHA-256 match the derived snapshot and the wrapper evidence, then replays wrapper CRC32 and ISIZE against the derived bytes. |
+| Identity collapse across encodings | Source identity names the compressed bytes, layout identity (`sealrTreeV7`/`sealrTreeV8`) binds wrapper fields plus the complete inner layout, and only content identity is shared with the raw dialect. |
+| Decompression resource abuse | `max_derived_archive_bytes` bounds the decoded TAR, `max_ratio` bounds expansion against the recorded Deflate payload, and the wrapper metadata is charged against `max_metadata_bytes` before the inner parse. |
+
 ### Wheel consumer threats
 
 Wheel evaluation adds a second semantic layer above the ZIP container. The controls below are supported Alpha.8 preview behavior in `sealr::wheel`; the Alpha.7 laboratory preserves the external installer proof. Their full contract is in [Python wheel consumer profile v1](profiles/python-wheel-v1.md).

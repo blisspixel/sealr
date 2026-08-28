@@ -35,6 +35,23 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-pax
 
 `--format tar-pax` accepts only `sealr.profile.tar.pax-portable.v1`: exact portable-ustar physical headers plus bounded local or global extensions containing only canonical `path` and `size` records. It is not automatic PAX detection or general TAR compatibility. Unknown keywords, links, sparse files, GNU records, base-256 numbers, mixed dialects, and recovery behavior fail closed.
 
+Restricted raw old-GNU long-name TAR is a separate current-main in-process preview under policy v6:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-gnu-longname
+```
+
+`--format tar-gnu-longname` accepts only exact old-GNU magic with at most one bounded pathname-only `L` carrier per member. `K` long links, sparse records, base-256 numbers, PAX records, mixed state, and orphan carriers fail closed.
+
+The gzip-wrapped restricted PAX and GNU long-name compositions are separate current-main in-process previews under policy v7:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-pax
+cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-gnu-longname
+```
+
+Each composition accepts exactly one strict RFC 1952 gzip member whose bounded decoded output satisfies the complete frozen raw dialect. No composition detects, retries, or aliases another selection, and the gzip FNAME field never selects the parser or supplies a member path.
+
 Strict ZIP64 is a separate current-main in-process preview under policy v3:
 
 ```text
@@ -67,6 +84,14 @@ For restricted raw PAX:
 cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-pax --dest ./new-output
 ```
 
+For restricted GNU long-name TAR and the gzip compositions:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-gnu-longname --dest ./new-output
+cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-pax --dest ./new-output
+cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-gnu-longname --dest ./new-output
+```
+
 For strict ZIP64 in process:
 
 ```text
@@ -94,7 +119,7 @@ establish the complete supervised boundary or the command exits unsuccessfully
 without invoking the in-process payload path. macOS and Windows return
 isolation unavailable if this option is selected.
 
-The authenticated worker currently carries semantic-record v2 ZIP32 plans only. Combining `--format tar-ustar`, `--format tar-gzip-ustar`, `--format tar-pax`, or `--format zip64` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it refuses before source access, never creates a destination effect, and never falls back to in-process verification. Worker support waits for later semantic records that bind each format-specific evidence model.
+The authenticated worker currently carries semantic-record v2 ZIP32 plans only. Combining `--format tar-ustar`, `--format tar-gzip-ustar`, `--format tar-pax`, `--format tar-gnu-longname`, `--format tar-gzip-pax`, `--format tar-gzip-gnu-longname`, or `--format zip64` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it refuses before source access, never creates a destination effect, and never falls back to in-process verification. Worker support waits for later semantic records that bind each format-specific evidence model.
 
 ## Output contract
 
@@ -145,7 +170,7 @@ Arguments:
   <ARCHIVE>  Archive file
 
 Options:
-      --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar, tar-gzip-ustar, tar-pax]
+      --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar, tar-gzip-ustar, tar-pax, tar-gnu-longname, tar-gzip-pax, tar-gzip-gnu-longname]
       --dest <DEST>                      Materialize into a new directory below an existing parent
       --worker-manifest <ABSOLUTE_PATH>  Use the exact packaged Linux worker bound by this manifest
   -h, --help                             Print help

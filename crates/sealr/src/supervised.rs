@@ -220,11 +220,16 @@ mod selection_tests {
         assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
         assert!(error.to_string().contains("GNU long-name TAR"));
 
-        let tar_gzip = ApplyOptions::new()
-            .with_tar_gzip_interpretation_profile(TarGzipInterpretationProfile::UstarPortableV1);
-        let error = supervised_zip_profile(&tar_gzip).unwrap_err();
-        assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
-        assert!(error.to_string().contains("semantic-record v3"));
+        for profile in [
+            TarGzipInterpretationProfile::UstarPortableV1,
+            TarGzipInterpretationProfile::PaxPortableV1,
+            TarGzipInterpretationProfile::GnuLongNamePortableV1,
+        ] {
+            let tar_gzip = ApplyOptions::new().with_tar_gzip_interpretation_profile(profile);
+            let error = supervised_zip_profile(&tar_gzip).unwrap_err();
+            assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
+            assert!(error.to_string().contains("semantic-record v3"));
+        }
     }
 
     #[cfg(not(target_os = "linux"))]

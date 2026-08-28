@@ -25,8 +25,7 @@ use crate::outcome::{
 };
 use crate::policy::{
     hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget,
-    POLICY_FORMAT_TAR_GNU_LONGNAME, POLICY_FORMAT_TAR_GZIP_USTAR, POLICY_FORMAT_TAR_PAX,
-    POLICY_FORMAT_TAR_USTAR,
+    POLICY_FORMAT_TAR_GNU_LONGNAME, POLICY_FORMAT_TAR_PAX, POLICY_FORMAT_TAR_USTAR,
 };
 use crate::quota::{QuotaError, QuotaState};
 use crate::snapshot::{
@@ -123,7 +122,12 @@ impl ApplyOptions {
         self
     }
 
-    /// Select strict single-member gzip-wrapped portable ustar explicitly.
+    /// Select one strict single-member gzip-wrapped raw TAR dialect explicitly.
+    ///
+    /// The profile names the exact frozen inner language (portable ustar,
+    /// restricted PAX, or restricted old-GNU long-name). Each composition is a
+    /// separate policy format and interpretation identity; none aliases or
+    /// widens another selection.
     pub fn with_tar_gzip_interpretation_profile(
         mut self,
         profile: TarGzipInterpretationProfile,
@@ -232,7 +236,7 @@ impl ApplyOptions {
         match self.selection {
             ArchiveSelection::Zip(profile) => profile.archive_format(),
             ArchiveSelection::TarUstar(_) => crate::ArchiveFormat::TarUstar,
-            ArchiveSelection::TarGzipUstar(_) => crate::ArchiveFormat::TarGzipUstar,
+            ArchiveSelection::TarGzipUstar(profile) => profile.archive_format(),
             ArchiveSelection::TarPax(_) => crate::ArchiveFormat::TarPax,
             ArchiveSelection::TarGnuLongName(_) => crate::ArchiveFormat::TarGnuLongName,
         }
@@ -558,8 +562,11 @@ fn apply_tar_pax_with_options(
         req,
         options,
         SnapshotSet::from_original(snapshot),
-        profile,
+        TransformGraph::empty(),
+        SnapshotDomainId::ORIGINAL,
+        PaxPlanProfile::Raw(profile),
         controls,
+        controls.budget.max_metadata_bytes,
         source_digest,
         identities_base,
         initial_materialization,
@@ -618,8 +625,11 @@ fn apply_tar_gnu_longname_with_options(
         req,
         options,
         SnapshotSet::from_original(snapshot),
-        profile,
+        TransformGraph::empty(),
+        SnapshotDomainId::ORIGINAL,
+        GnuLongNamePlanProfile::Raw(profile),
         controls,
+        controls.budget.max_metadata_bytes,
         source_digest,
         identities_base,
         initial_materialization,
@@ -634,7 +644,7 @@ fn apply_tar_gzip_with_options(
     let policy = req.policy;
     let initial_materialization =
         MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
-    let controls = match policy.compile_for_format(POLICY_FORMAT_TAR_GZIP_USTAR) {
+    let controls = match policy.compile_for_format(profile.policy_format()) {
         Ok(controls) => controls,
         Err(finding) => {
             return reject_only(
@@ -814,24 +824,62 @@ fn apply_tar_gzip_with_options(
         .max_metadata_bytes
         .checked_sub(wrapper_metadata)
         .expect("gzip decoder already enforced the wrapper metadata cap");
-    plan_tar_domains(
-        req,
-        options,
-        snapshots,
-        transforms,
-        SnapshotDomainId::FIRST_DERIVED,
-        TarPlanProfile::Gzip(profile, wrapper),
-        controls,
-        tar_metadata_budget,
-        source_digest,
-        identities_base,
-        initial_materialization,
-    )
+    match profile {
+        TarGzipInterpretationProfile::UstarPortableV1 => plan_tar_domains(
+            req,
+            options,
+            snapshots,
+            transforms,
+            SnapshotDomainId::FIRST_DERIVED,
+            TarPlanProfile::Gzip(profile, Box::new(wrapper)),
+            controls,
+            tar_metadata_budget,
+            source_digest,
+            identities_base,
+            initial_materialization,
+        ),
+        TarGzipInterpretationProfile::PaxPortableV1 => plan_tar_pax(
+            req,
+            options,
+            snapshots,
+            transforms,
+            SnapshotDomainId::FIRST_DERIVED,
+            PaxPlanProfile::Gzip(profile, Box::new(wrapper)),
+            controls,
+            tar_metadata_budget,
+            source_digest,
+            identities_base,
+            initial_materialization,
+        ),
+        TarGzipInterpretationProfile::GnuLongNamePortableV1 => plan_tar_gnu_longname(
+            req,
+            options,
+            snapshots,
+            transforms,
+            SnapshotDomainId::FIRST_DERIVED,
+            GnuLongNamePlanProfile::Gzip(profile, Box::new(wrapper)),
+            controls,
+            tar_metadata_budget,
+            source_digest,
+            identities_base,
+            initial_materialization,
+        ),
+    }
 }
 
 enum TarPlanProfile {
     Raw(TarInterpretationProfile),
-    Gzip(TarGzipInterpretationProfile, GzipWrapperEvidence),
+    Gzip(TarGzipInterpretationProfile, Box<GzipWrapperEvidence>),
+}
+
+enum PaxPlanProfile {
+    Raw(TarPaxInterpretationProfile),
+    Gzip(TarGzipInterpretationProfile, Box<GzipWrapperEvidence>),
+}
+
+enum GnuLongNamePlanProfile {
+    Raw(TarGnuLongNameInterpretationProfile),
+    Gzip(TarGzipInterpretationProfile, Box<GzipWrapperEvidence>),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1054,7 +1102,7 @@ fn plan_tar_domains(
             ArchiveIR::with_tar(profile, source_digest.clone(), covering, members)
         }
         TarPlanProfile::Gzip(profile, wrapper) => {
-            ArchiveIR::with_tar_gzip(profile, source_digest.clone(), wrapper, covering, members)
+            ArchiveIR::with_tar_gzip(profile, source_digest.clone(), *wrapper, covering, members)
         }
     };
     let tar_snapshot = snapshots
@@ -1103,29 +1151,37 @@ fn plan_tar_pax(
     req: &Request<'_>,
     options: &ApplyOptions,
     snapshots: SnapshotSet<'_>,
-    profile: TarPaxInterpretationProfile,
+    transforms: TransformGraph,
+    tar_domain: SnapshotDomainId,
+    profile: PaxPlanProfile,
     controls: CompiledControls,
+    tar_metadata_budget: u64,
     source_digest: SourceDigest,
     identities_base: OutcomeIdentities,
     initial_materialization: MaterializationMeta,
 ) -> Outcome {
     let policy = req.policy;
-    let snapshot = snapshots.original();
-    let observed_magic = if tar::recognizes_ustar(snapshot) {
-        "tar"
+    let wrapped = matches!(&profile, PaxPlanProfile::Gzip(_, _));
+    let magic = if wrapped { "gz" } else { "tar" };
+    let tar_snapshot = snapshots
+        .domain(tar_domain)
+        .expect("selected PAX domain exists before planning");
+    let observed_magic = if wrapped || tar::recognizes_ustar(tar_snapshot) {
+        magic
     } else {
         "unknown"
     };
     let parsed = match tar_pax::parse_pax_portable_v1(
-        snapshot,
+        tar_snapshot,
         controls.budget.max_files,
-        controls.budget.max_metadata_bytes,
+        tar_metadata_budget,
     ) {
         Ok(parsed) => parsed,
         Err(finding) => {
             let axes = parse_failure_axes(&finding);
+            let original = snapshots.original();
             return finish(
-                (snapshot.path_owned(), source_digest, snapshot.kind()),
+                (original.path_owned(), source_digest, original.kind()),
                 observed_magic,
                 policy,
                 vec![finding],
@@ -1309,7 +1365,7 @@ fn plan_tar_pax(
                 source_digest,
                 snapshots.original().kind(),
             ),
-            "tar",
+            magic,
             policy,
             findings,
             Vec::new(),
@@ -1321,7 +1377,13 @@ fn plan_tar_pax(
 
     let payloads = planned
         .iter()
-        .map(|(member, _, _)| PayloadPlan::from_tar_pax(member))
+        .map(|(member, _, _)| {
+            if wrapped {
+                PayloadPlan::from_tar_gzip_pax(member)
+            } else {
+                PayloadPlan::from_tar_pax(member)
+            }
+        })
         .collect();
     let members = planned
         .into_iter()
@@ -1344,51 +1406,74 @@ fn plan_tar_pax(
                 padding: member.padding,
                 is_dir: member.is_dir,
             };
-            IrMember::from_tar_pax_planned(
-                tar_member,
-                base_size,
-                effective_raw_name_bytes,
-                effective_name,
-                components,
-                actions,
-                path_source,
-                size_source,
-            )
+            if wrapped {
+                IrMember::from_tar_gzip_pax_planned(
+                    tar_member,
+                    base_size,
+                    effective_raw_name_bytes,
+                    effective_name,
+                    components,
+                    actions,
+                    path_source,
+                    size_source,
+                )
+            } else {
+                IrMember::from_tar_pax_planned(
+                    tar_member,
+                    base_size,
+                    effective_raw_name_bytes,
+                    effective_name,
+                    components,
+                    actions,
+                    path_source,
+                    size_source,
+                )
+            }
         })
         .collect();
-    let ir = ArchiveIR::with_tar_pax(
-        profile,
-        source_digest.clone(),
-        covering,
-        extensions,
-        members,
-    );
-    if let Err(finding) = audit_tar_pax_covering(snapshots.original(), &ir) {
+    let ir = match profile {
+        PaxPlanProfile::Raw(profile) => ArchiveIR::with_tar_pax(
+            profile,
+            source_digest.clone(),
+            covering,
+            extensions,
+            members,
+        ),
+        PaxPlanProfile::Gzip(profile, wrapper) => ArchiveIR::with_tar_gzip_pax(
+            profile,
+            source_digest.clone(),
+            *wrapper,
+            covering,
+            extensions,
+            members,
+        ),
+    };
+    let tar_snapshot = snapshots
+        .domain(tar_domain)
+        .expect("selected PAX domain remains retained");
+    if let Err(finding) = audit_tar_pax_covering(tar_snapshot, &ir) {
         findings.push(finding);
         let cause = first_error(&findings);
+        let axes = tar_covering_failure_axes(wrapped, &cause);
         let outcome = finish(
             (
                 snapshots.original().path_owned(),
                 source_digest,
                 snapshots.original().kind(),
             ),
-            "tar",
+            magic,
             policy,
             findings,
             Vec::new(),
             initial_materialization,
-            SemanticAxes::structure_stop(
-                InterpretationStatus::Malformed,
-                AdmissionStatus::Denied,
-                &cause,
-            ),
+            axes,
             identities_base,
         );
         return with_ir(outcome, ir);
     }
     let ready = ReadyArchive {
         snapshots,
-        transforms: TransformGraph::empty(),
+        transforms,
         ir,
         payloads,
         findings,
@@ -1396,7 +1481,7 @@ fn plan_tar_pax(
         member_sync: controls.effect.member_sync,
         source_digest,
         identities_base,
-        magic: "tar",
+        magic,
     };
     match execute_ready_archive(req, options, ready, initial_materialization) {
         Ok(outcome) => outcome,
@@ -1409,29 +1494,37 @@ fn plan_tar_gnu_longname(
     req: &Request<'_>,
     options: &ApplyOptions,
     snapshots: SnapshotSet<'_>,
-    profile: TarGnuLongNameInterpretationProfile,
+    transforms: TransformGraph,
+    tar_domain: SnapshotDomainId,
+    profile: GnuLongNamePlanProfile,
     controls: CompiledControls,
+    tar_metadata_budget: u64,
     source_digest: SourceDigest,
     identities_base: OutcomeIdentities,
     initial_materialization: MaterializationMeta,
 ) -> Outcome {
     let policy = req.policy;
-    let snapshot = snapshots.original();
-    let observed_magic = if tar_gnu::recognizes_oldgnu(snapshot) {
-        "tar"
+    let wrapped = matches!(&profile, GnuLongNamePlanProfile::Gzip(_, _));
+    let magic = if wrapped { "gz" } else { "tar" };
+    let tar_snapshot = snapshots
+        .domain(tar_domain)
+        .expect("selected GNU TAR domain exists before planning");
+    let observed_magic = if wrapped || tar_gnu::recognizes_oldgnu(tar_snapshot) {
+        magic
     } else {
         "unknown"
     };
     let parsed = match tar_gnu::parse_gnu_longname_portable_v1(
-        snapshot,
+        tar_snapshot,
         controls.budget.max_files,
-        controls.budget.max_metadata_bytes,
+        tar_metadata_budget,
     ) {
         Ok(parsed) => parsed,
         Err(finding) => {
             let axes = parse_failure_axes(&finding);
+            let original = snapshots.original();
             return finish(
-                (snapshot.path_owned(), source_digest, snapshot.kind()),
+                (original.path_owned(), source_digest, original.kind()),
                 observed_magic,
                 policy,
                 vec![finding],
@@ -1602,7 +1695,7 @@ fn plan_tar_gnu_longname(
                 source_digest,
                 snapshots.original().kind(),
             ),
-            "tar",
+            magic,
             policy,
             findings,
             Vec::new(),
@@ -1614,47 +1707,67 @@ fn plan_tar_gnu_longname(
 
     let payloads = planned
         .iter()
-        .map(|(member, _, _)| PayloadPlan::from_tar_gnu_longname(member))
+        .map(|(member, _, _)| {
+            if wrapped {
+                PayloadPlan::from_tar_gzip_gnu_longname(member)
+            } else {
+                PayloadPlan::from_tar_gnu_longname(member)
+            }
+        })
         .collect();
     let members = planned
         .into_iter()
         .map(|(member, components, actions)| {
-            IrMember::from_tar_gnu_longname_planned(member, components, actions)
+            if wrapped {
+                IrMember::from_tar_gzip_gnu_longname_planned(member, components, actions)
+            } else {
+                IrMember::from_tar_gnu_longname_planned(member, components, actions)
+            }
         })
         .collect();
-    let ir = ArchiveIR::with_tar_gnu_longname(
-        profile,
-        source_digest.clone(),
-        covering,
-        carriers,
-        members,
-    );
-    if let Err(finding) = audit_tar_gnu_longname_covering(snapshots.original(), &ir) {
+    let ir = match profile {
+        GnuLongNamePlanProfile::Raw(profile) => ArchiveIR::with_tar_gnu_longname(
+            profile,
+            source_digest.clone(),
+            covering,
+            carriers,
+            members,
+        ),
+        GnuLongNamePlanProfile::Gzip(profile, wrapper) => ArchiveIR::with_tar_gzip_gnu_longname(
+            profile,
+            source_digest.clone(),
+            *wrapper,
+            covering,
+            carriers,
+            members,
+        ),
+    };
+    let tar_snapshot = snapshots
+        .domain(tar_domain)
+        .expect("selected GNU TAR domain remains retained");
+    if let Err(finding) = audit_tar_gnu_longname_covering(tar_snapshot, &ir) {
         findings.push(finding);
         let cause = first_error(&findings);
+        let axes = tar_covering_failure_axes(wrapped, &cause);
         let outcome = finish(
             (
                 snapshots.original().path_owned(),
                 source_digest,
                 snapshots.original().kind(),
             ),
-            "tar",
+            magic,
             policy,
             findings,
             Vec::new(),
             initial_materialization,
-            SemanticAxes::structure_stop(
-                InterpretationStatus::Malformed,
-                AdmissionStatus::Denied,
-                &cause,
-            ),
+            axes,
             identities_base,
         );
         return with_ir(outcome, ir);
     }
     let ready = ReadyArchive {
         snapshots,
-        transforms: TransformGraph::empty(),
+        transforms,
         ir,
         payloads,
         findings,
@@ -1662,7 +1775,7 @@ fn plan_tar_gnu_longname(
         member_sync: controls.effect.member_sync,
         source_digest,
         identities_base,
-        magic: "tar",
+        magic,
     };
     match execute_ready_archive(req, options, ready, initial_materialization) {
         Ok(outcome) => outcome,
@@ -2367,11 +2480,20 @@ fn validate_ready_archive(
             }
             Ok(ReadyArchiveAuthority { _private: () })
         }
-        ArchiveFormat::TarGzipUstar => {
+        ArchiveFormat::TarGzipUstar
+        | ArchiveFormat::TarGzipPax
+        | ArchiveFormat::TarGzipGnuLongName => {
             audit_tar_gzip_composite(snapshots, transforms, ir)?;
             Ok(ReadyArchiveAuthority { _private: () })
         }
     }
+}
+
+const fn format_is_gzip_wrapped(format: ArchiveFormat) -> bool {
+    matches!(
+        format,
+        ArchiveFormat::TarGzipUstar | ArchiveFormat::TarGzipPax | ArchiveFormat::TarGzipGnuLongName
+    )
 }
 
 fn audit_tar_gzip_composite(
@@ -2417,7 +2539,20 @@ fn audit_tar_gzip_composite(
         ));
     }
     audit_gzip_wrapper_covering(original, wrapper)?;
-    audit_tar_covering(derived, ir)?;
+    match ir.format() {
+        ArchiveFormat::TarGzipUstar => audit_tar_covering(derived, ir)?,
+        ArchiveFormat::TarGzipPax => audit_tar_pax_covering(derived, ir)?,
+        ArchiveFormat::TarGzipGnuLongName => audit_tar_gnu_longname_covering(derived, ir)?,
+        ArchiveFormat::Zip32
+        | ArchiveFormat::Zip64
+        | ArchiveFormat::TarUstar
+        | ArchiveFormat::TarPax
+        | ArchiveFormat::TarGnuLongName => {
+            return Err(ready_inconsistent(
+                "composite gzip audit received a raw archive format",
+            ));
+        }
+    }
 
     let mut reader = derived.reader(0, derived.len())?;
     let mut crc = Crc::new();
@@ -2502,7 +2637,7 @@ fn execute_ready_archive(
     let ready_authority = match ready_validation {
         Ok(authority) => authority,
         Err(finding) => {
-            let axes = if ir.format() == ArchiveFormat::TarGzipUstar {
+            let axes = if format_is_gzip_wrapped(ir.format()) {
                 SemanticAxes::structure_stop(
                     InterpretationStatus::Indeterminate,
                     AdmissionStatus::NotEvaluated,
@@ -3065,8 +3200,11 @@ pub(crate) fn member_view(member: &IrMember) -> MemberView {
         crate::ir::MemberEvidence::Tar(tar) | crate::ir::MemberEvidence::TarGzip(tar) => {
             ("raw", tar.payload.len, 0)
         }
-        crate::ir::MemberEvidence::TarPax(tar) => ("raw", tar.tar.payload.len, 0),
-        crate::ir::MemberEvidence::TarGnuLongName(tar) => ("raw", tar.tar.payload.len, 0),
+        crate::ir::MemberEvidence::TarPax(tar) | crate::ir::MemberEvidence::TarGzipPax(tar) => {
+            ("raw", tar.tar.payload.len, 0)
+        }
+        crate::ir::MemberEvidence::TarGnuLongName(tar)
+        | crate::ir::MemberEvidence::TarGzipGnuLongName(tar) => ("raw", tar.tar.payload.len, 0),
     };
     MemberView {
         path: member.canonical_path.clone(),
@@ -3370,6 +3508,177 @@ mod tar_gzip_ready_tests {
         let raw = tar_covering_failure_axes(false, &finding);
         assert_eq!(raw.interpretation, InterpretationStatus::Malformed);
         assert_eq!(raw.admission, AdmissionStatus::Denied);
+    }
+
+    fn pax_record(keyword: &str, value: &str) -> Vec<u8> {
+        let body = format!(" {keyword}={value}\n");
+        let mut digits = 1_usize;
+        loop {
+            let len = digits + body.len();
+            let next_digits = len.to_string().len();
+            if digits == next_digits {
+                return format!("{len}{body}").into_bytes();
+            }
+            digits = next_digits;
+        }
+    }
+
+    fn dialect_header(name: &[u8], size: u64, typeflag: u8, magic: &[u8; 8]) -> [u8; 512] {
+        let mut header = [0_u8; 512];
+        header[..name.len()].copy_from_slice(name);
+        write_octal(&mut header[100..108], 0o644);
+        write_octal(&mut header[108..116], 0);
+        write_octal(&mut header[116..124], 0);
+        write_octal(&mut header[124..136], size);
+        write_octal(&mut header[136..148], 0);
+        header[148..156].fill(b' ');
+        header[156] = typeflag;
+        header[257..265].copy_from_slice(magic);
+        if magic == b"ustar\x0000" {
+            write_octal(&mut header[329..337], 0);
+            write_octal(&mut header[337..345], 0);
+        }
+        let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
+        header[148..154].copy_from_slice(format!("{checksum:06o}").as_bytes());
+        header[154] = 0;
+        header[155] = b' ';
+        header
+    }
+
+    fn pax_tar() -> Vec<u8> {
+        let payload = [
+            pax_record("path", "mission/long.txt"),
+            pax_record("size", "9"),
+        ]
+        .concat();
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&dialect_header(
+            b"carrier",
+            payload.len() as u64,
+            b'x',
+            b"ustar\x0000",
+        ));
+        bytes.extend_from_slice(&payload);
+        bytes.resize(bytes.len().next_multiple_of(512), 0);
+        bytes.extend_from_slice(&dialect_header(b"base", 9, b'0', b"ustar\x0000"));
+        bytes.extend_from_slice(b"authority");
+        bytes.resize(bytes.len().next_multiple_of(512), 0);
+        bytes.resize(bytes.len() + 1024, 0);
+        bytes
+    }
+
+    fn gnu_tar() -> Vec<u8> {
+        let mut payload = b"mission/long-gnu.txt".to_vec();
+        payload.push(0);
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&dialect_header(
+            b"././@LongLink",
+            payload.len() as u64,
+            b'L',
+            b"ustar  \0",
+        ));
+        bytes.extend_from_slice(&payload);
+        bytes.resize(bytes.len().next_multiple_of(512), 0);
+        bytes.extend_from_slice(&dialect_header(b"base", 9, b'0', b"ustar  \0"));
+        bytes.extend_from_slice(b"authority");
+        bytes.resize(bytes.len().next_multiple_of(512), 0);
+        bytes.resize(bytes.len() + 1024, 0);
+        bytes
+    }
+
+    fn admitted_composition(
+        source: &[u8],
+        profile: TarGzipInterpretationProfile,
+    ) -> (TransformGraph, ArchiveIR, Vec<PayloadPlan>) {
+        let policy = Policy::default_v7();
+        let outcome = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("composition.tar.gz"),
+                    data: source,
+                },
+                policy: &policy,
+                dest: None,
+            },
+            &ApplyOptions::new().with_tar_gzip_interpretation_profile(profile),
+        );
+        assert!(
+            matches!(outcome.admission, AdmissionStatus::Admitted),
+            "{:?}",
+            outcome.view.findings
+        );
+        let ir = outcome.archive_ir().cloned().expect("admitted IR");
+        let payloads = ir.members().iter().map(PayloadPlan::from_ir).collect();
+        (TransformGraph::empty(), ir, payloads)
+    }
+
+    fn composition_snapshots(source: &[u8]) -> (SnapshotSet<'_>, TransformGraph) {
+        let snapshot = SourceSnapshot::borrowed(None, source);
+        let mut snapshots = SnapshotSet::from_original(snapshot);
+        let mut transforms = TransformGraph::empty();
+        gzip::transform_single_member(
+            &mut snapshots,
+            &mut transforms,
+            gzip::GzipLimits {
+                max_metadata_bytes: 1024 * 1024,
+                max_output_bytes: 1024 * 1024,
+            },
+        )
+        .unwrap();
+        (snapshots, transforms)
+    }
+
+    #[test]
+    fn ready_composite_binds_wrapped_pax_and_gnu_variants_to_their_derived_domains() {
+        for (tar, profile) in [
+            (pax_tar(), TarGzipInterpretationProfile::PaxPortableV1),
+            (
+                gnu_tar(),
+                TarGzipInterpretationProfile::GnuLongNamePortableV1,
+            ),
+        ] {
+            let source = gzip(&tar);
+            let (_, ir, payloads) = admitted_composition(&source, profile);
+            let (snapshots, transforms) = composition_snapshots(&source);
+            assert_eq!(ir.format(), profile.archive_format());
+            validate_ready_archive(&snapshots, &transforms, &ir, &payloads).unwrap();
+
+            let (_, mut drifted, _) = admitted_composition(&source, profile);
+            match &mut drifted.evidence {
+                crate::ir::ArchiveEvidence::TarGzipPax(evidence) => {
+                    evidence.gzip.derived_output_sha256 = "00".repeat(32);
+                }
+                crate::ir::ArchiveEvidence::TarGzipGnuLongName(evidence) => {
+                    evidence.gzip.derived_output_sha256 = "00".repeat(32);
+                }
+                _ => panic!("expected gzip-wrapped dialect evidence"),
+            }
+            assert_eq!(
+                validate_ready_archive(&snapshots, &transforms, &drifted, &payloads)
+                    .unwrap_err()
+                    .code,
+                FindingCode::CoveringInconsistent
+            );
+
+            let (_, mut variant_drift, _) = admitted_composition(&source, profile);
+            let raw_variant = match &variant_drift.members[0].evidence {
+                crate::ir::MemberEvidence::TarGzipPax(evidence) => {
+                    crate::ir::MemberEvidence::TarPax(evidence.clone())
+                }
+                crate::ir::MemberEvidence::TarGzipGnuLongName(evidence) => {
+                    crate::ir::MemberEvidence::TarGnuLongName(evidence.clone())
+                }
+                _ => panic!("expected gzip-wrapped dialect member evidence"),
+            };
+            variant_drift.members[0].evidence = raw_variant;
+            assert!(
+                validate_ready_archive(&snapshots, &transforms, &variant_drift, &payloads).is_err()
+            );
+            assert!(crate::identity::layout_root(&variant_drift).hex().is_none());
+
+            let (empty_transforms, ir, payloads) = admitted_composition(&source, profile);
+            assert!(validate_ready_archive(&snapshots, &empty_transforms, &ir, &payloads).is_err());
+        }
     }
 }
 

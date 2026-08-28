@@ -26,6 +26,8 @@ $ExpectedFuzzJobs = @(
     'Bounded RFC 1952 gzip'
     'Bounded public TAR gzip ustar'
     'Bounded strict ZIP64'
+    'Bounded gzip-wrapped restricted PAX TAR'
+    'Bounded gzip-wrapped GNU long-name TAR'
 )
 $ExpectedCiJobs = @(
     'Format, lint, test, and docs'

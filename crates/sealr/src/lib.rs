@@ -137,13 +137,16 @@ pub use apply::{
 };
 pub use findings::{Finding, FindingCode, Severity};
 pub use identity::{
-    content_root, encode_tar_gnu_longname_layout, encode_tar_gzip_layout, encode_tar_layout,
-    encode_tar_pax_layout, encode_zip64_layout, layout_root, OutcomeIdentities, TreeRoot,
-    TREE_ENCODING_ID, TREE_ENCODING_V2_ID, TREE_ENCODING_V3_ID, TREE_ENCODING_V4_ID,
-    TREE_ENCODING_V5_ID, TREE_ENCODING_V6_ID,
+    content_root, encode_tar_gnu_longname_layout, encode_tar_gzip_gnu_longname_layout,
+    encode_tar_gzip_layout, encode_tar_gzip_pax_layout, encode_tar_layout, encode_tar_pax_layout,
+    encode_zip64_layout, layout_root, OutcomeIdentities, TreeRoot, TREE_ENCODING_ID,
+    TREE_ENCODING_V2_ID, TREE_ENCODING_V3_ID, TREE_ENCODING_V4_ID, TREE_ENCODING_V5_ID,
+    TREE_ENCODING_V6_ID, TREE_ENCODING_V7_ID, TREE_ENCODING_V8_ID,
 };
 pub use ir::{
     tar_gnu_longname_portable_v1_canonical_bytes, tar_gnu_longname_portable_v1_digest,
+    tar_gzip_gnu_longname_portable_v1_canonical_bytes, tar_gzip_gnu_longname_portable_v1_digest,
+    tar_gzip_pax_portable_v1_canonical_bytes, tar_gzip_pax_portable_v1_digest,
     tar_gzip_ustar_portable_v1_canonical_bytes, tar_gzip_ustar_portable_v1_digest,
     tar_pax_portable_v1_canonical_bytes, tar_pax_portable_v1_digest,
     tar_ustar_portable_v1_canonical_bytes, tar_ustar_portable_v1_digest,
@@ -158,14 +161,17 @@ pub use ir::{
     NormalizationAction, PaxExtensionEvidence, PaxExtensionKind, PaxKeyword, PaxRecordEvidence,
     PaxValueSource, TarArchiveCovering, TarGnuLongNameArchiveEvidence,
     TarGnuLongNameInterpretationProfile, TarGnuLongNameMemberEvidence, TarGzipArchiveEvidence,
-    TarGzipInterpretationProfile, TarInterpretationProfile, TarMemberEvidence,
-    TarPaxArchiveEvidence, TarPaxInterpretationProfile, TarPaxMemberEvidence, Zip64ArchiveCovering,
+    TarGzipGnuLongNameArchiveEvidence, TarGzipInterpretationProfile, TarGzipPaxArchiveEvidence,
+    TarInterpretationProfile, TarMemberEvidence, TarPaxArchiveEvidence,
+    TarPaxInterpretationProfile, TarPaxMemberEvidence, Zip64ArchiveCovering,
     Zip64DataDescriptorWidth, Zip64LocalValueShape, Zip64MemberEvidence, ZipInterpretationProfile,
     ZipMemberEvidence, ARCHIVE_IR_SCHEMA, TAR_ARCHIVE_IR_SCHEMA,
     TAR_GNU_LONGNAME_ARCHIVE_IR_SCHEMA, TAR_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_ARCHIVE_IR_SCHEMA,
-    TAR_GZIP_USTAR_PORTABLE_V1, TAR_PAX_ARCHIVE_IR_SCHEMA, TAR_PAX_PORTABLE_V1,
-    TAR_USTAR_PORTABLE_V1, ZIP64_ARCHIVE_IR_SCHEMA, ZIP64_STRICT_ASCII_V1, ZIP_PORTABLE_UTF8_V1,
-    ZIP_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2, ZIP_WHEEL_UTF8_V1,
+    TAR_GZIP_GNU_LONGNAME_ARCHIVE_IR_SCHEMA, TAR_GZIP_GNU_LONGNAME_PORTABLE_V1,
+    TAR_GZIP_PAX_ARCHIVE_IR_SCHEMA, TAR_GZIP_PAX_PORTABLE_V1, TAR_GZIP_USTAR_PORTABLE_V1,
+    TAR_PAX_ARCHIVE_IR_SCHEMA, TAR_PAX_PORTABLE_V1, TAR_USTAR_PORTABLE_V1, ZIP64_ARCHIVE_IR_SCHEMA,
+    ZIP64_STRICT_ASCII_V1, ZIP_PORTABLE_UTF8_V1, ZIP_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2,
+    ZIP_WHEEL_UTF8_V1,
 };
 pub use jail::{
     jail_name, jail_relative, join_under_dest, JailedName, PORTABLE_NAME_MAX_COMPONENT_UTF16_UNITS,
@@ -178,7 +184,8 @@ pub use outcome::{
 };
 pub use policy::{
     hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget,
-    POLICY_FORMAT_TAR_GNU_LONGNAME, POLICY_FORMAT_TAR_GZIP_USTAR, POLICY_FORMAT_TAR_PAX,
+    POLICY_FORMAT_TAR_GNU_LONGNAME, POLICY_FORMAT_TAR_GZIP_GNU_LONGNAME,
+    POLICY_FORMAT_TAR_GZIP_PAX, POLICY_FORMAT_TAR_GZIP_USTAR, POLICY_FORMAT_TAR_PAX,
     POLICY_FORMAT_TAR_USTAR, POLICY_FORMAT_ZIP, POLICY_FORMAT_ZIP64,
 };
 pub use snapshot::SnapshotKind;

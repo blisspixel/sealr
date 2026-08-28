@@ -25,12 +25,16 @@ pub const TREE_ENCODING_V3_ID: &str = "sealrTreeV3";
 pub const TREE_ENCODING_V4_ID: &str = "sealrTreeV4";
 pub const TREE_ENCODING_V5_ID: &str = "sealrTreeV5";
 pub const TREE_ENCODING_V6_ID: &str = "sealrTreeV6";
+pub const TREE_ENCODING_V7_ID: &str = "sealrTreeV7";
+pub const TREE_ENCODING_V8_ID: &str = "sealrTreeV8";
 const LAYOUT_LABEL: &str = "sealr.tree.layout.v1";
 const TAR_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-ustar.v1";
 const ZIP64_LAYOUT_LABEL: &str = "sealr.tree.layout.zip64.v1";
 const TAR_GZIP_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gzip-ustar.v1";
 const TAR_PAX_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-pax.v1";
 const TAR_GNU_LONGNAME_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gnu-longname.v1";
+const TAR_GZIP_PAX_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gzip-pax.v1";
+const TAR_GZIP_GNU_LONGNAME_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gzip-gnu-longname.v1";
 const CONTENT_LABEL: &str = "sealr.tree.content.v1";
 const FILE: u8 = 1;
 const DIRECTORY: u8 = 2;
@@ -60,6 +64,8 @@ pub enum TreeRoot {
     SealrTreeV4 { hex: String },
     SealrTreeV5 { hex: String },
     SealrTreeV6 { hex: String },
+    SealrTreeV7 { hex: String },
+    SealrTreeV8 { hex: String },
     Unavailable,
 }
 
@@ -104,6 +110,18 @@ impl TreeRoot {
         }
     }
 
+    pub fn from_v7_bytes(bytes: &[u8]) -> Self {
+        Self::SealrTreeV7 {
+            hex: hex_sha256(bytes),
+        }
+    }
+
+    pub fn from_v8_bytes(bytes: &[u8]) -> Self {
+        Self::SealrTreeV8 {
+            hex: hex_sha256(bytes),
+        }
+    }
+
     pub fn hex(&self) -> Option<&str> {
         match self {
             Self::SealrTreeV1 { hex } => Some(hex),
@@ -112,6 +130,8 @@ impl TreeRoot {
             Self::SealrTreeV4 { hex } => Some(hex),
             Self::SealrTreeV5 { hex } => Some(hex),
             Self::SealrTreeV6 { hex } => Some(hex),
+            Self::SealrTreeV7 { hex } => Some(hex),
+            Self::SealrTreeV8 { hex } => Some(hex),
             Self::Unavailable => None,
         }
     }
@@ -148,6 +168,16 @@ impl Serialize for TreeRoot {
             Self::SealrTreeV6 { hex } => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 map.serialize_entry(TREE_ENCODING_V6_ID, hex)?;
+                map.end()
+            }
+            Self::SealrTreeV7 { hex } => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry(TREE_ENCODING_V7_ID, hex)?;
+                map.end()
+            }
+            Self::SealrTreeV8 { hex } => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry(TREE_ENCODING_V8_ID, hex)?;
                 map.end()
             }
             Self::Unavailable => {
@@ -323,6 +353,10 @@ pub fn encode_tar_pax_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
     if ir.format() != ArchiveFormat::TarPax {
         return None;
     }
+    tar_pax_layout_body(ir, ArchiveFormat::TarPax).map(|body| preimage(TAR_PAX_LAYOUT_LABEL, &body))
+}
+
+fn tar_pax_layout_body(ir: &ArchiveIR, expected_format: ArchiveFormat) -> Option<Vec<u8>> {
     let covering = ir.tar_covering()?;
     let extensions = ir.pax_extensions()?;
     let members = sorted_members(ir);
@@ -365,7 +399,7 @@ pub fn encode_tar_pax_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
     }
     push_u32(&mut body, u32::try_from(members.len()).ok()?);
     for member in members {
-        if member.format() != ArchiveFormat::TarPax {
+        if member.format() != expected_format {
             return None;
         }
         let evidence = member.tar_pax_evidence()?;
@@ -403,7 +437,7 @@ pub fn encode_tar_pax_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
             }
         }
     }
-    Some(preimage(TAR_PAX_LAYOUT_LABEL, &body))
+    Some(body)
 }
 
 /// Canonical physical-layout encoding for the old-GNU long-name profile.
@@ -411,6 +445,11 @@ pub fn encode_tar_gnu_longname_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
     if ir.format() != ArchiveFormat::TarGnuLongName {
         return None;
     }
+    tar_gnu_longname_layout_body(ir, ArchiveFormat::TarGnuLongName)
+        .map(|body| preimage(TAR_GNU_LONGNAME_LAYOUT_LABEL, &body))
+}
+
+fn tar_gnu_longname_layout_body(ir: &ArchiveIR, expected_format: ArchiveFormat) -> Option<Vec<u8>> {
     let covering = ir.tar_covering()?;
     let carriers = ir.gnu_longname_carriers()?;
     let members = sorted_members(ir);
@@ -434,7 +473,7 @@ pub fn encode_tar_gnu_longname_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
     }
     push_u32(&mut body, u32::try_from(members.len()).ok()?);
     for member in members {
-        if member.format() != ArchiveFormat::TarGnuLongName {
+        if member.format() != expected_format {
             return None;
         }
         let evidence = member.tar_gnu_longname_evidence()?;
@@ -476,7 +515,7 @@ pub fn encode_tar_gnu_longname_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
             }
         }
     }
-    Some(preimage(TAR_GNU_LONGNAME_LAYOUT_LABEL, &body))
+    Some(body)
 }
 
 fn tar_layout_body(ir: &ArchiveIR, expected_format: ArchiveFormat) -> Option<Vec<u8>> {
@@ -525,11 +564,7 @@ fn tar_layout_body(ir: &ArchiveIR, expected_format: ArchiveFormat) -> Option<Vec
     Some(body)
 }
 
-/// Canonical wrapper-plus-inner-layout encoding for strict gzip-wrapped ustar.
-pub fn encode_tar_gzip_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
-    if ir.format() != ArchiveFormat::TarGzipUstar {
-        return None;
-    }
+fn encode_gzip_wrapper_header(ir: &ArchiveIR) -> Option<Vec<u8>> {
     let gzip = ir.gzip_evidence()?;
     let transform = TransformProfile::GzipRfc1952SingleMemberV1;
     let mut body = Vec::new();
@@ -564,11 +599,46 @@ pub fn encode_tar_gzip_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
     push_u32(&mut body, gzip.declared_isize);
     push_u64(&mut body, gzip.derived_output_len);
     body.extend_from_slice(&parse_hex32(&gzip.derived_output_sha256)?);
+    Some(body)
+}
+
+/// Canonical wrapper-plus-inner-layout encoding for strict gzip-wrapped ustar.
+pub fn encode_tar_gzip_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
+    if ir.format() != ArchiveFormat::TarGzipUstar {
+        return None;
+    }
+    let mut body = encode_gzip_wrapper_header(ir)?;
     push_bytes(
         &mut body,
         &tar_layout_body(ir, ArchiveFormat::TarGzipUstar)?,
     );
     Some(preimage(TAR_GZIP_LAYOUT_LABEL, &body))
+}
+
+/// Canonical wrapper-plus-inner-layout encoding for strict gzip-wrapped restricted PAX.
+pub fn encode_tar_gzip_pax_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
+    if ir.format() != ArchiveFormat::TarGzipPax {
+        return None;
+    }
+    let mut body = encode_gzip_wrapper_header(ir)?;
+    push_bytes(
+        &mut body,
+        &tar_pax_layout_body(ir, ArchiveFormat::TarGzipPax)?,
+    );
+    Some(preimage(TAR_GZIP_PAX_LAYOUT_LABEL, &body))
+}
+
+/// Canonical wrapper-plus-inner-layout encoding for strict gzip-wrapped old-GNU long-name TAR.
+pub fn encode_tar_gzip_gnu_longname_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
+    if ir.format() != ArchiveFormat::TarGzipGnuLongName {
+        return None;
+    }
+    let mut body = encode_gzip_wrapper_header(ir)?;
+    push_bytes(
+        &mut body,
+        &tar_gnu_longname_layout_body(ir, ArchiveFormat::TarGzipGnuLongName)?,
+    );
+    Some(preimage(TAR_GZIP_GNU_LONGNAME_LAYOUT_LABEL, &body))
 }
 
 pub fn encode_zip64_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
@@ -774,6 +844,12 @@ pub fn layout_root(ir: &ArchiveIR) -> TreeRoot {
             .unwrap_or_else(TreeRoot::unavailable),
         ArchiveFormat::TarGnuLongName => encode_tar_gnu_longname_layout(ir)
             .map(|bytes| TreeRoot::from_v6_bytes(&bytes))
+            .unwrap_or_else(TreeRoot::unavailable),
+        ArchiveFormat::TarGzipPax => encode_tar_gzip_pax_layout(ir)
+            .map(|bytes| TreeRoot::from_v7_bytes(&bytes))
+            .unwrap_or_else(TreeRoot::unavailable),
+        ArchiveFormat::TarGzipGnuLongName => encode_tar_gzip_gnu_longname_layout(ir)
+            .map(|bytes| TreeRoot::from_v8_bytes(&bytes))
             .unwrap_or_else(TreeRoot::unavailable),
     }
 }

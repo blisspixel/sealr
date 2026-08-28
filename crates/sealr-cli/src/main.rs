@@ -39,6 +39,10 @@ enum CliFormat {
     TarPax,
     #[value(name = "tar-gnu-longname")]
     TarGnuLongName,
+    #[value(name = "tar-gzip-pax")]
+    TarGzipPax,
+    #[value(name = "tar-gzip-gnu-longname")]
+    TarGzipGnuLongName,
 }
 
 fn main() -> ExitCode {
@@ -70,6 +74,17 @@ fn main() -> ExitCode {
             Policy::default_v6(),
             ApplyOptions::new().with_tar_gnu_longname_interpretation_profile(
                 TarGnuLongNameInterpretationProfile::PortableV1,
+            ),
+        ),
+        CliFormat::TarGzipPax => (
+            Policy::default_v7(),
+            ApplyOptions::new()
+                .with_tar_gzip_interpretation_profile(TarGzipInterpretationProfile::PaxPortableV1),
+        ),
+        CliFormat::TarGzipGnuLongName => (
+            Policy::default_v7(),
+            ApplyOptions::new().with_tar_gzip_interpretation_profile(
+                TarGzipInterpretationProfile::GnuLongNamePortableV1,
             ),
         ),
     };

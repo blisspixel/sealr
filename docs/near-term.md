@@ -1,6 +1,6 @@
 # Near-term execution plan
 
-> Status: active plan after the Alpha.11 restricted raw POSIX PAX increment. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
+> Status: active plan after the Alpha.11 restricted raw POSIX PAX increment, the restricted GNU long-name profile, and the gzip-wrapped PAX and GNU compositions on current main. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
 
 The next work should produce thin, independently reviewable trust increments. Each increment must finish with a useful artifact, explicit evidence, and a bounded claim. Work that merely makes the codebase larger does not count as progress.
 
@@ -26,7 +26,7 @@ The assurance and wheel lanes may add test, corpus, and research tooling. They d
 
 Alpha.6 shipped the public fail-closed Linux supervisor and capability boundary. Alpha.7 closed the repository-only wheel research proof. Alpha.8 added the supported portable UTF-8 profile and public capability-only wheel evaluator. Alpha.9 released strict portable POSIX ustar with zero new runtime dependencies. Alpha.10 released strict ZIP64 under policy v3 and strict single-member gzip-wrapped portable ustar under policy v4. Alpha.11 released `sealr.profile.tar.pax-portable.v1` under policy v5 with a fixed two-key extension language, exact global and local precedence, provenance, independent source-covering replay, `sealr.archive-ir.tar-pax.v1`, and `sealrTreeV5`, again with zero new runtime dependencies. ZIP32 and raw ustar do not alias to these profiles, and the authenticated worker refuses every unsupported selection without fallback.
 
-A narrow GNU long-name-only raw profile is next because GNU `L` carrier state is common but semantically different from PAX. Keeping it separate prevents producer-specific precedence, long-link, sparse, and base-256 behavior from leaking into the Alpha.11 language. Only after GNU raw conformance is frozen will PAX and GNU be composed separately with the existing exact gzip transform. Zstd, XZ/LZMA2, and bzip2 then enter one at a time under the codec dependency gate. A local 7z interpreter starts with Copy before reusing the reviewed LZMA layer. The cpio, ar/deb, CAB, RPM, and RAR5 programs remain separately gated. ISO 9660, UDF, and filesystem images are a separate program. Targeted benign wheel coverage, stable identity and API review, assurance history, worker-record parity, authenticated recovery, and durability continue in parallel.
+The narrow GNU long-name-only raw profile landed after Alpha.11 because GNU `L` carrier state is common but semantically different from PAX. Keeping it separate prevents producer-specific precedence, long-link, sparse, and base-256 behavior from leaking into the Alpha.11 language. With GNU raw conformance frozen, current main composes PAX and GNU separately with the existing exact gzip transform under policy v7, publishing `sealrTreeV7` and `sealrTreeV8` while preserving the format-neutral content root. Zstd, XZ/LZMA2, and bzip2 now enter one at a time under the codec dependency gate. A local 7z interpreter starts with Copy before reusing the reviewed LZMA layer. The cpio, ar/deb, CAB, RPM, and RAR5 programs remain separately gated. ISO 9660, UDF, and filesystem images are a separate program. Targeted benign wheel coverage, stable identity and API review, assurance history, worker-record parity, authenticated recovery, and durability continue in parallel.
 
 ### Alpha.11 restricted PAX gates: complete
 
@@ -40,14 +40,25 @@ A narrow GNU long-name-only raw profile is next because GNU `L` carrier state is
 8. Worker selection refuses before source access and without fallback until a later semantic record binds PAX evidence.
 9. A separate scheduled Linux AddressSanitizer target starts from nine digest-pinned deterministic seeds under exact input, time, memory, and job bounds. It is discovery evidence, not a coverage proof.
 
-### Next GNU and gzip-composition gates
+### GNU long-name gates: complete on current main
 
-1. Publish one separate raw GNU long-name-only profile. It must not widen, detect, retry, or alias portable ustar or PAX.
-2. Require exact GNU magic plus one `L` long-name carrier consumed by exactly one following ordinary member.
-3. Deny `K` long-link records, sparse records, GNU base-256 numbers, PAX records, mixed state, orphan carriers, links, devices, concatenation, and recovery behavior.
-4. Add a distinct interpretation, IR, covering audit, layout identity, producer corpus, field-family mutations, public package coverage, fail-closed worker refusal, and bounded fuzz surface before promotion.
-5. Preserve zero new runtime dependencies and reuse the existing raw-payload execution core.
-6. Compose each frozen raw dialect with the exact gzip transform only after its raw conformance is immutable. Each composition receives a distinct transform-bound layout identity while preserving the format-neutral verified content root.
+1. `sealr.profile.tar.gnu-longname-portable.v1` is a separate raw profile that does not widen, detect, retry, or alias portable ustar or PAX. Its canonical profile digest is `08fe2698806da997bc42e7e13a45cbf412a4a7056dec39c62456202680b91fa4`; the policy v6 digest is `aefc8a1baa113d7face30857ef64fe8f47c647fae863a72810b80380f8fd4178`.
+2. Exact GNU magic plus one `L` long-name carrier consumed by exactly one following ordinary member.
+3. `K` long-link records, sparse records, GNU base-256 numbers, PAX records, mixed state, orphan carriers, links, devices, concatenation, and recovery behavior are denied.
+4. A distinct interpretation, `sealr.archive-ir.tar-gnu-longname.v1`, independent covering audit, `sealrTreeV6`, producer corpus, field-family mutations, public package coverage, fail-closed worker refusal, and a 16-seed bounded fuzz surface landed together.
+5. Zero new runtime dependencies; the existing raw-payload execution core is reused.
+
+### Gzip-composition gates: complete on current main
+
+1. Each frozen raw dialect composes with the exact gzip transform only after its raw conformance is immutable. `sealr.profile.tar-gzip.pax-portable.v1` has digest `6cc91b2b8563b5b070b44bf357a5c62e5d9dda0aedc374d7a08cd80da9c5434f`; `sealr.profile.tar-gzip.gnu-longname-portable.v1` has digest `622943e9629c4acc7cfeb446eb9f2d16bb245db589c1a200e885a9d69a02295a`. Both bind the frozen wrapper transform digests and the exact inner profile digest.
+2. Policy v7 (`sealr:policy/default/v7`, digest `92d576984b718e8a02bc6044090f8e2b335dbd1abd136d53e5b02d0ffbd978ef`) authorizes the separate `tar-gzip-pax` and `tar-gzip-gnu-longname` formats, and each composition compiles policy for its own format string.
+3. Each composition receives a distinct transform-bound layout identity — `sealrTreeV7` under `sealr.tree.layout.tar-gzip-pax.v1` and `sealrTreeV8` under `sealr.tree.layout.tar-gzip-gnu-longname.v1` — while preserving the format-neutral verified content root.
+4. The ready boundary's composite audit requires exactly two snapshots, one exact full-source transform record, the independent wrapper covering over domain zero, the frozen inner dialect covering and state replay over the derived domain, and complete cross-layer identity binding before any destination stage exists.
+5. Conformance vectors replayed through the public production path bind wrapper evidence, derived bytes, inner evidence, layout preimages, and the shared content root; the authenticated worker refuses both compositions without fallback; and zero new runtime dependencies were added.
+
+### Next: codec promotion
+
+Promote zstd, XZ/LZMA2, and bzip2 wrappers one at a time under the [codec dependency gates](codec-dependency-gates.md). Each codec must justify the smallest practical pure-Rust graph, preserve exact compressed-input consumption and bounded windows, and must not introduce a general extractor framework. A local bounded 7z interpreter starts with Copy before reusing the reviewed LZMA layer.
 
 ### Alpha.9 portable ustar gates
 
@@ -82,7 +93,8 @@ Together, these completed increments freeze what the worker may mean, how read o
 | Alpha.9 | Portable ustar and multi-format core | Explicit selection and policy authorization, zero-dependency raw ustar, TAR-native evidence, independent roots, producer corpus, package and fuzz gates |
 | Alpha.10 | Strict ZIP64 and gzip TAR | Policy v3 and v4 selections, zero new dependencies, ZIP64-native and two-domain evidence, independently reconstructed roots, package paths, bounded fuzz, and fail-closed worker refusal |
 | Alpha.11 | Restricted raw POSIX PAX | Explicit policy v5 selection, two-key closed grammar, exact precedence provenance, independent audit and `sealrTreeV5`, zero new dependencies, fail-closed worker refusal |
-| Next | GNU long-name TAR and gzip composition | Separate GNU `L`-only raw language, then distinct gzip compositions for the frozen PAX and GNU profiles |
+| Current main | GNU long-name TAR and gzip compositions | Separate GNU `L`-only raw language under policy v6 with `sealrTreeV6`, then distinct gzip compositions for the frozen PAX and GNU profiles under policy v7 with `sealrTreeV7` and `sealrTreeV8` |
+| Next | Separately promoted codec wrappers | zstd, then XZ/LZMA2, then bzip2, each through the codec dependency gates before any 7z structure work |
 
 Version labels are delivery targets, not permission to cut a release with a red gate. If an increment changes identity or interpretation, it receives a new profile or schema identifier and preserves prior identifiers as immutable historical contracts.
 
@@ -279,7 +291,7 @@ The existing `CI` workflow remains the only required promotion authority. Schedu
 Two implementation lanes can proceed in parallel without inventing another meaning:
 
 - **Semantic and consumer lane:** targeted benign Unicode, `.data`, and descriptor-bearing wheel evidence; stable identity and API review; and a separately versioned legacy CP437 profile only where compatibility evidence justifies it.
-- **Systems and format lane:** add GNU long-name-only raw TAR, then compose the frozen PAX and GNU profiles with gzip; promote zstd, XZ/LZMA2, and bzip2 separately; build local 7z structure with Copy before LZMA; and add cpio, ar/deb, CAB, RPM, and RAR5 through their own gates. ZIP64 and TAR worker-record parity, authenticated abandoned-stage recovery, explicit durability levels, and platform-specific worker research continue in parallel. ISO 9660, UDF, and filesystem images remain a separate program.
+- **Systems and format lane:** with GNU long-name raw TAR and both gzip compositions landed, promote zstd, XZ/LZMA2, and bzip2 separately; build local 7z structure with Copy before LZMA; and add cpio, ar/deb, CAB, RPM, and RAR5 through their own gates. ZIP64 and TAR worker-record parity, authenticated abandoned-stage recovery, explicit durability levels, and platform-specific worker research continue in parallel. ISO 9660, UDF, and filesystem images remain a separate program.
 
 Both lanes consume the same identities, findings discipline, conformance bundles, and format-neutral verification and materialization boundary. Each TAR dialect and additional codec remains separately gated; raw portable ustar and restricted raw PAX do not silently authorize GNU or compressed variants.
 

@@ -8,6 +8,13 @@ The project is in initial development. Compatibility may change between preview 
 
 ### Added
 
+- Added the explicitly selected `sealr.profile.tar-gzip.pax-portable.v1` gzip-wrapped restricted PAX composition. Its canonical profile digest is `6cc91b2b8563b5b070b44bf357a5c62e5d9dda0aedc374d7a08cd80da9c5434f`, and it binds the frozen `sealr.transform.gzip.rfc1952-single-member.v1` wrapper digests and the exact frozen inner PAX profile digest.
+- Added the explicitly selected `sealr.profile.tar-gzip.gnu-longname-portable.v1` gzip-wrapped restricted GNU long-name composition. Its canonical profile digest is `622943e9629c4acc7cfeb446eb9f2d16bb245db589c1a200e885a9d69a02295a`, and it binds the same frozen wrapper digests and the exact frozen inner GNU profile digest.
+- Added policy v7 with id `sealr:policy/default/v7` and digest `92d576984b718e8a02bc6044090f8e2b335dbd1abd136d53e5b02d0ffbd978ef`. It authorizes the separate `tar-gzip-pax` and `tar-gzip-gnu-longname` formats, requires the explicit `max_derived_archive_bytes` cap, and preserves every earlier policy schema byte for byte.
+- Added `sealr.archive-ir.tar-gzip-pax.v1` and `sealr.archive-ir.tar-gzip-gnu-longname.v1`, nesting exact gzip wrapper evidence beside the complete inner PAX or GNU evidence, plus `sealrTreeV7` with label `sealr.tree.layout.tar-gzip-pax.v1` and `sealrTreeV8` with label `sealr.tree.layout.tar-gzip-gnu-longname.v1`. Both compositions preserve the format-neutral `sealrTreeV1` content identity, so a raw dialect and its gzip wrapper keep one content root while every structural identity stays distinct.
+- Added explicit Rust and CLI selection through `TarGzipInterpretationProfile::PaxPortableV1`, `TarGzipInterpretationProfile::GnuLongNamePortableV1`, `ArchiveFormat::TarGzipPax`, `ArchiveFormat::TarGzipGnuLongName`, `--format tar-gzip-pax`, and `--format tar-gzip-gnu-longname`. Each composition compiles policy for its own format string, dispatches through the shared gzip transform front end, and reuses the frozen raw-dialect planner against the derived domain.
+- Extended the ready boundary's composite audit to the new compositions: exactly two snapshots and one exact transform record, independent wrapper covering over domain zero, the frozen inner PAX or GNU covering and state replay over domain one, and a complete cross-layer identity binding before any destination stage exists.
+- Added `sealr.tar-gzip-pax-identity-conformance.v1` and `sealr.tar-gzip-gnu-longname-identity-conformance.v1` vectors replayed through the public production path, binding wrapper evidence, derived bytes, inner evidence, layout preimages, and the shared content root.
 - Added the explicitly selected `sealr.profile.tar.gnu-longname-portable.v1` restricted raw old-GNU long-name preview. Its canonical profile digest is `08fe2698806da997bc42e7e13a45cbf412a4a7056dec39c62456202680b91fa4`; policy v6 authorizes the separate `tar-gnu-longname` format with digest `aefc8a1baa113d7face30857ef64fe8f47c647fae863a72810b80380f8fd4178`.
 - Added strict single-carrier state management for `L` header blocks over exact old-GNU physical headers. An `L` carrier payload must contain strict UTF-8 path bytes and exactly one terminating NUL, and must be immediately consumed by the next file or directory member.
 - Added `sealr.archive-ir.tar-gnu-longname.v1`, GNU-native carrier and member evidence, and `sealrTreeV6` with layout label `sealr.tree.layout.tar-gnu-longname.v1`, preserving the format-neutral `sealrTreeV1` content identity.
@@ -17,8 +24,9 @@ The project is in initial development. Compatibility may change between preview 
 
 ### Security
 
+- Each composition wraps only its frozen raw dialect. A gzip wrapper cannot widen, alias, retry, or fall back between inner languages, and every wrapper failure keeps admission not-evaluated instead of guessing a recovery interpretation.
 - Denied GNU `K` long links, sparse files, GNU base-256 numbers, mixed PAX/GNU state, orphan carriers, links, devices, and concatenation.
-- The authenticated Linux worker fails closed on `tar-gnu-longname` without fallback until a later semantic record supports GNU evidence.
+- The authenticated Linux worker fails closed on `tar-gnu-longname`, `tar-gzip-pax`, and `tar-gzip-gnu-longname` without fallback until a later semantic record supports the composed evidence.
 
 ## [0.1.0-alpha.11] - 2026-08-28
 
