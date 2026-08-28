@@ -107,7 +107,7 @@ fn write_octal(field: &mut [u8], value: u64) {
     field[digits] = 0;
 }
 
-fn write_tar_fixture(path: &Path) {
+fn tar_fixture_bytes() -> Vec<u8> {
     let name = b"mission/status.txt";
     let body = b"nominal\n";
     let mut header = [0_u8; 512];
@@ -133,7 +133,34 @@ fn write_tar_fixture(path: &Path) {
     bytes.extend_from_slice(body);
     bytes.resize(bytes.len().next_multiple_of(512), 0);
     bytes.resize(bytes.len() + 1024, 0);
-    fs::write(path, bytes).expect("TAR fixture should be writable");
+    bytes
+}
+
+fn write_tar_fixture(path: &Path) {
+    fs::write(path, tar_fixture_bytes()).expect("TAR fixture should be writable");
+}
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = u32::MAX;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xedb8_8320 & (0_u32.wrapping_sub(crc & 1)));
+        }
+    }
+    !crc
+}
+
+fn write_tar_gzip_fixture(path: &Path) {
+    let tar = tar_fixture_bytes();
+    let len = u16::try_from(tar.len()).expect("CLI TAR fixture fits one stored Deflate block");
+    let mut bytes = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255, 0x01];
+    bytes.extend_from_slice(&len.to_le_bytes());
+    bytes.extend_from_slice(&(!len).to_le_bytes());
+    bytes.extend_from_slice(&tar);
+    bytes.extend_from_slice(&crc32(&tar).to_le_bytes());
+    bytes.extend_from_slice(&(tar.len() as u32).to_le_bytes());
+    fs::write(path, bytes).expect("gzip-wrapped TAR fixture should be writable");
 }
 
 fn write_zip64_fixture(path: &Path) {
@@ -212,6 +239,7 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert!(help_text.contains("--format <FORMAT>"));
     assert!(help_text.contains("zip64"));
     assert!(help_text.contains("tar-ustar"));
+    assert!(help_text.contains("tar-gzip-ustar"));
     assert!(help_text.contains("--worker-manifest <ABSOLUTE_PATH>"));
     assert!(help_text.contains("--version"));
 
@@ -252,6 +280,45 @@ fn explicit_tar_format_inspects_and_materializes() {
     let materialize = sealr(&[
         Path::new("--format"),
         Path::new("tar-ustar"),
+        &archive,
+        Path::new("--dest"),
+        &destination,
+    ]);
+    assert_eq!(materialize.status.code(), Some(0));
+    assert_eq!(
+        fs::read(destination.join("mission/status.txt")).unwrap(),
+        b"nominal\n"
+    );
+}
+
+#[test]
+fn explicit_tar_gzip_format_inspects_and_materializes() {
+    let run = RunDirectory::create("tar-gzip");
+    let archive = run.path.join("mission.tar.gz");
+    write_tar_gzip_fixture(&archive);
+
+    let inspect = sealr(&[Path::new("--format"), Path::new("tar-gzip-ustar"), &archive]);
+    assert_eq!(
+        inspect.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&inspect.stdout),
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    let view = json(&inspect.stdout, "gzip TAR stdout");
+    let receipt = json(&inspect.stderr, "gzip TAR stderr");
+    assert_eq!(view["source"]["magic"], "gz");
+    assert_eq!(view["members"][0]["path"], "mission/status.txt");
+    assert_eq!(
+        receipt["identities"]["interpretation"]["id"],
+        "sealr.profile.tar-gzip.ustar-portable.v1"
+    );
+    assert!(receipt["identities"]["layout"].get("sealrTreeV4").is_some());
+
+    let destination = run.path.join("materialized");
+    let materialize = sealr(&[
+        Path::new("--format"),
+        Path::new("tar-gzip-ustar"),
         &archive,
         Path::new("--dest"),
         &destination,

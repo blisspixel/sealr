@@ -7,6 +7,7 @@ pub use crate::ratio::ratio_exceeds;
 pub const POLICY_FORMAT_ZIP: &str = "zip";
 pub const POLICY_FORMAT_ZIP64: &str = "zip64";
 pub const POLICY_FORMAT_TAR_USTAR: &str = "tar-ustar";
+pub const POLICY_FORMAT_TAR_GZIP_USTAR: &str = "tar-gzip-ustar";
 
 /// Pre-release Sealr policy, hashed in this struct's deterministic serialized field order.
 ///
@@ -18,6 +19,8 @@ pub struct Policy {
     pub id: String,
     pub formats: Vec<String>,
     pub max_archive_bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_derived_archive_bytes: Option<u64>,
     pub max_files: u64,
     pub max_member_bytes: u64,
     pub max_total_bytes: u64,
@@ -41,6 +44,7 @@ pub struct Policy {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ResourceBudget {
     pub max_archive_bytes: u64,
+    pub max_derived_archive_bytes: u64,
     pub max_files: u64,
     pub max_member_bytes: u64,
     pub max_total_bytes: u64,
@@ -84,6 +88,7 @@ impl Policy {
             id: "sealr:policy/default/v1".into(),
             formats: vec![POLICY_FORMAT_ZIP.into()],
             max_archive_bytes: 512 * 1024 * 1024,
+            max_derived_archive_bytes: None,
             max_files: 10_000,
             max_member_bytes: 1024 * 1024 * 1024,
             max_total_bytes: 5 * 1024 * 1024 * 1024,
@@ -134,6 +139,24 @@ impl Policy {
         }
     }
 
+    /// Construct the v4 policy, which additionally authorizes strict
+    /// single-member gzip-wrapped portable ustar.
+    pub fn default_v4() -> Self {
+        let max_derived_archive_bytes = 512 * 1024 * 1024;
+        Self {
+            schema: "sealr.policy.v4",
+            id: "sealr:policy/default/v4".into(),
+            formats: vec![
+                POLICY_FORMAT_ZIP.into(),
+                POLICY_FORMAT_ZIP64.into(),
+                POLICY_FORMAT_TAR_USTAR.into(),
+                POLICY_FORMAT_TAR_GZIP_USTAR.into(),
+            ],
+            max_derived_archive_bytes: Some(max_derived_archive_bytes),
+            ..Self::default_v1()
+        }
+    }
+
     pub fn digest_hex(&self) -> String {
         let json = serde_json::to_vec(self).expect("policy serializes");
         hex_sha256(&json)
@@ -167,6 +190,13 @@ impl Policy {
             "sealr.policy.v3" => {
                 return Err(unsupported(format!(
                     "formats {:?} are not a canonical nonempty subset of [\"zip\", \"zip64\", \"tar-ustar\"]",
+                    self.formats
+                )));
+            }
+            "sealr.policy.v4" if valid_v4_formats(&self.formats) => {}
+            "sealr.policy.v4" => {
+                return Err(unsupported(format!(
+                    "formats {:?} are not a canonical nonempty subset of [\"zip\", \"zip64\", \"tar-ustar\", \"tar-gzip-ustar\"]",
                     self.formats
                 )));
             }
@@ -206,18 +236,35 @@ impl Policy {
                 self.max_dict_bytes, defaults.max_dict_bytes
             )));
         }
-        if matches!(self.schema, "sealr.policy.v2" | "sealr.policy.v3")
-            && self.max_files > u64::from(u32::MAX)
+        if matches!(
+            self.schema,
+            "sealr.policy.v2" | "sealr.policy.v3" | "sealr.policy.v4"
+        ) && self.max_files > u64::from(u32::MAX)
         {
             return Err(unsupported(format!(
                 "max_files={} exceeds the u32 identity-encoding limit",
                 self.max_files
             )));
         }
+        match (self.schema, self.max_derived_archive_bytes) {
+            ("sealr.policy.v4", Some(_)) => {}
+            ("sealr.policy.v4", None) => {
+                return Err(unsupported(
+                    "sealr.policy.v4 requires an explicit max_derived_archive_bytes cap".to_owned(),
+                ));
+            }
+            (_, None) => {}
+            (_, Some(value)) => {
+                return Err(unsupported(format!(
+                    "max_derived_archive_bytes={value} is only supported by sealr.policy.v4"
+                )));
+            }
+        }
 
         Ok(CompiledControls {
             budget: ResourceBudget {
                 max_archive_bytes: self.max_archive_bytes,
+                max_derived_archive_bytes: self.max_derived_archive_bytes.unwrap_or(0),
                 max_files: self.max_files,
                 max_member_bytes: self.max_member_bytes,
                 max_total_bytes: self.max_total_bytes,
@@ -258,6 +305,18 @@ fn valid_v3_formats(formats: &[String]) -> bool {
             POLICY_FORMAT_ZIP,
             POLICY_FORMAT_ZIP64,
             POLICY_FORMAT_TAR_USTAR,
+        ],
+    )
+}
+
+fn valid_v4_formats(formats: &[String]) -> bool {
+    valid_canonical_subset(
+        formats,
+        &[
+            POLICY_FORMAT_ZIP,
+            POLICY_FORMAT_ZIP64,
+            POLICY_FORMAT_TAR_USTAR,
+            POLICY_FORMAT_TAR_GZIP_USTAR,
         ],
     )
 }
@@ -334,6 +393,18 @@ mod tests {
         r#""atomic":false}"#,
     );
 
+    const DEFAULT_V4_JSON: &str = concat!(
+        r#"{"schema":"sealr.policy.v4","id":"sealr:policy/default/v4","#,
+        r#""formats":["zip","zip64","tar-ustar","tar-gzip-ustar"],"#,
+        r#""max_archive_bytes":536870912,"max_derived_archive_bytes":536870912,"#,
+        r#""max_files":10000,"max_member_bytes":1073741824,"#,
+        r#""max_total_bytes":5368709120,"max_ratio":100,"max_path_depth":32,"#,
+        r#""max_metadata_bytes":4194304,"max_dict_bytes":67108864,"symlinks":"deny","#,
+        r#""hardlinks":"deny","overwrite":"refuse","setuid":"strip","nested_depth":1,"#,
+        r#""ambiguity":"deny","case_fold_collision":"deny","magic_vs_extension":"deny","#,
+        r#""encrypted":"deny","atomic":false}"#,
+    );
+
     #[test]
     fn default_policy_digest_is_stable() {
         assert_eq!(
@@ -359,6 +430,14 @@ mod tests {
     }
 
     #[test]
+    fn tar_gzip_policy_digest_is_stable() {
+        assert_eq!(
+            Policy::default_v4().digest_hex(),
+            "ecfca685a8f05c63fd12b7fd1c183a90a3fa705f801493fa4cb003cd57f1d601"
+        );
+    }
+
+    #[test]
     fn default_policy_serializations_are_stable() {
         assert_eq!(
             serde_json::to_string(&Policy::default_v1()).unwrap(),
@@ -372,6 +451,10 @@ mod tests {
             serde_json::to_string(&Policy::default_v3()).unwrap(),
             DEFAULT_V3_JSON
         );
+        assert_eq!(
+            serde_json::to_string(&Policy::default_v4()).unwrap(),
+            DEFAULT_V4_JSON
+        );
     }
 
     #[test]
@@ -383,6 +466,9 @@ mod tests {
 
         let v3 = Policy::default_v3().compile().expect("v3 default compiles");
         assert_eq!(v3, v1, "v3 preserves all compiled controls and limits");
+
+        let v4 = Policy::default_v4().compile().expect("v4 default compiles");
+        assert_eq!(v4.budget.max_derived_archive_bytes, 512 * 1024 * 1024);
     }
 
     #[test]
@@ -495,6 +581,43 @@ mod tests {
                 FindingCode::PolicyUnsupported
             );
         }
+    }
+
+    #[test]
+    fn tar_gzip_policy_requires_canonical_formats_and_an_explicit_derived_cap() {
+        for formats in [
+            Vec::new(),
+            vec![
+                POLICY_FORMAT_TAR_GZIP_USTAR.into(),
+                POLICY_FORMAT_TAR_USTAR.into(),
+            ],
+            vec![
+                POLICY_FORMAT_TAR_GZIP_USTAR.into(),
+                POLICY_FORMAT_TAR_GZIP_USTAR.into(),
+            ],
+            vec![POLICY_FORMAT_ZIP.into(), "7z".into()],
+        ] {
+            let mut policy = Policy::default_v4();
+            policy.formats = formats;
+            assert_eq!(
+                policy.compile().unwrap_err().code,
+                FindingCode::PolicyUnsupported
+            );
+        }
+
+        let mut missing = Policy::default_v4();
+        missing.max_derived_archive_bytes = None;
+        assert_eq!(
+            missing.compile().unwrap_err().code,
+            FindingCode::PolicyUnsupported
+        );
+
+        let mut old_schema = Policy::default_v3();
+        old_schema.max_derived_archive_bytes = Some(1);
+        assert_eq!(
+            old_schema.compile().unwrap_err().code,
+            FindingCode::PolicyUnsupported
+        );
     }
 
     #[test]

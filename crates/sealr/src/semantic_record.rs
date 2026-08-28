@@ -922,6 +922,7 @@ fn decode_binding(cursor: &mut Cursor<'_>) -> Result<InvocationBinding, RecordEr
         policy_sha256,
         budget: ResourceBudget {
             max_archive_bytes,
+            max_derived_archive_bytes: 0,
             max_files,
             max_member_bytes,
             max_total_bytes,
@@ -1269,6 +1270,7 @@ fn finding_code_tag(code: FindingCode) -> u16 {
         FindingCode::TarType => 63,
         FindingCode::TarFeatureUnsupported => 64,
         FindingCode::GzipExtra => 65,
+        FindingCode::QuotaDerived => 66,
     }
 }
 
@@ -1340,6 +1342,7 @@ fn finding_code_from_tag(tag: u16, offset: usize) -> Result<FindingCode, RecordE
         63 => FindingCode::TarType,
         64 => FindingCode::TarFeatureUnsupported,
         65 => FindingCode::GzipExtra,
+        66 => FindingCode::QuotaDerived,
         _ => {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidEnum,
@@ -4704,6 +4707,15 @@ mod tests {
         );
     }
 
+    #[test]
+    fn derived_quota_finding_code_has_a_stable_wire_tag() {
+        assert_eq!(finding_code_tag(FindingCode::QuotaDerived), 66);
+        assert_eq!(
+            finding_code_from_tag(66, 0).unwrap(),
+            FindingCode::QuotaDerived
+        );
+    }
+
     fn test_zip_evidence(member: &IrMember) -> &ZipMemberEvidence {
         member
             .zip_evidence()
@@ -4724,7 +4736,7 @@ mod tests {
     fn test_zip_covering_mut(ir: &mut ArchiveIR) -> &mut ArchiveCovering {
         match &mut ir.evidence {
             ArchiveEvidence::Zip(covering) => covering,
-            ArchiveEvidence::Zip64(_) | ArchiveEvidence::Tar(_) => {
+            ArchiveEvidence::Zip64(_) | ArchiveEvidence::Tar(_) | ArchiveEvidence::TarGzip(_) => {
                 panic!("semantic-record test archive must carry ZIP evidence")
             }
         }

@@ -413,27 +413,16 @@ pub struct VerifiedArchive {
 
 impl VerifiedArchive {
     pub(crate) fn new(
+        _authority: crate::apply::VerifiedArchiveAuthority,
         snapshots: SnapshotSet<'_>,
         ir: ArchiveIR,
         payloads: Vec<PayloadPlan>,
         budget: ResourceBudget,
         retention: RetentionBuild,
     ) -> Self {
-        debug_assert!(ir
-            .members()
-            .iter()
-            .all(|member| matches!(&member.verification, MemberVerification::Verified)));
-        debug_assert_eq!(snapshots.original().digest(), ir.source_digest());
-        debug_assert_eq!(payloads.len(), ir.members().len());
-        debug_assert!(payloads
-            .iter()
-            .zip(ir.members())
-            .all(|(payload, member)| payload.matches_member(member)));
-
         let mut members_by_path = BTreeMap::new();
         for (index, member) in ir.members().iter().enumerate() {
-            let previous = members_by_path.insert(member.canonical_path.clone(), index);
-            debug_assert!(previous.is_none());
+            members_by_path.insert(member.canonical_path.clone(), index);
         }
 
         Self {

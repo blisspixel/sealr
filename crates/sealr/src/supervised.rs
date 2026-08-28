@@ -160,7 +160,11 @@ fn supervised_zip_profile(
             SupervisionErrorKind::IsolationUnavailable,
             "ZIP64 requires the not-yet-promoted semantic-record v3 worker contract",
         )),
-        _ => Err(SupervisionError::new(
+        ArchiveSelection::TarGzipUstar(_) => Err(SupervisionError::new(
+            SupervisionErrorKind::IsolationUnavailable,
+            "gzip-wrapped TAR requires the not-yet-promoted semantic-record v3 worker contract",
+        )),
+        ArchiveSelection::TarUstar(_) => Err(SupervisionError::new(
             SupervisionErrorKind::IsolationUnavailable,
             "the authenticated worker contract currently supports ZIP profiles only",
         )),
@@ -170,7 +174,9 @@ fn supervised_zip_profile(
 #[cfg(test)]
 mod selection_tests {
     use super::*;
-    use crate::TarInterpretationProfile;
+    #[cfg(not(target_os = "linux"))]
+    use crate::{Policy, Source};
+    use crate::{TarGzipInterpretationProfile, TarInterpretationProfile};
 
     #[test]
     fn worker_boundary_accepts_only_an_explicit_zip_selection() {
@@ -189,6 +195,30 @@ mod selection_tests {
         let error = supervised_zip_profile(&zip64).unwrap_err();
         assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
         assert!(error.to_string().contains("semantic-record v3"));
+
+        let tar_gzip = ApplyOptions::new()
+            .with_tar_gzip_interpretation_profile(TarGzipInterpretationProfile::UstarPortableV1);
+        let error = supervised_zip_profile(&tar_gzip).unwrap_err();
+        assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
+        assert!(error.to_string().contains("semantic-record v3"));
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    #[test]
+    fn gzip_tar_refusal_precedes_a_missing_source_path() {
+        let policy = Policy::default_v4();
+        let missing = std::path::Path::new("definitely-missing-supervised-input.tar.gz");
+        let request = Request {
+            source: Source::Path(missing),
+            policy: &policy,
+            dest: None,
+        };
+        let options = ApplyOptions::new()
+            .with_tar_gzip_interpretation_profile(TarGzipInterpretationProfile::UstarPortableV1);
+        let error = apply_supervised(request, &options, &LinuxWorker {}).unwrap_err();
+        assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
+        assert!(error.to_string().contains("semantic-record v3"));
+        assert!(!error.to_string().contains("source"));
     }
 }
 

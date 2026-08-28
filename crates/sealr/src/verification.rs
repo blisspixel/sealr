@@ -11,7 +11,7 @@ use crate::ir::{IrMember, MemberEvidence};
 use crate::policy::{ratio_exceeds, ResourceBudget};
 use crate::quota::{QuotaError, QuotaState};
 use crate::snapshot::finding_from_io;
-use crate::snapshot::{DomainRange, SnapshotSet};
+use crate::snapshot::{DomainRange, SnapshotDomainId, SnapshotSet};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct PayloadPlan {
@@ -69,6 +69,16 @@ impl PayloadPlan {
                 uncompressed_size: member.declared_uncomp_size,
                 integrity: PayloadIntegrity::None,
             },
+            MemberEvidence::TarGzip(tar) => Self {
+                source: DomainRange {
+                    domain: SnapshotDomainId::FIRST_DERIVED,
+                    range: tar.payload,
+                },
+                codec: PayloadCodec::Raw,
+                compressed_size: tar.payload.len,
+                uncompressed_size: member.declared_uncomp_size,
+                integrity: PayloadIntegrity::None,
+            },
         }
     }
 
@@ -92,8 +102,26 @@ impl PayloadPlan {
         }
     }
 
+    pub(crate) fn from_tar_gzip(member: &crate::tar::TarMember) -> Self {
+        Self {
+            source: DomainRange {
+                domain: SnapshotDomainId::FIRST_DERIVED,
+                range: member.payload,
+            },
+            codec: PayloadCodec::Raw,
+            compressed_size: member.payload.len,
+            uncompressed_size: member.size,
+            integrity: PayloadIntegrity::None,
+        }
+    }
+
     pub(crate) fn matches_member(self, member: &IrMember) -> bool {
         self == Self::from_ir(member)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_test_domain(&mut self, domain: SnapshotDomainId) {
+        self.source.domain = domain;
     }
 }
 

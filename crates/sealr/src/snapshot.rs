@@ -114,6 +114,7 @@ pub(crate) struct SnapshotDomainId(u16);
 
 impl SnapshotDomainId {
     pub(crate) const ORIGINAL: Self = Self(0);
+    pub(crate) const FIRST_DERIVED: Self = Self(1);
 }
 
 /// One exact range resolved against a named immutable snapshot domain.
@@ -381,7 +382,7 @@ impl TransformProfile {
 
     pub(crate) const fn definition(self) -> &'static [u8] {
         match self {
-            Self::GzipRfc1952SingleMemberV1 => b"algorithm=rfc1952-gzip;members=exactly-one;reserved-flags=zero;extra-fields=exact-subfield-framing-si2-nonzero;trailing-data=forbidden;header-crc=verify-when-present;data-crc32=verify;isize=verify;payload=rfc1951-deflate;output=bounded",
+            Self::GzipRfc1952SingleMemberV1 => b"algorithm=rfc1952-gzip;members=exactly-one;reserved-flags=zero;extra-fields=exact-subfield-framing-si2-nonzero-unique-ids;trailing-data=forbidden;header-crc=verify-when-present;data-crc32=verify;isize=verify;payload=rfc1951-deflate;output=bounded",
             #[cfg(test)]
             Self::TestIdentityV1 => b"algorithm=test-identity;version=1",
             #[cfg(test)]
@@ -392,7 +393,7 @@ impl TransformProfile {
     pub(crate) const fn digest(self) -> &'static str {
         match self {
             Self::GzipRfc1952SingleMemberV1 => {
-                "f01a542c9009aed6d669843234b81dcf0e80b176e507913f8aeaf968ce59577d"
+                "795a124c278eacf1fb9b4fc3825a74240d6d0e89c29ffdfe6118ff6db53c0a45"
             }
             #[cfg(test)]
             Self::TestIdentityV1 => {
@@ -474,6 +475,11 @@ impl TransformGraph {
     #[allow(dead_code)]
     pub(crate) fn records(&self) -> &[TransformRecord] {
         &self.records
+    }
+
+    #[cfg(test)]
+    pub(crate) fn records_mut(&mut self) -> &mut [TransformRecord] {
+        &mut self.records
     }
 
     pub(crate) fn validates(&self, snapshots: &SnapshotSet<'_>) -> bool {

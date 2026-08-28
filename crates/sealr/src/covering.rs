@@ -4,11 +4,13 @@
 //! EOCD, inflate payloads, or jail names. If it re-parsed ZIP, it would be a
 //! second parser.
 
+use crc32fast::Hasher as Crc;
+
 use crate::findings::{Finding, FindingCode};
 use crate::interval::{CheckedInterval, IntervalError};
 use crate::ir::{
-    ArchiveFormat, ArchiveIR, ByteRange, ExtraDisposition, ExtraSite, MemberKind,
-    Zip64DataDescriptorWidth, Zip64LocalValueShape,
+    ArchiveFormat, ArchiveIR, ByteRange, ExtraDisposition, ExtraSite, GzipWrapperEvidence,
+    MemberKind, Zip64DataDescriptorWidth, Zip64LocalValueShape,
 };
 use crate::policy::hex_sha256;
 use crate::snapshot::SourceSnapshot;
@@ -19,6 +21,11 @@ const EOCD_SIG: [u8; 4] = [0x50, 0x4b, 0x05, 0x06];
 const ZIP64_EOCD_SIG: [u8; 4] = [0x50, 0x4b, 0x06, 0x06];
 const ZIP64_LOCATOR_SIG: [u8; 4] = [0x50, 0x4b, 0x06, 0x07];
 const DATA_DESCRIPTOR_SIG: [u8; 4] = [0x50, 0x4b, 0x07, 0x08];
+const GZIP_FLAG_HEADER_CRC: u8 = 1 << 1;
+const GZIP_FLAG_EXTRA: u8 = 1 << 2;
+const GZIP_FLAG_NAME: u8 = 1 << 3;
+const GZIP_FLAG_COMMENT: u8 = 1 << 4;
+const GZIP_FLAG_RESERVED: u8 = 0b1110_0000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CoveringAuditError<'member> {
@@ -527,6 +534,205 @@ fn canonical_member_u32(legacy: u32, resolved: u64) -> bool {
     }
 }
 
+/// Independently check the exact RFC 1952 wrapper partition and recorded
+/// fixed fields without invoking a compression codec.
+pub(crate) fn audit_gzip_wrapper_covering(
+    snapshot: &SourceSnapshot<'_>,
+    evidence: &GzipWrapperEvidence,
+) -> Result<(), Finding> {
+    let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
+    let header_end = checked_range_end(evidence.header, "gzip header range overflow")?;
+    let payload_end = checked_range_end(
+        evidence.compressed_payload,
+        "gzip compressed payload range overflow",
+    )?;
+    let trailer_end = checked_range_end(evidence.trailer, "gzip trailer range overflow")?;
+    if evidence.header.offset != 0
+        || evidence.header.len < 10
+        || evidence.compressed_payload.offset != header_end
+        || evidence.trailer.offset != payload_end
+        || evidence.trailer.len != 8
+        || trailer_end != snapshot.len()
+    {
+        return Err(fail(
+            "gzip ranges do not exactly partition the original snapshot",
+        ));
+    }
+
+    let mut fixed = [0_u8; 10];
+    snapshot
+        .read_exact_at(0, &mut fixed)
+        .map_err(|_| fail("gzip fixed header is outside the original snapshot"))?;
+    if fixed[..3] != [0x1f, 0x8b, 8]
+        || fixed[3] & GZIP_FLAG_RESERVED != 0
+        || fixed[3] != evidence.flags
+        || le_u32(&fixed, 4) != evidence.modification_time
+        || fixed[8] != evidence.extra_flags
+        || fixed[9] != evidence.operating_system
+    {
+        return Err(fail("gzip fixed header disagrees with wrapper evidence"));
+    }
+
+    let mut cursor = 10_u64;
+    if evidence.flags & GZIP_FLAG_EXTRA != 0 {
+        let extra = evidence
+            .extra
+            .ok_or_else(|| fail("gzip FEXTRA flag has no range evidence"))?;
+        if extra.offset != cursor || extra.len < 2 {
+            return Err(fail("gzip FEXTRA range is not canonical"));
+        }
+        let mut xlen = [0_u8; 2];
+        snapshot
+            .read_exact_at(cursor, &mut xlen)
+            .map_err(|_| fail("gzip FEXTRA XLEN is outside the original snapshot"))?;
+        if u64::from(u16::from_le_bytes(xlen)) + 2 != extra.len {
+            return Err(fail("gzip FEXTRA XLEN disagrees with its range"));
+        }
+        let extra_end = checked_range_end(extra, "gzip FEXTRA range overflow")?;
+        let mut subfield_cursor = cursor + 2;
+        let mut count = 0_u32;
+        let mut seen = [0_u64; 1024];
+        while subfield_cursor < extra_end {
+            if extra_end - subfield_cursor < 4 {
+                return Err(fail("gzip FEXTRA has an incomplete subfield header"));
+            }
+            let mut subfield = [0_u8; 4];
+            snapshot
+                .read_exact_at(subfield_cursor, &mut subfield)
+                .map_err(|_| fail("gzip FEXTRA subfield header is outside the snapshot"))?;
+            if subfield[1] == 0 {
+                return Err(fail("gzip FEXTRA subfield uses reserved SI2 zero"));
+            }
+            let id = u16::from_le_bytes([subfield[0], subfield[1]]);
+            let word = usize::from(id / 64);
+            let bit = u32::from(id % 64);
+            if seen[word] & (1_u64 << bit) != 0 {
+                return Err(fail("gzip FEXTRA repeats a subfield ID"));
+            }
+            seen[word] |= 1_u64 << bit;
+            let subfield_end = subfield_cursor
+                .checked_add(4)
+                .and_then(|value| {
+                    value.checked_add(u64::from(u16::from_le_bytes([subfield[2], subfield[3]])))
+                })
+                .ok_or_else(|| fail("gzip FEXTRA subfield range overflow"))?;
+            if subfield_end > extra_end {
+                return Err(fail("gzip FEXTRA subfield exceeds XLEN"));
+            }
+            count = count
+                .checked_add(1)
+                .ok_or_else(|| fail("gzip FEXTRA subfield count overflow"))?;
+            subfield_cursor = subfield_end;
+        }
+        if count != evidence.extra_subfield_count {
+            return Err(fail("gzip FEXTRA subfield count disagrees with evidence"));
+        }
+        cursor = extra_end;
+    } else if evidence.extra.is_some() || evidence.extra_subfield_count != 0 {
+        return Err(fail("gzip FEXTRA evidence is present without its flag"));
+    }
+
+    cursor = audit_gzip_c_string(
+        snapshot,
+        cursor,
+        header_end,
+        evidence.flags & GZIP_FLAG_NAME != 0,
+        evidence.original_name,
+        "gzip FNAME evidence is inconsistent",
+    )?;
+    cursor = audit_gzip_c_string(
+        snapshot,
+        cursor,
+        header_end,
+        evidence.flags & GZIP_FLAG_COMMENT != 0,
+        evidence.comment,
+        "gzip FCOMMENT evidence is inconsistent",
+    )?;
+
+    if evidence.flags & GZIP_FLAG_HEADER_CRC != 0 {
+        let range = evidence
+            .header_crc16
+            .ok_or_else(|| fail("gzip FHCRC flag has no range evidence"))?;
+        if range.offset != cursor || range.len != 2 {
+            return Err(fail("gzip FHCRC range is not canonical"));
+        }
+        let header_bytes = snapshot
+            .read_vec(0, cursor)
+            .map_err(|_| fail("gzip header bytes are outside the original snapshot"))?;
+        let mut actual = Crc::new();
+        actual.update(&header_bytes);
+        let actual = actual.finalize() as u16;
+        let mut declared = [0_u8; 2];
+        snapshot
+            .read_exact_at(cursor, &mut declared)
+            .map_err(|_| fail("gzip FHCRC is outside the original snapshot"))?;
+        if u16::from_le_bytes(declared) != actual {
+            return Err(fail("gzip FHCRC disagrees with the original header"));
+        }
+        cursor += 2;
+    } else if evidence.header_crc16.is_some() {
+        return Err(fail("gzip FHCRC evidence is present without its flag"));
+    }
+    if cursor != header_end {
+        return Err(fail(
+            "gzip optional fields do not exactly fill the header range",
+        ));
+    }
+
+    let mut trailer = [0_u8; 8];
+    snapshot
+        .read_exact_at(evidence.trailer.offset, &mut trailer)
+        .map_err(|_| fail("gzip trailer is outside the original snapshot"))?;
+    if le_u32(&trailer, 0) != evidence.declared_crc32
+        || le_u32(&trailer, 4) != evidence.declared_isize
+        || evidence.declared_isize != gzip_isize(evidence.derived_output_len)
+        || evidence.derived_output_sha256.len() != 64
+        || !evidence
+            .derived_output_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(fail(
+            "gzip trailer or derived-output evidence is inconsistent",
+        ));
+    }
+    Ok(())
+}
+
+fn gzip_isize(len: u64) -> u32 {
+    u32::try_from(len % (u64::from(u32::MAX) + 1)).expect("gzip ISIZE modulo always fits u32")
+}
+
+fn audit_gzip_c_string(
+    snapshot: &SourceSnapshot<'_>,
+    cursor: u64,
+    header_end: u64,
+    flagged: bool,
+    range: Option<ByteRange>,
+    detail: &'static str,
+) -> Result<u64, Finding> {
+    let fail = || Finding::error(FindingCode::CoveringInconsistent, detail);
+    if !flagged {
+        return if range.is_none() {
+            Ok(cursor)
+        } else {
+            Err(fail())
+        };
+    }
+    let range = range.ok_or_else(fail)?;
+    let end = checked_range_end(range, detail)?;
+    if range.offset != cursor || range.len == 0 || end > header_end {
+        return Err(fail());
+    }
+    let bytes = snapshot
+        .read_vec(range.offset, range.len)
+        .map_err(|_| fail())?;
+    if bytes.last() != Some(&0) || bytes[..bytes.len() - 1].contains(&0) {
+        return Err(fail());
+    }
+    Ok(end)
+}
+
 /// Independently check a portable-ustar IR's source partition and recorded
 /// member ranges without interpreting names, numeric fields, or payloads.
 pub(crate) fn audit_tar_covering(
@@ -534,11 +740,27 @@ pub(crate) fn audit_tar_covering(
     ir: &ArchiveIR,
 ) -> Result<(), Finding> {
     let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
-    if ir.format() != ArchiveFormat::TarUstar {
+    if !matches!(
+        ir.format(),
+        ArchiveFormat::TarUstar | ArchiveFormat::TarGzipUstar
+    ) {
         return Err(fail("TAR covering audit received a non-TAR IR"));
     }
-    if ir.source_digest != *snapshot.digest() {
-        return Err(fail("source digest does not match the snapshot"));
+    match ir.format() {
+        ArchiveFormat::TarUstar if ir.source_digest != *snapshot.digest() => {
+            return Err(fail("source digest does not match the TAR snapshot"));
+        }
+        ArchiveFormat::TarGzipUstar => {
+            let gzip = ir
+                .gzip_evidence()
+                .ok_or_else(|| fail("gzip-wrapped TAR IR has no wrapper evidence"))?;
+            if gzip.derived_output_len != snapshot.len()
+                || snapshot.digest().sha256() != Some(gzip.derived_output_sha256.as_str())
+            {
+                return Err(fail("derived TAR identity does not match its snapshot"));
+            }
+        }
+        _ => {}
     }
     let covering = ir
         .tar_covering()
@@ -557,6 +779,12 @@ pub(crate) fn audit_tar_covering(
 
     let mut expected_header = 0_u64;
     for member in &ir.members {
+        if member.format() != ir.format() {
+            return Err(
+                fail("TAR member evidence variant does not match the archive format")
+                    .on(&member.decoded_name),
+            );
+        }
         let evidence = member.tar_evidence().ok_or_else(|| {
             fail("TAR member lacks format-specific evidence").on(&member.decoded_name)
         })?;
@@ -1294,6 +1522,43 @@ mod tests {
             .collect()
     }
 
+    #[test]
+    fn gzip_covering_audit_independently_rejects_duplicate_extra_ids() {
+        let mut bytes = vec![0x1f, 0x8b, 8, GZIP_FLAG_EXTRA, 0, 0, 0, 0, 0, 255];
+        bytes.extend_from_slice(&8_u16.to_le_bytes());
+        bytes.extend_from_slice(b"SL\0\0SL\0\0");
+        bytes.push(0);
+        bytes.extend_from_slice(&[0; 8]);
+        let snapshot = SourceSnapshot::borrowed(None, &bytes);
+        let evidence = GzipWrapperEvidence {
+            flags: GZIP_FLAG_EXTRA,
+            modification_time: 0,
+            extra_flags: 0,
+            operating_system: 255,
+            header: ByteRange { offset: 0, len: 20 },
+            extra: Some(ByteRange {
+                offset: 10,
+                len: 10,
+            }),
+            extra_subfield_count: 2,
+            original_name: None,
+            comment: None,
+            header_crc16: None,
+            compressed_payload: ByteRange { offset: 20, len: 1 },
+            trailer: ByteRange { offset: 21, len: 8 },
+            declared_crc32: 0,
+            declared_isize: 0,
+            derived_output_len: 0,
+            derived_output_sha256: "0".repeat(64),
+        };
+        assert_eq!(
+            audit_gzip_wrapper_covering(&snapshot, &evidence)
+                .unwrap_err()
+                .code,
+            FindingCode::CoveringInconsistent
+        );
+    }
+
     fn admitted_tar_ir(bytes: &[u8]) -> ArchiveIR {
         let policy = Policy::default_v2();
         let options = ApplyOptions::new()
@@ -1316,7 +1581,7 @@ mod tests {
     fn tar_covering_mut(ir: &mut ArchiveIR) -> &mut crate::ir::TarArchiveCovering {
         match &mut ir.evidence {
             ArchiveEvidence::Tar(covering) => covering,
-            ArchiveEvidence::Zip(_) | ArchiveEvidence::Zip64(_) => {
+            ArchiveEvidence::Zip(_) | ArchiveEvidence::Zip64(_) | ArchiveEvidence::TarGzip(_) => {
                 panic!("expected TAR evidence")
             }
         }
@@ -1325,14 +1590,16 @@ mod tests {
     fn zip_covering_mut(ir: &mut ArchiveIR) -> &mut crate::ir::ArchiveCovering {
         match &mut ir.evidence {
             ArchiveEvidence::Zip(covering) => covering,
-            ArchiveEvidence::Zip64(_) | ArchiveEvidence::Tar(_) => panic!("expected ZIP evidence"),
+            ArchiveEvidence::Zip64(_) | ArchiveEvidence::Tar(_) | ArchiveEvidence::TarGzip(_) => {
+                panic!("expected ZIP evidence")
+            }
         }
     }
 
     fn zip64_covering_mut(ir: &mut ArchiveIR) -> &mut crate::ir::Zip64ArchiveCovering {
         match &mut ir.evidence {
             ArchiveEvidence::Zip64(covering) => covering,
-            ArchiveEvidence::Zip(_) | ArchiveEvidence::Tar(_) => {
+            ArchiveEvidence::Zip(_) | ArchiveEvidence::Tar(_) | ArchiveEvidence::TarGzip(_) => {
                 panic!("expected ZIP64 evidence")
             }
         }
@@ -1341,7 +1608,7 @@ mod tests {
     fn tar_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut TarMemberEvidence {
         match &mut ir.members[index].evidence {
             MemberEvidence::Tar(evidence) => evidence,
-            MemberEvidence::Zip(_) | MemberEvidence::Zip64(_) => {
+            MemberEvidence::Zip(_) | MemberEvidence::Zip64(_) | MemberEvidence::TarGzip(_) => {
                 panic!("expected TAR member evidence")
             }
         }
@@ -1350,7 +1617,7 @@ mod tests {
     fn zip_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut ZipMemberEvidence {
         match &mut ir.members[index].evidence {
             MemberEvidence::Zip(evidence) => evidence,
-            MemberEvidence::Zip64(_) | MemberEvidence::Tar(_) => {
+            MemberEvidence::Zip64(_) | MemberEvidence::Tar(_) | MemberEvidence::TarGzip(_) => {
                 panic!("expected ZIP member evidence")
             }
         }
@@ -1359,7 +1626,7 @@ mod tests {
     fn zip64_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut Zip64MemberEvidence {
         match &mut ir.members[index].evidence {
             MemberEvidence::Zip64(evidence) => evidence,
-            MemberEvidence::Zip(_) | MemberEvidence::Tar(_) => {
+            MemberEvidence::Zip(_) | MemberEvidence::Tar(_) | MemberEvidence::TarGzip(_) => {
                 panic!("expected ZIP64 member evidence")
             }
         }

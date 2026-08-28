@@ -77,6 +77,8 @@ pub(crate) struct TransformedGzipMember {
     pub(crate) declared_crc32: u32,
     pub(crate) declared_isize: u32,
     pub(crate) output_domain: SnapshotDomainId,
+    pub(crate) output_len: u64,
+    pub(crate) output_sha256: String,
 }
 
 /// Internal failure classes kept distinct before they are mapped to the
@@ -201,12 +203,20 @@ pub(crate) fn decode_single_member(
             if let Some(Err(error)) = completion.borrow().as_ref() {
                 return Err(error.clone());
             }
-            let kind = if finding.code == FindingCode::QuotaArchive {
-                GzipErrorKind::OutputLimit
-            } else {
-                GzipErrorKind::Source
-            };
-            return Err(GzipError { kind, finding });
+            if finding.code == FindingCode::QuotaArchive {
+                return Err(GzipError::new(
+                    GzipErrorKind::OutputLimit,
+                    FindingCode::QuotaDerived,
+                    format!(
+                        "gzip derived output exceeds the {}-byte cap",
+                        limits.max_output_bytes
+                    ),
+                ));
+            }
+            return Err(GzipError {
+                kind: GzipErrorKind::Source,
+                finding,
+            });
         }
     };
 
@@ -215,6 +225,21 @@ pub(crate) fn decode_single_member(
         .as_ref()
         .cloned()
         .ok_or_else(|| GzipError::deflate("Deflate reader ended without trailer evidence"))??;
+
+    if evidence.trailer.end() != source.len() {
+        scan_trailing_members(
+            source,
+            evidence.trailer.end(),
+            limits,
+            header.header.len + TRAILER_LEN,
+            output.len(),
+        )?;
+        return Err(GzipError::new(
+            GzipErrorKind::ConcatenatedMember,
+            FindingCode::CodecDeflateTrailingInput,
+            "concatenated gzip members are outside the single-member profile",
+        ));
+    }
 
     Ok(DecodedGzipMember {
         header,
@@ -243,6 +268,12 @@ pub(crate) fn transform_single_member(
         declared_isize,
         output,
     } = decoded;
+    let output_len = output.len();
+    let output_sha256 = output
+        .digest()
+        .sha256()
+        .expect("private derived gzip output always has a SHA-256")
+        .to_owned();
     let output_domain = snapshots
         .append_derived_snapshot(
             transforms,
@@ -264,6 +295,8 @@ pub(crate) fn transform_single_member(
         declared_crc32,
         declared_isize,
         output_domain,
+        output_len,
+        output_sha256,
     })
 }
 
@@ -272,11 +305,28 @@ fn parse_header(
     max_header_bytes: u64,
     max_metadata_bytes: u64,
 ) -> Result<GzipHeader, GzipError> {
+    parse_header_at(source, 0, max_header_bytes, max_metadata_bytes)
+}
+
+fn parse_header_at(
+    source: &SourceSnapshot<'_>,
+    member_offset: u64,
+    max_header_bytes: u64,
+    max_metadata_bytes: u64,
+) -> Result<GzipHeader, GzipError> {
     if max_header_bytes < FIXED_HEADER_LEN {
         return Err(metadata_limit(max_metadata_bytes));
     }
+    let header_limit = member_offset
+        .checked_add(max_header_bytes)
+        .ok_or_else(|| metadata_limit(max_metadata_bytes))?;
     let mut fixed = [0_u8; FIXED_HEADER_LEN as usize];
-    read_exact(source, 0, &mut fixed, "gzip fixed header is truncated")?;
+    read_exact(
+        source,
+        member_offset,
+        &mut fixed,
+        "gzip fixed header is truncated",
+    )?;
     if fixed[..2] != [0x1f, 0x8b] {
         return Err(GzipError::new(
             GzipErrorKind::Magic,
@@ -302,12 +352,12 @@ fn parse_header(
 
     let mut header_crc = Crc::new();
     header_crc.update(&fixed);
-    let mut cursor = FIXED_HEADER_LEN;
+    let mut cursor = member_offset + FIXED_HEADER_LEN;
 
     let (extra, extra_subfield_count) = if flags & FLAG_EXTRA != 0 {
         let start = cursor;
         let mut xlen_bytes = [0_u8; 2];
-        reserve_header(&mut cursor, 2, max_header_bytes, max_metadata_bytes)?;
+        reserve_header(&mut cursor, 2, header_limit, max_metadata_bytes)?;
         read_exact(
             source,
             start,
@@ -316,7 +366,7 @@ fn parse_header(
         )?;
         header_crc.update(&xlen_bytes);
         let xlen = u64::from(u16::from_le_bytes(xlen_bytes));
-        reserve_header(&mut cursor, xlen, max_header_bytes, max_metadata_bytes)?;
+        reserve_header(&mut cursor, xlen, header_limit, max_metadata_bytes)?;
         let subfield_count = validate_extra_subfields(source, start + 2, xlen)?;
         hash_range(
             source,
@@ -340,7 +390,7 @@ fn parse_header(
         Some(read_c_string(
             source,
             &mut cursor,
-            max_header_bytes,
+            header_limit,
             max_metadata_bytes,
             &mut header_crc,
             "gzip FNAME is not NUL-terminated",
@@ -353,7 +403,7 @@ fn parse_header(
         Some(read_c_string(
             source,
             &mut cursor,
-            max_header_bytes,
+            header_limit,
             max_metadata_bytes,
             &mut header_crc,
             "gzip FCOMMENT is not NUL-terminated",
@@ -364,7 +414,7 @@ fn parse_header(
 
     let header_crc16 = if flags & FLAG_HEADER_CRC != 0 {
         let start = cursor;
-        reserve_header(&mut cursor, 2, max_header_bytes, max_metadata_bytes)?;
+        reserve_header(&mut cursor, 2, header_limit, max_metadata_bytes)?;
         let mut expected = [0_u8; 2];
         read_exact(source, start, &mut expected, "gzip FHCRC is truncated")?;
         let expected = u16::from_le_bytes(expected);
@@ -391,8 +441,8 @@ fn parse_header(
         extra_flags: fixed[8],
         operating_system: fixed[9],
         header: ByteRange {
-            offset: 0,
-            len: cursor,
+            offset: member_offset,
+            len: cursor - member_offset,
         },
         extra,
         extra_subfield_count,
@@ -412,6 +462,7 @@ fn validate_extra_subfields(
         .ok_or_else(|| malformed_extra("gzip FEXTRA range overflowed u64"))?;
     let mut cursor = offset;
     let mut count = 0_u32;
+    let mut seen = [0_u64; 1024];
     while cursor < end {
         let remaining = end - cursor;
         if remaining < 4 {
@@ -432,6 +483,16 @@ fn validate_extra_subfields(
                 fixed[0]
             )));
         }
+        let id = u16::from_le_bytes([fixed[0], fixed[1]]);
+        let word = usize::from(id / 64);
+        let bit = u32::from(id % 64);
+        if seen[word] & (1_u64 << bit) != 0 {
+            return Err(malformed_extra(format!(
+                "gzip FEXTRA repeats subfield ID {:02x}{:02x}",
+                fixed[0], fixed[1]
+            )));
+        }
+        seen[word] |= 1_u64 << bit;
         let data_len = u64::from(u16::from_le_bytes([fixed[2], fixed[3]]));
         let subfield_end = cursor
             .checked_add(4)
@@ -594,7 +655,7 @@ impl Read for VerifiedDeflateReader<'_, '_> {
                     None => {
                         let error = GzipError::new(
                             GzipErrorKind::OutputLimit,
-                            FindingCode::QuotaArchive,
+                            FindingCode::QuotaDerived,
                             "gzip output length overflowed u64",
                         );
                         self.terminal = true;
@@ -661,46 +722,17 @@ impl VerifiedDeflateReader<'_, '_> {
                 format!("gzip CRC32 is {declared_crc32:08x}; computed {actual_crc32:08x}"),
             ));
         }
-        if declared_isize != self.output_len as u32 {
+        let output_isize = gzip_isize(self.output_len);
+        if declared_isize != output_isize {
             return Err(GzipError::new(
                 GzipErrorKind::DeclaredSize,
                 FindingCode::QuotaDeclaredLie,
                 format!(
                     "gzip ISIZE is {declared_isize}; decoded size modulo 2^32 is {}",
-                    self.output_len as u32
+                    output_isize
                 ),
             ));
         }
-        if trailer_end != self.source.len() {
-            let trailing_len = self.source.len() - trailer_end;
-            let kind = if trailing_len >= 2 {
-                let mut magic = [0_u8; 2];
-                read_exact(
-                    self.source,
-                    trailer_end,
-                    &mut magic,
-                    "gzip trailing input is truncated",
-                )?;
-                if magic == [0x1f, 0x8b] {
-                    GzipErrorKind::ConcatenatedMember
-                } else {
-                    GzipErrorKind::TrailingInput
-                }
-            } else {
-                GzipErrorKind::TrailingInput
-            };
-            let detail = if kind == GzipErrorKind::ConcatenatedMember {
-                "concatenated gzip members are outside the single-member profile".to_owned()
-            } else {
-                format!("gzip member has {trailing_len} trailing byte(s)")
-            };
-            return Err(GzipError::new(
-                kind,
-                FindingCode::CodecDeflateTrailingInput,
-                detail,
-            ));
-        }
-
         Ok(TrailerEvidence {
             compressed_payload: ByteRange {
                 offset: self.payload_offset,
@@ -714,6 +746,216 @@ impl VerifiedDeflateReader<'_, '_> {
             declared_isize,
         })
     }
+}
+
+fn scan_trailing_members(
+    source: &SourceSnapshot<'_>,
+    mut member_offset: u64,
+    limits: GzipLimits,
+    mut metadata_bytes: u64,
+    mut output_bytes: u64,
+) -> Result<(), GzipError> {
+    let _scan = ConcatScanGuard::enter();
+    let trailing_len = source.len() - member_offset;
+    while member_offset != source.len() {
+        let member_start = member_offset;
+        if source.len() - member_offset < 2 {
+            return Err(trailing_input(trailing_len));
+        }
+        let mut magic = [0_u8; 2];
+        read_exact(
+            source,
+            member_offset,
+            &mut magic,
+            "gzip trailing input is truncated",
+        )?;
+        if magic != [0x1f, 0x8b] {
+            return Err(trailing_input(trailing_len));
+        }
+
+        let remaining_metadata = limits
+            .max_metadata_bytes
+            .checked_sub(metadata_bytes)
+            .ok_or_else(|| metadata_limit(limits.max_metadata_bytes))?;
+        let max_header_bytes = remaining_metadata
+            .checked_sub(TRAILER_LEN)
+            .ok_or_else(|| metadata_limit(limits.max_metadata_bytes))?;
+        let header = match parse_header_at(
+            source,
+            member_offset,
+            max_header_bytes,
+            limits.max_metadata_bytes,
+        ) {
+            Ok(header) => header,
+            Err(error)
+                if matches!(
+                    error.kind,
+                    GzipErrorKind::Source | GzipErrorKind::HeaderLimit
+                ) =>
+            {
+                return Err(error);
+            }
+            Err(_) => return Err(trailing_input(trailing_len)),
+        };
+        metadata_bytes = metadata_bytes
+            .checked_add(header.header.len)
+            .and_then(|value| value.checked_add(TRAILER_LEN))
+            .ok_or_else(|| metadata_limit(limits.max_metadata_bytes))?;
+
+        let payload_offset = header.header.end();
+        let input_len = source
+            .len()
+            .checked_sub(payload_offset)
+            .ok_or_else(|| GzipError::truncated("gzip trailing member header exceeds source"))?;
+        if input_len < TRAILER_LEN {
+            return Err(trailing_input(trailing_len));
+        }
+        let input = source
+            .reader(payload_offset, input_len)
+            .map_err(GzipError::source)?;
+        let mut decoder = DeflateDecoder::new(BufReader::with_capacity(4096, input));
+        let mut crc32 = Crc::new();
+        let mut member_output = 0_u64;
+        let mut buffer = [0_u8; 32 * 1024];
+        loop {
+            let read = match decoder.read(&mut buffer) {
+                Ok(read) => read,
+                Err(error) => {
+                    if let Some(finding) = finding_from_io(&error) {
+                        return Err(GzipError::source(finding));
+                    }
+                    return Err(trailing_input(trailing_len));
+                }
+            };
+            if read == 0 {
+                break;
+            }
+            member_output = member_output.checked_add(read as u64).ok_or_else(|| {
+                GzipError::new(
+                    GzipErrorKind::OutputLimit,
+                    FindingCode::QuotaDerived,
+                    "gzip concatenation recognition output length overflowed u64",
+                )
+            })?;
+            let aggregate_output = output_bytes.checked_add(member_output).ok_or_else(|| {
+                GzipError::new(
+                    GzipErrorKind::OutputLimit,
+                    FindingCode::QuotaDerived,
+                    "gzip concatenation recognition output length overflowed u64",
+                )
+            })?;
+            if aggregate_output > limits.max_output_bytes {
+                return Err(GzipError::new(
+                    GzipErrorKind::OutputLimit,
+                    FindingCode::QuotaDerived,
+                    format!(
+                        "gzip concatenation recognition output exceeds the {}-byte cap",
+                        limits.max_output_bytes
+                    ),
+                ));
+            }
+            crc32.update(&buffer[..read]);
+        }
+
+        let trailer_offset = payload_offset
+            .checked_add(decoder.total_in())
+            .ok_or_else(|| trailing_input(trailing_len))?;
+        let trailer_end = trailer_offset
+            .checked_add(TRAILER_LEN)
+            .ok_or_else(|| trailing_input(trailing_len))?;
+        if trailer_end > source.len() {
+            return Err(trailing_input(trailing_len));
+        }
+        let mut trailer = [0_u8; TRAILER_LEN as usize];
+        read_exact(
+            source,
+            trailer_offset,
+            &mut trailer,
+            "gzip trailing member trailer is truncated",
+        )?;
+        let declared_crc32 = u32::from_le_bytes(trailer[..4].try_into().unwrap());
+        let declared_isize = u32::from_le_bytes(trailer[4..].try_into().unwrap());
+        if declared_crc32 != crc32.finalize() || declared_isize != gzip_isize(member_output) {
+            return Err(trailing_input(trailing_len));
+        }
+
+        output_bytes = output_bytes
+            .checked_add(member_output)
+            .ok_or_else(|| trailing_input(trailing_len))?;
+        ConcatScanGuard::record_member(trailer_end - member_start, member_output);
+        member_offset = trailer_end;
+    }
+    Ok(())
+}
+
+fn trailing_input(trailing_len: u64) -> GzipError {
+    GzipError::new(
+        GzipErrorKind::TrailingInput,
+        FindingCode::CodecDeflateTrailingInput,
+        format!("gzip member has {trailing_len} trailing byte(s)"),
+    )
+}
+
+#[cfg(test)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct ConcatScanStats {
+    members: u64,
+    source_bytes: u64,
+    output_bytes: u64,
+    active_depth: u64,
+    max_depth: u64,
+}
+
+#[cfg(test)]
+thread_local! {
+    static CONCAT_SCAN_STATS: RefCell<ConcatScanStats> = RefCell::new(ConcatScanStats::default());
+}
+
+struct ConcatScanGuard;
+
+impl ConcatScanGuard {
+    fn enter() -> Self {
+        #[cfg(test)]
+        CONCAT_SCAN_STATS.with(|stats| {
+            let mut stats = stats.borrow_mut();
+            stats.active_depth += 1;
+            stats.max_depth = stats.max_depth.max(stats.active_depth);
+        });
+        Self
+    }
+
+    fn record_member(source_bytes: u64, output_bytes: u64) {
+        #[cfg(not(test))]
+        let _ = (source_bytes, output_bytes);
+        #[cfg(test)]
+        CONCAT_SCAN_STATS.with(|stats| {
+            let mut stats = stats.borrow_mut();
+            stats.members += 1;
+            stats.source_bytes += source_bytes;
+            stats.output_bytes += output_bytes;
+        });
+    }
+}
+
+impl Drop for ConcatScanGuard {
+    fn drop(&mut self) {
+        #[cfg(test)]
+        CONCAT_SCAN_STATS.with(|stats| stats.borrow_mut().active_depth -= 1);
+    }
+}
+
+#[cfg(test)]
+fn reset_concat_scan_stats() {
+    CONCAT_SCAN_STATS.with(|stats| *stats.borrow_mut() = ConcatScanStats::default());
+}
+
+#[cfg(test)]
+fn concat_scan_stats() -> ConcatScanStats {
+    CONCAT_SCAN_STATS.with(|stats| *stats.borrow())
+}
+
+fn gzip_isize(len: u64) -> u32 {
+    u32::try_from(len % (u64::from(u32::MAX) + 1)).expect("gzip ISIZE modulo always fits u32")
 }
 
 #[cfg(feature = "__internal-fuzzing")]
@@ -971,6 +1213,7 @@ mod tests {
             ("declared data overrun", b"SL\x04\x00x".as_slice()),
             ("trailing remainder", b"SL\x00\x00x".as_slice()),
             ("reserved SI2", b"S\x00\x00\x00".as_slice()),
+            ("duplicate ID", b"SL\x00\x00SL\x00\x00".as_slice()),
         ] {
             let error = decode(&fixture_with_extra(extra, b"payload")).unwrap_err();
             assert_eq!(error.kind, GzipErrorKind::ExtraField, "{label}");
@@ -1130,12 +1373,61 @@ mod tests {
             GzipErrorKind::TrailingInput
         );
 
+        let mut gzip_prefix = member.clone();
+        gzip_prefix.extend_from_slice(&[0x1f, 0x8b]);
+        assert_eq!(
+            decode(&gzip_prefix).unwrap_err().kind,
+            GzipErrorKind::TrailingInput
+        );
+
+        let mut invalid_second_header = member.clone();
+        invalid_second_header.extend_from_slice(&[0x1f, 0x8b, 0, 0, 0, 0, 0, 0, 0, 255]);
+        assert_eq!(
+            decode(&invalid_second_header).unwrap_err().kind,
+            GzipErrorKind::TrailingInput
+        );
+
+        let mut invalid_second_trailer = member.clone();
+        let mut second = fixture(0, b"second");
+        let second_trailer = second.len() - TRAILER_LEN as usize;
+        second[second_trailer] ^= 1;
+        invalid_second_trailer.extend_from_slice(&second);
+        assert_eq!(
+            decode(&invalid_second_trailer).unwrap_err().kind,
+            GzipErrorKind::TrailingInput
+        );
+
         let mut padded = member;
         padded.extend_from_slice(&[0, 0, 0, 0]);
         assert_eq!(
             decode(&padded).unwrap_err().kind,
             GzipErrorKind::TrailingInput
         );
+    }
+
+    #[test]
+    fn concatenation_recognition_is_iterative_and_linear() {
+        for count in [2_usize, 3, 128] {
+            let members: Vec<_> = (0..count)
+                .map(|index| fixture(0, format!("member-{index}").as_bytes()))
+                .collect();
+            let source: Vec<_> = members.iter().flatten().copied().collect();
+            let expected_source_bytes: u64 =
+                members[1..].iter().map(|member| member.len() as u64).sum();
+            let expected_output_bytes: u64 = (1..count)
+                .map(|index| format!("member-{index}").len() as u64)
+                .sum();
+
+            reset_concat_scan_stats();
+            let error = decode(&source).unwrap_err();
+            assert_eq!(error.kind, GzipErrorKind::ConcatenatedMember);
+            let stats = concat_scan_stats();
+            assert_eq!(stats.members, (count - 1) as u64);
+            assert_eq!(stats.source_bytes, expected_source_bytes);
+            assert_eq!(stats.output_bytes, expected_output_bytes);
+            assert_eq!(stats.active_depth, 0);
+            assert_eq!(stats.max_depth, 1);
+        }
     }
 
     #[test]
@@ -1150,7 +1442,7 @@ mod tests {
         )
         .unwrap_err();
         assert_eq!(error.kind, GzipErrorKind::OutputLimit);
-        assert_eq!(error.finding().code, FindingCode::QuotaArchive);
+        assert_eq!(error.finding().code, FindingCode::QuotaDerived);
     }
 
     #[test]
