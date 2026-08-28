@@ -66,11 +66,15 @@ pub enum FindingCode {
     TarFeatureUnsupported,
     TarPaxRecord,
     TarPaxState,
+    TarGnuLongName,
+    TarGnuState,
     FormatUnsupported,
     FormatMagic,
     GzipExtra,
     CodecDeflateInvalidStream,
     CodecDeflateTrailingInput,
+    CodecZstdInvalidFrame,
+    CodecZstdTrailingInput,
     CrcMismatch,
     MethodUnsupported,
 }
@@ -140,11 +144,15 @@ impl FindingCode {
             Self::TarFeatureUnsupported => "tar.feature_unsupported",
             Self::TarPaxRecord => "tar.pax.record",
             Self::TarPaxState => "tar.pax.state",
+            Self::TarGnuLongName => "tar.gnu.long_name",
+            Self::TarGnuState => "tar.gnu.state",
             Self::FormatUnsupported => "format.unsupported",
             Self::FormatMagic => "format.magic",
             Self::GzipExtra => "gzip.extra",
             Self::CodecDeflateInvalidStream => "codec.deflate.invalid_stream",
             Self::CodecDeflateTrailingInput => "codec.deflate.trailing_input",
+            Self::CodecZstdInvalidFrame => "codec.zstd.invalid_frame",
+            Self::CodecZstdTrailingInput => "codec.zstd.trailing_input",
             Self::CrcMismatch => "crc.mismatch",
             Self::MethodUnsupported => "method.unsupported",
         }
@@ -198,8 +206,10 @@ mod tests {
     use super::FindingCode;
 
     #[test]
-    fn pax_finding_codes_are_stable() {
+    fn tar_extension_finding_codes_are_stable() {
         assert_eq!(FindingCode::TarPaxRecord.as_str(), "tar.pax.record");
         assert_eq!(FindingCode::TarPaxState.as_str(), "tar.pax.state");
+        assert_eq!(FindingCode::TarGnuLongName.as_str(), "tar.gnu.long_name");
+        assert_eq!(FindingCode::TarGnuState.as_str(), "tar.gnu.state");
     }
 }

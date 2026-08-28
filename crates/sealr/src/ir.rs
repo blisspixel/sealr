@@ -5,6 +5,7 @@ use crate::jail::{PORTABLE_PATH_GRAMMAR_ID, PORTABLE_RESERVED_NAMES_ID};
 use crate::outcome::SourceDigest;
 use crate::policy::hex_sha256;
 use crate::tar::TarMember;
+use crate::tar_gnu::GnuLongNameMember;
 use crate::zip::{
     DataDescriptorWidth, Zip64LocalValueShape as ParsedZip64LocalValueShape, ZipMember,
 };
@@ -14,6 +15,11 @@ pub const ZIP64_ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.zip64.v1";
 pub const TAR_ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.tar-ustar.v1";
 pub const TAR_GZIP_ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.tar-gzip-ustar.v1";
 pub const TAR_PAX_ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.tar-pax.v1";
+pub const TAR_GNU_LONGNAME_ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.tar-gnu-longname.v1";
+pub const TAR_GZIP_PAX_ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.tar-gzip-pax.v1";
+pub const TAR_GZIP_GNU_LONGNAME_ARCHIVE_IR_SCHEMA: &str =
+    "sealr.archive-ir.tar-gzip-gnu-longname.v1";
+pub const TAR_ZSTD_ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.tar-zstd-ustar.v1";
 pub const ZIP_STRICT_ASCII_V1: &str = "sealr.profile.zip.strict-ascii.v1";
 pub const ZIP_STRICT_ASCII_V2: &str = "sealr.profile.zip.strict-ascii.v2";
 pub const ZIP_PORTABLE_UTF8_V1: &str = "sealr.profile.zip.portable-utf8.v1";
@@ -22,6 +28,11 @@ pub const ZIP64_STRICT_ASCII_V1: &str = "sealr.profile.zip64.strict-ascii.v1";
 pub const TAR_USTAR_PORTABLE_V1: &str = "sealr.profile.tar.ustar-portable.v1";
 pub const TAR_GZIP_USTAR_PORTABLE_V1: &str = "sealr.profile.tar-gzip.ustar-portable.v1";
 pub const TAR_PAX_PORTABLE_V1: &str = "sealr.profile.tar.pax-portable.v1";
+pub const TAR_GNU_LONGNAME_PORTABLE_V1: &str = "sealr.profile.tar.gnu-longname-portable.v1";
+pub const TAR_GZIP_PAX_PORTABLE_V1: &str = "sealr.profile.tar-gzip.pax-portable.v1";
+pub const TAR_GZIP_GNU_LONGNAME_PORTABLE_V1: &str =
+    "sealr.profile.tar-gzip.gnu-longname-portable.v1";
+pub const TAR_ZSTD_USTAR_PORTABLE_V1: &str = "sealr.profile.tar-zstd.ustar-portable.v1";
 
 const DENIED_EXTRA_ZIP64: u16 = 0x0001;
 const DENIED_EXTRA_UNICODE_PATH: u16 = 0x7075;
@@ -147,6 +158,30 @@ impl TarPaxInterpretationProfile {
     }
 }
 
+/// Old-GNU TAR interpretation selected for one operation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TarGnuLongNameInterpretationProfile {
+    /// Exact old-GNU regular files and directories extended only by one
+    /// bounded pathname-only `L` carrier consumed by the following member.
+    #[default]
+    PortableV1,
+}
+
+impl TarGnuLongNameInterpretationProfile {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::PortableV1 => TAR_GNU_LONGNAME_PORTABLE_V1,
+        }
+    }
+
+    pub fn digest(self) -> String {
+        match self {
+            Self::PortableV1 => tar_gnu_longname_portable_v1_digest(),
+        }
+    }
+}
+
 /// Gzip-wrapped TAR interpretation selected for one operation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[non_exhaustive]
@@ -155,18 +190,80 @@ pub enum TarGzipInterpretationProfile {
     /// portable POSIX ustar.
     #[default]
     UstarPortableV1,
+    /// Exactly one strict RFC 1952 member whose bounded output is exact
+    /// restricted POSIX PAX.
+    PaxPortableV1,
+    /// Exactly one strict RFC 1952 member whose bounded output is exact
+    /// restricted old-GNU long-name TAR.
+    GnuLongNamePortableV1,
 }
 
 impl TarGzipInterpretationProfile {
     pub const fn id(self) -> &'static str {
         match self {
             Self::UstarPortableV1 => TAR_GZIP_USTAR_PORTABLE_V1,
+            Self::PaxPortableV1 => TAR_GZIP_PAX_PORTABLE_V1,
+            Self::GnuLongNamePortableV1 => TAR_GZIP_GNU_LONGNAME_PORTABLE_V1,
         }
     }
 
     pub fn digest(self) -> String {
         match self {
             Self::UstarPortableV1 => tar_gzip_ustar_portable_v1_digest(),
+            Self::PaxPortableV1 => tar_gzip_pax_portable_v1_digest(),
+            Self::GnuLongNamePortableV1 => tar_gzip_gnu_longname_portable_v1_digest(),
+        }
+    }
+
+    pub const fn archive_format(self) -> ArchiveFormat {
+        match self {
+            Self::UstarPortableV1 => ArchiveFormat::TarGzipUstar,
+            Self::PaxPortableV1 => ArchiveFormat::TarGzipPax,
+            Self::GnuLongNamePortableV1 => ArchiveFormat::TarGzipGnuLongName,
+        }
+    }
+
+    pub const fn policy_format(self) -> &'static str {
+        match self {
+            Self::UstarPortableV1 => crate::policy::POLICY_FORMAT_TAR_GZIP_USTAR,
+            Self::PaxPortableV1 => crate::policy::POLICY_FORMAT_TAR_GZIP_PAX,
+            Self::GnuLongNamePortableV1 => crate::policy::POLICY_FORMAT_TAR_GZIP_GNU_LONGNAME,
+        }
+    }
+}
+
+/// Zstandard-wrapped TAR interpretation selected for one operation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TarZstdInterpretationProfile {
+    /// Exactly one strict RFC 8878 frame whose bounded output is exact
+    /// portable POSIX ustar.
+    #[default]
+    UstarPortableV1,
+}
+
+impl TarZstdInterpretationProfile {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::UstarPortableV1 => TAR_ZSTD_USTAR_PORTABLE_V1,
+        }
+    }
+
+    pub fn digest(self) -> String {
+        match self {
+            Self::UstarPortableV1 => tar_zstd_ustar_portable_v1_digest(),
+        }
+    }
+
+    pub const fn archive_format(self) -> ArchiveFormat {
+        match self {
+            Self::UstarPortableV1 => ArchiveFormat::TarZstdUstar,
+        }
+    }
+
+    pub const fn policy_format(self) -> &'static str {
+        match self {
+            Self::UstarPortableV1 => crate::policy::POLICY_FORMAT_TAR_ZSTD_USTAR,
         }
     }
 }
@@ -181,6 +278,14 @@ pub enum ArchiveFormat {
     TarUstar,
     TarGzipUstar,
     TarPax,
+    #[serde(rename = "tar-gnu-longname")]
+    TarGnuLongName,
+    #[serde(rename = "tar-gzip-pax")]
+    TarGzipPax,
+    #[serde(rename = "tar-gzip-gnu-longname")]
+    TarGzipGnuLongName,
+    #[serde(rename = "tar-zstd-ustar")]
+    TarZstdUstar,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -340,6 +445,71 @@ pub struct TarPaxMemberEvidence {
     pub size_source: PaxValueSource,
 }
 
+/// Exact source of an effective old-GNU member pathname.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(tag = "source", rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum GnuLongNamePathSource {
+    Header,
+    Carrier { carrier_index: u32 },
+}
+
+/// Exact source evidence for one non-materialized GNU `L` carrier.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct GnuLongNameCarrierEvidence {
+    pub raw_name_bytes: Vec<u8>,
+    /// Complete effective pathname bytes, excluding the final carrier NUL.
+    pub path_bytes: Vec<u8>,
+    pub header: ByteRange,
+    pub payload: ByteRange,
+    /// Exact pathname bytes inside `payload`, excluding the final NUL.
+    pub path: ByteRange,
+    pub padding: ByteRange,
+    pub mode: u32,
+    pub mtime: u64,
+    pub header_checksum: u32,
+    pub header_sha256: String,
+    pub payload_sha256: String,
+}
+
+/// Exact structural and precedence evidence for one old-GNU member.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct TarGnuLongNameMemberEvidence {
+    pub tar: TarMemberEvidence,
+    /// Physical 1 through 100-byte name from the ordinary header.
+    pub base_name_bytes: Vec<u8>,
+    pub path_source: GnuLongNamePathSource,
+}
+
+/// Selects which wrapper variant carries shared portable-ustar member
+/// evidence.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TarPayloadWrapper {
+    Raw,
+    Gzip,
+    Zstd,
+}
+
+/// Exact wrapper evidence for one strict RFC 8878 single-frame source.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct ZstdWrapperEvidence {
+    pub descriptor: u8,
+    pub single_segment: bool,
+    pub checksum_flag: bool,
+    pub window_descriptor: Option<u8>,
+    pub window_size: u64,
+    pub frame_content_size: Option<u64>,
+    pub header: ByteRange,
+    pub compressed_payload: ByteRange,
+    pub trailer: ByteRange,
+    pub declared_checksum: Option<u32>,
+    pub derived_output_len: u64,
+    pub derived_output_sha256: String,
+}
+
 /// Exact RFC 1952 wrapper evidence for a gzip-derived archive domain.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
@@ -454,6 +624,10 @@ pub enum MemberEvidence {
     Tar(TarMemberEvidence),
     TarGzip(TarMemberEvidence),
     TarPax(TarPaxMemberEvidence),
+    TarGnuLongName(TarGnuLongNameMemberEvidence),
+    TarGzipPax(TarPaxMemberEvidence),
+    TarGzipGnuLongName(TarGnuLongNameMemberEvidence),
+    TarZstd(TarMemberEvidence),
 }
 
 impl MemberSourceRanges {
@@ -812,6 +986,40 @@ struct TarGzipUstarPortableV1Profile {
 }
 
 #[derive(Clone, Debug, Serialize)]
+struct TarGzipPaxPortableV1Profile {
+    schema: &'static str,
+    status: &'static str,
+    format: &'static str,
+    wrapper_profile: &'static str,
+    wrapper_profile_sha256: &'static str,
+    decoder_parameters_sha256: &'static str,
+    gzip_members: &'static str,
+    gzip_optional_fields: &'static str,
+    gzip_integrity: &'static str,
+    gzip_trailing_input: &'static str,
+    derived_output: &'static str,
+    inner_profile: &'static str,
+    inner_profile_sha256: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct TarGzipGnuLongNamePortableV1Profile {
+    schema: &'static str,
+    status: &'static str,
+    format: &'static str,
+    wrapper_profile: &'static str,
+    wrapper_profile_sha256: &'static str,
+    decoder_parameters_sha256: &'static str,
+    gzip_members: &'static str,
+    gzip_optional_fields: &'static str,
+    gzip_integrity: &'static str,
+    gzip_trailing_input: &'static str,
+    derived_output: &'static str,
+    inner_profile: &'static str,
+    inner_profile_sha256: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
 struct TarPaxPortableV1Profile {
     schema: &'static str,
     status: &'static str,
@@ -840,6 +1048,51 @@ struct TarPaxPortableV1Profile {
     max_keyword_scan_bytes: u8,
     max_effective_path_bytes: &'static str,
     denied_features: [&'static str; 10],
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct TarGnuLongNamePortableV1Profile {
+    schema: &'static str,
+    status: &'static str,
+    format: &'static str,
+    block_bytes: u16,
+    header_magic_and_version: &'static str,
+    accepted_types: [&'static str; 3],
+    numeric_encoding: &'static str,
+    checksum: &'static str,
+    fixed_text_fields: &'static str,
+    owner_names: &'static str,
+    mode: &'static str,
+    linkname: &'static str,
+    device_numbers: &'static str,
+    gnu_tail: &'static str,
+    carrier_names: &'static str,
+    carrier_payload: &'static str,
+    carrier_state: &'static str,
+    physical_name_binding: &'static str,
+    min_effective_path_bytes: u8,
+    max_effective_path_bytes: &'static str,
+    max_carrier_payload_bytes: u16,
+    max_carrier_headers: u16,
+    carrier_materialization: &'static str,
+    member_padding: &'static str,
+    termination: &'static str,
+    destination_metadata: &'static str,
+    names: &'static str,
+    unicode_repertoire_version: &'static str,
+    unicode_repertoire: &'static str,
+    unicode_repertoire_implementation: &'static str,
+    character_restrictions: &'static str,
+    path_grammar: &'static str,
+    reserved_names: &'static str,
+    normalization_unicode_version: &'static str,
+    normalization_implementation: &'static str,
+    case_folding_unicode_version: &'static str,
+    case_folding_implementation: &'static str,
+    normalization: &'static str,
+    case_collision: &'static str,
+    component_limit: &'static str,
+    denied_features: [&'static str; 13],
 }
 
 fn tar_ustar_portable_v1_profile() -> TarUstarPortableV1Profile {
@@ -910,6 +1163,82 @@ fn tar_gzip_ustar_portable_v1_profile() -> TarGzipUstarPortableV1Profile {
     }
 }
 
+fn tar_gzip_pax_portable_v1_profile() -> TarGzipPaxPortableV1Profile {
+    TarGzipPaxPortableV1Profile {
+        schema: TAR_GZIP_PAX_PORTABLE_V1,
+        status: "supported-preview",
+        format: "tar-gzip-pax",
+        wrapper_profile: "sealr.transform.gzip.rfc1952-single-member.v1",
+        wrapper_profile_sha256: "795a124c278eacf1fb9b4fc3825a74240d6d0e89c29ffdfe6118ff6db53c0a45",
+        decoder_parameters_sha256:
+            "c835627b01c4b54041c627319fab4d5af294a203ac26fbe91cadb6d1f17cd5e1",
+        gzip_members: "exactly-one",
+        gzip_optional_fields: "bounded-exact-rfc1952-framing-si2-nonzero-unique-ids",
+        gzip_integrity: "fhcrc-when-present-and-crc32-and-isize",
+        gzip_trailing_input: "denied-including-zero-padding-and-concatenation",
+        derived_output: "private-immutable-bounded-and-sha256-bound",
+        inner_profile: TAR_PAX_PORTABLE_V1,
+        inner_profile_sha256: tar_pax_portable_v1_digest(),
+    }
+}
+
+fn tar_gzip_gnu_longname_portable_v1_profile() -> TarGzipGnuLongNamePortableV1Profile {
+    TarGzipGnuLongNamePortableV1Profile {
+        schema: TAR_GZIP_GNU_LONGNAME_PORTABLE_V1,
+        status: "supported-preview",
+        format: "tar-gzip-gnu-longname",
+        wrapper_profile: "sealr.transform.gzip.rfc1952-single-member.v1",
+        wrapper_profile_sha256: "795a124c278eacf1fb9b4fc3825a74240d6d0e89c29ffdfe6118ff6db53c0a45",
+        decoder_parameters_sha256:
+            "c835627b01c4b54041c627319fab4d5af294a203ac26fbe91cadb6d1f17cd5e1",
+        gzip_members: "exactly-one",
+        gzip_optional_fields: "bounded-exact-rfc1952-framing-si2-nonzero-unique-ids",
+        gzip_integrity: "fhcrc-when-present-and-crc32-and-isize",
+        gzip_trailing_input: "denied-including-zero-padding-and-concatenation",
+        derived_output: "private-immutable-bounded-and-sha256-bound",
+        inner_profile: TAR_GNU_LONGNAME_PORTABLE_V1,
+        inner_profile_sha256: tar_gnu_longname_portable_v1_digest(),
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct TarZstdUstarPortableV1Profile {
+    schema: &'static str,
+    status: &'static str,
+    format: &'static str,
+    wrapper_profile: &'static str,
+    wrapper_profile_sha256: &'static str,
+    decoder_parameters_sha256: &'static str,
+    zstd_frames: &'static str,
+    zstd_descriptor: &'static str,
+    zstd_window: &'static str,
+    zstd_integrity: &'static str,
+    zstd_trailing_input: &'static str,
+    derived_output: &'static str,
+    inner_profile: &'static str,
+    inner_profile_sha256: String,
+}
+
+fn tar_zstd_ustar_portable_v1_profile() -> TarZstdUstarPortableV1Profile {
+    TarZstdUstarPortableV1Profile {
+        schema: TAR_ZSTD_USTAR_PORTABLE_V1,
+        status: "supported-preview",
+        format: "tar-zstd-ustar",
+        wrapper_profile: "sealr.transform.zstd.rfc8878-single-frame.v1",
+        wrapper_profile_sha256: "86745123584dc79e454f8f1bbf5a1bd1b75d1334902fd629e8eee8f251aa9d19",
+        decoder_parameters_sha256:
+            "a4a46d31cf8acbbfe043745ba1df4f43b7a955efc28ee8913804a99bae79d503",
+        zstd_frames: "exactly-one-standard-frame-no-skippable",
+        zstd_descriptor: "reserved-and-unused-bits-zero-dictionary-forbidden",
+        zstd_window: "effective-window-at-most-8388608-bytes",
+        zstd_integrity: "xxh64-checksum-and-frame-content-size-verified-when-present",
+        zstd_trailing_input: "denied-including-concatenated-and-skippable-frames",
+        derived_output: "private-immutable-bounded-and-sha256-bound",
+        inner_profile: TAR_USTAR_PORTABLE_V1,
+        inner_profile_sha256: tar_ustar_portable_v1_digest(),
+    }
+}
+
 fn tar_pax_portable_v1_profile() -> TarPaxPortableV1Profile {
     TarPaxPortableV1Profile {
         schema: TAR_PAX_PORTABLE_V1,
@@ -949,6 +1278,66 @@ fn tar_pax_portable_v1_profile() -> TarPaxPortableV1Profile {
             "base-256-numbers",
             "mixed-pax-and-gnu-state",
             "orphan-local-header",
+            "concatenated-archive",
+        ],
+    }
+}
+
+fn tar_gnu_longname_portable_v1_profile() -> TarGnuLongNamePortableV1Profile {
+    TarGnuLongNamePortableV1Profile {
+        schema: TAR_GNU_LONGNAME_PORTABLE_V1,
+        status: "supported-preview",
+        format: "old-gnu-tar-long-name-only",
+        block_bytes: 512,
+        header_magic_and_version: "7573746172202000",
+        accepted_types: ["regular-0-or-nul", "directory-5-size-zero", "long-name-L"],
+        numeric_encoding: "one-or-more-ascii-octal-digits;one-or-more-nul-or-space-terminators;no-leading-space;base256-denied",
+        checksum: "six-octal-digits-nul-space;unsigned-byte-sum-with-spaces",
+        fixed_text_fields: "name-may-fill-field;after-first-nul-all-bytes-zero",
+        owner_names: "nul-terminated-printable-ascii;remaining-bytes-zero",
+        mode: "ascii-octal-permission-bits<=07777",
+        linkname: "all-zero",
+        device_numbers: "all-zero-bytes-or-ascii-octal-zero;never-applied",
+        gnu_tail: "header-345-through-511-all-zero",
+        carrier_names: "structurally-valid-oldgnu-text-not-destination-validated-and-bound-as-evidence",
+        carrier_payload: "strict-utf8-effective-path-followed-by-exactly-one-final-nul;no-embedded-nul",
+        carrier_state: "at-most-one-pending-L-consumed-by-exactly-one-following-file-or-directory",
+        physical_name_binding: "ordinary-header-name-bound-as-overridden-evidence-without-equality-rule",
+        min_effective_path_bytes: 1,
+        max_effective_path_bytes: "min-8191-and-256-times-policy-max-path-depth-minus-1",
+        max_carrier_payload_bytes: 8192,
+        max_carrier_headers: 1024,
+        carrier_materialization: "metadata-only-never-a-member",
+        member_padding: "zero-to-512-byte-boundary",
+        termination: "two-zero-blocks;remaining-complete-blocks-zero",
+        destination_metadata: "uid-gid-uname-gname-mtime-not-applied;mode-recorded-not-applied;setid-and-special-effects-never-applied",
+        names: "strict-utf8-oldgnu-name-or-L-value",
+        unicode_repertoire_version: "16.0.0",
+        unicode_repertoire: "public-assigned-no-private-use",
+        unicode_repertoire_implementation: "unicode-general-category-1.1.0-exact",
+        character_restrictions: "unicode-16-general-category-cc;white-space-0085-00a0-1680-2000..200a-2028-2029-202f-205f-3000;bidi-control-061c-200e-200f-202a..202e-2066..2069",
+        path_grammar: PORTABLE_PATH_GRAMMAR_ID,
+        reserved_names: PORTABLE_RESERVED_NAMES_ID,
+        normalization_unicode_version: "17.0.0-stable-for-16.0.0-repertoire",
+        normalization_implementation: "unicode-normalization-0.1.25-exact",
+        case_folding_unicode_version: "16.0.0",
+        case_folding_implementation: "caseless-0.2.2-exact",
+        normalization: "unicode-17-full-nfc-over-unicode-16-repertoire-no-dot-component",
+        case_collision: "unicode-16-full-default-case-fold-then-nfc",
+        component_limit: "utf8-bytes<=255-and-utf16-code-units<=255",
+        denied_features: [
+            "pax-local-header",
+            "pax-global-header",
+            "gnu-long-link",
+            "gnu-sparse",
+            "gnu-incremental",
+            "hard-link",
+            "symbolic-link",
+            "device-or-fifo",
+            "base-256-numbers",
+            "mixed-dialect-state",
+            "orphan-or-chained-carrier",
+            "multi-volume",
             "concatenated-archive",
         ],
     }
@@ -1224,8 +1613,24 @@ pub fn tar_gzip_ustar_portable_v1_digest() -> String {
     hex_sha256(&tar_gzip_ustar_portable_v1_canonical_bytes())
 }
 
+pub fn tar_gzip_pax_portable_v1_digest() -> String {
+    hex_sha256(&tar_gzip_pax_portable_v1_canonical_bytes())
+}
+
+pub fn tar_gzip_gnu_longname_portable_v1_digest() -> String {
+    hex_sha256(&tar_gzip_gnu_longname_portable_v1_canonical_bytes())
+}
+
+pub fn tar_zstd_ustar_portable_v1_digest() -> String {
+    hex_sha256(&tar_zstd_ustar_portable_v1_canonical_bytes())
+}
+
 pub fn tar_pax_portable_v1_digest() -> String {
     hex_sha256(&tar_pax_portable_v1_canonical_bytes())
+}
+
+pub fn tar_gnu_longname_portable_v1_digest() -> String {
+    hex_sha256(&tar_gnu_longname_portable_v1_canonical_bytes())
 }
 
 /// Canonical JSON bytes hashed by the v1 interpretation identity.
@@ -1263,9 +1668,29 @@ pub fn tar_gzip_ustar_portable_v1_canonical_bytes() -> Vec<u8> {
     serde_json::to_vec(&tar_gzip_ustar_portable_v1_profile()).expect("profile serializes")
 }
 
+/// Canonical JSON bytes hashed by the gzip-wrapped portable PAX interpretation.
+pub fn tar_gzip_pax_portable_v1_canonical_bytes() -> Vec<u8> {
+    serde_json::to_vec(&tar_gzip_pax_portable_v1_profile()).expect("profile serializes")
+}
+
+/// Canonical JSON bytes hashed by the gzip-wrapped old-GNU long-name interpretation.
+pub fn tar_gzip_gnu_longname_portable_v1_canonical_bytes() -> Vec<u8> {
+    serde_json::to_vec(&tar_gzip_gnu_longname_portable_v1_profile()).expect("profile serializes")
+}
+
+/// Canonical JSON bytes hashed by the zstd-wrapped portable ustar interpretation.
+pub fn tar_zstd_ustar_portable_v1_canonical_bytes() -> Vec<u8> {
+    serde_json::to_vec(&tar_zstd_ustar_portable_v1_profile()).expect("profile serializes")
+}
+
 /// Canonical JSON bytes hashed by the portable POSIX PAX interpretation.
 pub fn tar_pax_portable_v1_canonical_bytes() -> Vec<u8> {
     serde_json::to_vec(&tar_pax_portable_v1_profile()).expect("profile serializes")
+}
+
+/// Canonical JSON bytes hashed by the old-GNU long-name interpretation.
+pub fn tar_gnu_longname_portable_v1_canonical_bytes() -> Vec<u8> {
+    serde_json::to_vec(&tar_gnu_longname_portable_v1_profile()).expect("profile serializes")
 }
 
 pub fn is_denied_extra_id(id: u16) -> bool {
@@ -1403,7 +1828,12 @@ impl IrMember {
         components: Vec<String>,
         normalization_actions: Vec<NormalizationAction>,
     ) -> Self {
-        Self::from_tar_planned_for_format(tar, components, normalization_actions, false)
+        Self::from_tar_planned_for_format(
+            tar,
+            components,
+            normalization_actions,
+            TarPayloadWrapper::Raw,
+        )
     }
 
     pub(crate) fn from_tar_gzip_planned(
@@ -1411,7 +1841,25 @@ impl IrMember {
         components: Vec<String>,
         normalization_actions: Vec<NormalizationAction>,
     ) -> Self {
-        Self::from_tar_planned_for_format(tar, components, normalization_actions, true)
+        Self::from_tar_planned_for_format(
+            tar,
+            components,
+            normalization_actions,
+            TarPayloadWrapper::Gzip,
+        )
+    }
+
+    pub(crate) fn from_tar_zstd_planned(
+        tar: TarMember,
+        components: Vec<String>,
+        normalization_actions: Vec<NormalizationAction>,
+    ) -> Self {
+        Self::from_tar_planned_for_format(
+            tar,
+            components,
+            normalization_actions,
+            TarPayloadWrapper::Zstd,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1425,12 +1873,76 @@ impl IrMember {
         path_source: PaxValueSource,
         size_source: PaxValueSource,
     ) -> Self {
+        Self::from_tar_pax_planned_for_format(
+            tar,
+            base_size,
+            effective_raw_name_bytes,
+            effective_name,
+            components,
+            normalization_actions,
+            path_source,
+            size_source,
+            false,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn from_tar_gzip_pax_planned(
+        tar: TarMember,
+        base_size: u64,
+        effective_raw_name_bytes: Vec<u8>,
+        effective_name: String,
+        components: Vec<String>,
+        normalization_actions: Vec<NormalizationAction>,
+        path_source: PaxValueSource,
+        size_source: PaxValueSource,
+    ) -> Self {
+        Self::from_tar_pax_planned_for_format(
+            tar,
+            base_size,
+            effective_raw_name_bytes,
+            effective_name,
+            components,
+            normalization_actions,
+            path_source,
+            size_source,
+            true,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn from_tar_pax_planned_for_format(
+        tar: TarMember,
+        base_size: u64,
+        effective_raw_name_bytes: Vec<u8>,
+        effective_name: String,
+        components: Vec<String>,
+        normalization_actions: Vec<NormalizationAction>,
+        path_source: PaxValueSource,
+        size_source: PaxValueSource,
+        gzip_wrapped: bool,
+    ) -> Self {
         let kind = if tar.is_dir {
             MemberKind::Directory
         } else {
             MemberKind::File
         };
         let base_name_bytes = tar.raw_name;
+        let evidence = TarPaxMemberEvidence {
+            tar: TarMemberEvidence {
+                header: tar.header,
+                payload: tar.payload,
+                padding: tar.padding,
+                mode: tar.mode,
+                mtime: tar.mtime,
+                header_checksum: tar.header_checksum,
+                header_sha256: tar.header_sha256,
+            },
+            base_name_bytes,
+            base_size,
+            path_source,
+            size_source,
+        };
         Self {
             raw_name_bytes: effective_raw_name_bytes,
             decoded_name: effective_name,
@@ -1438,21 +1950,83 @@ impl IrMember {
             components,
             kind,
             declared_uncomp_size: tar.size,
-            evidence: MemberEvidence::TarPax(TarPaxMemberEvidence {
-                tar: TarMemberEvidence {
-                    header: tar.header,
-                    payload: tar.payload,
-                    padding: tar.padding,
-                    mode: tar.mode,
-                    mtime: tar.mtime,
-                    header_checksum: tar.header_checksum,
-                    header_sha256: tar.header_sha256,
-                },
-                base_name_bytes,
-                base_size,
-                path_source,
-                size_source,
-            }),
+            evidence: if gzip_wrapped {
+                MemberEvidence::TarGzipPax(evidence)
+            } else {
+                MemberEvidence::TarPax(evidence)
+            },
+            actual_uncomp_size: None,
+            actual_crc: None,
+            content_sha256: None,
+            verification: MemberVerification::Pending,
+            normalization_actions,
+        }
+    }
+
+    pub(crate) fn from_tar_gnu_longname_planned(
+        tar: GnuLongNameMember,
+        components: Vec<String>,
+        normalization_actions: Vec<NormalizationAction>,
+    ) -> Self {
+        Self::from_tar_gnu_longname_planned_for_format(
+            tar,
+            components,
+            normalization_actions,
+            false,
+        )
+    }
+
+    pub(crate) fn from_tar_gzip_gnu_longname_planned(
+        tar: GnuLongNameMember,
+        components: Vec<String>,
+        normalization_actions: Vec<NormalizationAction>,
+    ) -> Self {
+        Self::from_tar_gnu_longname_planned_for_format(tar, components, normalization_actions, true)
+    }
+
+    fn from_tar_gnu_longname_planned_for_format(
+        tar: GnuLongNameMember,
+        components: Vec<String>,
+        normalization_actions: Vec<NormalizationAction>,
+        gzip_wrapped: bool,
+    ) -> Self {
+        let kind = if tar.is_dir {
+            MemberKind::Directory
+        } else {
+            MemberKind::File
+        };
+        let effective_name_bytes = tar.name.as_bytes().to_vec();
+        let base_name_bytes = tar.raw_name;
+        let path_source = tar
+            .carrier_index
+            .map_or(GnuLongNamePathSource::Header, |carrier_index| {
+                GnuLongNamePathSource::Carrier { carrier_index }
+            });
+        let evidence = TarGnuLongNameMemberEvidence {
+            tar: TarMemberEvidence {
+                header: tar.header,
+                payload: tar.payload,
+                padding: tar.padding,
+                mode: tar.mode,
+                mtime: tar.mtime,
+                header_checksum: tar.header_checksum,
+                header_sha256: tar.header_sha256,
+            },
+            base_name_bytes,
+            path_source,
+        };
+        Self {
+            raw_name_bytes: effective_name_bytes,
+            decoded_name: tar.name,
+            canonical_path: components.join("/"),
+            components,
+            kind,
+            declared_uncomp_size: tar.size,
+            evidence: if gzip_wrapped {
+                MemberEvidence::TarGzipGnuLongName(evidence)
+            } else {
+                MemberEvidence::TarGnuLongName(evidence)
+            },
             actual_uncomp_size: None,
             actual_crc: None,
             content_sha256: None,
@@ -1465,7 +2039,7 @@ impl IrMember {
         tar: TarMember,
         components: Vec<String>,
         normalization_actions: Vec<NormalizationAction>,
-        gzip_wrapped: bool,
+        wrapper: TarPayloadWrapper,
     ) -> Self {
         let kind = if tar.is_dir {
             MemberKind::Directory
@@ -1488,10 +2062,10 @@ impl IrMember {
             components,
             kind,
             declared_uncomp_size: tar.size,
-            evidence: if gzip_wrapped {
-                MemberEvidence::TarGzip(evidence)
-            } else {
-                MemberEvidence::Tar(evidence)
+            evidence: match wrapper {
+                TarPayloadWrapper::Raw => MemberEvidence::Tar(evidence),
+                TarPayloadWrapper::Gzip => MemberEvidence::TarGzip(evidence),
+                TarPayloadWrapper::Zstd => MemberEvidence::TarZstd(evidence),
             },
             actual_uncomp_size: None,
             actual_crc: None,
@@ -1532,6 +2106,10 @@ impl IrMember {
             MemberEvidence::Tar(_) => ArchiveFormat::TarUstar,
             MemberEvidence::TarGzip(_) => ArchiveFormat::TarGzipUstar,
             MemberEvidence::TarPax(_) => ArchiveFormat::TarPax,
+            MemberEvidence::TarGnuLongName(_) => ArchiveFormat::TarGnuLongName,
+            MemberEvidence::TarGzipPax(_) => ArchiveFormat::TarGzipPax,
+            MemberEvidence::TarGzipGnuLongName(_) => ArchiveFormat::TarGzipGnuLongName,
+            MemberEvidence::TarZstd(_) => ArchiveFormat::TarZstdUstar,
         }
     }
 
@@ -1540,7 +2118,13 @@ impl IrMember {
         match &self.evidence {
             MemberEvidence::Zip(evidence) => Some(evidence),
             MemberEvidence::Zip64(evidence) => Some(&evidence.zip),
-            MemberEvidence::Tar(_) | MemberEvidence::TarGzip(_) | MemberEvidence::TarPax(_) => None,
+            MemberEvidence::Tar(_)
+            | MemberEvidence::TarGzip(_)
+            | MemberEvidence::TarPax(_)
+            | MemberEvidence::TarGnuLongName(_)
+            | MemberEvidence::TarGzipPax(_)
+            | MemberEvidence::TarGzipGnuLongName(_)
+            | MemberEvidence::TarZstd(_) => None,
         }
     }
 
@@ -1549,17 +2133,28 @@ impl IrMember {
         match &mut self.evidence {
             MemberEvidence::Zip(evidence) => Some(evidence),
             MemberEvidence::Zip64(evidence) => Some(&mut evidence.zip),
-            MemberEvidence::Tar(_) | MemberEvidence::TarGzip(_) | MemberEvidence::TarPax(_) => None,
+            MemberEvidence::Tar(_)
+            | MemberEvidence::TarGzip(_)
+            | MemberEvidence::TarPax(_)
+            | MemberEvidence::TarGnuLongName(_)
+            | MemberEvidence::TarGzipPax(_)
+            | MemberEvidence::TarGzipGnuLongName(_)
+            | MemberEvidence::TarZstd(_) => None,
         }
     }
 
     /// Return exact portable-ustar evidence, or `None` for a ZIP member.
     pub fn tar_evidence(&self) -> Option<&TarMemberEvidence> {
         match &self.evidence {
-            MemberEvidence::Zip(_) => None,
-            MemberEvidence::Zip64(_) => None,
-            MemberEvidence::Tar(evidence) | MemberEvidence::TarGzip(evidence) => Some(evidence),
-            MemberEvidence::TarPax(evidence) => Some(&evidence.tar),
+            MemberEvidence::Zip(_) | MemberEvidence::Zip64(_) => None,
+            MemberEvidence::Tar(evidence)
+            | MemberEvidence::TarGzip(evidence)
+            | MemberEvidence::TarZstd(evidence) => Some(evidence),
+            MemberEvidence::TarPax(evidence) | MemberEvidence::TarGzipPax(evidence) => {
+                Some(&evidence.tar)
+            }
+            MemberEvidence::TarGnuLongName(evidence)
+            | MemberEvidence::TarGzipGnuLongName(evidence) => Some(&evidence.tar),
         }
     }
 
@@ -1570,18 +2165,42 @@ impl IrMember {
             MemberEvidence::Zip(_)
             | MemberEvidence::Tar(_)
             | MemberEvidence::TarGzip(_)
-            | MemberEvidence::TarPax(_) => None,
+            | MemberEvidence::TarPax(_)
+            | MemberEvidence::TarGnuLongName(_)
+            | MemberEvidence::TarGzipPax(_)
+            | MemberEvidence::TarGzipGnuLongName(_)
+            | MemberEvidence::TarZstd(_) => None,
         }
     }
 
     /// Return exact PAX-specific evidence, or `None` for another format.
     pub fn tar_pax_evidence(&self) -> Option<&TarPaxMemberEvidence> {
         match &self.evidence {
-            MemberEvidence::TarPax(evidence) => Some(evidence),
+            MemberEvidence::TarPax(evidence) | MemberEvidence::TarGzipPax(evidence) => {
+                Some(evidence)
+            }
             MemberEvidence::Zip(_)
             | MemberEvidence::Zip64(_)
             | MemberEvidence::Tar(_)
-            | MemberEvidence::TarGzip(_) => None,
+            | MemberEvidence::TarGzip(_)
+            | MemberEvidence::TarGnuLongName(_)
+            | MemberEvidence::TarGzipGnuLongName(_)
+            | MemberEvidence::TarZstd(_) => None,
+        }
+    }
+
+    /// Return exact old-GNU long-name evidence, or `None` for another format.
+    pub fn tar_gnu_longname_evidence(&self) -> Option<&TarGnuLongNameMemberEvidence> {
+        match &self.evidence {
+            MemberEvidence::TarGnuLongName(evidence)
+            | MemberEvidence::TarGzipGnuLongName(evidence) => Some(evidence),
+            MemberEvidence::Zip(_)
+            | MemberEvidence::Zip64(_)
+            | MemberEvidence::Tar(_)
+            | MemberEvidence::TarGzip(_)
+            | MemberEvidence::TarPax(_)
+            | MemberEvidence::TarGzipPax(_)
+            | MemberEvidence::TarZstd(_) => None,
         }
     }
 
@@ -1604,9 +2223,13 @@ impl Serialize for IrMember {
             match &self.evidence {
                 MemberEvidence::Zip(_) => 17,
                 MemberEvidence::Zip64(_) => 18,
-                MemberEvidence::Tar(_) | MemberEvidence::TarGzip(_) | MemberEvidence::TarPax(_) => {
-                    12
-                }
+                MemberEvidence::Tar(_)
+                | MemberEvidence::TarGzip(_)
+                | MemberEvidence::TarPax(_)
+                | MemberEvidence::TarGnuLongName(_)
+                | MemberEvidence::TarGzipPax(_)
+                | MemberEvidence::TarGzipGnuLongName(_)
+                | MemberEvidence::TarZstd(_) => 12,
             },
         )?;
         state.serialize_field("raw_name_bytes", &self.raw_name_bytes)?;
@@ -1631,11 +2254,17 @@ impl Serialize for IrMember {
                 state.serialize_field("extra_fields", &evidence.zip.extra_fields)?;
                 state.serialize_field("zip64", &evidence.specific())?;
             }
-            MemberEvidence::Tar(evidence) | MemberEvidence::TarGzip(evidence) => {
+            MemberEvidence::Tar(evidence)
+            | MemberEvidence::TarGzip(evidence)
+            | MemberEvidence::TarZstd(evidence) => {
                 state.serialize_field("tar", evidence)?;
             }
-            MemberEvidence::TarPax(evidence) => {
+            MemberEvidence::TarPax(evidence) | MemberEvidence::TarGzipPax(evidence) => {
                 state.serialize_field("tar_pax", evidence)?;
+            }
+            MemberEvidence::TarGnuLongName(evidence)
+            | MemberEvidence::TarGzipGnuLongName(evidence) => {
+                state.serialize_field("tar_gnu_longname", evidence)?;
             }
         }
         state.serialize_field("actual_uncomp_size", &self.actual_uncomp_size)?;
@@ -1694,6 +2323,38 @@ pub struct TarPaxArchiveEvidence {
     pub extensions: Vec<PaxExtensionEvidence>,
 }
 
+/// Exact source covering and ordered carrier evidence for old-GNU long names.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct TarGnuLongNameArchiveEvidence {
+    pub tar: TarArchiveCovering,
+    pub carriers: Vec<GnuLongNameCarrierEvidence>,
+}
+
+/// Exact original-wrapper and derived-TAR evidence for one zstd-wrapped ustar.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct TarZstdArchiveEvidence {
+    pub zstd: ZstdWrapperEvidence,
+    pub tar: TarArchiveCovering,
+}
+
+/// Exact original-wrapper and derived-TAR evidence for one gzip-wrapped restricted PAX.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct TarGzipPaxArchiveEvidence {
+    pub gzip: GzipWrapperEvidence,
+    pub pax: TarPaxArchiveEvidence,
+}
+
+/// Exact original-wrapper and derived-TAR evidence for one gzip-wrapped old-GNU long-name TAR.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct TarGzipGnuLongNameArchiveEvidence {
+    pub gzip: GzipWrapperEvidence,
+    pub gnu: TarGnuLongNameArchiveEvidence,
+}
+
 /// Format-native source covering for one interpreted archive.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -1703,6 +2364,10 @@ pub enum ArchiveEvidence {
     Tar(TarArchiveCovering),
     TarGzip(TarGzipArchiveEvidence),
     TarPax(TarPaxArchiveEvidence),
+    TarGnuLongName(TarGnuLongNameArchiveEvidence),
+    TarGzipPax(TarGzipPaxArchiveEvidence),
+    TarGzipGnuLongName(TarGzipGnuLongNameArchiveEvidence),
+    TarZstd(TarZstdArchiveEvidence),
 }
 
 impl ArchiveCovering {
@@ -1857,6 +2522,23 @@ impl ArchiveIR {
         }
     }
 
+    pub(crate) fn with_tar_zstd(
+        profile: TarZstdInterpretationProfile,
+        source_digest: SourceDigest,
+        zstd: ZstdWrapperEvidence,
+        tar: TarArchiveCovering,
+        members: Vec<IrMember>,
+    ) -> Self {
+        Self {
+            schema: TAR_ZSTD_ARCHIVE_IR_SCHEMA,
+            profile: profile.id(),
+            profile_digest: profile.digest(),
+            source_digest,
+            evidence: ArchiveEvidence::TarZstd(TarZstdArchiveEvidence { zstd, tar }),
+            members,
+        }
+    }
+
     pub(crate) fn with_tar_pax(
         profile: TarPaxInterpretationProfile,
         source_digest: SourceDigest,
@@ -1870,6 +2552,68 @@ impl ArchiveIR {
             profile_digest: profile.digest(),
             source_digest,
             evidence: ArchiveEvidence::TarPax(TarPaxArchiveEvidence { tar, extensions }),
+            members,
+        }
+    }
+
+    pub(crate) fn with_tar_gnu_longname(
+        profile: TarGnuLongNameInterpretationProfile,
+        source_digest: SourceDigest,
+        tar: TarArchiveCovering,
+        carriers: Vec<GnuLongNameCarrierEvidence>,
+        members: Vec<IrMember>,
+    ) -> Self {
+        Self {
+            schema: TAR_GNU_LONGNAME_ARCHIVE_IR_SCHEMA,
+            profile: profile.id(),
+            profile_digest: profile.digest(),
+            source_digest,
+            evidence: ArchiveEvidence::TarGnuLongName(TarGnuLongNameArchiveEvidence {
+                tar,
+                carriers,
+            }),
+            members,
+        }
+    }
+
+    pub(crate) fn with_tar_gzip_pax(
+        profile: TarGzipInterpretationProfile,
+        source_digest: SourceDigest,
+        gzip: GzipWrapperEvidence,
+        tar: TarArchiveCovering,
+        extensions: Vec<PaxExtensionEvidence>,
+        members: Vec<IrMember>,
+    ) -> Self {
+        Self {
+            schema: TAR_GZIP_PAX_ARCHIVE_IR_SCHEMA,
+            profile: profile.id(),
+            profile_digest: profile.digest(),
+            source_digest,
+            evidence: ArchiveEvidence::TarGzipPax(TarGzipPaxArchiveEvidence {
+                gzip,
+                pax: TarPaxArchiveEvidence { tar, extensions },
+            }),
+            members,
+        }
+    }
+
+    pub(crate) fn with_tar_gzip_gnu_longname(
+        profile: TarGzipInterpretationProfile,
+        source_digest: SourceDigest,
+        gzip: GzipWrapperEvidence,
+        tar: TarArchiveCovering,
+        carriers: Vec<GnuLongNameCarrierEvidence>,
+        members: Vec<IrMember>,
+    ) -> Self {
+        Self {
+            schema: TAR_GZIP_GNU_LONGNAME_ARCHIVE_IR_SCHEMA,
+            profile: profile.id(),
+            profile_digest: profile.digest(),
+            source_digest,
+            evidence: ArchiveEvidence::TarGzipGnuLongName(TarGzipGnuLongNameArchiveEvidence {
+                gzip,
+                gnu: TarGnuLongNameArchiveEvidence { tar, carriers },
+            }),
             members,
         }
     }
@@ -1910,6 +2654,10 @@ impl ArchiveIR {
             ArchiveEvidence::Tar(_) => ArchiveFormat::TarUstar,
             ArchiveEvidence::TarGzip(_) => ArchiveFormat::TarGzipUstar,
             ArchiveEvidence::TarPax(_) => ArchiveFormat::TarPax,
+            ArchiveEvidence::TarGnuLongName(_) => ArchiveFormat::TarGnuLongName,
+            ArchiveEvidence::TarGzipPax(_) => ArchiveFormat::TarGzipPax,
+            ArchiveEvidence::TarGzipGnuLongName(_) => ArchiveFormat::TarGzipGnuLongName,
+            ArchiveEvidence::TarZstd(_) => ArchiveFormat::TarZstdUstar,
         }
     }
 
@@ -1934,7 +2682,11 @@ impl ArchiveIR {
             ArchiveEvidence::Zip64(_)
             | ArchiveEvidence::Tar(_)
             | ArchiveEvidence::TarGzip(_)
-            | ArchiveEvidence::TarPax(_) => None,
+            | ArchiveEvidence::TarPax(_)
+            | ArchiveEvidence::TarGnuLongName(_)
+            | ArchiveEvidence::TarGzipPax(_)
+            | ArchiveEvidence::TarGzipGnuLongName(_)
+            | ArchiveEvidence::TarZstd(_) => None,
         }
     }
 
@@ -1945,7 +2697,11 @@ impl ArchiveIR {
             ArchiveEvidence::Zip(_)
             | ArchiveEvidence::Tar(_)
             | ArchiveEvidence::TarGzip(_)
-            | ArchiveEvidence::TarPax(_) => None,
+            | ArchiveEvidence::TarPax(_)
+            | ArchiveEvidence::TarGnuLongName(_)
+            | ArchiveEvidence::TarGzipPax(_)
+            | ArchiveEvidence::TarGzipGnuLongName(_)
+            | ArchiveEvidence::TarZstd(_) => None,
         }
     }
 
@@ -1955,6 +2711,25 @@ impl ArchiveIR {
             ArchiveEvidence::Tar(covering) => Some(covering),
             ArchiveEvidence::TarGzip(evidence) => Some(&evidence.tar),
             ArchiveEvidence::TarPax(evidence) => Some(&evidence.tar),
+            ArchiveEvidence::TarGnuLongName(evidence) => Some(&evidence.tar),
+            ArchiveEvidence::TarGzipPax(evidence) => Some(&evidence.pax.tar),
+            ArchiveEvidence::TarGzipGnuLongName(evidence) => Some(&evidence.gnu.tar),
+            ArchiveEvidence::TarZstd(evidence) => Some(&evidence.tar),
+        }
+    }
+
+    /// Return exact RFC 8878 evidence for a zstd-wrapped TAR, if selected.
+    pub fn zstd_evidence(&self) -> Option<&ZstdWrapperEvidence> {
+        match &self.evidence {
+            ArchiveEvidence::TarZstd(evidence) => Some(&evidence.zstd),
+            ArchiveEvidence::Zip(_)
+            | ArchiveEvidence::Zip64(_)
+            | ArchiveEvidence::Tar(_)
+            | ArchiveEvidence::TarGzip(_)
+            | ArchiveEvidence::TarPax(_)
+            | ArchiveEvidence::TarGnuLongName(_)
+            | ArchiveEvidence::TarGzipPax(_)
+            | ArchiveEvidence::TarGzipGnuLongName(_) => None,
         }
     }
 
@@ -1962,10 +2737,14 @@ impl ArchiveIR {
     pub fn gzip_evidence(&self) -> Option<&GzipWrapperEvidence> {
         match &self.evidence {
             ArchiveEvidence::TarGzip(evidence) => Some(&evidence.gzip),
+            ArchiveEvidence::TarGzipPax(evidence) => Some(&evidence.gzip),
+            ArchiveEvidence::TarGzipGnuLongName(evidence) => Some(&evidence.gzip),
             ArchiveEvidence::Zip(_)
             | ArchiveEvidence::Zip64(_)
             | ArchiveEvidence::Tar(_)
-            | ArchiveEvidence::TarPax(_) => None,
+            | ArchiveEvidence::TarPax(_)
+            | ArchiveEvidence::TarGnuLongName(_)
+            | ArchiveEvidence::TarZstd(_) => None,
         }
     }
 
@@ -1979,10 +2758,35 @@ impl ArchiveIR {
     pub fn tar_pax_evidence(&self) -> Option<&TarPaxArchiveEvidence> {
         match &self.evidence {
             ArchiveEvidence::TarPax(evidence) => Some(evidence),
+            ArchiveEvidence::TarGzipPax(evidence) => Some(&evidence.pax),
             ArchiveEvidence::Zip(_)
             | ArchiveEvidence::Zip64(_)
             | ArchiveEvidence::Tar(_)
-            | ArchiveEvidence::TarGzip(_) => None,
+            | ArchiveEvidence::TarGzip(_)
+            | ArchiveEvidence::TarGnuLongName(_)
+            | ArchiveEvidence::TarGzipGnuLongName(_)
+            | ArchiveEvidence::TarZstd(_) => None,
+        }
+    }
+
+    /// Return exact ordered GNU long-name carrier evidence, if selected.
+    pub fn gnu_longname_carriers(&self) -> Option<&[GnuLongNameCarrierEvidence]> {
+        self.tar_gnu_longname_evidence()
+            .map(|evidence| evidence.carriers.as_slice())
+    }
+
+    /// Return exact old-GNU long-name archive evidence, if selected.
+    pub fn tar_gnu_longname_evidence(&self) -> Option<&TarGnuLongNameArchiveEvidence> {
+        match &self.evidence {
+            ArchiveEvidence::TarGnuLongName(evidence) => Some(evidence),
+            ArchiveEvidence::TarGzipGnuLongName(evidence) => Some(&evidence.gnu),
+            ArchiveEvidence::Zip(_)
+            | ArchiveEvidence::Zip64(_)
+            | ArchiveEvidence::Tar(_)
+            | ArchiveEvidence::TarGzip(_)
+            | ArchiveEvidence::TarPax(_)
+            | ArchiveEvidence::TarGzipPax(_)
+            | ArchiveEvidence::TarZstd(_) => None,
         }
     }
 
@@ -2004,6 +2808,10 @@ impl Serialize for ArchiveIR {
                 ArchiveEvidence::Tar(_) => 7,
                 ArchiveEvidence::TarGzip(_) => 8,
                 ArchiveEvidence::TarPax(_) => 8,
+                ArchiveEvidence::TarGnuLongName(_) => 8,
+                ArchiveEvidence::TarGzipPax(_) => 9,
+                ArchiveEvidence::TarGzipGnuLongName(_) => 9,
+                ArchiveEvidence::TarZstd(_) => 8,
             },
         )?;
         state.serialize_field("schema", self.schema)?;
@@ -2031,6 +2839,28 @@ impl Serialize for ArchiveIR {
                 state.serialize_field("format", &ArchiveFormat::TarPax)?;
                 state.serialize_field("tar_covering", &evidence.tar)?;
                 state.serialize_field("pax_extensions", &evidence.extensions)?;
+            }
+            ArchiveEvidence::TarGnuLongName(evidence) => {
+                state.serialize_field("format", &ArchiveFormat::TarGnuLongName)?;
+                state.serialize_field("tar_covering", &evidence.tar)?;
+                state.serialize_field("gnu_longname_carriers", &evidence.carriers)?;
+            }
+            ArchiveEvidence::TarGzipPax(evidence) => {
+                state.serialize_field("format", &ArchiveFormat::TarGzipPax)?;
+                state.serialize_field("gzip", &evidence.gzip)?;
+                state.serialize_field("tar_covering", &evidence.pax.tar)?;
+                state.serialize_field("pax_extensions", &evidence.pax.extensions)?;
+            }
+            ArchiveEvidence::TarGzipGnuLongName(evidence) => {
+                state.serialize_field("format", &ArchiveFormat::TarGzipGnuLongName)?;
+                state.serialize_field("gzip", &evidence.gzip)?;
+                state.serialize_field("tar_covering", &evidence.gnu.tar)?;
+                state.serialize_field("gnu_longname_carriers", &evidence.gnu.carriers)?;
+            }
+            ArchiveEvidence::TarZstd(evidence) => {
+                state.serialize_field("format", &ArchiveFormat::TarZstdUstar)?;
+                state.serialize_field("zstd", &evidence.zstd)?;
+                state.serialize_field("tar_covering", &evidence.tar)?;
             }
         }
         state.serialize_field("members", &self.members)?;
@@ -2148,5 +2978,105 @@ mod tests {
             "db951f620acf54e67845144e138f9f16994439847a97601e20a424dfea7f4445"
         );
         assert_eq!(&canonical, &vector[..vector.len() - 1]);
+    }
+
+    #[test]
+    fn portable_gnu_longname_v1_profile_is_closed_and_pinned() {
+        let profile = tar_gnu_longname_portable_v1_profile();
+        let canonical = tar_gnu_longname_portable_v1_canonical_bytes();
+        let vector = include_bytes!("../tests/conformance/tar-gnu-longname-profile-v1.json");
+        assert_eq!(profile.header_magic_and_version, "7573746172202000");
+        assert_eq!(
+            profile.accepted_types,
+            ["regular-0-or-nul", "directory-5-size-zero", "long-name-L"]
+        );
+        assert_eq!(profile.min_effective_path_bytes, 1);
+        assert_eq!(profile.max_carrier_payload_bytes, 8192);
+        assert_eq!(profile.max_carrier_headers, 1024);
+        assert_eq!(
+            tar_gnu_longname_portable_v1_digest(),
+            "08fe2698806da997bc42e7e13a45cbf412a4a7056dec39c62456202680b91fa4"
+        );
+        assert_eq!(&canonical, &vector[..vector.len() - 1]);
+    }
+
+    #[test]
+    fn zstd_ustar_composition_profile_binds_the_frozen_inner_language() {
+        let profile = tar_zstd_ustar_portable_v1_profile();
+        assert_eq!(profile.schema, TAR_ZSTD_USTAR_PORTABLE_V1);
+        assert_eq!(profile.format, "tar-zstd-ustar");
+        assert_eq!(
+            profile.wrapper_profile,
+            "sealr.transform.zstd.rfc8878-single-frame.v1"
+        );
+        assert_eq!(
+            profile.wrapper_profile_sha256,
+            crate::snapshot::TransformProfile::ZstdRfc8878SingleFrameV1.digest()
+        );
+        assert_eq!(
+            profile.decoder_parameters_sha256,
+            crate::snapshot::TransformProfile::ZstdRfc8878SingleFrameV1.decoder_parameters_digest()
+        );
+        assert_eq!(profile.inner_profile, TAR_USTAR_PORTABLE_V1);
+        assert_eq!(profile.inner_profile_sha256, tar_ustar_portable_v1_digest());
+        assert_eq!(
+            tar_zstd_ustar_portable_v1_digest(),
+            "c7d2e708f2f5258eddfb99fbf13661bd2f671a2daa4a45bc1d9603d30d472ae7"
+        );
+    }
+
+    #[test]
+    fn gzip_pax_composition_profile_binds_the_frozen_inner_language() {
+        let profile = tar_gzip_pax_portable_v1_profile();
+        assert_eq!(profile.schema, TAR_GZIP_PAX_PORTABLE_V1);
+        assert_eq!(profile.format, "tar-gzip-pax");
+        assert_eq!(
+            profile.wrapper_profile,
+            "sealr.transform.gzip.rfc1952-single-member.v1"
+        );
+        assert_eq!(
+            profile.wrapper_profile_sha256,
+            crate::snapshot::TransformProfile::GzipRfc1952SingleMemberV1.digest()
+        );
+        assert_eq!(
+            profile.decoder_parameters_sha256,
+            crate::snapshot::TransformProfile::GzipRfc1952SingleMemberV1
+                .decoder_parameters_digest()
+        );
+        assert_eq!(profile.inner_profile, TAR_PAX_PORTABLE_V1);
+        assert_eq!(profile.inner_profile_sha256, tar_pax_portable_v1_digest());
+        assert_eq!(
+            tar_gzip_pax_portable_v1_digest(),
+            "6cc91b2b8563b5b070b44bf357a5c62e5d9dda0aedc374d7a08cd80da9c5434f"
+        );
+    }
+
+    #[test]
+    fn gzip_gnu_longname_composition_profile_binds_the_frozen_inner_language() {
+        let profile = tar_gzip_gnu_longname_portable_v1_profile();
+        assert_eq!(profile.schema, TAR_GZIP_GNU_LONGNAME_PORTABLE_V1);
+        assert_eq!(profile.format, "tar-gzip-gnu-longname");
+        assert_eq!(
+            profile.wrapper_profile,
+            "sealr.transform.gzip.rfc1952-single-member.v1"
+        );
+        assert_eq!(
+            profile.wrapper_profile_sha256,
+            crate::snapshot::TransformProfile::GzipRfc1952SingleMemberV1.digest()
+        );
+        assert_eq!(
+            profile.decoder_parameters_sha256,
+            crate::snapshot::TransformProfile::GzipRfc1952SingleMemberV1
+                .decoder_parameters_digest()
+        );
+        assert_eq!(profile.inner_profile, TAR_GNU_LONGNAME_PORTABLE_V1);
+        assert_eq!(
+            profile.inner_profile_sha256,
+            tar_gnu_longname_portable_v1_digest()
+        );
+        assert_eq!(
+            tar_gzip_gnu_longname_portable_v1_digest(),
+            "622943e9629c4acc7cfeb446eb9f2d16bb245db589c1a200e885a9d69a02295a"
+        );
     }
 }

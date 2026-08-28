@@ -13,10 +13,18 @@ $tarManifestPath = Join-Path $workspace 'fuzz/tar-seed-manifest.json'
 $tarManifest = Get-Content -Raw -LiteralPath $tarManifestPath | ConvertFrom-Json
 $tarPaxManifestPath = Join-Path $workspace 'fuzz/tar-pax-seed-manifest.json'
 $tarPaxManifest = Get-Content -Raw -LiteralPath $tarPaxManifestPath | ConvertFrom-Json
+$tarGnuLongNameManifestPath = Join-Path $workspace 'fuzz/tar-gnu-longname-seed-manifest.json'
+$tarGnuLongNameManifest = Get-Content -Raw -LiteralPath $tarGnuLongNameManifestPath | ConvertFrom-Json
 $gzipManifestPath = Join-Path $workspace 'fuzz/gzip-seed-manifest.json'
 $gzipManifest = Get-Content -Raw -LiteralPath $gzipManifestPath | ConvertFrom-Json
 $tarGzipManifestPath = Join-Path $workspace 'fuzz/tar-gzip-seed-manifest.json'
 $tarGzipManifest = Get-Content -Raw -LiteralPath $tarGzipManifestPath | ConvertFrom-Json
+$tarGzipPaxManifestPath = Join-Path $workspace 'fuzz/tar-gzip-pax-seed-manifest.json'
+$tarGzipPaxManifest = Get-Content -Raw -LiteralPath $tarGzipPaxManifestPath | ConvertFrom-Json
+$tarGzipGnuLongNameManifestPath = Join-Path $workspace 'fuzz/tar-gzip-gnu-longname-seed-manifest.json'
+$tarGzipGnuLongNameManifest = Get-Content -Raw -LiteralPath $tarGzipGnuLongNameManifestPath | ConvertFrom-Json
+$tarZstdManifestPath = Join-Path $workspace 'fuzz/tar-zstd-seed-manifest.json'
+$tarZstdManifest = Get-Content -Raw -LiteralPath $tarZstdManifestPath | ConvertFrom-Json
 $zip64ManifestPath = Join-Path $workspace 'fuzz/zip64-seed-manifest.json'
 $zip64Manifest = Get-Content -Raw -LiteralPath $zip64ManifestPath | ConvertFrom-Json
 
@@ -48,6 +56,14 @@ if ($tarPaxManifest.schema -ne 'sealr.tar-pax-fuzz-seeds.v1' -or
     $tarPaxManifest.libfuzzerSysVersion -ne '0.4.13') {
     throw 'TAR PAX fuzz manifest identity or pinned tools changed unexpectedly'
 }
+if ($tarGnuLongNameManifest.schema -ne 'sealr.tar-gnu-longname-fuzz-seeds.v1' -or
+    $tarGnuLongNameManifest.target -ne 'tar_gnu_longname_portable_v1' -or
+    $tarGnuLongNameManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $tarGnuLongNameManifest.cargoFuzzVersion -ne '0.13.2' -or
+    $tarGnuLongNameManifest.libfuzzerSysVersion -ne '0.4.13' -or
+    $tarGnuLongNameManifest.sanitizer -ne 'address') {
+    throw 'TAR GNU long-name fuzz manifest identity or pinned tools changed unexpectedly'
+}
 if ($gzipManifest.schema -ne 'sealr.gzip-fuzz-seeds.v1' -or
     $gzipManifest.target -ne 'gzip_rfc1952_single_member_v1' -or
     $gzipManifest.toolchain -ne 'nightly-2026-08-01' -or
@@ -62,6 +78,30 @@ if ($tarGzipManifest.schema -ne 'sealr.tar-gzip-fuzz-seeds.v1' -or
     $tarGzipManifest.libfuzzerSysVersion -ne '0.4.13' -or
     $tarGzipManifest.sanitizer -ne 'address') {
     throw 'TAR/gzip fuzz manifest identity or pinned tools changed unexpectedly'
+}
+if ($tarGzipPaxManifest.schema -ne 'sealr.tar-gzip-pax-fuzz-seeds.v1' -or
+    $tarGzipPaxManifest.target -ne 'tar_gzip_pax_portable_v1' -or
+    $tarGzipPaxManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $tarGzipPaxManifest.cargoFuzzVersion -ne '0.13.2' -or
+    $tarGzipPaxManifest.libfuzzerSysVersion -ne '0.4.13' -or
+    $tarGzipPaxManifest.sanitizer -ne 'address') {
+    throw 'TAR/gzip PAX fuzz manifest identity or pinned tools changed unexpectedly'
+}
+if ($tarGzipGnuLongNameManifest.schema -ne 'sealr.tar-gzip-gnu-longname-fuzz-seeds.v1' -or
+    $tarGzipGnuLongNameManifest.target -ne 'tar_gzip_gnu_longname_portable_v1' -or
+    $tarGzipGnuLongNameManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $tarGzipGnuLongNameManifest.cargoFuzzVersion -ne '0.13.2' -or
+    $tarGzipGnuLongNameManifest.libfuzzerSysVersion -ne '0.4.13' -or
+    $tarGzipGnuLongNameManifest.sanitizer -ne 'address') {
+    throw 'TAR/gzip GNU long-name fuzz manifest identity or pinned tools changed unexpectedly'
+}
+if ($tarZstdManifest.schema -ne 'sealr.tar-zstd-fuzz-seeds.v1' -or
+    $tarZstdManifest.target -ne 'tar_zstd_ustar_portable_v1' -or
+    $tarZstdManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $tarZstdManifest.cargoFuzzVersion -ne '0.13.2' -or
+    $tarZstdManifest.libfuzzerSysVersion -ne '0.4.13' -or
+    $tarZstdManifest.sanitizer -ne 'address') {
+    throw 'TAR/zstd fuzz manifest identity or pinned tools changed unexpectedly'
 }
 if ($zip64Manifest.schema -ne 'sealr.zip64-fuzz-seeds.v1' -or
     $zip64Manifest.target -ne 'zip64_strict_ascii_v1' -or
@@ -90,6 +130,9 @@ foreach ($name in $expectedBounds.Keys) {
     }
     if ($tarPaxManifest.bounds.$name -ne $expectedBounds[$name]) {
         throw "TAR PAX fuzz bound $name changed unexpectedly"
+    }
+    if ($tarGnuLongNameManifest.bounds.$name -ne $expectedBounds[$name]) {
+        throw "TAR GNU long-name fuzz bound $name changed unexpectedly"
     }
 }
 $expectedGzipBounds = [ordered]@{
@@ -124,6 +167,15 @@ foreach ($name in $expectedTarGzipBounds.Keys) {
     if ($tarGzipManifest.bounds.$name -ne $expectedTarGzipBounds[$name]) {
         throw "TAR/gzip fuzz bound $name changed unexpectedly"
     }
+    if ($tarGzipPaxManifest.bounds.$name -ne $expectedTarGzipBounds[$name]) {
+        throw "TAR/gzip PAX fuzz bound $name changed unexpectedly"
+    }
+    if ($tarGzipGnuLongNameManifest.bounds.$name -ne $expectedTarGzipBounds[$name]) {
+        throw "TAR/gzip GNU long-name fuzz bound $name changed unexpectedly"
+    }
+    if ($tarZstdManifest.bounds.$name -ne $expectedTarGzipBounds[$name]) {
+        throw "TAR/zstd fuzz bound $name changed unexpectedly"
+    }
 }
 $expectedZip64Bounds = [ordered]@{
     maxInputBytes = 1048576
@@ -157,6 +209,11 @@ if ($tarPaxManifest.failureArtifact.directoryName -ne 'sealr-tar-pax-fuzz-artifa
     $tarPaxManifest.failureArtifact.retentionDays -ne 7) {
     throw 'TAR PAX fuzz failure artifact policy changed unexpectedly'
 }
+if ($tarGnuLongNameManifest.failureArtifact.directoryName -ne 'sealr-tar-gnu-longname-fuzz-artifacts' -or
+    $tarGnuLongNameManifest.failureArtifact.uploadOn -ne 'failure' -or
+    $tarGnuLongNameManifest.failureArtifact.retentionDays -ne 7) {
+    throw 'TAR GNU long-name fuzz failure artifact policy changed unexpectedly'
+}
 if ($gzipManifest.failureArtifact.directoryName -ne 'sealr-gzip-fuzz-artifacts' -or
     $gzipManifest.failureArtifact.uploadOn -ne 'failure' -or
     $gzipManifest.failureArtifact.retentionDays -ne 7) {
@@ -166,6 +223,21 @@ if ($tarGzipManifest.failureArtifact.directoryName -ne 'sealr-tar-gzip-fuzz-arti
     $tarGzipManifest.failureArtifact.uploadOn -ne 'failure' -or
     $tarGzipManifest.failureArtifact.retentionDays -ne 7) {
     throw 'TAR/gzip fuzz failure artifact policy changed unexpectedly'
+}
+if ($tarGzipPaxManifest.failureArtifact.directoryName -ne 'sealr-tar-gzip-pax-fuzz-artifacts' -or
+    $tarGzipPaxManifest.failureArtifact.uploadOn -ne 'failure' -or
+    $tarGzipPaxManifest.failureArtifact.retentionDays -ne 7) {
+    throw 'TAR/gzip PAX fuzz failure artifact policy changed unexpectedly'
+}
+if ($tarGzipGnuLongNameManifest.failureArtifact.directoryName -ne 'sealr-tar-gzip-gnu-longname-fuzz-artifacts' -or
+    $tarGzipGnuLongNameManifest.failureArtifact.uploadOn -ne 'failure' -or
+    $tarGzipGnuLongNameManifest.failureArtifact.retentionDays -ne 7) {
+    throw 'TAR/gzip GNU long-name fuzz failure artifact policy changed unexpectedly'
+}
+if ($tarZstdManifest.failureArtifact.directoryName -ne 'sealr-tar-zstd-fuzz-artifacts' -or
+    $tarZstdManifest.failureArtifact.uploadOn -ne 'failure' -or
+    $tarZstdManifest.failureArtifact.retentionDays -ne 7) {
+    throw 'TAR/zstd fuzz failure artifact policy changed unexpectedly'
 }
 if ($zip64Manifest.failureArtifact.directoryName -ne 'sealr-zip64-fuzz-artifacts' -or
     $zip64Manifest.failureArtifact.uploadOn -ne 'failure' -or
@@ -286,6 +358,80 @@ function Assert-TarPaxManifestContract {
 
 Assert-TarPaxManifestContract -Candidate $tarPaxManifest
 
+function Assert-TarGnuLongNameManifestContract {
+    param([Parameter(Mandatory)] [object] $Candidate)
+
+    $rootProperties = @($Candidate.PSObject.Properties.Name | Sort-Object)
+    $expectedRootProperties = @(
+        'bounds', 'cargoFuzzVersion', 'dictionary', 'failureArtifact', 'generator', 'generatorSource',
+        'libfuzzerSysVersion', 'sanitizer', 'schema', 'seeds', 'target', 'targetSource',
+        'toolchain'
+    ) | Sort-Object
+    if (($rootProperties -join "`n") -cne ($expectedRootProperties -join "`n") -or
+        $Candidate.schema -cne 'sealr.tar-gnu-longname-fuzz-seeds.v1' -or
+        $Candidate.target -cne 'tar_gnu_longname_portable_v1' -or
+        $Candidate.toolchain -cne 'nightly-2026-08-01' -or
+        $Candidate.cargoFuzzVersion -cne '0.13.2' -or
+        $Candidate.libfuzzerSysVersion -cne '0.4.13' -or
+        $Candidate.sanitizer -cne 'address' -or
+        $Candidate.generator -cne 'fuzz/generate_tar_gnu_longname_fuzz_seeds.ps1') {
+        throw 'TAR GNU long-name fuzz manifest root contract changed'
+    }
+    $boundProperties = @($Candidate.bounds.PSObject.Properties.Name | Sort-Object)
+    if (($boundProperties -join "`n") -cne ((@($expectedBounds.Keys) | Sort-Object) -join "`n")) {
+        throw 'TAR GNU long-name fuzz manifest bound set changed'
+    }
+    foreach ($name in $expectedBounds.Keys) {
+        if ($Candidate.bounds.$name -ne $expectedBounds[$name]) {
+            throw "TAR GNU long-name fuzz manifest weakened bound: $name"
+        }
+    }
+    if ((@($Candidate.failureArtifact.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('directoryName', 'retentionDays', 'uploadOn') | Sort-Object) -join "`n") -or
+        $Candidate.failureArtifact.directoryName -cne 'sealr-tar-gnu-longname-fuzz-artifacts' -or
+        $Candidate.failureArtifact.uploadOn -cne 'failure' -or
+        $Candidate.failureArtifact.retentionDays -ne 7) {
+        throw 'TAR GNU long-name fuzz manifest artifact contract changed'
+    }
+    if ((@($Candidate.dictionary.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.dictionary.path -cne 'fuzz/dictionaries/tar_gnu_longname_portable_v1_dictionary' -or
+        $Candidate.dictionary.bytes -ne 152 -or
+        $Candidate.dictionary.sha256 -cne 'b9caadeab7d22894fad357bb54d107b97c8a45a54121de569d8f2cca5eb37390') {
+        throw 'TAR GNU long-name fuzz manifest dictionary contract changed'
+    }
+    if ((@($Candidate.targetSource.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.targetSource.path -cne 'fuzz/fuzz_targets/tar_gnu_longname_portable_v1.rs' -or
+        $Candidate.targetSource.bytes -ne 135 -or
+        $Candidate.targetSource.sha256 -cne '9deaaa5c9a2a19370ce9c93e6c7990bba1308ed1107f8bbf03fece2d080bea27') {
+        throw 'TAR GNU long-name fuzz manifest target binding changed'
+    }
+    if ((@($Candidate.generatorSource.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.generatorSource.path -cne 'fuzz/generate_tar_gnu_longname_fuzz_seeds.ps1' -or
+        $Candidate.generatorSource.bytes -ne 9463 -or
+        $Candidate.generatorSource.sha256 -cne 'cba8d79fa86f12d4120c361d3699342a4868e61b8466183803d20bb02dbd8324') {
+        throw 'TAR GNU long-name fuzz manifest generator binding changed'
+    }
+    $seeds = @($Candidate.seeds)
+    $seedPaths = @($seeds.path)
+    if ($seeds.Count -ne 16 -or
+        @($seedPaths | Select-Object -Unique).Count -ne 16 -or
+        ($seedPaths -join "`n") -cne (($seedPaths | Sort-Object) -join "`n")) {
+        throw 'TAR GNU long-name fuzz manifest seed set is not exact, unique, and sorted'
+    }
+    foreach ($seed in $seeds) {
+        if ((@($seed.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+                ((@('bytes', 'generated', 'path', 'sha256') | Sort-Object) -join "`n") -or
+            $seed.generated -isnot [bool] -or -not $seed.generated) {
+            throw 'TAR GNU long-name fuzz manifest seed entry contract changed'
+        }
+    }
+}
+
+Assert-TarGnuLongNameManifestContract -Candidate $tarGnuLongNameManifest
+
 function Assert-TarGzipManifestContract {
     param([Parameter(Mandatory)] [object] $Candidate)
 
@@ -360,6 +506,228 @@ function Assert-TarGzipManifestContract {
 
 Assert-TarGzipManifestContract -Candidate $tarGzipManifest
 
+function Assert-TarGzipPaxManifestContract {
+    param([Parameter(Mandatory)] [object] $Candidate)
+
+    $rootProperties = @($Candidate.PSObject.Properties.Name | Sort-Object)
+    $expectedRootProperties = @(
+        'bounds', 'cargoFuzzVersion', 'dictionary', 'failureArtifact', 'generator', 'generatorSource',
+        'libfuzzerSysVersion', 'sanitizer', 'schema', 'seeds', 'target', 'targetSource',
+        'toolchain'
+    ) | Sort-Object
+    if (($rootProperties -join "`n") -cne ($expectedRootProperties -join "`n") -or
+        $Candidate.schema -cne 'sealr.tar-gzip-pax-fuzz-seeds.v1' -or
+        $Candidate.target -cne 'tar_gzip_pax_portable_v1' -or
+        $Candidate.toolchain -cne 'nightly-2026-08-01' -or
+        $Candidate.cargoFuzzVersion -cne '0.13.2' -or
+        $Candidate.libfuzzerSysVersion -cne '0.4.13' -or
+        $Candidate.sanitizer -cne 'address' -or
+        $Candidate.generator -cne 'fuzz/generate_tar_gzip_pax_fuzz_seeds.ps1') {
+        throw 'TAR/gzip PAX fuzz manifest root contract changed'
+    }
+    $boundProperties = @($Candidate.bounds.PSObject.Properties.Name | Sort-Object)
+    if (($boundProperties -join "`n") -cne ((@($expectedTarGzipBounds.Keys) | Sort-Object) -join "`n")) {
+        throw 'TAR/gzip PAX fuzz manifest bound set changed'
+    }
+    foreach ($name in $expectedTarGzipBounds.Keys) {
+        if ($Candidate.bounds.$name -ne $expectedTarGzipBounds[$name]) {
+            throw "TAR/gzip PAX fuzz manifest weakened bound: $name"
+        }
+    }
+    if ((@($Candidate.failureArtifact.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('directoryName', 'retentionDays', 'uploadOn') | Sort-Object) -join "`n") -or
+        $Candidate.failureArtifact.directoryName -cne 'sealr-tar-gzip-pax-fuzz-artifacts' -or
+        $Candidate.failureArtifact.uploadOn -cne 'failure' -or
+        $Candidate.failureArtifact.retentionDays -ne 7) {
+        throw 'TAR/gzip PAX fuzz manifest artifact contract changed'
+    }
+    if ((@($Candidate.dictionary.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.dictionary.path -cne 'fuzz/dictionaries/tar_gzip_pax_portable_v1_dictionary' -or
+        $Candidate.dictionary.bytes -ne 481 -or
+        $Candidate.dictionary.sha256 -cne '6f310992ad4122c3aad65ece4228b879046b489a3efccf16c77c9079ec13b425') {
+        throw 'TAR/gzip PAX fuzz manifest dictionary contract changed'
+    }
+    if ((@($Candidate.targetSource.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.targetSource.path -cne 'fuzz/fuzz_targets/tar_gzip_pax_portable_v1.rs' -or
+        $Candidate.targetSource.bytes -ne 2747 -or
+        $Candidate.targetSource.sha256 -cne '5510b150c3ab01d97f299236397e43038b63e32fef1ac887de727866e760f3ff') {
+        throw 'TAR/gzip PAX fuzz manifest target binding changed'
+    }
+    if ((@($Candidate.generatorSource.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.generatorSource.path -cne 'fuzz/generate_tar_gzip_pax_fuzz_seeds.ps1' -or
+        $Candidate.generatorSource.bytes -ne 13419 -or
+        $Candidate.generatorSource.sha256 -cne 'c8889c731d17f2a1a3b5cf0e09bfe322043f51567c5c1c9a7d2c74d314b6cbf4') {
+        throw 'TAR/gzip PAX fuzz manifest generator binding changed'
+    }
+    $seeds = @($Candidate.seeds)
+    $seedPaths = @($seeds.path)
+    if ($seeds.Count -ne 15 -or
+        @($seedPaths | Select-Object -Unique).Count -ne 15 -or
+        ($seedPaths -join "`n") -cne (($seedPaths | Sort-Object) -join "`n")) {
+        throw 'TAR/gzip PAX fuzz manifest seed set is not exact, unique, and sorted'
+    }
+    foreach ($seed in $seeds) {
+        if ((@($seed.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+                ((@('bytes', 'generated', 'path', 'sha256') | Sort-Object) -join "`n") -or
+            $seed.generated -isnot [bool] -or -not $seed.generated) {
+            throw 'TAR/gzip PAX fuzz manifest seed entry contract changed'
+        }
+    }
+}
+
+Assert-TarGzipPaxManifestContract -Candidate $tarGzipPaxManifest
+
+function Assert-TarGzipGnuLongNameManifestContract {
+    param([Parameter(Mandatory)] [object] $Candidate)
+
+    $rootProperties = @($Candidate.PSObject.Properties.Name | Sort-Object)
+    $expectedRootProperties = @(
+        'bounds', 'cargoFuzzVersion', 'dictionary', 'failureArtifact', 'generator', 'generatorSource',
+        'libfuzzerSysVersion', 'sanitizer', 'schema', 'seeds', 'target', 'targetSource',
+        'toolchain'
+    ) | Sort-Object
+    if (($rootProperties -join "`n") -cne ($expectedRootProperties -join "`n") -or
+        $Candidate.schema -cne 'sealr.tar-gzip-gnu-longname-fuzz-seeds.v1' -or
+        $Candidate.target -cne 'tar_gzip_gnu_longname_portable_v1' -or
+        $Candidate.toolchain -cne 'nightly-2026-08-01' -or
+        $Candidate.cargoFuzzVersion -cne '0.13.2' -or
+        $Candidate.libfuzzerSysVersion -cne '0.4.13' -or
+        $Candidate.sanitizer -cne 'address' -or
+        $Candidate.generator -cne 'fuzz/generate_tar_gzip_gnu_longname_fuzz_seeds.ps1') {
+        throw 'TAR/gzip GNU long-name fuzz manifest root contract changed'
+    }
+    $boundProperties = @($Candidate.bounds.PSObject.Properties.Name | Sort-Object)
+    if (($boundProperties -join "`n") -cne ((@($expectedTarGzipBounds.Keys) | Sort-Object) -join "`n")) {
+        throw 'TAR/gzip GNU long-name fuzz manifest bound set changed'
+    }
+    foreach ($name in $expectedTarGzipBounds.Keys) {
+        if ($Candidate.bounds.$name -ne $expectedTarGzipBounds[$name]) {
+            throw "TAR/gzip GNU long-name fuzz manifest weakened bound: $name"
+        }
+    }
+    if ((@($Candidate.failureArtifact.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('directoryName', 'retentionDays', 'uploadOn') | Sort-Object) -join "`n") -or
+        $Candidate.failureArtifact.directoryName -cne 'sealr-tar-gzip-gnu-longname-fuzz-artifacts' -or
+        $Candidate.failureArtifact.uploadOn -cne 'failure' -or
+        $Candidate.failureArtifact.retentionDays -ne 7) {
+        throw 'TAR/gzip GNU long-name fuzz manifest artifact contract changed'
+    }
+    if ((@($Candidate.dictionary.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.dictionary.path -cne 'fuzz/dictionaries/tar_gzip_gnu_longname_portable_v1_dictionary' -or
+        $Candidate.dictionary.bytes -ne 401 -or
+        $Candidate.dictionary.sha256 -cne '8ebd10a30426d098956f95b292210674820940c866e0023104de19c334e2f22f') {
+        throw 'TAR/gzip GNU long-name fuzz manifest dictionary contract changed'
+    }
+    if ((@($Candidate.targetSource.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.targetSource.path -cne 'fuzz/fuzz_targets/tar_gzip_gnu_longname_portable_v1.rs' -or
+        $Candidate.targetSource.bytes -ne 2781 -or
+        $Candidate.targetSource.sha256 -cne '1ea777656777671195c3a25e2ba68d4ca199d204322bafe9c4e1b9ed6a0f83dd') {
+        throw 'TAR/gzip GNU long-name fuzz manifest target binding changed'
+    }
+    if ((@($Candidate.generatorSource.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.generatorSource.path -cne 'fuzz/generate_tar_gzip_gnu_longname_fuzz_seeds.ps1' -or
+        $Candidate.generatorSource.bytes -ne 11543 -or
+        $Candidate.generatorSource.sha256 -cne 'a1adad0c9458bea75e57c3f85a07420e44f384de7c01e529de6b2467a9992180') {
+        throw 'TAR/gzip GNU long-name fuzz manifest generator binding changed'
+    }
+    $seeds = @($Candidate.seeds)
+    $seedPaths = @($seeds.path)
+    if ($seeds.Count -ne 14 -or
+        @($seedPaths | Select-Object -Unique).Count -ne 14 -or
+        ($seedPaths -join "`n") -cne (($seedPaths | Sort-Object) -join "`n")) {
+        throw 'TAR/gzip GNU long-name fuzz manifest seed set is not exact, unique, and sorted'
+    }
+    foreach ($seed in $seeds) {
+        if ((@($seed.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+                ((@('bytes', 'generated', 'path', 'sha256') | Sort-Object) -join "`n") -or
+            $seed.generated -isnot [bool] -or -not $seed.generated) {
+            throw 'TAR/gzip GNU long-name fuzz manifest seed entry contract changed'
+        }
+    }
+}
+
+Assert-TarGzipGnuLongNameManifestContract -Candidate $tarGzipGnuLongNameManifest
+
+function Assert-TarZstdManifestContract {
+    param([Parameter(Mandatory)] [object] $Candidate)
+
+    $rootProperties = @($Candidate.PSObject.Properties.Name | Sort-Object)
+    $expectedRootProperties = @(
+        'bounds', 'cargoFuzzVersion', 'dictionary', 'failureArtifact', 'generator', 'generatorSource',
+        'libfuzzerSysVersion', 'sanitizer', 'schema', 'seeds', 'target', 'targetSource',
+        'toolchain'
+    ) | Sort-Object
+    if (($rootProperties -join "`n") -cne ($expectedRootProperties -join "`n") -or
+        $Candidate.schema -cne 'sealr.tar-zstd-fuzz-seeds.v1' -or
+        $Candidate.target -cne 'tar_zstd_ustar_portable_v1' -or
+        $Candidate.toolchain -cne 'nightly-2026-08-01' -or
+        $Candidate.cargoFuzzVersion -cne '0.13.2' -or
+        $Candidate.libfuzzerSysVersion -cne '0.4.13' -or
+        $Candidate.sanitizer -cne 'address' -or
+        $Candidate.generator -cne 'fuzz/generate_tar_zstd_fuzz_seeds.ps1') {
+        throw 'TAR/zstd fuzz manifest root contract changed'
+    }
+    $boundProperties = @($Candidate.bounds.PSObject.Properties.Name | Sort-Object)
+    if (($boundProperties -join "`n") -cne ((@($expectedTarGzipBounds.Keys) | Sort-Object) -join "`n")) {
+        throw 'TAR/zstd fuzz manifest bound set changed'
+    }
+    foreach ($name in $expectedTarGzipBounds.Keys) {
+        if ($Candidate.bounds.$name -ne $expectedTarGzipBounds[$name]) {
+            throw "TAR/zstd fuzz manifest weakened bound: $name"
+        }
+    }
+    if ((@($Candidate.failureArtifact.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('directoryName', 'retentionDays', 'uploadOn') | Sort-Object) -join "`n") -or
+        $Candidate.failureArtifact.directoryName -cne 'sealr-tar-zstd-fuzz-artifacts' -or
+        $Candidate.failureArtifact.uploadOn -cne 'failure' -or
+        $Candidate.failureArtifact.retentionDays -ne 7) {
+        throw 'TAR/zstd fuzz manifest artifact contract changed'
+    }
+    if ((@($Candidate.dictionary.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.dictionary.path -cne 'fuzz/dictionaries/tar_zstd_ustar_portable_v1_dictionary' -or
+        $Candidate.dictionary.bytes -ne 434 -or
+        $Candidate.dictionary.sha256 -cne '051a6fd9df2b3048dd054c5ed3a45ba183e2fa92dc7ea0d88933441d82f2f61a') {
+        throw 'TAR/zstd fuzz manifest dictionary contract changed'
+    }
+    if ((@($Candidate.targetSource.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.targetSource.path -cne 'fuzz/fuzz_targets/tar_zstd_ustar_portable_v1.rs' -or
+        $Candidate.targetSource.bytes -ne 2756 -or
+        $Candidate.targetSource.sha256 -cne '96d479943121a4293a944d5c91eba7f6fae98d66987e906cb340088d133a0e13') {
+        throw 'TAR/zstd fuzz manifest target binding changed'
+    }
+    if ((@($Candidate.generatorSource.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.generatorSource.path -cne 'fuzz/generate_tar_zstd_fuzz_seeds.ps1' -or
+        $Candidate.generatorSource.bytes -ne 10965 -or
+        $Candidate.generatorSource.sha256 -cne '3a804db90f58a4c5ba1c94726aa5faa9da04c0db68345112fe9e1ee45302c4d8') {
+        throw 'TAR/zstd fuzz manifest generator binding changed'
+    }
+    $seeds = @($Candidate.seeds)
+    $seedPaths = @($seeds.path)
+    if ($seeds.Count -ne 15 -or
+        @($seedPaths | Select-Object -Unique).Count -ne 15 -or
+        ($seedPaths -join "`n") -cne (($seedPaths | Sort-Object) -join "`n")) {
+        throw 'TAR/zstd fuzz manifest seed set is not exact, unique, and sorted'
+    }
+    foreach ($seed in $seeds) {
+        if ((@($seed.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+                ((@('bytes', 'generated', 'path', 'sha256') | Sort-Object) -join "`n") -or
+            $seed.generated -isnot [bool] -or -not $seed.generated) {
+            throw 'TAR/zstd fuzz manifest seed entry contract changed'
+        }
+    }
+}
+
+Assert-TarZstdManifestContract -Candidate $tarZstdManifest
+
 Assert-ManifestFile -Entry $manifest.dictionary
 foreach ($seed in $manifest.seeds) {
     Assert-ManifestFile -Entry $seed
@@ -378,6 +746,12 @@ Assert-ManifestFile -Entry $tarPaxManifest.generatorSource
 foreach ($seed in $tarPaxManifest.seeds) {
     Assert-ManifestFile -Entry $seed
 }
+Assert-ManifestFile -Entry $tarGnuLongNameManifest.dictionary
+Assert-ManifestFile -Entry $tarGnuLongNameManifest.targetSource
+Assert-ManifestFile -Entry $tarGnuLongNameManifest.generatorSource
+foreach ($seed in $tarGnuLongNameManifest.seeds) {
+    Assert-ManifestFile -Entry $seed
+}
 Assert-ManifestFile -Entry $gzipManifest.dictionary
 foreach ($seed in $gzipManifest.seeds) {
     Assert-ManifestFile -Entry $seed
@@ -386,6 +760,24 @@ Assert-ManifestFile -Entry $tarGzipManifest.dictionary
 Assert-ManifestFile -Entry $tarGzipManifest.targetSource
 Assert-ManifestFile -Entry $tarGzipManifest.generatorSource
 foreach ($seed in $tarGzipManifest.seeds) {
+    Assert-ManifestFile -Entry $seed
+}
+Assert-ManifestFile -Entry $tarGzipPaxManifest.dictionary
+Assert-ManifestFile -Entry $tarGzipPaxManifest.targetSource
+Assert-ManifestFile -Entry $tarGzipPaxManifest.generatorSource
+foreach ($seed in $tarGzipPaxManifest.seeds) {
+    Assert-ManifestFile -Entry $seed
+}
+Assert-ManifestFile -Entry $tarGzipGnuLongNameManifest.dictionary
+Assert-ManifestFile -Entry $tarGzipGnuLongNameManifest.targetSource
+Assert-ManifestFile -Entry $tarGzipGnuLongNameManifest.generatorSource
+foreach ($seed in $tarGzipGnuLongNameManifest.seeds) {
+    Assert-ManifestFile -Entry $seed
+}
+Assert-ManifestFile -Entry $tarZstdManifest.dictionary
+Assert-ManifestFile -Entry $tarZstdManifest.targetSource
+Assert-ManifestFile -Entry $tarZstdManifest.generatorSource
+foreach ($seed in $tarZstdManifest.seeds) {
     Assert-ManifestFile -Entry $seed
 }
 Assert-ManifestFile -Entry $zip64Manifest.dictionary
@@ -437,6 +829,17 @@ if ($actualTarPaxSeeds.Count -ne $declaredTarPaxSeeds.Count -or
     @(Compare-Object $actualTarPaxSeeds $declaredTarPaxSeeds).Count -ne 0) {
     throw 'TAR PAX fuzz corpus and seed manifest contain different paths'
 }
+$tarGnuLongNameCorpusRoot = Join-Path $workspace 'fuzz/corpus/tar_gnu_longname_portable_v1'
+$actualTarGnuLongNameSeeds = @(
+    Get-ChildItem -LiteralPath $tarGnuLongNameCorpusRoot -File |
+        ForEach-Object { [IO.Path]::GetRelativePath($workspace, $_.FullName).Replace('\', '/') } |
+        Sort-Object
+)
+$declaredTarGnuLongNameSeeds = @($tarGnuLongNameManifest.seeds.path | Sort-Object)
+if ($actualTarGnuLongNameSeeds.Count -ne $declaredTarGnuLongNameSeeds.Count -or
+    @(Compare-Object $actualTarGnuLongNameSeeds $declaredTarGnuLongNameSeeds).Count -ne 0) {
+    throw 'TAR GNU long-name fuzz corpus and seed manifest contain different paths'
+}
 $gzipCorpusRoot = Join-Path $workspace 'fuzz/corpus/gzip_rfc1952_single_member_v1'
 $actualGzipSeeds = @(
     Get-ChildItem -LiteralPath $gzipCorpusRoot -File |
@@ -458,6 +861,39 @@ $declaredTarGzipSeeds = @($tarGzipManifest.seeds.path | Sort-Object)
 if ($actualTarGzipSeeds.Count -ne $declaredTarGzipSeeds.Count -or
     @(Compare-Object $actualTarGzipSeeds $declaredTarGzipSeeds).Count -ne 0) {
     throw 'TAR/gzip fuzz corpus and seed manifest contain different paths'
+}
+$tarGzipPaxCorpusRoot = Join-Path $workspace 'fuzz/corpus/tar_gzip_pax_portable_v1'
+$actualTarGzipPaxSeeds = @(
+    Get-ChildItem -LiteralPath $tarGzipPaxCorpusRoot -File |
+        ForEach-Object { [IO.Path]::GetRelativePath($workspace, $_.FullName).Replace('\', '/') } |
+        Sort-Object
+)
+$declaredTarGzipPaxSeeds = @($tarGzipPaxManifest.seeds.path | Sort-Object)
+if ($actualTarGzipPaxSeeds.Count -ne $declaredTarGzipPaxSeeds.Count -or
+    @(Compare-Object $actualTarGzipPaxSeeds $declaredTarGzipPaxSeeds).Count -ne 0) {
+    throw 'TAR/gzip PAX fuzz corpus and seed manifest contain different paths'
+}
+$tarGzipGnuLongNameCorpusRoot = Join-Path $workspace 'fuzz/corpus/tar_gzip_gnu_longname_portable_v1'
+$actualTarGzipGnuLongNameSeeds = @(
+    Get-ChildItem -LiteralPath $tarGzipGnuLongNameCorpusRoot -File |
+        ForEach-Object { [IO.Path]::GetRelativePath($workspace, $_.FullName).Replace('\', '/') } |
+        Sort-Object
+)
+$declaredTarGzipGnuLongNameSeeds = @($tarGzipGnuLongNameManifest.seeds.path | Sort-Object)
+if ($actualTarGzipGnuLongNameSeeds.Count -ne $declaredTarGzipGnuLongNameSeeds.Count -or
+    @(Compare-Object $actualTarGzipGnuLongNameSeeds $declaredTarGzipGnuLongNameSeeds).Count -ne 0) {
+    throw 'TAR/gzip GNU long-name fuzz corpus and seed manifest contain different paths'
+}
+$tarZstdCorpusRoot = Join-Path $workspace 'fuzz/corpus/tar_zstd_ustar_portable_v1'
+$actualTarZstdSeeds = @(
+    Get-ChildItem -LiteralPath $tarZstdCorpusRoot -File |
+        ForEach-Object { [IO.Path]::GetRelativePath($workspace, $_.FullName).Replace('\', '/') } |
+        Sort-Object
+)
+$declaredTarZstdSeeds = @($tarZstdManifest.seeds.path | Sort-Object)
+if ($actualTarZstdSeeds.Count -ne $declaredTarZstdSeeds.Count -or
+    @(Compare-Object $actualTarZstdSeeds $declaredTarZstdSeeds).Count -ne 0) {
+    throw 'TAR/zstd fuzz corpus and seed manifest contain different paths'
 }
 $zip64CorpusRoot = Join-Path $workspace 'fuzz/corpus/zip64_strict_ascii_v1'
 $actualZip64Seeds = @(
@@ -616,6 +1052,258 @@ try {
             throw "refusing to remove unexpected TAR/gzip fuzz generation path: $resolvedTarGzipGenerationRoot"
         }
         Remove-Item -LiteralPath $resolvedTarGzipGenerationRoot -Recurse -Force
+    }
+}
+if ([string]$tarGzipPaxManifest.generator -cne 'fuzz/generate_tar_gzip_pax_fuzz_seeds.ps1') {
+    throw 'TAR/gzip PAX fuzz seed generator path changed unexpectedly'
+}
+$generatedTarGzipPaxSeeds = @(
+    $tarGzipPaxManifest.seeds | Where-Object { $_.generated -is [bool] -and $_.generated }
+)
+if ($generatedTarGzipPaxSeeds.Count -ne 15 -or
+    @($tarGzipPaxManifest.seeds | Where-Object { $_.generated -isnot [bool] }).Count -ne 0 -or
+    @($tarGzipPaxManifest.seeds | Where-Object { $_.generated -is [bool] -and -not $_.generated }).Count -ne 0) {
+    throw 'TAR/gzip PAX fuzz seeds must classify exactly 15 generated entries'
+}
+$requiredTarGzipPaxSeeds = @(
+    'invalid-extension-over-cap'
+    'invalid-malformed-record-length'
+    'invalid-orphan-local'
+    'invalid-wrapper-bad-data-crc'
+    'invalid-wrapper-concatenated-members'
+    'invalid-wrapper-trailing-byte'
+    'resource-derived-over-cap'
+    'unsupported-gnu-longlink-carrier'
+    'unsupported-keyword'
+    'valid-all-optional-stored'
+    'valid-empty-pax'
+    'valid-global-local-precedence'
+    'valid-local-path-size'
+    'valid-ordinary-ustar-subset'
+    'valid-quota-boundary-two-files'
+)
+$actualTarGzipPaxSeedNames = @(
+    $tarGzipPaxManifest.seeds.path |
+        ForEach-Object { [IO.Path]::GetFileName([string]$_) }
+)
+foreach ($requiredSeed in $requiredTarGzipPaxSeeds) {
+    if (@($actualTarGzipPaxSeedNames | Where-Object { $_ -ceq $requiredSeed }).Count -ne 1) {
+        throw "TAR/gzip PAX corpus must contain exactly one required seed: $requiredSeed"
+    }
+}
+$tarGzipPaxGenerator = Join-Path $workspace ([string]$tarGzipPaxManifest.generator)
+$tarGzipPaxGenerationRoot = Join-Path (
+    [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar
+    )
+) ("sealr-tar-gzip-pax-fuzz-seeds-{0}" -f [Guid]::NewGuid().ToString('N'))
+try {
+    & $tarGzipPaxGenerator -OutputDirectory $tarGzipPaxGenerationRoot
+    $actualGeneratedTarGzipPaxNames = @(
+        Get-ChildItem -LiteralPath $tarGzipPaxGenerationRoot -File |
+            ForEach-Object Name |
+            Sort-Object
+    )
+    $expectedGeneratedTarGzipPaxNames = @(
+        $generatedTarGzipPaxSeeds.path |
+            ForEach-Object { [IO.Path]::GetFileName([string]$_) } |
+            Sort-Object
+    )
+    if ($actualGeneratedTarGzipPaxNames.Count -ne $expectedGeneratedTarGzipPaxNames.Count -or
+        @(Compare-Object $actualGeneratedTarGzipPaxNames $expectedGeneratedTarGzipPaxNames).Count -ne 0) {
+        throw 'TAR/gzip PAX fuzz seed generator produced a different exact file set'
+    }
+    foreach ($entry in $generatedTarGzipPaxSeeds) {
+        $generatedPath = Join-Path $tarGzipPaxGenerationRoot ([IO.Path]::GetFileName([string]$entry.path))
+        $generatedFile = Get-Item -LiteralPath $generatedPath
+        $generatedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $generatedPath).Hash.ToLowerInvariant()
+        if ($generatedFile.Length -ne $entry.bytes -or $generatedHash -cne [string]$entry.sha256) {
+            throw "TAR/gzip PAX fuzz seed generator did not reproduce $($entry.path)"
+        }
+    }
+} finally {
+    if (Test-Path -LiteralPath $tarGzipPaxGenerationRoot) {
+        $resolvedTarGzipPaxGenerationRoot = [IO.Path]::GetFullPath($tarGzipPaxGenerationRoot)
+        $generationParent = [IO.Path]::GetDirectoryName($resolvedTarGzipPaxGenerationRoot)
+        $generationLeaf = [IO.Path]::GetFileName($resolvedTarGzipPaxGenerationRoot)
+        $expectedTemporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+            [IO.Path]::DirectorySeparatorChar,
+            [IO.Path]::AltDirectorySeparatorChar
+        )
+        if ($generationParent -cne $expectedTemporaryParent -or
+            $generationLeaf -notmatch '^sealr-tar-gzip-pax-fuzz-seeds-[0-9a-f]{32}$') {
+            throw "refusing to remove unexpected TAR/gzip PAX fuzz generation path: $resolvedTarGzipPaxGenerationRoot"
+        }
+        Remove-Item -LiteralPath $resolvedTarGzipPaxGenerationRoot -Recurse -Force
+    }
+}
+if ([string]$tarGzipGnuLongNameManifest.generator -cne 'fuzz/generate_tar_gzip_gnu_longname_fuzz_seeds.ps1') {
+    throw 'TAR/gzip GNU long-name fuzz seed generator path changed unexpectedly'
+}
+$generatedTarGzipGnuLongNameSeeds = @(
+    $tarGzipGnuLongNameManifest.seeds |
+        Where-Object { $_.generated -is [bool] -and $_.generated }
+)
+if ($generatedTarGzipGnuLongNameSeeds.Count -ne 14 -or
+    @($tarGzipGnuLongNameManifest.seeds | Where-Object { $_.generated -isnot [bool] }).Count -ne 0 -or
+    @($tarGzipGnuLongNameManifest.seeds | Where-Object { $_.generated -is [bool] -and -not $_.generated }).Count -ne 0) {
+    throw 'TAR/gzip GNU long-name fuzz seeds must classify exactly 14 generated entries'
+}
+$requiredTarGzipGnuLongNameSeeds = @(
+    'invalid-chained-carrier'
+    'invalid-orphan-carrier'
+    'invalid-oversized-carrier'
+    'invalid-wrapper-bad-data-crc'
+    'invalid-wrapper-concatenated-members'
+    'invalid-wrapper-trailing-byte'
+    'resource-derived-over-cap'
+    'unsupported-long-link-k'
+    'unsupported-sparse'
+    'valid-all-optional-stored'
+    'valid-empty-oldgnu'
+    'valid-gnu-longlink'
+    'valid-ordinary-oldgnu'
+    'valid-two-carrier-pairs'
+)
+$actualTarGzipGnuLongNameSeedNames = @(
+    $tarGzipGnuLongNameManifest.seeds.path |
+        ForEach-Object { [IO.Path]::GetFileName([string]$_) }
+)
+foreach ($requiredSeed in $requiredTarGzipGnuLongNameSeeds) {
+    if (@($actualTarGzipGnuLongNameSeedNames | Where-Object { $_ -ceq $requiredSeed }).Count -ne 1) {
+        throw "TAR/gzip GNU long-name corpus must contain exactly one required seed: $requiredSeed"
+    }
+}
+$tarGzipGnuLongNameGenerator = Join-Path $workspace ([string]$tarGzipGnuLongNameManifest.generator)
+$tarGzipGnuLongNameGenerationRoot = Join-Path (
+    [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar
+    )
+) ("sealr-tar-gzip-gnu-longname-fuzz-seeds-{0}" -f [Guid]::NewGuid().ToString('N'))
+try {
+    & $tarGzipGnuLongNameGenerator -OutputDirectory $tarGzipGnuLongNameGenerationRoot
+    $actualGeneratedTarGzipGnuLongNameNames = @(
+        Get-ChildItem -LiteralPath $tarGzipGnuLongNameGenerationRoot -File |
+            ForEach-Object Name |
+            Sort-Object
+    )
+    $expectedGeneratedTarGzipGnuLongNameNames = @(
+        $generatedTarGzipGnuLongNameSeeds.path |
+            ForEach-Object { [IO.Path]::GetFileName([string]$_) } |
+            Sort-Object
+    )
+    if ($actualGeneratedTarGzipGnuLongNameNames.Count -ne $expectedGeneratedTarGzipGnuLongNameNames.Count -or
+        @(Compare-Object $actualGeneratedTarGzipGnuLongNameNames $expectedGeneratedTarGzipGnuLongNameNames).Count -ne 0) {
+        throw 'TAR/gzip GNU long-name fuzz seed generator produced a different exact file set'
+    }
+    foreach ($entry in $generatedTarGzipGnuLongNameSeeds) {
+        $generatedPath = Join-Path $tarGzipGnuLongNameGenerationRoot ([IO.Path]::GetFileName([string]$entry.path))
+        $generatedFile = Get-Item -LiteralPath $generatedPath
+        $generatedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $generatedPath).Hash.ToLowerInvariant()
+        if ($generatedFile.Length -ne $entry.bytes -or $generatedHash -cne [string]$entry.sha256) {
+            throw "TAR/gzip GNU long-name fuzz seed generator did not reproduce $($entry.path)"
+        }
+    }
+} finally {
+    if (Test-Path -LiteralPath $tarGzipGnuLongNameGenerationRoot) {
+        $resolvedTarGzipGnuLongNameGenerationRoot = [IO.Path]::GetFullPath($tarGzipGnuLongNameGenerationRoot)
+        $generationParent = [IO.Path]::GetDirectoryName($resolvedTarGzipGnuLongNameGenerationRoot)
+        $generationLeaf = [IO.Path]::GetFileName($resolvedTarGzipGnuLongNameGenerationRoot)
+        $expectedTemporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+            [IO.Path]::DirectorySeparatorChar,
+            [IO.Path]::AltDirectorySeparatorChar
+        )
+        if ($generationParent -cne $expectedTemporaryParent -or
+            $generationLeaf -notmatch '^sealr-tar-gzip-gnu-longname-fuzz-seeds-[0-9a-f]{32}$') {
+            throw "refusing to remove unexpected TAR/gzip GNU long-name fuzz generation path: $resolvedTarGzipGnuLongNameGenerationRoot"
+        }
+        Remove-Item -LiteralPath $resolvedTarGzipGnuLongNameGenerationRoot -Recurse -Force
+    }
+}
+if ([string]$tarZstdManifest.generator -cne 'fuzz/generate_tar_zstd_fuzz_seeds.ps1') {
+    throw 'TAR/zstd fuzz seed generator path changed unexpectedly'
+}
+$generatedTarZstdSeeds = @(
+    $tarZstdManifest.seeds | Where-Object { $_.generated -is [bool] -and $_.generated }
+)
+if ($generatedTarZstdSeeds.Count -ne 15 -or
+    @($tarZstdManifest.seeds | Where-Object { $_.generated -isnot [bool] }).Count -ne 0 -or
+    @($tarZstdManifest.seeds | Where-Object { $_.generated -is [bool] -and -not $_.generated }).Count -ne 0) {
+    throw 'TAR/zstd fuzz seeds must classify exactly 15 generated entries'
+}
+$requiredTarZstdSeeds = @(
+    'invalid-checksum-lie'
+    'invalid-concatenated-frames'
+    'invalid-fcs-lie'
+    'invalid-inner-not-tar'
+    'invalid-trailing-byte'
+    'resource-derived-over-cap'
+    'unsupported-dictionary-bit'
+    'unsupported-skippable-frame'
+    'unsupported-window-over-cap'
+    'valid-cli-default-single-segment'
+    'valid-cli-level19-single-segment'
+    'valid-empty-ustar-windowed'
+    'valid-ordinary-ustar-windowed'
+    'valid-single-segment-fcs'
+    'valid-two-raw-blocks'
+)
+$actualTarZstdSeedNames = @(
+    $tarZstdManifest.seeds.path |
+        ForEach-Object { [IO.Path]::GetFileName([string]$_) }
+)
+foreach ($requiredSeed in $requiredTarZstdSeeds) {
+    if (@($actualTarZstdSeedNames | Where-Object { $_ -ceq $requiredSeed }).Count -ne 1) {
+        throw "TAR/zstd corpus must contain exactly one required seed: $requiredSeed"
+    }
+}
+$tarZstdGenerator = Join-Path $workspace ([string]$tarZstdManifest.generator)
+$tarZstdGenerationRoot = Join-Path (
+    [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar
+    )
+) ("sealr-tar-zstd-fuzz-seeds-{0}" -f [Guid]::NewGuid().ToString('N'))
+try {
+    & $tarZstdGenerator -OutputDirectory $tarZstdGenerationRoot
+    $actualGeneratedTarZstdNames = @(
+        Get-ChildItem -LiteralPath $tarZstdGenerationRoot -File |
+            ForEach-Object Name |
+            Sort-Object
+    )
+    $expectedGeneratedTarZstdNames = @(
+        $generatedTarZstdSeeds.path |
+            ForEach-Object { [IO.Path]::GetFileName([string]$_) } |
+            Sort-Object
+    )
+    if ($actualGeneratedTarZstdNames.Count -ne $expectedGeneratedTarZstdNames.Count -or
+        @(Compare-Object $actualGeneratedTarZstdNames $expectedGeneratedTarZstdNames).Count -ne 0) {
+        throw 'TAR/zstd fuzz seed generator produced a different exact file set'
+    }
+    foreach ($entry in $generatedTarZstdSeeds) {
+        $generatedPath = Join-Path $tarZstdGenerationRoot ([IO.Path]::GetFileName([string]$entry.path))
+        $generatedFile = Get-Item -LiteralPath $generatedPath
+        $generatedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $generatedPath).Hash.ToLowerInvariant()
+        if ($generatedFile.Length -ne $entry.bytes -or $generatedHash -cne [string]$entry.sha256) {
+            throw "TAR/zstd fuzz seed generator did not reproduce $($entry.path)"
+        }
+    }
+} finally {
+    if (Test-Path -LiteralPath $tarZstdGenerationRoot) {
+        $resolvedTarZstdGenerationRoot = [IO.Path]::GetFullPath($tarZstdGenerationRoot)
+        $generationParent = [IO.Path]::GetDirectoryName($resolvedTarZstdGenerationRoot)
+        $generationLeaf = [IO.Path]::GetFileName($resolvedTarZstdGenerationRoot)
+        $expectedTemporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+            [IO.Path]::DirectorySeparatorChar,
+            [IO.Path]::AltDirectorySeparatorChar
+        )
+        if ($generationParent -cne $expectedTemporaryParent -or
+            $generationLeaf -notmatch '^sealr-tar-zstd-fuzz-seeds-[0-9a-f]{32}$') {
+            throw "refusing to remove unexpected TAR/zstd fuzz generation path: $resolvedTarZstdGenerationRoot"
+        }
+        Remove-Item -LiteralPath $resolvedTarZstdGenerationRoot -Recurse -Force
     }
 }
 if ([string]$zip64Manifest.generator -cne 'fuzz/generate_zip64_fuzz_seeds.ps1') {
@@ -823,6 +1511,93 @@ try {
     }
 }
 
+if ([string]$tarGnuLongNameManifest.generator -cne 'fuzz/generate_tar_gnu_longname_fuzz_seeds.ps1') {
+    throw 'TAR GNU long-name fuzz seed generator path changed unexpectedly'
+}
+$generatedTarGnuLongNameSeeds = @(
+    $tarGnuLongNameManifest.seeds |
+        Where-Object { $_.generated -is [bool] -and $_.generated }
+)
+if ($generatedTarGnuLongNameSeeds.Count -ne 16 -or
+    @($tarGnuLongNameManifest.seeds | Where-Object { $_.generated -isnot [bool] }).Count -ne 0 -or
+    @($tarGnuLongNameManifest.seeds | Where-Object { $_.generated -is [bool] -and -not $_.generated }).Count -ne 0) {
+    throw 'TAR GNU long-name fuzz seeds must classify exactly 16 generated entries'
+}
+$requiredTarGnuLongNameSeeds = @(
+    'invalid-base256-size'
+    'invalid-chained-carrier'
+    'invalid-embedded-nul'
+    'invalid-missing-final-nul'
+    'invalid-nonzero-carrier-padding'
+    'invalid-orphan-carrier'
+    'invalid-oversized-carrier'
+    'unsupported-cve-2026-53655-pax-gnu-state'
+    'unsupported-long-link-k'
+    'unsupported-sparse'
+    'valid-empty-oldgnu'
+    'valid-gnu-longlink'
+    'valid-libarchive-longname'
+    'valid-ordinary-oldgnu'
+    'valid-short-redundant-carrier'
+    'valid-two-carrier-pairs'
+)
+$actualTarGnuLongNameSeedNames = @(
+    $tarGnuLongNameManifest.seeds.path |
+        ForEach-Object { [IO.Path]::GetFileName([string]$_) }
+)
+foreach ($requiredSeed in $requiredTarGnuLongNameSeeds) {
+    if (@($actualTarGnuLongNameSeedNames | Where-Object { $_ -ceq $requiredSeed }).Count -ne 1) {
+        throw "TAR GNU long-name corpus must contain exactly one required seed: $requiredSeed"
+    }
+}
+$tarGnuLongNameGenerator = Join-Path $workspace ([string]$tarGnuLongNameManifest.generator)
+$tarGnuLongNameGenerationRoot = Join-Path (
+    [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar
+    )
+) ("sealr-tar-gnu-longname-fuzz-seeds-{0}" -f [Guid]::NewGuid().ToString('N'))
+try {
+    & $tarGnuLongNameGenerator -OutputDirectory $tarGnuLongNameGenerationRoot
+    $actualGeneratedTarGnuLongNameNames = @(
+        Get-ChildItem -LiteralPath $tarGnuLongNameGenerationRoot -File |
+            ForEach-Object Name |
+            Sort-Object
+    )
+    $expectedGeneratedTarGnuLongNameNames = @(
+        $generatedTarGnuLongNameSeeds.path |
+            ForEach-Object { [IO.Path]::GetFileName([string]$_) } |
+            Sort-Object
+    )
+    if ($actualGeneratedTarGnuLongNameNames.Count -ne $expectedGeneratedTarGnuLongNameNames.Count -or
+        @(Compare-Object $actualGeneratedTarGnuLongNameNames $expectedGeneratedTarGnuLongNameNames).Count -ne 0) {
+        throw 'TAR GNU long-name fuzz seed generator produced a different exact file set'
+    }
+    foreach ($entry in $generatedTarGnuLongNameSeeds) {
+        $generatedPath = Join-Path $tarGnuLongNameGenerationRoot ([IO.Path]::GetFileName([string]$entry.path))
+        $generatedFile = Get-Item -LiteralPath $generatedPath
+        $generatedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $generatedPath).Hash.ToLowerInvariant()
+        if ($generatedFile.Length -ne $entry.bytes -or $generatedHash -cne [string]$entry.sha256) {
+            throw "TAR GNU long-name fuzz seed generator did not reproduce $($entry.path)"
+        }
+    }
+} finally {
+    if (Test-Path -LiteralPath $tarGnuLongNameGenerationRoot) {
+        $resolvedTarGnuLongNameGenerationRoot = [IO.Path]::GetFullPath($tarGnuLongNameGenerationRoot)
+        $generationParent = [IO.Path]::GetDirectoryName($resolvedTarGnuLongNameGenerationRoot)
+        $generationLeaf = [IO.Path]::GetFileName($resolvedTarGnuLongNameGenerationRoot)
+        $expectedTemporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+            [IO.Path]::DirectorySeparatorChar,
+            [IO.Path]::AltDirectorySeparatorChar
+        )
+        if ($generationParent -cne $expectedTemporaryParent -or
+            $generationLeaf -notmatch '^sealr-tar-gnu-longname-fuzz-seeds-[0-9a-f]{32}$') {
+            throw "refusing to remove unexpected TAR GNU long-name fuzz generation path: $resolvedTarGnuLongNameGenerationRoot"
+        }
+        Remove-Item -LiteralPath $resolvedTarGnuLongNameGenerationRoot -Recurse -Force
+    }
+}
+
 $fuzzCargo = Get-Content -Raw -LiteralPath (Join-Path $workspace 'fuzz/Cargo.toml')
 $fuzzLock = Get-Content -Raw -LiteralPath (Join-Path $workspace 'fuzz/Cargo.lock')
 $semanticTarget = Get-Content -Raw -LiteralPath (
@@ -834,11 +1609,23 @@ $tarTarget = Get-Content -Raw -LiteralPath (
 $tarPaxTarget = Get-Content -Raw -LiteralPath (
     Join-Path $workspace 'fuzz/fuzz_targets/tar_pax_portable_v1.rs'
 )
+$tarGnuLongNameTarget = Get-Content -Raw -LiteralPath (
+    Join-Path $workspace 'fuzz/fuzz_targets/tar_gnu_longname_portable_v1.rs'
+)
 $gzipTarget = Get-Content -Raw -LiteralPath (
     Join-Path $workspace 'fuzz/fuzz_targets/gzip_rfc1952_single_member_v1.rs'
 )
 $tarGzipTarget = Get-Content -Raw -LiteralPath (
     Join-Path $workspace 'fuzz/fuzz_targets/tar_gzip_ustar_portable_v1.rs'
+)
+$tarGzipPaxTarget = Get-Content -Raw -LiteralPath (
+    Join-Path $workspace 'fuzz/fuzz_targets/tar_gzip_pax_portable_v1.rs'
+)
+$tarGzipGnuLongNameTarget = Get-Content -Raw -LiteralPath (
+    Join-Path $workspace 'fuzz/fuzz_targets/tar_gzip_gnu_longname_portable_v1.rs'
+)
+$tarZstdTarget = Get-Content -Raw -LiteralPath (
+    Join-Path $workspace 'fuzz/fuzz_targets/tar_zstd_ustar_portable_v1.rs'
 )
 $zip64Target = Get-Content -Raw -LiteralPath (
     Join-Path $workspace 'fuzz/fuzz_targets/zip64_strict_ascii_v1.rs'
@@ -1075,13 +1862,17 @@ function Assert-FuzzMetadataBinding {
         'gzip_rfc1952_single_member_v1'
         'protocol_decoders'
         'semantic_records'
+        'tar_gnu_longname_portable_v1'
+        'tar_gzip_gnu_longname_portable_v1'
+        'tar_gzip_pax_portable_v1'
         'tar_gzip_ustar_portable_v1'
         'tar_pax_portable_v1'
         'tar_ustar_portable_v1'
+        'tar_zstd_ustar_portable_v1'
         'zip64_strict_ascii_v1'
     )
     if (($targetNames -join "`n") -cne ($expectedTargetNames -join "`n")) {
-        throw 'Cargo metadata must contain exactly the gzip, protocol, semantic, TAR, PAX, TAR/gzip, and ZIP64 fuzz targets'
+        throw 'Cargo metadata must contain exactly the gzip, protocol, semantic, TAR, PAX, GNU long-name TAR, TAR/gzip, TAR/gzip PAX, TAR/gzip GNU long-name, TAR/zstd, and ZIP64 fuzz targets'
     }
     $manifestDirectory = Split-Path ([IO.Path]::GetFullPath($ManifestPath)) -Parent
     foreach ($targetContract in @(
@@ -1102,12 +1893,28 @@ function Assert-FuzzMetadataBinding {
             RelativePath = 'fuzz_targets/tar_pax_portable_v1.rs'
         }
         @{
+            Name = 'tar_gnu_longname_portable_v1'
+            RelativePath = 'fuzz_targets/tar_gnu_longname_portable_v1.rs'
+        }
+        @{
             Name = 'gzip_rfc1952_single_member_v1'
             RelativePath = 'fuzz_targets/gzip_rfc1952_single_member_v1.rs'
         }
         @{
             Name = 'tar_gzip_ustar_portable_v1'
             RelativePath = 'fuzz_targets/tar_gzip_ustar_portable_v1.rs'
+        }
+        @{
+            Name = 'tar_gzip_pax_portable_v1'
+            RelativePath = 'fuzz_targets/tar_gzip_pax_portable_v1.rs'
+        }
+        @{
+            Name = 'tar_gzip_gnu_longname_portable_v1'
+            RelativePath = 'fuzz_targets/tar_gzip_gnu_longname_portable_v1.rs'
+        }
+        @{
+            Name = 'tar_zstd_ustar_portable_v1'
+            RelativePath = 'fuzz_targets/tar_zstd_ustar_portable_v1.rs'
         }
         @{
             Name = 'zip64_strict_ascii_v1'
@@ -1306,6 +2113,31 @@ function Assert-TarPaxFuzzTargetSource {
     }
 }
 
+function Assert-TarGnuLongNameFuzzTargetSource {
+    param([Parameter(Mandatory)] [string] $TargetSource)
+
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($TargetSource)
+    $digest = [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData($bytes)
+    ).ToLowerInvariant()
+    if ($bytes.Length -ne $tarGnuLongNameManifest.targetSource.bytes -or
+        $digest -cne [string]$tarGnuLongNameManifest.targetSource.sha256) {
+        throw 'TAR GNU long-name fuzz target source differs from its digest-pinned contract'
+    }
+    $expectedSource = @(
+        '#![no_main]'
+        ''
+        'use libfuzzer_sys::fuzz_target;'
+        ''
+        'fuzz_target!(|input: &[u8]| {'
+        '    sealr::__fuzz_tar_gnu_longname_portable_v1(input);'
+        '});'
+    ) -join "`n"
+    if ((Normalize-WorkflowBlock $TargetSource) -cne $expectedSource) {
+        throw 'TAR GNU long-name fuzz target source must call the exact hidden Sealr driver'
+    }
+}
+
 function Assert-GzipFuzzTargetSource {
     param([Parameter(Mandatory)] [string] $TargetSource)
 
@@ -1364,6 +2196,141 @@ function Assert-TarGzipFuzzTargetSource {
     foreach ($forbidden in @('dest: Some(', '__fuzz_tar_', 'unsafe {')) {
         if ($TargetSource.Contains($forbidden, [StringComparison]::Ordinal)) {
             throw "TAR/gzip public fuzz target contains forbidden source: $forbidden"
+        }
+    }
+}
+
+function Assert-TarGzipPaxFuzzTargetSource {
+    param([Parameter(Mandatory)] [string] $TargetSource)
+
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($TargetSource)
+    $digest = [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData($bytes)
+    ).ToLowerInvariant()
+    if ($bytes.Length -ne $tarGzipPaxManifest.targetSource.bytes -or
+        $digest -cne [string]$tarGzipPaxManifest.targetSource.sha256) {
+        throw 'TAR/gzip PAX fuzz target source differs from its digest-pinned contract'
+    }
+    foreach ($contract in @(
+        @{ Token = 'fuzz_target!(|input: &[u8]| {'; Count = 1 }
+        @{ Token = 'apply_with_options('; Count = 1 }
+        @{ Token = 'Policy::default_v7()'; Count = 1 }
+        @{ Token = 'policy.max_archive_bytes = MAX_INPUT_BYTES as u64;'; Count = 1 }
+        @{ Token = 'policy.max_derived_archive_bytes = Some(131_072);'; Count = 1 }
+        @{ Token = 'policy.max_metadata_bytes = 32_768;'; Count = 1 }
+        @{ Token = 'policy.max_files = 64;'; Count = 1 }
+        @{ Token = 'policy.max_member_bytes = 32_768;'; Count = 1 }
+        @{ Token = 'policy.max_total_bytes = 65_536;'; Count = 1 }
+        @{ Token = 'policy.max_path_depth = 16;'; Count = 1 }
+        @{ Token = 'policy.max_ratio = Some(32);'; Count = 1 }
+        @{ Token = '.with_tar_gzip_interpretation_profile(TarGzipInterpretationProfile::PaxPortableV1)'; Count = 1 }
+        @{ Token = 'dest: None,'; Count = 1 }
+        @{ Token = 'let first = inspect();'; Count = 1 }
+        @{ Token = 'let second = inspect();'; Count = 1 }
+        @{ Token = 'format!("{:?}", first.archive_ir())'; Count = 1 }
+        @{ Token = 'assert_eq!(ir.format(), ArchiveFormat::TarGzipPax);'; Count = 1 }
+    )) {
+        $count = [regex]::Matches(
+            $TargetSource,
+            [regex]::Escape([string]$contract.Token)
+        ).Count
+        if ($count -ne [int]$contract.Count) {
+            throw "TAR/gzip PAX fuzz target must contain exactly $($contract.Count) live contract token(s): $($contract.Token)"
+        }
+    }
+    foreach ($forbidden in @('dest: Some(', '__fuzz_tar_', 'unsafe {')) {
+        if ($TargetSource.Contains($forbidden, [StringComparison]::Ordinal)) {
+            throw "TAR/gzip PAX public fuzz target contains forbidden source: $forbidden"
+        }
+    }
+}
+
+function Assert-TarGzipGnuLongNameFuzzTargetSource {
+    param([Parameter(Mandatory)] [string] $TargetSource)
+
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($TargetSource)
+    $digest = [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData($bytes)
+    ).ToLowerInvariant()
+    if ($bytes.Length -ne $tarGzipGnuLongNameManifest.targetSource.bytes -or
+        $digest -cne [string]$tarGzipGnuLongNameManifest.targetSource.sha256) {
+        throw 'TAR/gzip GNU long-name fuzz target source differs from its digest-pinned contract'
+    }
+    foreach ($contract in @(
+        @{ Token = 'fuzz_target!(|input: &[u8]| {'; Count = 1 }
+        @{ Token = 'apply_with_options('; Count = 1 }
+        @{ Token = 'Policy::default_v7()'; Count = 1 }
+        @{ Token = 'policy.max_archive_bytes = MAX_INPUT_BYTES as u64;'; Count = 1 }
+        @{ Token = 'policy.max_derived_archive_bytes = Some(131_072);'; Count = 1 }
+        @{ Token = 'policy.max_metadata_bytes = 32_768;'; Count = 1 }
+        @{ Token = 'policy.max_files = 64;'; Count = 1 }
+        @{ Token = 'policy.max_member_bytes = 32_768;'; Count = 1 }
+        @{ Token = 'policy.max_total_bytes = 65_536;'; Count = 1 }
+        @{ Token = 'policy.max_path_depth = 16;'; Count = 1 }
+        @{ Token = 'policy.max_ratio = Some(32);'; Count = 1 }
+        @{ Token = '.with_tar_gzip_interpretation_profile(TarGzipInterpretationProfile::GnuLongNamePortableV1)'; Count = 1 }
+        @{ Token = 'dest: None,'; Count = 1 }
+        @{ Token = 'let first = inspect();'; Count = 1 }
+        @{ Token = 'let second = inspect();'; Count = 1 }
+        @{ Token = 'format!("{:?}", first.archive_ir())'; Count = 1 }
+        @{ Token = 'assert_eq!(ir.format(), ArchiveFormat::TarGzipGnuLongName);'; Count = 1 }
+    )) {
+        $count = [regex]::Matches(
+            $TargetSource,
+            [regex]::Escape([string]$contract.Token)
+        ).Count
+        if ($count -ne [int]$contract.Count) {
+            throw "TAR/gzip GNU long-name fuzz target must contain exactly $($contract.Count) live contract token(s): $($contract.Token)"
+        }
+    }
+    foreach ($forbidden in @('dest: Some(', '__fuzz_tar_', 'unsafe {')) {
+        if ($TargetSource.Contains($forbidden, [StringComparison]::Ordinal)) {
+            throw "TAR/gzip GNU long-name public fuzz target contains forbidden source: $forbidden"
+        }
+    }
+}
+
+function Assert-TarZstdFuzzTargetSource {
+    param([Parameter(Mandatory)] [string] $TargetSource)
+
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($TargetSource)
+    $digest = [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData($bytes)
+    ).ToLowerInvariant()
+    if ($bytes.Length -ne $tarZstdManifest.targetSource.bytes -or
+        $digest -cne [string]$tarZstdManifest.targetSource.sha256) {
+        throw 'TAR/zstd fuzz target source differs from its digest-pinned contract'
+    }
+    foreach ($contract in @(
+        @{ Token = 'fuzz_target!(|input: &[u8]| {'; Count = 1 }
+        @{ Token = 'apply_with_options('; Count = 1 }
+        @{ Token = 'Policy::default_v8()'; Count = 1 }
+        @{ Token = 'policy.max_archive_bytes = MAX_INPUT_BYTES as u64;'; Count = 1 }
+        @{ Token = 'policy.max_derived_archive_bytes = Some(131_072);'; Count = 1 }
+        @{ Token = 'policy.max_metadata_bytes = 32_768;'; Count = 1 }
+        @{ Token = 'policy.max_files = 64;'; Count = 1 }
+        @{ Token = 'policy.max_member_bytes = 32_768;'; Count = 1 }
+        @{ Token = 'policy.max_total_bytes = 65_536;'; Count = 1 }
+        @{ Token = 'policy.max_path_depth = 16;'; Count = 1 }
+        @{ Token = 'policy.max_ratio = Some(32);'; Count = 1 }
+        @{ Token = '.with_tar_zstd_interpretation_profile(TarZstdInterpretationProfile::UstarPortableV1)'; Count = 1 }
+        @{ Token = 'dest: None,'; Count = 1 }
+        @{ Token = 'let first = inspect();'; Count = 1 }
+        @{ Token = 'let second = inspect();'; Count = 1 }
+        @{ Token = 'format!("{:?}", first.archive_ir())'; Count = 1 }
+        @{ Token = 'assert_eq!(ir.format(), ArchiveFormat::TarZstdUstar);'; Count = 1 }
+    )) {
+        $count = [regex]::Matches(
+            $TargetSource,
+            [regex]::Escape([string]$contract.Token)
+        ).Count
+        if ($count -ne [int]$contract.Count) {
+            throw "TAR/zstd fuzz target must contain exactly $($contract.Count) live contract token(s): $($contract.Token)"
+        }
+    }
+    foreach ($forbidden in @('dest: Some(', '__fuzz_tar_', 'unsafe {')) {
+        if ($TargetSource.Contains($forbidden, [StringComparison]::Ordinal)) {
+            throw "TAR/zstd public fuzz target contains forbidden source: $forbidden"
         }
     }
 }
@@ -1452,6 +2419,13 @@ function Assert-FuzzCargoManifestContract {
         'bench = false'
         ''
         '[[bin]]'
+        'name = "tar_gnu_longname_portable_v1"'
+        'path = "fuzz_targets/tar_gnu_longname_portable_v1.rs"'
+        'test = false'
+        'doc = false'
+        'bench = false'
+        ''
+        '[[bin]]'
         'name = "gzip_rfc1952_single_member_v1"'
         'path = "fuzz_targets/gzip_rfc1952_single_member_v1.rs"'
         'test = false'
@@ -1468,6 +2442,27 @@ function Assert-FuzzCargoManifestContract {
         '[[bin]]'
         'name = "tar_gzip_ustar_portable_v1"'
         'path = "fuzz_targets/tar_gzip_ustar_portable_v1.rs"'
+        'test = false'
+        'doc = false'
+        'bench = false'
+        ''
+        '[[bin]]'
+        'name = "tar_gzip_pax_portable_v1"'
+        'path = "fuzz_targets/tar_gzip_pax_portable_v1.rs"'
+        'test = false'
+        'doc = false'
+        'bench = false'
+        ''
+        '[[bin]]'
+        'name = "tar_gzip_gnu_longname_portable_v1"'
+        'path = "fuzz_targets/tar_gzip_gnu_longname_portable_v1.rs"'
+        'test = false'
+        'doc = false'
+        'bench = false'
+        ''
+        '[[bin]]'
+        'name = "tar_zstd_ustar_portable_v1"'
+        'path = "fuzz_targets/tar_zstd_ustar_portable_v1.rs"'
         'test = false'
         'doc = false'
         'bench = false'
@@ -1501,8 +2496,12 @@ Assert-FuzzMetadataBinding `
 Assert-SemanticFuzzTargetSource -TargetSource $semanticTarget
 Assert-TarFuzzTargetSource -TargetSource $tarTarget
 Assert-TarPaxFuzzTargetSource -TargetSource $tarPaxTarget
+Assert-TarGnuLongNameFuzzTargetSource -TargetSource $tarGnuLongNameTarget
 Assert-GzipFuzzTargetSource -TargetSource $gzipTarget
 Assert-TarGzipFuzzTargetSource -TargetSource $tarGzipTarget
+Assert-TarGzipPaxFuzzTargetSource -TargetSource $tarGzipPaxTarget
+Assert-TarGzipGnuLongNameFuzzTargetSource -TargetSource $tarGzipGnuLongNameTarget
+Assert-TarZstdFuzzTargetSource -TargetSource $tarZstdTarget
 Assert-Zip64FuzzTargetSource -TargetSource $zip64Target
 Assert-FuzzCargoManifestContract -CargoManifest $fuzzCargo
 
@@ -1581,6 +2580,49 @@ foreach ($mutation in @(
     }
 }
 
+function Copy-TarGnuLongNameManifest {
+    return $tarGnuLongNameManifest | ConvertTo-Json -Depth 100 | ConvertFrom-Json -Depth 100
+}
+
+foreach ($mutation in @(
+    @{
+        Label = 'inert manifest evidence'
+        Apply = { param($candidate) $candidate | Add-Member -NotePropertyName inertEvidence -NotePropertyValue $true }
+    }
+    @{
+        Label = 'duplicate seed path'
+        Apply = { param($candidate) $candidate.seeds[1].path = $candidate.seeds[0].path }
+    }
+    @{
+        Label = 'weakened manifest input bound'
+        Apply = { param($candidate) $candidate.bounds.maxInputBytes = 8388608 }
+    }
+    @{
+        Label = 'disabled sanitizer'
+        Apply = { param($candidate) $candidate.sanitizer = 'none' }
+    }
+    @{
+        Label = 'drifted dictionary digest'
+        Apply = { param($candidate) $candidate.dictionary.sha256 = '00' * 32 }
+    }
+    @{
+        Label = 'drifted failure artifact'
+        Apply = { param($candidate) $candidate.failureArtifact.directoryName = 'wrong-artifacts' }
+    }
+)) {
+    $candidate = Copy-TarGnuLongNameManifest
+    & $mutation.Apply $candidate
+    $rejected = $false
+    try {
+        Assert-TarGnuLongNameManifestContract -Candidate $candidate
+    } catch {
+        $rejected = $true
+    }
+    if (-not $rejected) {
+        throw "TAR GNU long-name manifest verifier accepted its $($mutation.Label) fixture"
+    }
+}
+
 $temporaryBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
     [IO.Path]::DirectorySeparatorChar,
     [IO.Path]::AltDirectorySeparatorChar
@@ -1646,6 +2688,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = 'tar_gnu_longname_portable_v1'
+path = 'fuzz_targets/tar_gnu_longname_portable_v1.rs'
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = 'gzip_rfc1952_single_member_v1'
 path = 'fuzz_targets/gzip_rfc1952_single_member_v1.rs'
 test = false
@@ -1655,6 +2704,34 @@ bench = false
 [[bin]]
 name = 'zip64_strict_ascii_v1'
 path = 'fuzz_targets/zip64_strict_ascii_v1.rs'
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = 'tar_gzip_ustar_portable_v1'
+path = 'fuzz_targets/tar_gzip_ustar_portable_v1.rs'
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = 'tar_gzip_pax_portable_v1'
+path = 'fuzz_targets/tar_gzip_pax_portable_v1.rs'
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = 'tar_gzip_gnu_longname_portable_v1'
+path = 'fuzz_targets/tar_gzip_gnu_longname_portable_v1.rs'
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = 'tar_zstd_ustar_portable_v1'
+path = 'fuzz_targets/tar_zstd_ustar_portable_v1.rs'
 test = false
 doc = false
 bench = false
@@ -1687,6 +2764,11 @@ bench = false
         [Text.UTF8Encoding]::new($false)
     )
     [IO.File]::WriteAllText(
+        (Join-Path $temporaryFixture 'fuzz_targets/tar_gnu_longname_portable_v1.rs'),
+        "fn main() {}`n",
+        [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
         (Join-Path $temporaryFixture 'fuzz_targets/gzip_rfc1952_single_member_v1.rs'),
         "fn main() {}`n",
         [Text.UTF8Encoding]::new($false)
@@ -1698,6 +2780,21 @@ bench = false
     )
     [IO.File]::WriteAllText(
         (Join-Path $temporaryFixture 'fuzz_targets/tar_gzip_ustar_portable_v1.rs'),
+        "fn main() {}`n",
+        [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+        (Join-Path $temporaryFixture 'fuzz_targets/tar_gzip_pax_portable_v1.rs'),
+        "fn main() {}`n",
+        [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+        (Join-Path $temporaryFixture 'fuzz_targets/tar_gzip_gnu_longname_portable_v1.rs'),
+        "fn main() {}`n",
+        [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+        (Join-Path $temporaryFixture 'fuzz_targets/tar_zstd_ustar_portable_v1.rs'),
         "fn main() {}`n",
         [Text.UTF8Encoding]::new($false)
     )
@@ -1772,6 +2869,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "tar_gnu_longname_portable_v1"
+path = "fuzz_targets/tar_gnu_longname_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "gzip_rfc1952_single_member_v1"
 path = "fuzz_targets/gzip_rfc1952_single_member_v1.rs"
 test = false
@@ -1788,6 +2892,27 @@ bench = false
 [[bin]]
 name = "tar_gzip_ustar_portable_v1"
 path = "fuzz_targets/tar_gzip_ustar_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_gzip_pax_portable_v1"
+path = "fuzz_targets/tar_gzip_pax_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_gzip_gnu_longname_portable_v1"
+path = "fuzz_targets/tar_gzip_gnu_longname_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_zstd_ustar_portable_v1"
+path = "fuzz_targets/tar_zstd_ustar_portable_v1.rs"
 test = false
 doc = false
 bench = false
@@ -1873,9 +2998,13 @@ $protocolJob = Get-WorkflowJobBlock -Content $workflow -JobName 'protocol'
 $semanticJob = Get-WorkflowJobBlock -Content $workflow -JobName 'semantic'
 $tarJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_ustar'
 $tarPaxJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_pax'
+$tarGnuLongNameJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_gnu_longname'
 $gzipJob = Get-WorkflowJobBlock -Content $workflow -JobName 'gzip'
 $tarGzipJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_gzip_ustar'
 $zip64Job = Get-WorkflowJobBlock -Content $workflow -JobName 'zip64'
+$tarGzipPaxJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_gzip_pax'
+$tarGzipGnuLongNameJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_gzip_gnu_longname'
+$tarZstdJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_zstd_ustar'
 Assert-FuzzJobContract `
     -JobBlock $protocolJob `
     -JobManifest $manifest `
@@ -1905,6 +3034,13 @@ Assert-FuzzJobContract `
     -FuzzStepName 'Fuzz bounded raw POSIX PAX' `
     -ReproducerName 'tar-pax-reproducer'
 Assert-FuzzJobContract `
+    -JobBlock $tarGnuLongNameJob `
+    -JobManifest $tarGnuLongNameManifest `
+    -JobName 'tar_gnu_longname' `
+    -JobDisplayName 'Bounded raw GNU long-name TAR' `
+    -FuzzStepName 'Fuzz bounded raw GNU long-name TAR' `
+    -ReproducerName 'tar-gnu-longname-reproducer'
+Assert-FuzzJobContract `
     -JobBlock $gzipJob `
     -JobManifest $gzipManifest `
     -JobName 'gzip' `
@@ -1925,6 +3061,27 @@ Assert-FuzzJobContract `
     -JobDisplayName 'Bounded strict ZIP64' `
     -FuzzStepName 'Fuzz bounded strict ZIP64 planning' `
     -ReproducerName 'zip64-strict-reproducer'
+Assert-FuzzJobContract `
+    -JobBlock $tarGzipPaxJob `
+    -JobManifest $tarGzipPaxManifest `
+    -JobName 'tar_gzip_pax' `
+    -JobDisplayName 'Bounded gzip-wrapped restricted PAX TAR' `
+    -FuzzStepName 'Fuzz bounded gzip-wrapped restricted PAX TAR' `
+    -ReproducerName 'tar-gzip-pax-reproducer'
+Assert-FuzzJobContract `
+    -JobBlock $tarGzipGnuLongNameJob `
+    -JobManifest $tarGzipGnuLongNameManifest `
+    -JobName 'tar_gzip_gnu_longname' `
+    -JobDisplayName 'Bounded gzip-wrapped GNU long-name TAR' `
+    -FuzzStepName 'Fuzz bounded gzip-wrapped GNU long-name TAR' `
+    -ReproducerName 'tar-gzip-gnu-longname-reproducer'
+Assert-FuzzJobContract `
+    -JobBlock $tarZstdJob `
+    -JobManifest $tarZstdManifest `
+    -JobName 'tar_zstd_ustar' `
+    -JobDisplayName 'Bounded zstd-wrapped portable ustar TAR' `
+    -FuzzStepName 'Fuzz bounded zstd-wrapped portable ustar TAR' `
+    -ReproducerName 'tar-zstd-ustar-reproducer'
 
 function Assert-FuzzWorkflowContract {
     param(
@@ -1933,9 +3090,13 @@ function Assert-FuzzWorkflowContract {
         [Parameter(Mandatory)] [string] $ExpectedSemanticJob,
         [Parameter(Mandatory)] [string] $ExpectedTarJob,
         [Parameter(Mandatory)] [string] $ExpectedTarPaxJob,
+        [Parameter(Mandatory)] [string] $ExpectedTarGnuLongNameJob,
         [Parameter(Mandatory)] [string] $ExpectedGzipJob,
         [Parameter(Mandatory)] [string] $ExpectedTarGzipJob,
-        [Parameter(Mandatory)] [string] $ExpectedZip64Job
+        [Parameter(Mandatory)] [string] $ExpectedZip64Job,
+        [Parameter(Mandatory)] [string] $ExpectedTarGzipPaxJob,
+        [Parameter(Mandatory)] [string] $ExpectedTarGzipGnuLongNameJob,
+        [Parameter(Mandatory)] [string] $ExpectedTarZstdJob
     )
 
     $expectedHeader = @(
@@ -1960,9 +3121,13 @@ function Assert-FuzzWorkflowContract {
         (Normalize-WorkflowBlock $ExpectedSemanticJob) + "`n`n" +
         (Normalize-WorkflowBlock $ExpectedTarJob) + "`n`n" +
         (Normalize-WorkflowBlock $ExpectedTarPaxJob) + "`n`n" +
+        (Normalize-WorkflowBlock $ExpectedTarGnuLongNameJob) + "`n`n" +
         (Normalize-WorkflowBlock $ExpectedGzipJob) + "`n`n" +
         (Normalize-WorkflowBlock $ExpectedTarGzipJob) + "`n`n" +
-        (Normalize-WorkflowBlock $ExpectedZip64Job)
+        (Normalize-WorkflowBlock $ExpectedZip64Job) + "`n`n" +
+        (Normalize-WorkflowBlock $ExpectedTarGzipPaxJob) + "`n`n" +
+        (Normalize-WorkflowBlock $ExpectedTarGzipGnuLongNameJob) + "`n`n" +
+        (Normalize-WorkflowBlock $ExpectedTarZstdJob)
     if ((Normalize-WorkflowBlock $CandidateWorkflow) -cne $expectedWorkflow) {
         throw 'Scheduled fuzz workflow must exactly match its trigger, authority, concurrency, and job contracts'
     }
@@ -1974,9 +3139,13 @@ Assert-FuzzWorkflowContract `
     -ExpectedSemanticJob $semanticJob `
     -ExpectedTarJob $tarJob `
     -ExpectedTarPaxJob $tarPaxJob `
+    -ExpectedTarGnuLongNameJob $tarGnuLongNameJob `
     -ExpectedGzipJob $gzipJob `
     -ExpectedTarGzipJob $tarGzipJob `
-    -ExpectedZip64Job $zip64Job
+    -ExpectedZip64Job $zip64Job `
+    -ExpectedTarGzipPaxJob $tarGzipPaxJob `
+    -ExpectedTarGzipGnuLongNameJob $tarGzipGnuLongNameJob `
+    -ExpectedTarZstdJob $tarZstdJob
 $manualOnlyWorkflow = [regex]::Replace(
     $workflow,
     '(?m)^  schedule:\r?\n    - cron: "31 8 \* \* 1"\r?\n',
@@ -1994,9 +3163,13 @@ try {
         -ExpectedSemanticJob $semanticJob `
         -ExpectedTarJob $tarJob `
         -ExpectedTarPaxJob $tarPaxJob `
+        -ExpectedTarGnuLongNameJob $tarGnuLongNameJob `
         -ExpectedGzipJob $gzipJob `
         -ExpectedTarGzipJob $tarGzipJob `
-        -ExpectedZip64Job $zip64Job
+        -ExpectedZip64Job $zip64Job `
+        -ExpectedTarGzipPaxJob $tarGzipPaxJob `
+        -ExpectedTarGzipGnuLongNameJob $tarGzipGnuLongNameJob `
+        -ExpectedTarZstdJob $tarZstdJob
 } catch {
     $manualOnlyRejected = $true
 }
@@ -2230,6 +3403,85 @@ Assert-TarPaxJobMutationRejected `
     -MutatedJob $inertArtifactTarPaxJob `
     -Label 'inert TAR PAX artifact evidence with a drifted upload path'
 
+function Assert-TarGnuLongNameJobMutationRejected {
+    param(
+        [Parameter(Mandatory)] [string] $MutatedJob,
+        [Parameter(Mandatory)] [string] $Label
+    )
+
+    if ($MutatedJob -ceq $tarGnuLongNameJob) {
+        throw "TAR GNU long-name fuzz verifier regression could not construct its $Label fixture"
+    }
+    try {
+        Assert-FuzzJobContract `
+            -JobBlock $MutatedJob `
+            -JobManifest $tarGnuLongNameManifest `
+            -JobName 'tar_gnu_longname' `
+            -JobDisplayName 'Bounded raw GNU long-name TAR' `
+            -FuzzStepName 'Fuzz bounded raw GNU long-name TAR' `
+            -ReproducerName 'tar-gnu-longname-reproducer'
+    } catch {
+        return
+    }
+    throw "TAR GNU long-name fuzz verifier accepted its $Label fixture"
+}
+
+$expectedTarGnuLongNameMaxLen = '-max_len={0} \' -f $tarGnuLongNameManifest.bounds.maxInputBytes
+$weakenedTarGnuLongNameJob = $tarGnuLongNameJob.Replace(
+    $expectedTarGnuLongNameMaxLen,
+    '-max_len=64 \'
+)
+Assert-TarGnuLongNameJobMutationRejected `
+    -MutatedJob $weakenedTarGnuLongNameJob `
+    -Label 'weakened input bound masked by other job tokens'
+
+$duplicateTarGnuLongNameJob = $tarGnuLongNameJob.Replace(
+    $expectedTarGnuLongNameMaxLen,
+    "$expectedTarGnuLongNameMaxLen`n            -max_len=64 \"
+)
+Assert-TarGnuLongNameJobMutationRejected `
+    -MutatedJob $duplicateTarGnuLongNameJob `
+    -Label 'duplicate last-wins input bound'
+
+$inactiveTarGnuLongNameJob = $tarGnuLongNameJob.Replace(
+    '          set -euo pipefail',
+    "          if false; then`n          set -euo pipefail"
+).Replace(
+    '            -print_final_stats=1',
+    "            -print_final_stats=1`n          fi`n          true"
+)
+Assert-TarGnuLongNameJobMutationRejected `
+    -MutatedJob $inactiveTarGnuLongNameJob `
+    -Label 'inactive command followed by a successful no-op'
+
+$secondCommandTarGnuLongNameJob = $tarGnuLongNameJob.Replace(
+    '            -print_final_stats=1',
+    "            -print_final_stats=1`n          true"
+)
+Assert-TarGnuLongNameJobMutationRejected `
+    -MutatedJob $secondCommandTarGnuLongNameJob `
+    -Label 'second fuzz-step command'
+
+$weakenedTarGnuLongNameSanitizer = $tarGnuLongNameJob.Replace(
+    '            --sanitizer address \',
+    '            --sanitizer none \'
+)
+Assert-TarGnuLongNameJobMutationRejected `
+    -MutatedJob $weakenedTarGnuLongNameSanitizer `
+    -Label 'weakened sanitizer'
+
+$expectedTarGnuLongNameArtifactPath = '          path: ${{ runner.temp }}/sealr-tar-gnu-longname-fuzz-artifacts/'
+$inertArtifactTarGnuLongNameJob = $tarGnuLongNameJob.Replace(
+    $expectedTarGnuLongNameArtifactPath,
+    '          path: ${{ runner.temp }}/wrong-artifacts/'
+).Replace(
+    '        with:',
+    "        env:`n          INERT_MANIFEST_EVIDENCE: |`n            $($expectedTarGnuLongNameArtifactPath.Trim())`n        with:"
+)
+Assert-TarGnuLongNameJobMutationRejected `
+    -MutatedJob $inertArtifactTarGnuLongNameJob `
+    -Label 'inert artifact evidence with a drifted upload path'
+
 function Assert-GzipJobMutationRejected {
     param(
         [Parameter(Mandatory)] [string] $MutatedJob,
@@ -2442,6 +3694,243 @@ Assert-Zip64JobMutationRejected `
     -MutatedJob $inertArtifactZip64Job `
     -Label 'inert ZIP64 artifact evidence with a drifted upload path'
 
+function Assert-TarGzipPaxJobMutationRejected {
+    param(
+        [Parameter(Mandatory)] [string] $MutatedJob,
+        [Parameter(Mandatory)] [string] $Label
+    )
+
+    if ($MutatedJob -ceq $tarGzipPaxJob) {
+        throw "TAR/gzip PAX fuzz verifier regression could not construct its $Label fixture"
+    }
+    try {
+        Assert-FuzzJobContract `
+            -JobBlock $MutatedJob `
+            -JobManifest $tarGzipPaxManifest `
+            -JobName 'tar_gzip_pax' `
+            -JobDisplayName 'Bounded gzip-wrapped restricted PAX TAR' `
+            -FuzzStepName 'Fuzz bounded gzip-wrapped restricted PAX TAR' `
+            -ReproducerName 'tar-gzip-pax-reproducer'
+    } catch {
+        return
+    }
+    throw "TAR/gzip PAX fuzz verifier accepted its $Label fixture"
+}
+
+$expectedTarGzipPaxMaxLen = '-max_len={0} \' -f $tarGzipPaxManifest.bounds.maxInputBytes
+$weakenedTarGzipPaxJob = $tarGzipPaxJob.Replace(
+    $expectedTarGzipPaxMaxLen,
+    '-max_len=524288 \'
+)
+Assert-TarGzipPaxJobMutationRejected `
+    -MutatedJob $weakenedTarGzipPaxJob `
+    -Label 'weakened input bound masked by other job tokens'
+
+$duplicateTarGzipPaxJob = $tarGzipPaxJob.Replace(
+    $expectedTarGzipPaxMaxLen,
+    "$expectedTarGzipPaxMaxLen`n            -max_len=524288 \"
+)
+Assert-TarGzipPaxJobMutationRejected `
+    -MutatedJob $duplicateTarGzipPaxJob `
+    -Label 'duplicate last-wins input bound'
+
+$inactiveTarGzipPaxJob = $tarGzipPaxJob.Replace(
+    '          set -euo pipefail',
+    "          if false; then`n          set -euo pipefail"
+).Replace(
+    '            -print_final_stats=1',
+    "            -print_final_stats=1`n          fi`n          true"
+)
+Assert-TarGzipPaxJobMutationRejected `
+    -MutatedJob $inactiveTarGzipPaxJob `
+    -Label 'inactive command followed by a successful no-op'
+
+$secondCommandTarGzipPaxJob = $tarGzipPaxJob.Replace(
+    '            -print_final_stats=1',
+    "            -print_final_stats=1`n          true"
+)
+Assert-TarGzipPaxJobMutationRejected `
+    -MutatedJob $secondCommandTarGzipPaxJob `
+    -Label 'second fuzz-step command'
+
+$weakenedTarGzipPaxSanitizer = $tarGzipPaxJob.Replace(
+    '            --sanitizer address \',
+    '            --sanitizer none \'
+)
+Assert-TarGzipPaxJobMutationRejected `
+    -MutatedJob $weakenedTarGzipPaxSanitizer `
+    -Label 'weakened sanitizer'
+
+$expectedTarGzipPaxArtifactPath = '          path: ${{ runner.temp }}/sealr-tar-gzip-pax-fuzz-artifacts/'
+$inertArtifactTarGzipPaxJob = $tarGzipPaxJob.Replace(
+    $expectedTarGzipPaxArtifactPath,
+    '          path: ${{ runner.temp }}/wrong-artifacts/'
+).Replace(
+    '        with:',
+    "        env:`n          INERT_MANIFEST_EVIDENCE: |`n            $($expectedTarGzipPaxArtifactPath.Trim())`n        with:"
+)
+Assert-TarGzipPaxJobMutationRejected `
+    -MutatedJob $inertArtifactTarGzipPaxJob `
+    -Label 'inert artifact evidence with a drifted upload path'
+
+function Assert-TarGzipGnuLongNameJobMutationRejected {
+    param(
+        [Parameter(Mandatory)] [string] $MutatedJob,
+        [Parameter(Mandatory)] [string] $Label
+    )
+
+    if ($MutatedJob -ceq $tarGzipGnuLongNameJob) {
+        throw "TAR/gzip GNU long-name fuzz verifier regression could not construct its $Label fixture"
+    }
+    try {
+        Assert-FuzzJobContract `
+            -JobBlock $MutatedJob `
+            -JobManifest $tarGzipGnuLongNameManifest `
+            -JobName 'tar_gzip_gnu_longname' `
+            -JobDisplayName 'Bounded gzip-wrapped GNU long-name TAR' `
+            -FuzzStepName 'Fuzz bounded gzip-wrapped GNU long-name TAR' `
+            -ReproducerName 'tar-gzip-gnu-longname-reproducer'
+    } catch {
+        return
+    }
+    throw "TAR/gzip GNU long-name fuzz verifier accepted its $Label fixture"
+}
+
+$expectedTarGzipGnuLongNameMaxLen = '-max_len={0} \' -f $tarGzipGnuLongNameManifest.bounds.maxInputBytes
+$weakenedTarGzipGnuLongNameJob = $tarGzipGnuLongNameJob.Replace(
+    $expectedTarGzipGnuLongNameMaxLen,
+    '-max_len=524288 \'
+)
+Assert-TarGzipGnuLongNameJobMutationRejected `
+    -MutatedJob $weakenedTarGzipGnuLongNameJob `
+    -Label 'weakened input bound masked by other job tokens'
+
+$duplicateTarGzipGnuLongNameJob = $tarGzipGnuLongNameJob.Replace(
+    $expectedTarGzipGnuLongNameMaxLen,
+    "$expectedTarGzipGnuLongNameMaxLen`n            -max_len=524288 \"
+)
+Assert-TarGzipGnuLongNameJobMutationRejected `
+    -MutatedJob $duplicateTarGzipGnuLongNameJob `
+    -Label 'duplicate last-wins input bound'
+
+$inactiveTarGzipGnuLongNameJob = $tarGzipGnuLongNameJob.Replace(
+    '          set -euo pipefail',
+    "          if false; then`n          set -euo pipefail"
+).Replace(
+    '            -print_final_stats=1',
+    "            -print_final_stats=1`n          fi`n          true"
+)
+Assert-TarGzipGnuLongNameJobMutationRejected `
+    -MutatedJob $inactiveTarGzipGnuLongNameJob `
+    -Label 'inactive command followed by a successful no-op'
+
+$secondCommandTarGzipGnuLongNameJob = $tarGzipGnuLongNameJob.Replace(
+    '            -print_final_stats=1',
+    "            -print_final_stats=1`n          true"
+)
+Assert-TarGzipGnuLongNameJobMutationRejected `
+    -MutatedJob $secondCommandTarGzipGnuLongNameJob `
+    -Label 'second fuzz-step command'
+
+$weakenedTarGzipGnuLongNameSanitizer = $tarGzipGnuLongNameJob.Replace(
+    '            --sanitizer address \',
+    '            --sanitizer none \'
+)
+Assert-TarGzipGnuLongNameJobMutationRejected `
+    -MutatedJob $weakenedTarGzipGnuLongNameSanitizer `
+    -Label 'weakened sanitizer'
+
+$expectedTarGzipGnuLongNameArtifactPath = '          path: ${{ runner.temp }}/sealr-tar-gzip-gnu-longname-fuzz-artifacts/'
+$inertArtifactTarGzipGnuLongNameJob = $tarGzipGnuLongNameJob.Replace(
+    $expectedTarGzipGnuLongNameArtifactPath,
+    '          path: ${{ runner.temp }}/wrong-artifacts/'
+).Replace(
+    '        with:',
+    "        env:`n          INERT_MANIFEST_EVIDENCE: |`n            $($expectedTarGzipGnuLongNameArtifactPath.Trim())`n        with:"
+)
+Assert-TarGzipGnuLongNameJobMutationRejected `
+    -MutatedJob $inertArtifactTarGzipGnuLongNameJob `
+    -Label 'inert artifact evidence with a drifted upload path'
+
+function Assert-TarZstdJobMutationRejected {
+    param(
+        [Parameter(Mandatory)] [string] $MutatedJob,
+        [Parameter(Mandatory)] [string] $Label
+    )
+
+    if ($MutatedJob -ceq $tarZstdJob) {
+        throw "TAR/zstd fuzz verifier regression could not construct its $Label fixture"
+    }
+    try {
+        Assert-FuzzJobContract `
+            -JobBlock $MutatedJob `
+            -JobManifest $tarZstdManifest `
+            -JobName 'tar_zstd_ustar' `
+            -JobDisplayName 'Bounded zstd-wrapped portable ustar TAR' `
+            -FuzzStepName 'Fuzz bounded zstd-wrapped portable ustar TAR' `
+            -ReproducerName 'tar-zstd-ustar-reproducer'
+    } catch {
+        return
+    }
+    throw "TAR/zstd fuzz verifier accepted its $Label fixture"
+}
+
+$expectedTarZstdMaxLen = '-max_len={0} \' -f $tarZstdManifest.bounds.maxInputBytes
+$weakenedTarZstdJob = $tarZstdJob.Replace(
+    $expectedTarZstdMaxLen,
+    '-max_len=524288 \'
+)
+Assert-TarZstdJobMutationRejected `
+    -MutatedJob $weakenedTarZstdJob `
+    -Label 'weakened input bound masked by other job tokens'
+
+$duplicateTarZstdJob = $tarZstdJob.Replace(
+    $expectedTarZstdMaxLen,
+    "$expectedTarZstdMaxLen`n            -max_len=524288 \"
+)
+Assert-TarZstdJobMutationRejected `
+    -MutatedJob $duplicateTarZstdJob `
+    -Label 'duplicate last-wins input bound'
+
+$inactiveTarZstdJob = $tarZstdJob.Replace(
+    '          set -euo pipefail',
+    "          if false; then`n          set -euo pipefail"
+).Replace(
+    '            -print_final_stats=1',
+    "            -print_final_stats=1`n          fi`n          true"
+)
+Assert-TarZstdJobMutationRejected `
+    -MutatedJob $inactiveTarZstdJob `
+    -Label 'inactive command followed by a successful no-op'
+
+$secondCommandTarZstdJob = $tarZstdJob.Replace(
+    '            -print_final_stats=1',
+    "            -print_final_stats=1`n          true"
+)
+Assert-TarZstdJobMutationRejected `
+    -MutatedJob $secondCommandTarZstdJob `
+    -Label 'second fuzz-step command'
+
+$weakenedTarZstdSanitizer = $tarZstdJob.Replace(
+    '            --sanitizer address \',
+    '            --sanitizer none \'
+)
+Assert-TarZstdJobMutationRejected `
+    -MutatedJob $weakenedTarZstdSanitizer `
+    -Label 'weakened sanitizer'
+
+$expectedTarZstdArtifactPath = '          path: ${{ runner.temp }}/sealr-tar-zstd-fuzz-artifacts/'
+$inertArtifactTarZstdJob = $tarZstdJob.Replace(
+    $expectedTarZstdArtifactPath,
+    '          path: ${{ runner.temp }}/wrong-artifacts/'
+).Replace(
+    '        with:',
+    "        env:`n          INERT_MANIFEST_EVIDENCE: |`n            $($expectedTarZstdArtifactPath.Trim())`n        with:"
+)
+Assert-TarZstdJobMutationRejected `
+    -MutatedJob $inertArtifactTarZstdJob `
+    -Label 'inert artifact evidence with a drifted upload path'
+
 foreach ($required in @(
     'Require exact protected main fuzz evidence',
     'actions/workflows/fuzz.yml/runs',
@@ -2449,9 +3938,13 @@ foreach ($required in @(
     'Bounded semantic records',
     'Bounded raw POSIX ustar',
     'Bounded raw POSIX PAX',
+    'Bounded raw GNU long-name TAR',
     'Bounded RFC 1952 gzip',
     'Bounded public TAR gzip ustar',
-    'Bounded strict ZIP64'
+    'Bounded strict ZIP64',
+    'Bounded gzip-wrapped restricted PAX TAR',
+    'Bounded gzip-wrapped GNU long-name TAR',
+    'Bounded zstd-wrapped portable ustar TAR'
 )) {
     if (-not $releaseWorkflow.Contains($required, [StringComparison]::Ordinal)) {
         throw "Release workflow is missing exact fuzz evidence: $required"
@@ -2464,9 +3957,13 @@ foreach ($required in @(
     "'Bounded semantic records'",
     "'Bounded raw POSIX ustar'",
     "'Bounded raw POSIX PAX'",
+    "'Bounded raw GNU long-name TAR'",
     "'Bounded RFC 1952 gzip'",
     "'Bounded public TAR gzip ustar'",
     "'Bounded strict ZIP64'",
+    "'Bounded gzip-wrapped restricted PAX TAR'",
+    "'Bounded gzip-wrapped GNU long-name TAR'",
+    "'Bounded zstd-wrapped portable ustar TAR'",
     'Get-ExactFuzzState',
     'fuzz_run_id'
 )) {
@@ -2475,4 +3972,4 @@ foreach ($required in @(
     }
 }
 
-Write-Host "Fuzz seed verification passed: $($actualSeeds.Count) protocol, $($actualSemanticSeeds.Count) semantic, $($actualTarSeeds.Count) TAR, $($actualTarPaxSeeds.Count) TAR PAX, $($actualGzipSeeds.Count) gzip, $($actualTarGzipSeeds.Count) TAR/gzip, and $($actualZip64Seeds.Count) ZIP64 seeds, pinned nightly and tool versions."
+Write-Host "Fuzz seed verification passed: $($actualSeeds.Count) protocol, $($actualSemanticSeeds.Count) semantic, $($actualTarSeeds.Count) TAR, $($actualTarPaxSeeds.Count) TAR PAX, $($actualTarGnuLongNameSeeds.Count) TAR GNU long-name, $($actualGzipSeeds.Count) gzip, $($actualTarGzipSeeds.Count) TAR/gzip, $($actualTarGzipPaxSeeds.Count) TAR/gzip PAX, $($actualTarGzipGnuLongNameSeeds.Count) TAR/gzip GNU long-name, $($actualTarZstdSeeds.Count) TAR/zstd, and $($actualZip64Seeds.Count) ZIP64 seeds, pinned nightly and tool versions."

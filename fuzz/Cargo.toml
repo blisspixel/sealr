@@ -42,6 +42,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "tar_gnu_longname_portable_v1"
+path = "fuzz_targets/tar_gnu_longname_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "gzip_rfc1952_single_member_v1"
 path = "fuzz_targets/gzip_rfc1952_single_member_v1.rs"
 test = false
@@ -58,6 +65,27 @@ bench = false
 [[bin]]
 name = "tar_gzip_ustar_portable_v1"
 path = "fuzz_targets/tar_gzip_ustar_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_gzip_pax_portable_v1"
+path = "fuzz_targets/tar_gzip_pax_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_gzip_gnu_longname_portable_v1"
+path = "fuzz_targets/tar_gzip_gnu_longname_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_zstd_ustar_portable_v1"
+path = "fuzz_targets/tar_zstd_ustar_portable_v1.rs"
 test = false
 doc = false
 bench = false

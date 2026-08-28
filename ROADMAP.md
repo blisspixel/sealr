@@ -61,7 +61,7 @@ In-scope ZIP methods, once each adapter meets the reliability bar:
 | BZip2 (12) | older ZIP toolchains | Planned adapter |
 | LZMA (14) | 7-Zip ZIP files | Planned adapter |
 | XZ (95) | newer ZIP toolchains | Planned adapter |
-| Zstandard (93) | modern ZIP and package tools | Planned adapter |
+| Zstandard (93) | modern ZIP and package tools | Planned adapter; the reviewed `ruzstd` boundary already ships in the TAR wrapper |
 
 In-scope TAR wrappers, after the ZIP trust gate and as reuse of the same adapters:
 
@@ -69,11 +69,13 @@ In-scope TAR wrappers, after the ZIP trust gate and as reuse of the same adapter
 |---|---|
 | uncompressed portable POSIX ustar | Implemented for Alpha.9 with zero new runtime dependencies |
 | restricted raw POSIX PAX | Implemented for Alpha.11 as an explicit policy v5 in-process preview with zero new runtime dependencies |
+| restricted raw GNU long-name | Implemented on current main as an explicit policy v6 in-process preview with zero new runtime dependencies |
 | gzip-wrapped portable ustar | Released in Alpha.10 as an explicit policy v4 in-process preview; reuses existing `flate2` with zero new dependencies |
-| gzip-wrapped restricted PAX | Next composition after the raw profile and GNU long-name-only profile are independently frozen |
+| gzip-wrapped restricted PAX | Implemented on current main as an explicit policy v7 composition of the frozen wrapper and PAX languages with `sealrTreeV7` |
+| gzip-wrapped restricted GNU long-name | Implemented on current main as an explicit policy v7 composition of the frozen wrapper and GNU languages with `sealrTreeV8` |
+| zstd-wrapped portable ustar | Implemented on current main as an explicit policy v8 in-process preview; the first Gate B codec promotion adds exactly `ruzstd` and `twox-hash` |
 | bzip2 | Planned wrapper |
 | xz | Planned wrapper |
-| zstd | Planned wrapper |
 
 Each adapter must preserve exact compressed-input consumption, bounded windows and dictionaries, quota accounting, the same `ArchiveIR`, the same path and publication core, and the same findings discipline. Inspect and materialize must still agree. A method that cannot be consumed exactly is `unsupported`, not best-effort.
 
@@ -156,7 +158,7 @@ The detailed release-sized plan is [docs/near-term.md](docs/near-term.md). It co
 10. **Alpha.11 restricted raw POSIX PAX: released.** `TarPaxInterpretationProfile::PortableV1` is an explicit in-process selection authorized by policy v5. `sealr.profile.tar.pax-portable.v1` permits only canonical local and global `path` and `size` records, resolves local then global then underlying ustar values with exact provenance, and denies unknown keywords, links, sparse files, GNU records, base-256 numbers, mixed dialects, and recovery behavior. Format-native `sealr.archive-ir.tar-pax.v1` evidence, an independent source-covering and state-replay audit, `sealrTreeV5`, and a dedicated nine-seed bounded scheduled AddressSanitizer campaign bind and exercise the result. It adds no runtime dependency, never widens raw ustar, and is refused by the authenticated worker without fallback.
 11. **Stable distribution mechanics: executable before the stable claim.** Only the `sealr` crate is crates.io-allowlisted; exact package files, README, license, MSRV, registry, extracted consumer, and public API fixture are required checks. Native workflows use exact Ubuntu 24.04, macOS 15 arm64, and Windows Server 2022 runners and assert the architecture, ABI, kernel or deployment contract before testing and packaging. The [distribution contract](docs/distribution-contract.md) keeps source and native promises separate. The remaining 1.0 blockers are trust-gate completion, supported consumer promotion, stable assurance history, API and schema freeze, and independent review.
 
-Raw portable ustar, restricted raw PAX, strict gzip-wrapped portable ustar, format-native archive and member evidence, domain-qualified retained payload plans, one validated `VerifiedArchive` construction authority, immutable original and derived snapshots, exact transform graphs, and the explicit strict ZIP64 in-process path are landed. The immediate sequence is: add a narrow GNU long-name-only raw profile; compose PAX and GNU with gzip; then promote zstd, XZ/LZMA2, and bzip2 wrappers before building local 7z structure with Copy first and the reviewed LZMA layer second. cpio, ar/deb, CAB, RPM, and RAR5 follow only through measured gates. ISO 9660, UDF, and filesystem images remain separate. ZIP64 and TAR worker-record parity, targeted wheel evidence, authenticated recovery, durability, stable identities, and avoided-work performance continue in parallel.
+Raw portable ustar, restricted raw PAX, the narrow GNU long-name-only raw profile, strict gzip-wrapped portable ustar, the gzip-wrapped PAX and GNU compositions, format-native archive and member evidence, domain-qualified retained payload plans, one validated `VerifiedArchive` construction authority, immutable original and derived snapshots, exact transform graphs, and the explicit strict ZIP64 in-process path are landed. The zstd wrapper is now promoted through the executed ruzstd Gate B review under policy v8. The immediate sequence is: promote XZ/LZMA2 and then bzip2 wrappers one at a time before building local 7z structure with Copy first and the reviewed LZMA layer second. cpio, ar/deb, CAB, RPM, and RAR5 follow only through measured gates. ISO 9660, UDF, and filesystem images remain separate. ZIP64 and TAR worker-record parity, targeted wheel evidence, authenticated recovery, durability, stable identities, and avoided-work performance continue in parallel.
 
 ## Repository tooling and dependency rule
 
@@ -533,7 +535,7 @@ Done when repeated consumers can reuse one admitted tree without a second parser
 
 - raw portable POSIX ustar through the same canonical path, quota, verification, identity, and materialization core is implemented in Alpha.9;
 - restricted raw POSIX PAX is implemented in Alpha.11 as `sealr.profile.tar.pax-portable.v1`, with only canonical `path` and `size` records, fixed global and local precedence, exact provenance, independent covering replay, and `sealrTreeV5`;
-- GNU long-name parsing remains a separate next dialect profile rather than widening portable ustar or mixing PAX and GNU state;
+- GNU long-name parsing is implemented on current main as a separate dialect profile rather than widening portable ustar or mixing PAX and GNU state, and each frozen raw dialect now composes separately with the exact gzip transform under its own layout identity;
 - gzip, bzip2, xz, and zstd wrappers that call the ZIP codec adapters, with bounded window and metadata policy;
 - default denial of symlinks, hardlinks, devices, sparse surprises, and unsafe modes;
 - TAR checksum, duplicate path, extension-header, and truncation fixtures;

@@ -9,9 +9,9 @@ use crc32fast::Hasher as Crc;
 use crate::findings::{Finding, FindingCode};
 use crate::interval::{CheckedInterval, IntervalError};
 use crate::ir::{
-    ArchiveFormat, ArchiveIR, ByteRange, ExtraDisposition, ExtraSite, GzipWrapperEvidence,
-    MemberKind, PaxExtensionEvidence, PaxExtensionKind, PaxKeyword, PaxValueSource,
-    Zip64DataDescriptorWidth, Zip64LocalValueShape,
+    ArchiveFormat, ArchiveIR, ByteRange, ExtraDisposition, ExtraSite, GnuLongNamePathSource,
+    GzipWrapperEvidence, MemberKind, PaxExtensionEvidence, PaxExtensionKind, PaxKeyword,
+    PaxValueSource, Zip64DataDescriptorWidth, Zip64LocalValueShape,
 };
 use crate::policy::hex_sha256;
 use crate::snapshot::SourceSnapshot;
@@ -33,6 +33,8 @@ const PAX_MAX_EXTENSIONS: usize = 1024;
 const PAX_MAX_RECORD_LENGTH_DIGITS: usize = 20;
 const PAX_MAX_KEYWORD_BYTES: usize = 16;
 const PAX_MAX_EFFECTIVE_PATH_BYTES: usize = 8191;
+const GNU_MAX_CARRIERS: usize = 1024;
+const GNU_MAX_PATH_BYTES: usize = 8191;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CoveringAuditError<'member> {
@@ -710,6 +712,142 @@ fn gzip_isize(len: u64) -> u32 {
     u32::try_from(len % (u64::from(u32::MAX) + 1)).expect("gzip ISIZE modulo always fits u32")
 }
 
+/// Independently replay the restricted RFC 8878 wrapper grammar over the
+/// original snapshot without invoking a decompressor.
+pub(crate) fn audit_zstd_wrapper_covering(
+    snapshot: &SourceSnapshot<'_>,
+    evidence: &crate::ir::ZstdWrapperEvidence,
+) -> Result<(), Finding> {
+    const MAGIC: u32 = 0xFD2F_B528;
+    const MAX_WINDOW_BYTES: u64 = 8 * 1024 * 1024;
+    const MIN_WINDOW_BYTES: u64 = 1024;
+    let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
+
+    let header_end = checked_range_end(evidence.header, "zstd header overflow")?;
+    let payload_end = checked_range_end(evidence.compressed_payload, "zstd payload overflow")?;
+    let trailer_end = checked_range_end(evidence.trailer, "zstd trailer overflow")?;
+    if evidence.header.offset != 0
+        || evidence.compressed_payload.offset != header_end
+        || evidence.trailer.offset != payload_end
+        || trailer_end != snapshot.len()
+        || evidence.compressed_payload.len < 3
+    {
+        return Err(fail(
+            "zstd wrapper ranges do not exactly partition the snapshot",
+        ));
+    }
+
+    let mut fixed = [0_u8; 5];
+    snapshot
+        .read_exact_at(0, &mut fixed)
+        .map_err(|_| fail("zstd frame header is outside the original snapshot"))?;
+    if u32::from_le_bytes([fixed[0], fixed[1], fixed[2], fixed[3]]) != MAGIC {
+        return Err(fail("recorded source does not begin with the zstd magic"));
+    }
+    let descriptor = fixed[4];
+    if descriptor != evidence.descriptor
+        || descriptor & 0b0001_1000 != 0
+        || descriptor & 0b0000_0011 != 0
+    {
+        return Err(fail("zstd frame descriptor disagrees with the evidence"));
+    }
+    let single_segment = descriptor & 0b0010_0000 != 0;
+    let checksum_flag = descriptor & 0b0000_0100 != 0;
+    if single_segment != evidence.single_segment || checksum_flag != evidence.checksum_flag {
+        return Err(fail("zstd descriptor flags disagree with the evidence"));
+    }
+    if evidence.trailer.len != if checksum_flag { 4 } else { 0 } {
+        return Err(fail("zstd trailer length disagrees with the checksum flag"));
+    }
+
+    let mut cursor = 5_u64;
+    let window_descriptor = if single_segment {
+        None
+    } else {
+        let mut window = [0_u8; 1];
+        snapshot
+            .read_exact_at(cursor, &mut window)
+            .map_err(|_| fail("zstd window descriptor is outside the snapshot"))?;
+        cursor += 1;
+        Some(window[0])
+    };
+    if window_descriptor != evidence.window_descriptor {
+        return Err(fail("zstd window descriptor disagrees with the evidence"));
+    }
+
+    let fcs_len = match (descriptor >> 6, single_segment) {
+        (0, false) => 0_u64,
+        (0, true) => 1,
+        (1, _) => 2,
+        (2, _) => 4,
+        (3, _) => 8,
+        _ => unreachable!("a two-bit flag has four values"),
+    };
+    let frame_content_size = if fcs_len == 0 {
+        None
+    } else {
+        let mut fcs_bytes = [0_u8; 8];
+        snapshot
+            .read_exact_at(cursor, &mut fcs_bytes[..fcs_len as usize])
+            .map_err(|_| fail("zstd frame content size is outside the snapshot"))?;
+        cursor += fcs_len;
+        let mut value = u64::from_le_bytes(fcs_bytes);
+        if fcs_len == 2 {
+            value += 256;
+        }
+        Some(value)
+    };
+    if frame_content_size != evidence.frame_content_size || cursor != evidence.header.len {
+        return Err(fail(
+            "zstd frame content size or header length disagrees with the evidence",
+        ));
+    }
+    if let Some(declared) = frame_content_size {
+        if declared != evidence.derived_output_len {
+            return Err(fail(
+                "zstd frame content size disagrees with the derived output length",
+            ));
+        }
+    }
+
+    let window_size = match window_descriptor {
+        Some(window) => {
+            let window_base = 1_u64 << (10 + u64::from(window >> 3));
+            window_base + (window_base / 8) * u64::from(window & 0x7)
+        }
+        None => frame_content_size
+            .ok_or_else(|| fail("single-segment zstd frames must declare a content size"))?,
+    };
+    if window_size != evidence.window_size
+        || window_size > MAX_WINDOW_BYTES
+        || (!single_segment && window_size < MIN_WINDOW_BYTES)
+    {
+        return Err(fail("zstd window size is outside the audited bounds"));
+    }
+
+    if checksum_flag {
+        let mut trailer = [0_u8; 4];
+        snapshot
+            .read_exact_at(evidence.trailer.offset, &mut trailer)
+            .map_err(|_| fail("zstd checksum trailer is outside the snapshot"))?;
+        if Some(u32::from_le_bytes(trailer)) != evidence.declared_checksum {
+            return Err(fail("zstd checksum trailer disagrees with the evidence"));
+        }
+    } else if evidence.declared_checksum.is_some() {
+        return Err(fail("zstd evidence declares a checksum the frame lacks"));
+    }
+
+    if evidence.derived_output_sha256.len() != 64
+        || !evidence
+            .derived_output_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(fail("zstd derived-output identity is malformed"));
+    }
+    Ok(())
+}
+
 fn audit_gzip_c_string(
     snapshot: &SourceSnapshot<'_>,
     cursor: u64,
@@ -749,7 +887,7 @@ pub(crate) fn audit_tar_covering(
     let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
     if !matches!(
         ir.format(),
-        ArchiveFormat::TarUstar | ArchiveFormat::TarGzipUstar
+        ArchiveFormat::TarUstar | ArchiveFormat::TarGzipUstar | ArchiveFormat::TarZstdUstar
     ) {
         return Err(fail("TAR covering audit received a non-TAR IR"));
     }
@@ -763,6 +901,16 @@ pub(crate) fn audit_tar_covering(
                 .ok_or_else(|| fail("gzip-wrapped TAR IR has no wrapper evidence"))?;
             if gzip.derived_output_len != snapshot.len()
                 || snapshot.digest().sha256() != Some(gzip.derived_output_sha256.as_str())
+            {
+                return Err(fail("derived TAR identity does not match its snapshot"));
+            }
+        }
+        ArchiveFormat::TarZstdUstar => {
+            let zstd = ir
+                .zstd_evidence()
+                .ok_or_else(|| fail("zstd-wrapped TAR IR has no wrapper evidence"))?;
+            if zstd.derived_output_len != snapshot.len()
+                || snapshot.digest().sha256() != Some(zstd.derived_output_sha256.as_str())
             {
                 return Err(fail("derived TAR identity does not match its snapshot"));
             }
@@ -856,11 +1004,27 @@ pub(crate) fn audit_tar_pax_covering(
     ir: &ArchiveIR,
 ) -> Result<(), Finding> {
     let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
-    if ir.format() != ArchiveFormat::TarPax {
+    if !matches!(
+        ir.format(),
+        ArchiveFormat::TarPax | ArchiveFormat::TarGzipPax
+    ) {
         return Err(fail("PAX covering audit received a non-PAX IR"));
     }
-    if ir.source_digest != *snapshot.digest() {
-        return Err(fail("source digest does not match the PAX snapshot"));
+    match ir.format() {
+        ArchiveFormat::TarPax if ir.source_digest != *snapshot.digest() => {
+            return Err(fail("source digest does not match the PAX snapshot"));
+        }
+        ArchiveFormat::TarGzipPax => {
+            let gzip = ir
+                .gzip_evidence()
+                .ok_or_else(|| fail("gzip-wrapped PAX IR has no wrapper evidence"))?;
+            if gzip.derived_output_len != snapshot.len()
+                || snapshot.digest().sha256() != Some(gzip.derived_output_sha256.as_str())
+            {
+                return Err(fail("derived PAX identity does not match its snapshot"));
+            }
+        }
+        _ => {}
     }
     let archive = ir
         .tar_pax_evidence()
@@ -1100,7 +1264,10 @@ fn audit_one_pax_member(
     let fail = |detail: &'static str| {
         Finding::error(FindingCode::CoveringInconsistent, detail).on(&member.decoded_name)
     };
-    if member.format() != ArchiveFormat::TarPax {
+    if !matches!(
+        member.format(),
+        ArchiveFormat::TarPax | ArchiveFormat::TarGzipPax
+    ) {
         return Err(fail(
             "PAX member evidence variant does not match the archive format",
         ));
@@ -1363,6 +1530,377 @@ fn audit_pax_records(
         ));
     }
     Ok(())
+}
+
+/// Independently reparse and replay the exact old-GNU long-name source.
+///
+/// This deliberately does not invoke the structural parser or share its
+/// header helpers. Readiness requires agreement between these two authorities.
+pub(crate) fn audit_tar_gnu_longname_covering(
+    snapshot: &SourceSnapshot<'_>,
+    ir: &ArchiveIR,
+) -> Result<(), Finding> {
+    let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
+    if !matches!(
+        ir.format(),
+        ArchiveFormat::TarGnuLongName | ArchiveFormat::TarGzipGnuLongName
+    ) {
+        return Err(fail("GNU TAR covering audit received a non-GNU IR"));
+    }
+    match ir.format() {
+        ArchiveFormat::TarGnuLongName if ir.source_digest != *snapshot.digest() => {
+            return Err(fail("source digest does not match the GNU TAR snapshot"));
+        }
+        ArchiveFormat::TarGzipGnuLongName => {
+            let gzip = ir
+                .gzip_evidence()
+                .ok_or_else(|| fail("gzip-wrapped GNU TAR IR has no wrapper evidence"))?;
+            if gzip.derived_output_len != snapshot.len()
+                || snapshot.digest().sha256() != Some(gzip.derived_output_sha256.as_str())
+            {
+                return Err(fail("derived GNU TAR identity does not match its snapshot"));
+            }
+        }
+        _ => {}
+    }
+    let archive = ir
+        .tar_gnu_longname_evidence()
+        .ok_or_else(|| fail("GNU TAR IR has no GNU archive evidence"))?;
+    if archive.carriers.len() > GNU_MAX_CARRIERS {
+        return Err(fail("GNU carrier evidence exceeds the closed profile cap"));
+    }
+
+    let covering = &archive.tar;
+    let member_end = checked_range_end(covering.member_records, "GNU member covering overflow")?;
+    let terminator_end = checked_range_end(covering.terminator, "GNU terminator overflow")?;
+    let trailing_end = checked_range_end(covering.trailing_zeros, "GNU trailing range overflow")?;
+    if covering.member_records.offset != 0
+        || covering.terminator.offset != member_end
+        || covering.terminator.len != TAR_BLOCK_LEN * 2
+        || covering.trailing_zeros.offset != terminator_end
+        || trailing_end != snapshot.len()
+    {
+        return Err(fail(
+            "GNU TAR covering does not exactly partition the snapshot",
+        ));
+    }
+
+    let mut cursor = 0_u64;
+    let mut carrier_index = 0_usize;
+    let mut member_index = 0_usize;
+    let mut pending: Option<u32> = None;
+    while cursor < member_end {
+        let header_end = cursor
+            .checked_add(TAR_BLOCK_LEN)
+            .ok_or_else(|| fail("GNU header end overflowed"))?;
+        if header_end > member_end {
+            return Err(fail("GNU header crosses the member-record covering"));
+        }
+        let mut header = [0_u8; TAR_BLOCK_LEN as usize];
+        snapshot
+            .read_exact_at(cursor, &mut header)
+            .map_err(|_| fail("GNU header is outside the snapshot"))?;
+        let facts = audit_gnu_header(&header)?;
+        let padded_size = facts
+            .size
+            .checked_add((TAR_BLOCK_LEN - facts.size % TAR_BLOCK_LEN) % TAR_BLOCK_LEN)
+            .ok_or_else(|| fail("GNU record alignment overflowed"))?;
+        let payload_end = header_end
+            .checked_add(facts.size)
+            .ok_or_else(|| fail("GNU payload end overflowed"))?;
+        let record_end = header_end
+            .checked_add(padded_size)
+            .ok_or_else(|| fail("GNU record end overflowed"))?;
+        if record_end > member_end {
+            return Err(fail("GNU record crosses the member-record covering"));
+        }
+
+        if facts.typeflag == b'L' {
+            if pending.is_some() {
+                return Err(fail("GNU long-name carriers are chained"));
+            }
+            if facts.size < 2 || facts.size > (GNU_MAX_PATH_BYTES as u64 + 1) {
+                return Err(fail("GNU carrier payload is outside the closed bound"));
+            }
+            let carrier = archive
+                .carriers
+                .get(carrier_index)
+                .ok_or_else(|| fail("GNU source has an unrecorded carrier"))?;
+            let padding_len = padded_size - facts.size;
+            let path_len = facts.size - 1;
+            if carrier.header
+                != (ByteRange {
+                    offset: cursor,
+                    len: TAR_BLOCK_LEN,
+                })
+                || carrier.payload
+                    != (ByteRange {
+                        offset: header_end,
+                        len: facts.size,
+                    })
+                || carrier.path
+                    != (ByteRange {
+                        offset: header_end,
+                        len: path_len,
+                    })
+                || carrier.padding
+                    != (ByteRange {
+                        offset: payload_end,
+                        len: padding_len,
+                    })
+                || carrier.raw_name_bytes != facts.name
+                || carrier.mode != facts.mode
+                || carrier.mtime != facts.mtime
+                || carrier.header_checksum != facts.checksum
+                || carrier.header_sha256 != hex_sha256(&header)
+            {
+                return Err(fail("GNU carrier evidence disagrees with its header"));
+            }
+            let payload = snapshot
+                .read_vec(header_end, facts.size)
+                .map_err(|_| fail("GNU carrier payload is outside the snapshot"))?;
+            let path = &payload[..payload.len() - 1];
+            if payload.last() != Some(&0)
+                || path.contains(&0)
+                || std::str::from_utf8(path).is_err()
+                || carrier.path_bytes != path
+                || carrier.payload_sha256 != hex_sha256(&payload)
+            {
+                return Err(fail("GNU carrier payload evidence or final NUL disagrees"));
+            }
+            audit_zero_range(
+                snapshot,
+                carrier.padding,
+                "GNU carrier padding contains nonzero bytes",
+            )?;
+            let index = u32::try_from(carrier_index)
+                .map_err(|_| fail("GNU carrier index does not fit u32"))?;
+            pending = Some(index);
+            carrier_index += 1;
+        } else {
+            let member = ir
+                .members
+                .get(member_index)
+                .ok_or_else(|| fail("GNU source has an unrecorded ordinary member"))?;
+            if !matches!(
+                member.format(),
+                ArchiveFormat::TarGnuLongName | ArchiveFormat::TarGzipGnuLongName
+            ) {
+                return Err(fail("GNU member evidence carries the wrong format"));
+            }
+            let evidence = member
+                .tar_gnu_longname_evidence()
+                .ok_or_else(|| fail("GNU member lacks format-specific evidence"))?;
+            let expected_kind = if facts.typeflag == b'5' {
+                MemberKind::Directory
+            } else {
+                MemberKind::File
+            };
+            let padding_len = padded_size - facts.size;
+            if member.kind != expected_kind
+                || member.declared_uncomp_size != facts.size
+                || evidence.base_name_bytes != facts.name
+                || evidence.tar.header
+                    != (ByteRange {
+                        offset: cursor,
+                        len: TAR_BLOCK_LEN,
+                    })
+                || evidence.tar.payload
+                    != (ByteRange {
+                        offset: header_end,
+                        len: facts.size,
+                    })
+                || evidence.tar.padding
+                    != (ByteRange {
+                        offset: payload_end,
+                        len: padding_len,
+                    })
+                || evidence.tar.mode != facts.mode
+                || evidence.tar.mtime != facts.mtime
+                || evidence.tar.header_checksum != facts.checksum
+                || evidence.tar.header_sha256 != hex_sha256(&header)
+            {
+                return Err(
+                    fail("GNU ordinary-member evidence disagrees with its header")
+                        .on(&member.decoded_name),
+                );
+            }
+
+            let expected_effective = match pending.take() {
+                Some(index) => {
+                    if evidence.path_source
+                        != (GnuLongNamePathSource::Carrier {
+                            carrier_index: index,
+                        })
+                    {
+                        return Err(fail("GNU member carrier provenance is stale or missing")
+                            .on(&member.decoded_name));
+                    }
+                    archive
+                        .carriers
+                        .get(index as usize)
+                        .map(|carrier| carrier.path_bytes.as_slice())
+                        .ok_or_else(|| fail("GNU member carrier provenance is out of range"))?
+                }
+                None => {
+                    if evidence.path_source != GnuLongNamePathSource::Header
+                        || std::str::from_utf8(&facts.name).is_err()
+                    {
+                        return Err(fail("GNU header-name provenance is inconsistent")
+                            .on(&member.decoded_name));
+                    }
+                    facts.name.as_slice()
+                }
+            };
+            if member.raw_name_bytes != expected_effective
+                || member.decoded_name.as_bytes() != expected_effective
+                || member.components.join("/") != member.canonical_path
+            {
+                return Err(fail("GNU effective pathname evidence is inconsistent")
+                    .on(&member.decoded_name));
+            }
+            let strip_actions = member
+                .normalization_actions
+                .iter()
+                .filter(|action| {
+                    matches!(
+                        action,
+                        crate::ir::NormalizationAction::StripDirectoryTrailingSlash
+                    )
+                })
+                .count();
+            if member.kind == MemberKind::Directory {
+                let expected_canonical = member.decoded_name.strip_suffix('/');
+                match expected_canonical {
+                    Some(path)
+                        if strip_actions == 1
+                            && member.canonical_path.as_bytes() == path.as_bytes() => {}
+                    None if strip_actions == 0
+                        && member.canonical_path.as_bytes() == member.decoded_name.as_bytes() => {}
+                    _ => {
+                        return Err(fail("GNU directory slash normalization is inconsistent")
+                            .on(&member.decoded_name));
+                    }
+                }
+            } else if strip_actions != 0 {
+                return Err(fail("GNU file has directory-only normalization evidence")
+                    .on(&member.decoded_name));
+            }
+            audit_zero_range(
+                snapshot,
+                evidence.tar.padding,
+                "GNU member padding contains nonzero bytes",
+            )
+            .map_err(|finding| finding.on(&member.decoded_name))?;
+            member_index += 1;
+        }
+        cursor = record_end;
+    }
+
+    if pending.is_some()
+        || carrier_index != archive.carriers.len()
+        || member_index != ir.members.len()
+        || cursor != member_end
+    {
+        return Err(fail(
+            "GNU state or evidence tables do not exactly consume the source",
+        ));
+    }
+    let mut terminator = [1_u8; (TAR_BLOCK_LEN * 2) as usize];
+    snapshot
+        .read_exact_at(covering.terminator.offset, &mut terminator)
+        .map_err(|_| fail("GNU terminator is outside the snapshot"))?;
+    if terminator.iter().any(|byte| *byte != 0) {
+        return Err(fail("GNU terminator contains nonzero bytes"));
+    }
+    audit_zero_range(
+        snapshot,
+        covering.trailing_zeros,
+        "GNU trailing record padding contains nonzero bytes",
+    )?;
+    Ok(())
+}
+
+#[derive(Clone, Debug)]
+struct GnuHeaderFacts {
+    name: Vec<u8>,
+    typeflag: u8,
+    size: u64,
+    mode: u32,
+    mtime: u64,
+    checksum: u32,
+}
+
+fn audit_gnu_header(header: &[u8; TAR_BLOCK_LEN as usize]) -> Result<GnuHeaderFacts, Finding> {
+    let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
+    if &header[257..265] != b"ustar  \0"
+        || header[157..257].iter().any(|byte| *byte != 0)
+        || header[345..].iter().any(|byte| *byte != 0)
+        || !pax_owner_field_is_canonical(&header[265..297])
+        || !pax_owner_field_is_canonical(&header[297..329])
+    {
+        return Err(fail("GNU header is outside exact old-GNU framing"));
+    }
+    let checksum_field = &header[148..156];
+    if !checksum_field[..6]
+        .iter()
+        .all(|byte| matches!(byte, b'0'..=b'7'))
+        || checksum_field[6] != 0
+        || checksum_field[7] != b' '
+    {
+        return Err(fail("GNU header checksum field is not canonical"));
+    }
+    let checksum = parse_pax_octal_digits(&checksum_field[..6])
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or_else(|| fail("GNU header checksum overflows u32"))?;
+    let actual_checksum = header
+        .iter()
+        .enumerate()
+        .map(|(index, byte)| {
+            if (148..156).contains(&index) {
+                u32::from(b' ')
+            } else {
+                u32::from(*byte)
+            }
+        })
+        .sum::<u32>();
+    if checksum != actual_checksum {
+        return Err(fail("GNU header checksum disagrees with its bytes"));
+    }
+    let mode_u64 = parse_pax_octal(&header[100..108])
+        .ok_or_else(|| fail("GNU header mode is not canonical octal"))?;
+    if mode_u64 > 0o7777
+        || parse_pax_octal(&header[108..116]).is_none()
+        || parse_pax_octal(&header[116..124]).is_none()
+        || !pax_device_field_is_zero(&header[329..337])
+        || !pax_device_field_is_zero(&header[337..345])
+    {
+        return Err(fail(
+            "GNU header identity fields are outside the closed profile",
+        ));
+    }
+    let size = parse_pax_octal(&header[124..136])
+        .ok_or_else(|| fail("GNU header size is not canonical octal"))?;
+    let mtime = parse_pax_octal(&header[136..148])
+        .ok_or_else(|| fail("GNU header mtime is not canonical octal"))?;
+    let typeflag = header[156];
+    if !matches!(typeflag, 0 | b'0' | b'5' | b'L') {
+        return Err(fail("GNU header type is outside the closed profile"));
+    }
+    if typeflag == b'5' && size != 0 {
+        return Err(fail("GNU directory has a nonzero size"));
+    }
+    let name = pax_text_field(&header[..100], false)
+        .ok_or_else(|| fail("GNU header name is not closed structural text"))?
+        .to_vec();
+    Ok(GnuHeaderFacts {
+        name,
+        typeflag,
+        size,
+        mode: u32::try_from(mode_u64).expect("portable GNU mode fits u32"),
+        mtime,
+        checksum,
+    })
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -2126,9 +2664,10 @@ mod tests {
     use crate::apply::{apply, apply_with_options, ApplyOptions, Request, Source};
     use crate::findings::Finding;
     use crate::ir::{
-        ArchiveEvidence, ArchiveIR, MemberEvidence, PaxValueSource, TarInterpretationProfile,
-        TarMemberEvidence, TarPaxInterpretationProfile, Zip64MemberEvidence,
-        ZipInterpretationProfile, ZipMemberEvidence,
+        ArchiveEvidence, ArchiveIR, GnuLongNamePathSource, MemberEvidence, PaxValueSource,
+        TarGnuLongNameInterpretationProfile, TarInterpretationProfile, TarMemberEvidence,
+        TarPaxInterpretationProfile, Zip64MemberEvidence, ZipInterpretationProfile,
+        ZipMemberEvidence,
     };
     use crate::policy::Policy;
     use std::io::{Cursor, Write};
@@ -2249,6 +2788,53 @@ mod tests {
         bytes
     }
 
+    fn make_gnu_longname_tar() -> Vec<u8> {
+        fn octal(field: &mut [u8], value: u64) {
+            field.fill(b'0');
+            let value = format!("{value:o}");
+            let end = field.len() - 1;
+            field[end - value.len()..end].copy_from_slice(value.as_bytes());
+            field[end] = 0;
+        }
+
+        fn header(name: &[u8], size: u64, typeflag: u8) -> [u8; 512] {
+            let mut header = [0_u8; 512];
+            header[..name.len()].copy_from_slice(name);
+            octal(&mut header[100..108], 0o644);
+            octal(&mut header[108..116], 0);
+            octal(&mut header[116..124], 0);
+            octal(&mut header[124..136], size);
+            octal(&mut header[136..148], 0);
+            header[148..156].fill(b' ');
+            header[156] = typeflag;
+            header[257..265].copy_from_slice(b"ustar  \0");
+            let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
+            header[148..154].copy_from_slice(format!("{checksum:06o}").as_bytes());
+            header[154] = 0;
+            header[155] = b' ';
+            header
+        }
+
+        fn append_record(bytes: &mut Vec<u8>, header: [u8; 512], payload: &[u8]) {
+            bytes.extend_from_slice(&header);
+            bytes.extend_from_slice(payload);
+            bytes.resize(bytes.len().next_multiple_of(512), 0);
+        }
+
+        let path = format!("mission/{}/status.txt", "segment".repeat(15));
+        let mut carrier_payload = path.as_bytes().to_vec();
+        carrier_payload.push(0);
+        let mut bytes = Vec::new();
+        append_record(
+            &mut bytes,
+            header(b"producer-carrier", carrier_payload.len() as u64, b'L'),
+            &carrier_payload,
+        );
+        append_record(&mut bytes, header(b"opaque-base", 4, b'0'), b"mars");
+        bytes.resize(bytes.len() + 1024, 0);
+        bytes
+    }
+
     fn make_zip64() -> Vec<u8> {
         let hex = concat!(
             "504b03042d0000000800000021000b5704bbffffffffffffffff01001400",
@@ -2343,10 +2929,37 @@ mod tests {
         outcome.archive_ir().cloned().expect("admitted PAX IR")
     }
 
+    fn admitted_gnu_ir(bytes: &[u8]) -> ArchiveIR {
+        let policy = Policy::default_v6();
+        let options = ApplyOptions::new().with_tar_gnu_longname_interpretation_profile(
+            TarGnuLongNameInterpretationProfile::PortableV1,
+        );
+        let outcome = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("cover-gnu.tar"),
+                    data: bytes,
+                },
+                policy: &policy,
+                dest: None,
+            },
+            &options,
+        );
+        assert!(!outcome.rejected(), "{:?}", outcome.view.findings);
+        outcome
+            .archive_ir()
+            .cloned()
+            .expect("admitted GNU long-name IR")
+    }
+
     fn tar_covering_mut(ir: &mut ArchiveIR) -> &mut crate::ir::TarArchiveCovering {
         match &mut ir.evidence {
             ArchiveEvidence::Tar(covering) => covering,
             ArchiveEvidence::TarPax(evidence) => &mut evidence.tar,
+            ArchiveEvidence::TarGnuLongName(evidence) => &mut evidence.tar,
+            ArchiveEvidence::TarGzipPax(evidence) => &mut evidence.pax.tar,
+            ArchiveEvidence::TarGzipGnuLongName(evidence) => &mut evidence.gnu.tar,
+            ArchiveEvidence::TarZstd(evidence) => &mut evidence.tar,
             ArchiveEvidence::Zip(_) | ArchiveEvidence::Zip64(_) | ArchiveEvidence::TarGzip(_) => {
                 panic!("expected TAR evidence")
             }
@@ -2359,7 +2972,11 @@ mod tests {
             ArchiveEvidence::Zip64(_)
             | ArchiveEvidence::Tar(_)
             | ArchiveEvidence::TarGzip(_)
-            | ArchiveEvidence::TarPax(_) => {
+            | ArchiveEvidence::TarPax(_)
+            | ArchiveEvidence::TarGnuLongName(_)
+            | ArchiveEvidence::TarGzipPax(_)
+            | ArchiveEvidence::TarGzipGnuLongName(_)
+            | ArchiveEvidence::TarZstd(_) => {
                 panic!("expected ZIP evidence")
             }
         }
@@ -2371,7 +2988,11 @@ mod tests {
             ArchiveEvidence::Zip(_)
             | ArchiveEvidence::Tar(_)
             | ArchiveEvidence::TarGzip(_)
-            | ArchiveEvidence::TarPax(_) => {
+            | ArchiveEvidence::TarPax(_)
+            | ArchiveEvidence::TarGnuLongName(_)
+            | ArchiveEvidence::TarGzipPax(_)
+            | ArchiveEvidence::TarGzipGnuLongName(_)
+            | ArchiveEvidence::TarZstd(_) => {
                 panic!("expected ZIP64 evidence")
             }
         }
@@ -2380,7 +3001,12 @@ mod tests {
     fn tar_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut TarMemberEvidence {
         match &mut ir.members[index].evidence {
             MemberEvidence::Tar(evidence) => evidence,
-            MemberEvidence::TarPax(evidence) => &mut evidence.tar,
+            MemberEvidence::TarPax(evidence) | MemberEvidence::TarGzipPax(evidence) => {
+                &mut evidence.tar
+            }
+            MemberEvidence::TarGnuLongName(evidence)
+            | MemberEvidence::TarGzipGnuLongName(evidence) => &mut evidence.tar,
+            MemberEvidence::TarZstd(evidence) => evidence,
             MemberEvidence::Zip(_) | MemberEvidence::Zip64(_) | MemberEvidence::TarGzip(_) => {
                 panic!("expected TAR member evidence")
             }
@@ -2390,20 +3016,58 @@ mod tests {
     fn pax_archive_mut(ir: &mut ArchiveIR) -> &mut crate::ir::TarPaxArchiveEvidence {
         match &mut ir.evidence {
             ArchiveEvidence::TarPax(evidence) => evidence,
+            ArchiveEvidence::TarGzipPax(evidence) => &mut evidence.pax,
             ArchiveEvidence::Zip(_)
             | ArchiveEvidence::Zip64(_)
             | ArchiveEvidence::Tar(_)
-            | ArchiveEvidence::TarGzip(_) => panic!("expected PAX archive evidence"),
+            | ArchiveEvidence::TarGzip(_)
+            | ArchiveEvidence::TarGnuLongName(_)
+            | ArchiveEvidence::TarGzipGnuLongName(_)
+            | ArchiveEvidence::TarZstd(_) => panic!("expected PAX archive evidence"),
         }
     }
 
     fn pax_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut crate::ir::TarPaxMemberEvidence {
         match &mut ir.members[index].evidence {
-            MemberEvidence::TarPax(evidence) => evidence,
+            MemberEvidence::TarPax(evidence) | MemberEvidence::TarGzipPax(evidence) => evidence,
             MemberEvidence::Zip(_)
             | MemberEvidence::Zip64(_)
             | MemberEvidence::Tar(_)
-            | MemberEvidence::TarGzip(_) => panic!("expected PAX member evidence"),
+            | MemberEvidence::TarGzip(_)
+            | MemberEvidence::TarGnuLongName(_)
+            | MemberEvidence::TarGzipGnuLongName(_)
+            | MemberEvidence::TarZstd(_) => panic!("expected PAX member evidence"),
+        }
+    }
+
+    fn gnu_archive_mut(ir: &mut ArchiveIR) -> &mut crate::ir::TarGnuLongNameArchiveEvidence {
+        match &mut ir.evidence {
+            ArchiveEvidence::TarGnuLongName(evidence) => evidence,
+            ArchiveEvidence::TarGzipGnuLongName(evidence) => &mut evidence.gnu,
+            ArchiveEvidence::Zip(_)
+            | ArchiveEvidence::Zip64(_)
+            | ArchiveEvidence::Tar(_)
+            | ArchiveEvidence::TarGzip(_)
+            | ArchiveEvidence::TarPax(_)
+            | ArchiveEvidence::TarGzipPax(_)
+            | ArchiveEvidence::TarZstd(_) => panic!("expected GNU long-name archive evidence"),
+        }
+    }
+
+    fn gnu_member_mut(
+        ir: &mut ArchiveIR,
+        index: usize,
+    ) -> &mut crate::ir::TarGnuLongNameMemberEvidence {
+        match &mut ir.members[index].evidence {
+            MemberEvidence::TarGnuLongName(evidence)
+            | MemberEvidence::TarGzipGnuLongName(evidence) => evidence,
+            MemberEvidence::Zip(_)
+            | MemberEvidence::Zip64(_)
+            | MemberEvidence::Tar(_)
+            | MemberEvidence::TarGzip(_)
+            | MemberEvidence::TarPax(_)
+            | MemberEvidence::TarGzipPax(_)
+            | MemberEvidence::TarZstd(_) => panic!("expected GNU long-name member evidence"),
         }
     }
 
@@ -2413,7 +3077,11 @@ mod tests {
             MemberEvidence::Zip64(_)
             | MemberEvidence::Tar(_)
             | MemberEvidence::TarGzip(_)
-            | MemberEvidence::TarPax(_) => {
+            | MemberEvidence::TarPax(_)
+            | MemberEvidence::TarGnuLongName(_)
+            | MemberEvidence::TarGzipPax(_)
+            | MemberEvidence::TarGzipGnuLongName(_)
+            | MemberEvidence::TarZstd(_) => {
                 panic!("expected ZIP member evidence")
             }
         }
@@ -2425,7 +3093,11 @@ mod tests {
             MemberEvidence::Zip(_)
             | MemberEvidence::Tar(_)
             | MemberEvidence::TarGzip(_)
-            | MemberEvidence::TarPax(_) => {
+            | MemberEvidence::TarPax(_)
+            | MemberEvidence::TarGnuLongName(_)
+            | MemberEvidence::TarGzipPax(_)
+            | MemberEvidence::TarGzipGnuLongName(_)
+            | MemberEvidence::TarZstd(_) => {
                 panic!("expected ZIP64 member evidence")
             }
         }
@@ -2664,6 +3336,103 @@ mod tests {
         let mut ir = original;
         pax_member_mut(&mut ir, 1).tar.padding.len += 1;
         audit(&ir);
+    }
+
+    #[test]
+    fn gnu_covering_oracle_replays_state_and_rejects_each_evidence_layer_drift() {
+        let bytes = make_gnu_longname_tar();
+        let original = admitted_gnu_ir(&bytes);
+        let snapshot = crate::snapshot::SourceSnapshot::borrowed(None, &bytes);
+        audit_tar_gnu_longname_covering(&snapshot, &original)
+            .expect("source-derived GNU long-name evidence audits");
+        assert_eq!(original.gnu_longname_carriers().unwrap().len(), 1);
+        assert_eq!(original.members.len(), 1);
+
+        let audit = |ir: &ArchiveIR| {
+            let snapshot = crate::snapshot::SourceSnapshot::borrowed(None, &bytes);
+            assert_eq!(
+                audit_tar_gnu_longname_covering(&snapshot, ir)
+                    .unwrap_err()
+                    .code,
+                FindingCode::CoveringInconsistent
+            );
+        };
+
+        macro_rules! rejects {
+            ($ir:ident, $edit:block) => {{
+                let mut $ir = original.clone();
+                $edit
+                audit(&$ir);
+            }};
+        }
+
+        rejects!(ir, {
+            gnu_archive_mut(&mut ir).tar.terminator.len = 512;
+        });
+        rejects!(ir, {
+            gnu_archive_mut(&mut ir).carriers[0].header.offset += 1;
+        });
+        rejects!(ir, {
+            gnu_archive_mut(&mut ir).carriers[0].payload.len -= 1;
+        });
+        rejects!(ir, {
+            gnu_archive_mut(&mut ir).carriers[0].path.len -= 1;
+        });
+        rejects!(ir, {
+            gnu_archive_mut(&mut ir).carriers[0].padding.offset += 1;
+        });
+        rejects!(ir, {
+            gnu_archive_mut(&mut ir).carriers[0].raw_name_bytes[0] ^= 1;
+        });
+        rejects!(ir, {
+            gnu_archive_mut(&mut ir).carriers[0].path_bytes[0] ^= 1;
+        });
+        rejects!(ir, {
+            gnu_archive_mut(&mut ir).carriers[0].mode ^= 1;
+        });
+        rejects!(ir, {
+            gnu_archive_mut(&mut ir).carriers[0].mtime += 1;
+        });
+        rejects!(ir, {
+            gnu_archive_mut(&mut ir).carriers[0].header_checksum ^= 1;
+        });
+        rejects!(ir, {
+            gnu_archive_mut(&mut ir).carriers[0].header_sha256 = "0".repeat(64);
+        });
+        rejects!(ir, {
+            gnu_archive_mut(&mut ir).carriers[0].payload_sha256 = "0".repeat(64);
+        });
+        rejects!(ir, {
+            gnu_archive_mut(&mut ir).carriers.clear();
+        });
+        rejects!(ir, {
+            gnu_member_mut(&mut ir, 0).base_name_bytes[0] ^= 1;
+        });
+        rejects!(ir, {
+            gnu_member_mut(&mut ir, 0).path_source = GnuLongNamePathSource::Header;
+        });
+        rejects!(ir, {
+            gnu_member_mut(&mut ir, 0).path_source =
+                GnuLongNamePathSource::Carrier { carrier_index: 1 };
+        });
+        rejects!(ir, {
+            gnu_member_mut(&mut ir, 0).tar.header.offset += 1;
+        });
+        rejects!(ir, {
+            gnu_member_mut(&mut ir, 0).tar.payload.len += 1;
+        });
+        rejects!(ir, {
+            gnu_member_mut(&mut ir, 0).tar.header_sha256 = "0".repeat(64);
+        });
+        rejects!(ir, {
+            ir.members[0].raw_name_bytes[0] ^= 1;
+        });
+        rejects!(ir, {
+            ir.members[0].kind = MemberKind::Directory;
+        });
+        rejects!(ir, {
+            ir.members[0].canonical_path.push('x');
+        });
     }
 
     #[test]

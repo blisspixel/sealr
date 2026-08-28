@@ -211,6 +211,79 @@ function Add-PaddedTarRecord {
     }
 }
 
+function Get-Crc32 {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Bytes)
+
+    [uint32]$crc = [uint32]::MaxValue
+    foreach ($value in $Bytes) {
+        $crc = [uint32]($crc -bxor [uint32]$value)
+        for ($bit = 0; $bit -lt 8; $bit++) {
+            if (($crc -band 1) -ne 0) {
+                $crc = [uint32](($crc -shr 1) -bxor [uint32]3988292384)
+            } else {
+                $crc = [uint32]($crc -shr 1)
+            }
+        }
+    }
+    return [uint32]([uint64]4294967295 - [uint64]$crc)
+}
+
+function Add-UInt16LittleEndian {
+    param(
+        [Parameter(Mandatory)][Collections.Generic.List[byte]]$Bytes,
+        [Parameter(Mandatory)][uint16]$Value
+    )
+
+    $Bytes.Add([byte]($Value -band 0xff))
+    $Bytes.Add([byte](($Value -shr 8) -band 0xff))
+}
+
+function Add-UInt32LittleEndian {
+    param(
+        [Parameter(Mandatory)][Collections.Generic.List[byte]]$Bytes,
+        [Parameter(Mandatory)][uint32]$Value
+    )
+
+    for ($shift = 0; $shift -lt 32; $shift += 8) {
+        $Bytes.Add([byte](($Value -shr $shift) -band 0xff))
+    }
+}
+
+function New-StoredDeflate {
+    param([Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Payload)
+
+    $bytes = [Collections.Generic.List[byte]]::new()
+    $offset = 0
+    do {
+        $remaining = $Payload.Length - $offset
+        $length = [Math]::Min(65535, $remaining)
+        $final = ($offset + $length -eq $Payload.Length)
+        $bytes.Add([byte]$(if ($final) { 1 } else { 0 }))
+        Add-UInt16LittleEndian -Bytes $bytes -Value ([uint16]$length)
+        Add-UInt16LittleEndian -Bytes $bytes -Value ([uint16](0xffff - $length))
+        if ($length -gt 0) {
+            $chunk = [byte[]]::new($length)
+            [Array]::Copy($Payload, $offset, $chunk, 0, $length)
+            $bytes.AddRange($chunk)
+        }
+        $offset += $length
+    } while ($offset -lt $Payload.Length)
+    return ,$bytes.ToArray()
+}
+
+# A deterministic minimal gzip member (fixed mtime 0, no optional fields) that
+# stores its derived TAR in uncompressed Deflate blocks.
+function New-GzipWrappedTar {
+    param([Parameter(Mandatory)][byte[]]$Payload)
+
+    $bytes = [Collections.Generic.List[byte]]::new()
+    $bytes.AddRange([byte[]]@(0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255))
+    $bytes.AddRange((New-StoredDeflate -Payload $Payload))
+    Add-UInt32LittleEndian -Bytes $bytes -Value (Get-Crc32 $Payload)
+    Add-UInt32LittleEndian -Bytes $bytes -Value ([uint32]$Payload.Length)
+    return ,$bytes.ToArray()
+}
+
 if ($TargetTriple -notin $supportedTargets) {
     throw "unsupported native release target: $TargetTriple"
 }
@@ -554,6 +627,379 @@ try {
         throw 'packaged restricted PAX materialization did not preserve the effective admitted tree'
     }
 
+    $gnuManifestPath = Resolve-RequiredFile `
+        -Path (Join-Path $workspace 'crates/sealr/tests/conformance/tar-gnu-longname-producers-v1.json') `
+        -Role 'old-GNU long-name producer corpus'
+    $gnuManifest = Get-Content -Raw -LiteralPath $gnuManifestPath | ConvertFrom-Json
+    $gnuFixture = @($gnuManifest.fixtures | Where-Object { $_.id -ceq 'gnu-tar-1.35' })
+    if ($gnuManifest.schema -cne 'sealr.tar-gnu-longname-producer-fixtures.v1' -or
+        $gnuFixture.Count -ne 1) {
+        throw 'old-GNU long-name producer corpus does not contain exactly one GNU tar fixture'
+    }
+    $gnuFixture = $gnuFixture[0]
+    if ($gnuFixture.len -ne 10240 -or
+        $gnuFixture.source_sha256 -cne '0953f9d5cd95b15786620225bca10b4fbecf017c8b06a48ac5872ec985a6a1cc' -or
+        $gnuFixture.layout_sha256 -cne 'df34e19111a92bd9785bad127f6dbca2fd45429d61b5e174a9e6c1c318f3dd84' -or
+        $gnuFixture.content_sha256 -cne '4f6857e09b37a13750d51e1a36bb43730da3c7592c94495b8d0f5ee41ead4855') {
+        throw 'old-GNU long-name fixture identity changed'
+    }
+    $gnuBytes = [byte[]]::new([int]$gnuFixture.len)
+    $previousSpanEnd = 0
+    foreach ($span in $gnuFixture.spans) {
+        $spanBytes = [System.Convert]::FromHexString([string]$span.hex)
+        $spanOffset = [int]$span.offset
+        $spanEnd = $spanOffset + $spanBytes.Length
+        if ($spanOffset -lt $previousSpanEnd -or $spanEnd -gt $gnuBytes.Length -or
+            @($spanBytes | Where-Object { $_ -eq 0 }).Count -ne 0) {
+            throw 'old-GNU sparse span is unordered, overlapping, out of range, or contains zero bytes'
+        }
+        [System.Array]::Copy($spanBytes, 0, $gnuBytes, $spanOffset, $spanBytes.Length)
+        $previousSpanEnd = $spanEnd
+    }
+    $gnuArchivePath = Join-Path $temporaryRoot 'portable-gnu-longname.tar'
+    [System.IO.File]::WriteAllBytes($gnuArchivePath, $gnuBytes)
+    $gnuHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $gnuArchivePath).Hash.ToLowerInvariant()
+    if ($gnuHash -cne $gnuFixture.source_sha256) {
+        throw "reconstructed old-GNU source digest changed: $gnuHash"
+    }
+
+    $gnuInspect = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-gnu-longname', $gnuArchivePath) `
+        -Role 'packaged old-GNU long-name inspect'
+    if ($gnuInspect.ExitCode -ne 0) {
+        throw "packaged old-GNU long-name inspect failed: $($gnuInspect.Stderr)"
+    }
+    $gnuView = $gnuInspect.Stdout | ConvertFrom-Json
+    $gnuReceipt = $gnuInspect.Stderr | ConvertFrom-Json
+    if ($gnuView.schema -cne 'sealr.view.v1' -or
+        $gnuReceipt.schema -cne 'sealr.receipt.v2' -or
+        $gnuView.source.magic -cne 'tar' -or
+        $gnuView.interpretation.status -cne 'interpreted' -or
+        $gnuView.admission.status -cne 'admitted' -or
+        $gnuView.verification.status -cne 'complete' -or
+        $gnuView.effect.status -cne 'not-requested' -or
+        @($gnuView.members).Count -ne 1 -or
+        $gnuView.members[0].path -cne $gnuFixture.member_path -or
+        $gnuView.members[0].method -cne 'raw' -or
+        $gnuView.members[0].uncomp_bytes -ne 22 -or
+        $gnuReceipt.policy.id -cne 'sealr:policy/default/v6' -or
+        $gnuReceipt.policy.digest.sha256 -cne 'aefc8a1baa113d7face30857ef64fe8f47c647fae863a72810b80380f8fd4178' -or
+        $gnuReceipt.identities.interpretation.id -cne 'sealr.profile.tar.gnu-longname-portable.v1' -or
+        $gnuReceipt.identities.interpretation.digest.sha256 -cne '08fe2698806da997bc42e7e13a45cbf412a4a7056dec39c62456202680b91fa4' -or
+        $gnuReceipt.identities.layout.sealrTreeV6 -cne $gnuFixture.layout_sha256 -or
+        $gnuReceipt.identities.content.sealrTreeV1 -cne $gnuFixture.content_sha256) {
+        throw 'packaged old-GNU long-name inspect returned unexpected semantic evidence'
+    }
+
+    $gnuDefault = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @($gnuArchivePath) `
+        -Role 'packaged old-GNU compatibility-default refusal'
+    $gnuDefaultView = $gnuDefault.Stdout | ConvertFrom-Json
+    $gnuDefaultReceipt = $gnuDefault.Stderr | ConvertFrom-Json
+    if ($gnuDefault.ExitCode -ne 2 -or
+        $gnuDefaultView.verdict -cne 'rejected' -or
+        $gnuDefaultView.source.magic -cne 'unknown' -or
+        $gnuDefaultView.policy.id -cne 'sealr:policy/default/v1' -or
+        $gnuDefaultView.interpretation.status -cne 'unsupported' -or
+        $gnuDefaultView.admission.status -cne 'not-evaluated' -or
+        @($gnuDefaultView.members).Count -ne 0 -or
+        $gnuDefaultReceipt.identities.interpretation.id -cne 'sealr.profile.zip.strict-ascii.v1' -or
+        $gnuDefaultReceipt.identities.layout.status -cne 'unavailable' -or
+        $gnuDefaultReceipt.identities.content.status -cne 'unavailable') {
+        throw 'packaged compatibility default unexpectedly recognized old-GNU long-name TAR'
+    }
+
+    $gnuDestination = Join-Path $temporaryRoot 'old-gnu-longname-output'
+    $gnuMaterialize = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-gnu-longname', $gnuArchivePath, '--dest', $gnuDestination) `
+        -Role 'packaged old-GNU long-name materialization'
+    if ($gnuMaterialize.ExitCode -ne 0) {
+        throw "packaged old-GNU long-name materialization failed: $($gnuMaterialize.Stderr)"
+    }
+    $gnuMaterializedView = $gnuMaterialize.Stdout | ConvertFrom-Json
+    $gnuMaterializedReceipt = $gnuMaterialize.Stderr | ConvertFrom-Json
+    $gnuFiles = @(Get-ChildItem -LiteralPath $gnuDestination -Recurse -Force -File | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($gnuDestination, $_.FullName).Replace('\', '/')
+        })
+    $leakedStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+    $gnuMaterializedPath = Join-Path $gnuDestination ([string]$gnuFixture.member_path)
+    if (-not $gnuMaterializedView.wrote -or
+        $gnuMaterializedView.effect.status -cne 'committed' -or
+        $gnuMaterializedReceipt.identities.layout.sealrTreeV6 -cne $gnuFixture.layout_sha256 -or
+        $gnuMaterializedReceipt.identities.content.sealrTreeV1 -cne $gnuFixture.content_sha256 -or
+        $gnuFiles.Count -ne 1 -or $gnuFiles[0] -cne $gnuFixture.member_path -or
+        [System.IO.File]::ReadAllText($gnuMaterializedPath) -cne "gnu longname portable`n" -or
+        $leakedStages.Count -ne 0) {
+        throw 'packaged old-GNU long-name materialization did not preserve the effective admitted tree'
+    }
+
+    $gzipPaxBytes = New-GzipWrappedTar -Payload $paxBytes
+    if ($gzipPaxBytes.Length -ne 3095) {
+        throw "native-package gzip-wrapped PAX fixture length changed: $($gzipPaxBytes.Length)"
+    }
+    $gzipPaxArchivePath = Join-Path $temporaryRoot 'portable-pax.tar.gz'
+    [System.IO.File]::WriteAllBytes($gzipPaxArchivePath, $gzipPaxBytes)
+    $gzipPaxSourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $gzipPaxArchivePath).Hash.ToLowerInvariant()
+    if ($gzipPaxSourceHash -cne 'd69dfb232b999e5bc7e538bf98ce5e23e72526bc3613b77eecb0a1e4b3c1cc34') {
+        throw "native-package gzip-wrapped PAX fixture identity changed: $gzipPaxSourceHash"
+    }
+
+    $gzipPaxInspect = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-gzip-pax', $gzipPaxArchivePath) `
+        -Role 'packaged gzip-wrapped PAX inspect'
+    if ($gzipPaxInspect.ExitCode -ne 0) {
+        throw "packaged gzip-wrapped PAX inspect failed: $($gzipPaxInspect.Stderr)"
+    }
+    $gzipPaxView = $gzipPaxInspect.Stdout | ConvertFrom-Json
+    $gzipPaxReceipt = $gzipPaxInspect.Stderr | ConvertFrom-Json
+    if ($gzipPaxView.schema -cne 'sealr.view.v1' -or
+        $gzipPaxReceipt.schema -cne 'sealr.receipt.v2' -or
+        $gzipPaxView.source.magic -cne 'gz' -or
+        $gzipPaxView.interpretation.status -cne 'interpreted' -or
+        $gzipPaxView.admission.status -cne 'admitted' -or
+        $gzipPaxView.verification.status -cne 'complete' -or
+        $gzipPaxView.effect.status -cne 'not-requested' -or
+        @($gzipPaxView.members).Count -ne 1 -or
+        $gzipPaxView.members[0].path -cne 'mars/retained.txt' -or
+        $gzipPaxView.members[0].method -cne 'raw' -or
+        $gzipPaxView.members[0].uncomp_bytes -ne 4 -or
+        $gzipPaxReceipt.policy.id -cne 'sealr:policy/default/v7' -or
+        $gzipPaxReceipt.policy.digest.sha256 -cne '92d576984b718e8a02bc6044090f8e2b335dbd1abd136d53e5b02d0ffbd978ef' -or
+        $gzipPaxReceipt.identities.interpretation.id -cne 'sealr.profile.tar-gzip.pax-portable.v1' -or
+        $gzipPaxReceipt.identities.interpretation.digest.sha256 -cne '6cc91b2b8563b5b070b44bf357a5c62e5d9dda0aedc374d7a08cd80da9c5434f' -or
+        $gzipPaxReceipt.identities.layout.sealrTreeV7 -cne '3f9a628a8369e254b62ed5c069e5210f3b3679c83b90e753ec29ce6ceb08fc36' -or
+        $gzipPaxReceipt.identities.content.sealrTreeV1 -cne 'c668daa1f966425150367b8aafe176477b9960a421f9d35502256845b0a7a1a1') {
+        throw 'packaged gzip-wrapped PAX inspect returned unexpected semantic evidence'
+    }
+
+    $gzipPaxDefault = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @($gzipPaxArchivePath) `
+        -Role 'packaged gzip-wrapped PAX compatibility-default refusal'
+    $gzipPaxDefaultView = $gzipPaxDefault.Stdout | ConvertFrom-Json
+    $gzipPaxDefaultReceipt = $gzipPaxDefault.Stderr | ConvertFrom-Json
+    if ($gzipPaxDefault.ExitCode -ne 2 -or
+        $gzipPaxDefaultView.verdict -cne 'rejected' -or
+        $gzipPaxDefaultView.source.magic -cne 'gz' -or
+        $gzipPaxDefaultView.policy.id -cne 'sealr:policy/default/v1' -or
+        $gzipPaxDefaultView.interpretation.status -cne 'unsupported' -or
+        $gzipPaxDefaultView.admission.status -cne 'not-evaluated' -or
+        @($gzipPaxDefaultView.members).Count -ne 0 -or
+        $gzipPaxDefaultReceipt.identities.interpretation.id -cne 'sealr.profile.zip.strict-ascii.v1' -or
+        $gzipPaxDefaultReceipt.identities.layout.status -cne 'unavailable' -or
+        $gzipPaxDefaultReceipt.identities.content.status -cne 'unavailable') {
+        throw 'packaged compatibility default unexpectedly recognized gzip-wrapped PAX'
+    }
+
+    $gzipPaxDestination = Join-Path $temporaryRoot 'gzip-pax-output'
+    $gzipPaxMaterialize = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-gzip-pax', $gzipPaxArchivePath, '--dest', $gzipPaxDestination) `
+        -Role 'packaged gzip-wrapped PAX materialization'
+    if ($gzipPaxMaterialize.ExitCode -ne 0) {
+        throw "packaged gzip-wrapped PAX materialization failed: $($gzipPaxMaterialize.Stderr)"
+    }
+    $gzipPaxMaterializedView = $gzipPaxMaterialize.Stdout | ConvertFrom-Json
+    $gzipPaxMaterializedReceipt = $gzipPaxMaterialize.Stderr | ConvertFrom-Json
+    $gzipPaxFiles = @(Get-ChildItem -LiteralPath $gzipPaxDestination -Recurse -Force -File | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($gzipPaxDestination, $_.FullName).Replace('\', '/')
+        })
+    $gzipPaxDirectories = @(Get-ChildItem -LiteralPath $gzipPaxDestination -Recurse -Force -Directory | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($gzipPaxDestination, $_.FullName).Replace('\', '/')
+        })
+    $leakedStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+    if (-not $gzipPaxMaterializedView.wrote -or
+        $gzipPaxMaterializedView.effect.status -cne 'committed' -or
+        $gzipPaxMaterializedReceipt.identities.layout.sealrTreeV7 -cne $gzipPaxReceipt.identities.layout.sealrTreeV7 -or
+        $gzipPaxMaterializedReceipt.identities.content.sealrTreeV1 -cne $gzipPaxReceipt.identities.content.sealrTreeV1 -or
+        $gzipPaxFiles.Count -ne 1 -or $gzipPaxFiles[0] -cne 'mars/retained.txt' -or
+        $gzipPaxDirectories.Count -ne 1 -or $gzipPaxDirectories[0] -cne 'mars' -or
+        [System.IO.File]::ReadAllText((Join-Path $gzipPaxDestination 'mars/retained.txt')) -cne 'mars' -or
+        $leakedStages.Count -ne 0) {
+        throw 'packaged gzip-wrapped PAX materialization did not preserve the effective admitted tree'
+    }
+
+    $gzipGnuBytes = New-GzipWrappedTar -Payload $gnuBytes
+    if ($gzipGnuBytes.Length -ne 10263) {
+        throw "native-package gzip-wrapped GNU long-name fixture length changed: $($gzipGnuBytes.Length)"
+    }
+    $gzipGnuArchivePath = Join-Path $temporaryRoot 'portable-gnu-longname.tar.gz'
+    [System.IO.File]::WriteAllBytes($gzipGnuArchivePath, $gzipGnuBytes)
+    $gzipGnuSourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $gzipGnuArchivePath).Hash.ToLowerInvariant()
+    if ($gzipGnuSourceHash -cne 'ee454a01c3ac8091473f022115363f7ef64b581fbc10763a923d0c6f8f7562f2') {
+        throw "native-package gzip-wrapped GNU long-name fixture identity changed: $gzipGnuSourceHash"
+    }
+
+    $gzipGnuInspect = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-gzip-gnu-longname', $gzipGnuArchivePath) `
+        -Role 'packaged gzip-wrapped GNU long-name inspect'
+    if ($gzipGnuInspect.ExitCode -ne 0) {
+        throw "packaged gzip-wrapped GNU long-name inspect failed: $($gzipGnuInspect.Stderr)"
+    }
+    $gzipGnuView = $gzipGnuInspect.Stdout | ConvertFrom-Json
+    $gzipGnuReceipt = $gzipGnuInspect.Stderr | ConvertFrom-Json
+    if ($gzipGnuView.schema -cne 'sealr.view.v1' -or
+        $gzipGnuReceipt.schema -cne 'sealr.receipt.v2' -or
+        $gzipGnuView.source.magic -cne 'gz' -or
+        $gzipGnuView.interpretation.status -cne 'interpreted' -or
+        $gzipGnuView.admission.status -cne 'admitted' -or
+        $gzipGnuView.verification.status -cne 'complete' -or
+        $gzipGnuView.effect.status -cne 'not-requested' -or
+        @($gzipGnuView.members).Count -ne 1 -or
+        $gzipGnuView.members[0].path -cne $gnuFixture.member_path -or
+        $gzipGnuView.members[0].method -cne 'raw' -or
+        $gzipGnuView.members[0].uncomp_bytes -ne 22 -or
+        $gzipGnuReceipt.policy.id -cne 'sealr:policy/default/v7' -or
+        $gzipGnuReceipt.policy.digest.sha256 -cne '92d576984b718e8a02bc6044090f8e2b335dbd1abd136d53e5b02d0ffbd978ef' -or
+        $gzipGnuReceipt.identities.interpretation.id -cne 'sealr.profile.tar-gzip.gnu-longname-portable.v1' -or
+        $gzipGnuReceipt.identities.interpretation.digest.sha256 -cne '622943e9629c4acc7cfeb446eb9f2d16bb245db589c1a200e885a9d69a02295a' -or
+        $gzipGnuReceipt.identities.layout.sealrTreeV8 -cne '92b635ab1d332b77b7e94852fc341636043363b127698cf42dcb3766c3e883ab' -or
+        $gzipGnuReceipt.identities.content.sealrTreeV1 -cne $gnuFixture.content_sha256) {
+        throw 'packaged gzip-wrapped GNU long-name inspect returned unexpected semantic evidence'
+    }
+
+    $gzipGnuDefault = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @($gzipGnuArchivePath) `
+        -Role 'packaged gzip-wrapped GNU compatibility-default refusal'
+    $gzipGnuDefaultView = $gzipGnuDefault.Stdout | ConvertFrom-Json
+    $gzipGnuDefaultReceipt = $gzipGnuDefault.Stderr | ConvertFrom-Json
+    if ($gzipGnuDefault.ExitCode -ne 2 -or
+        $gzipGnuDefaultView.verdict -cne 'rejected' -or
+        $gzipGnuDefaultView.source.magic -cne 'gz' -or
+        $gzipGnuDefaultView.policy.id -cne 'sealr:policy/default/v1' -or
+        $gzipGnuDefaultView.interpretation.status -cne 'unsupported' -or
+        $gzipGnuDefaultView.admission.status -cne 'not-evaluated' -or
+        @($gzipGnuDefaultView.members).Count -ne 0 -or
+        $gzipGnuDefaultReceipt.identities.interpretation.id -cne 'sealr.profile.zip.strict-ascii.v1' -or
+        $gzipGnuDefaultReceipt.identities.layout.status -cne 'unavailable' -or
+        $gzipGnuDefaultReceipt.identities.content.status -cne 'unavailable') {
+        throw 'packaged compatibility default unexpectedly recognized gzip-wrapped GNU long-name TAR'
+    }
+
+    $gzipGnuDestination = Join-Path $temporaryRoot 'gzip-gnu-longname-output'
+    $gzipGnuMaterialize = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-gzip-gnu-longname', $gzipGnuArchivePath, '--dest', $gzipGnuDestination) `
+        -Role 'packaged gzip-wrapped GNU long-name materialization'
+    if ($gzipGnuMaterialize.ExitCode -ne 0) {
+        throw "packaged gzip-wrapped GNU long-name materialization failed: $($gzipGnuMaterialize.Stderr)"
+    }
+    $gzipGnuMaterializedView = $gzipGnuMaterialize.Stdout | ConvertFrom-Json
+    $gzipGnuMaterializedReceipt = $gzipGnuMaterialize.Stderr | ConvertFrom-Json
+    $gzipGnuFiles = @(Get-ChildItem -LiteralPath $gzipGnuDestination -Recurse -Force -File | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($gzipGnuDestination, $_.FullName).Replace('\', '/')
+        })
+    $leakedStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+    $gzipGnuMaterializedPath = Join-Path $gzipGnuDestination ([string]$gnuFixture.member_path)
+    if (-not $gzipGnuMaterializedView.wrote -or
+        $gzipGnuMaterializedView.effect.status -cne 'committed' -or
+        $gzipGnuMaterializedReceipt.identities.layout.sealrTreeV8 -cne $gzipGnuReceipt.identities.layout.sealrTreeV8 -or
+        $gzipGnuMaterializedReceipt.identities.content.sealrTreeV1 -cne $gzipGnuReceipt.identities.content.sealrTreeV1 -or
+        $gzipGnuFiles.Count -ne 1 -or $gzipGnuFiles[0] -cne $gnuFixture.member_path -or
+        [System.IO.File]::ReadAllText($gzipGnuMaterializedPath) -cne "gnu longname portable`n" -or
+        $leakedStages.Count -ne 0) {
+        throw 'packaged gzip-wrapped GNU long-name materialization did not preserve the effective admitted tree'
+    }
+
+    # Zstandard CLI v1.5.7 default-level output for the conformance derived TAR
+    # holding mission/plan.txt with `verify twice, decode once`.
+    $zstdHex = '28b52ffd640007a5030062c5121880a96dc0ffd67f1bf321d16a06b6620b6de647c162f42' +
+        '2038a129f1e8cf43843d126fa1683558a6866f59b3abd0e3f43c424598ac944438c94ff7fa6e0ffad15' +
+        '0d4887600824deb5b6100e004fc10f92c40c35149a94c11c58d301c0907b01a0133cf00e83dc50ab023' +
+        '8562e1326b004ca51b2db'
+    $zstdBytes = [System.Convert]::FromHexString($zstdHex)
+    if ($zstdBytes.Length -ne 130) {
+        throw "native-package zstd-wrapped ustar fixture length changed: $($zstdBytes.Length)"
+    }
+    $zstdArchivePath = Join-Path $temporaryRoot 'portable-ustar.tar.zst'
+    [System.IO.File]::WriteAllBytes($zstdArchivePath, $zstdBytes)
+    $zstdSourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zstdArchivePath).Hash.ToLowerInvariant()
+    if ($zstdSourceHash -cne '4a467796ef2cd9a9e1a6ed670fa1d1ef15174b95be29b087af7339c32b078dcb') {
+        throw "native-package zstd-wrapped ustar fixture identity changed: $zstdSourceHash"
+    }
+
+    $zstdInspect = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-zstd-ustar', $zstdArchivePath) `
+        -Role 'packaged zstd-wrapped ustar inspect'
+    if ($zstdInspect.ExitCode -ne 0) {
+        throw "packaged zstd-wrapped ustar inspect failed: $($zstdInspect.Stderr)"
+    }
+    $zstdView = $zstdInspect.Stdout | ConvertFrom-Json
+    $zstdReceipt = $zstdInspect.Stderr | ConvertFrom-Json
+    if ($zstdView.schema -cne 'sealr.view.v1' -or
+        $zstdReceipt.schema -cne 'sealr.receipt.v2' -or
+        $zstdView.source.magic -cne 'zst' -or
+        $zstdView.interpretation.status -cne 'interpreted' -or
+        $zstdView.admission.status -cne 'admitted' -or
+        $zstdView.verification.status -cne 'complete' -or
+        $zstdView.effect.status -cne 'not-requested' -or
+        @($zstdView.members).Count -ne 1 -or
+        $zstdView.members[0].path -cne 'mission/plan.txt' -or
+        $zstdView.members[0].method -cne 'raw' -or
+        $zstdView.members[0].uncomp_bytes -ne 25 -or
+        $zstdReceipt.policy.id -cne 'sealr:policy/default/v8' -or
+        $zstdReceipt.policy.digest.sha256 -cne 'd0cfdf4d40e3a88c8e80170494b23e91761802304265e41ce19cb616fa8a1c42' -or
+        $zstdReceipt.identities.interpretation.id -cne 'sealr.profile.tar-zstd.ustar-portable.v1' -or
+        $zstdReceipt.identities.interpretation.digest.sha256 -cne 'c7d2e708f2f5258eddfb99fbf13661bd2f671a2daa4a45bc1d9603d30d472ae7' -or
+        $zstdReceipt.identities.layout.sealrTreeV9 -cne '8638eff6b2507614edc81eaccf4c3168e245febe0d1ee0eeb7651b018233fb63' -or
+        $zstdReceipt.identities.content.sealrTreeV1 -cne 'bc8f6d6f7870aeab647cff08db25471a729bd2a41e095d49d6254c49afc34278') {
+        throw 'packaged zstd-wrapped ustar inspect returned unexpected semantic evidence'
+    }
+
+    $zstdDefault = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @($zstdArchivePath) `
+        -Role 'packaged zstd-wrapped ustar compatibility-default refusal'
+    $zstdDefaultView = $zstdDefault.Stdout | ConvertFrom-Json
+    $zstdDefaultReceipt = $zstdDefault.Stderr | ConvertFrom-Json
+    if ($zstdDefault.ExitCode -ne 2 -or
+        $zstdDefaultView.verdict -cne 'rejected' -or
+        $zstdDefaultView.source.magic -cne 'unknown' -or
+        $zstdDefaultView.policy.id -cne 'sealr:policy/default/v1' -or
+        $zstdDefaultView.interpretation.status -cne 'unsupported' -or
+        $zstdDefaultView.admission.status -cne 'not-evaluated' -or
+        @($zstdDefaultView.members).Count -ne 0 -or
+        $zstdDefaultReceipt.identities.interpretation.id -cne 'sealr.profile.zip.strict-ascii.v1' -or
+        $zstdDefaultReceipt.identities.layout.status -cne 'unavailable' -or
+        $zstdDefaultReceipt.identities.content.status -cne 'unavailable') {
+        throw 'packaged compatibility default unexpectedly recognized zstd-wrapped ustar'
+    }
+
+    $zstdDestination = Join-Path $temporaryRoot 'zstd-ustar-output'
+    $zstdMaterialize = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-zstd-ustar', $zstdArchivePath, '--dest', $zstdDestination) `
+        -Role 'packaged zstd-wrapped ustar materialization'
+    if ($zstdMaterialize.ExitCode -ne 0) {
+        throw "packaged zstd-wrapped ustar materialization failed: $($zstdMaterialize.Stderr)"
+    }
+    $zstdMaterializedView = $zstdMaterialize.Stdout | ConvertFrom-Json
+    $zstdMaterializedReceipt = $zstdMaterialize.Stderr | ConvertFrom-Json
+    $zstdFiles = @(Get-ChildItem -LiteralPath $zstdDestination -Recurse -Force -File | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($zstdDestination, $_.FullName).Replace('\', '/')
+        })
+    $zstdDirectories = @(Get-ChildItem -LiteralPath $zstdDestination -Recurse -Force -Directory | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($zstdDestination, $_.FullName).Replace('\', '/')
+        })
+    $leakedStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+    if (-not $zstdMaterializedView.wrote -or
+        $zstdMaterializedView.effect.status -cne 'committed' -or
+        $zstdMaterializedReceipt.identities.layout.sealrTreeV9 -cne $zstdReceipt.identities.layout.sealrTreeV9 -or
+        $zstdMaterializedReceipt.identities.content.sealrTreeV1 -cne $zstdReceipt.identities.content.sealrTreeV1 -or
+        $zstdFiles.Count -ne 1 -or $zstdFiles[0] -cne 'mission/plan.txt' -or
+        $zstdDirectories.Count -ne 1 -or $zstdDirectories[0] -cne 'mission' -or
+        [System.IO.File]::ReadAllText((Join-Path $zstdDestination 'mission/plan.txt')) -cne 'verify twice, decode once' -or
+        $leakedStages.Count -ne 0) {
+        throw 'packaged zstd-wrapped ustar materialization did not preserve the effective admitted tree'
+    }
+
     if ($TargetTriple -ne $windowsTarget) {
         foreach ($relative in $expectedFiles) {
             $expectedMode = if ($relative -in @($binaryName, 'libexec/sealr/sealr-worker')) { '755' } else { '644' }
@@ -631,6 +1077,82 @@ try {
             (Test-Path -LiteralPath $paxWorkerDestination) -or
             $workerStages.Count -ne 0) {
             throw 'packaged restricted PAX worker selection did not fail closed without fallback'
+        }
+        $gnuWorkerDestination = Join-Path $temporaryRoot 'old-gnu-longname-worker-output'
+        $gnuWorker = Invoke-Captured `
+            -FilePath $packagedCli `
+            -Arguments @(
+                '--format', 'tar-gnu-longname',
+                '--worker-manifest', $manifestPath,
+                $gnuArchivePath,
+                '--dest', $gnuWorkerDestination
+            ) `
+            -Role 'packaged old-GNU long-name worker refusal'
+        $workerStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+        if ($gnuWorker.ExitCode -ne 1 -or
+            -not [string]::IsNullOrEmpty($gnuWorker.Stdout) -or
+            $gnuWorker.Stderr -notmatch 'isolation unavailable' -or
+            $gnuWorker.Stderr -notmatch 'GNU long-name TAR' -or
+            (Test-Path -LiteralPath $gnuWorkerDestination) -or
+            $workerStages.Count -ne 0) {
+            throw 'packaged old-GNU long-name worker selection did not fail closed without fallback'
+        }
+        $gzipPaxWorkerDestination = Join-Path $temporaryRoot 'gzip-pax-worker-output'
+        $gzipPaxWorker = Invoke-Captured `
+            -FilePath $packagedCli `
+            -Arguments @(
+                '--format', 'tar-gzip-pax',
+                '--worker-manifest', $manifestPath,
+                $gzipPaxArchivePath,
+                '--dest', $gzipPaxWorkerDestination
+            ) `
+            -Role 'packaged gzip-wrapped PAX worker refusal'
+        $workerStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+        if ($gzipPaxWorker.ExitCode -ne 1 -or
+            -not [string]::IsNullOrEmpty($gzipPaxWorker.Stdout) -or
+            $gzipPaxWorker.Stderr -notmatch 'isolation unavailable' -or
+            $gzipPaxWorker.Stderr -notmatch 'semantic-record v3' -or
+            (Test-Path -LiteralPath $gzipPaxWorkerDestination) -or
+            $workerStages.Count -ne 0) {
+            throw 'packaged gzip-wrapped PAX worker selection did not fail closed without fallback'
+        }
+        $gzipGnuWorkerDestination = Join-Path $temporaryRoot 'gzip-gnu-longname-worker-output'
+        $gzipGnuWorker = Invoke-Captured `
+            -FilePath $packagedCli `
+            -Arguments @(
+                '--format', 'tar-gzip-gnu-longname',
+                '--worker-manifest', $manifestPath,
+                $gzipGnuArchivePath,
+                '--dest', $gzipGnuWorkerDestination
+            ) `
+            -Role 'packaged gzip-wrapped GNU long-name worker refusal'
+        $workerStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+        if ($gzipGnuWorker.ExitCode -ne 1 -or
+            -not [string]::IsNullOrEmpty($gzipGnuWorker.Stdout) -or
+            $gzipGnuWorker.Stderr -notmatch 'isolation unavailable' -or
+            $gzipGnuWorker.Stderr -notmatch 'semantic-record v3' -or
+            (Test-Path -LiteralPath $gzipGnuWorkerDestination) -or
+            $workerStages.Count -ne 0) {
+            throw 'packaged gzip-wrapped GNU long-name worker selection did not fail closed without fallback'
+        }
+        $zstdWorkerDestination = Join-Path $temporaryRoot 'zstd-ustar-worker-output'
+        $zstdWorker = Invoke-Captured `
+            -FilePath $packagedCli `
+            -Arguments @(
+                '--format', 'tar-zstd-ustar',
+                '--worker-manifest', $manifestPath,
+                $zstdArchivePath,
+                '--dest', $zstdWorkerDestination
+            ) `
+            -Role 'packaged zstd-wrapped ustar worker refusal'
+        $workerStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+        if ($zstdWorker.ExitCode -ne 1 -or
+            -not [string]::IsNullOrEmpty($zstdWorker.Stdout) -or
+            $zstdWorker.Stderr -notmatch 'isolation unavailable' -or
+            $zstdWorker.Stderr -notmatch 'zstd-wrapped TAR' -or
+            (Test-Path -LiteralPath $zstdWorkerDestination) -or
+            $workerStages.Count -ne 0) {
+            throw 'packaged zstd-wrapped ustar worker selection did not fail closed without fallback'
         }
         $elfHeader = readelf --file-header $helper | Out-String
         if ($LASTEXITCODE -ne 0 -or
