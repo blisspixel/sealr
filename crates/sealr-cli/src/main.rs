@@ -5,8 +5,8 @@ use std::process::ExitCode;
 use clap::{Parser, ValueEnum};
 use sealr::{
     apply_supervised, apply_with_options, ApplyOptions, LinuxWorker, Policy, Request, Source,
-    TarGzipInterpretationProfile, TarInterpretationProfile, TarPaxInterpretationProfile,
-    ZipInterpretationProfile,
+    TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
+    TarPaxInterpretationProfile, TarZstdInterpretationProfile, ZipInterpretationProfile,
 };
 use serde::Serialize;
 
@@ -37,6 +37,13 @@ enum CliFormat {
     TarUstar,
     TarGzipUstar,
     TarPax,
+    #[value(name = "tar-gnu-longname")]
+    TarGnuLongName,
+    #[value(name = "tar-gzip-pax")]
+    TarGzipPax,
+    #[value(name = "tar-gzip-gnu-longname")]
+    TarGzipGnuLongName,
+    TarZstdUstar,
 }
 
 fn main() -> ExitCode {
@@ -63,6 +70,29 @@ fn main() -> ExitCode {
             Policy::default_v5(),
             ApplyOptions::new()
                 .with_tar_pax_interpretation_profile(TarPaxInterpretationProfile::PortableV1),
+        ),
+        CliFormat::TarGnuLongName => (
+            Policy::default_v6(),
+            ApplyOptions::new().with_tar_gnu_longname_interpretation_profile(
+                TarGnuLongNameInterpretationProfile::PortableV1,
+            ),
+        ),
+        CliFormat::TarGzipPax => (
+            Policy::default_v7(),
+            ApplyOptions::new()
+                .with_tar_gzip_interpretation_profile(TarGzipInterpretationProfile::PaxPortableV1),
+        ),
+        CliFormat::TarGzipGnuLongName => (
+            Policy::default_v7(),
+            ApplyOptions::new().with_tar_gzip_interpretation_profile(
+                TarGzipInterpretationProfile::GnuLongNamePortableV1,
+            ),
+        ),
+        CliFormat::TarZstdUstar => (
+            Policy::default_v8(),
+            ApplyOptions::new().with_tar_zstd_interpretation_profile(
+                TarZstdInterpretationProfile::UstarPortableV1,
+            ),
         ),
     };
     let request = Request {

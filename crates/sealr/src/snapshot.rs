@@ -363,6 +363,7 @@ impl<'a> SnapshotSet<'a> {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TransformProfile {
     GzipRfc1952SingleMemberV1,
+    ZstdRfc8878SingleFrameV1,
     #[cfg(test)]
     TestIdentityV1,
     #[cfg(test)]
@@ -373,6 +374,7 @@ impl TransformProfile {
     pub(crate) const fn id(self) -> &'static str {
         match self {
             Self::GzipRfc1952SingleMemberV1 => "sealr.transform.gzip.rfc1952-single-member.v1",
+            Self::ZstdRfc8878SingleFrameV1 => "sealr.transform.zstd.rfc8878-single-frame.v1",
             #[cfg(test)]
             Self::TestIdentityV1 => "sealr.transform.test.identity.v1",
             #[cfg(test)]
@@ -383,6 +385,7 @@ impl TransformProfile {
     pub(crate) const fn definition(self) -> &'static [u8] {
         match self {
             Self::GzipRfc1952SingleMemberV1 => b"algorithm=rfc1952-gzip;members=exactly-one;reserved-flags=zero;extra-fields=exact-subfield-framing-si2-nonzero-unique-ids;trailing-data=forbidden;header-crc=verify-when-present;data-crc32=verify;isize=verify;payload=rfc1951-deflate;output=bounded",
+            Self::ZstdRfc8878SingleFrameV1 => b"algorithm=rfc8878-zstd;frames=exactly-one;skippable-frames=forbidden;reserved-descriptor-bit=zero;unused-descriptor-bit=zero;dictionary=forbidden;window-size-max-bytes=8388608;frame-content-size=verify-when-present;content-checksum-xxh64=verify-when-present;trailing-data=forbidden;payload=rfc8878-blocks;output=bounded",
             #[cfg(test)]
             Self::TestIdentityV1 => b"algorithm=test-identity;version=1",
             #[cfg(test)]
@@ -394,6 +397,9 @@ impl TransformProfile {
         match self {
             Self::GzipRfc1952SingleMemberV1 => {
                 "795a124c278eacf1fb9b4fc3825a74240d6d0e89c29ffdfe6118ff6db53c0a45"
+            }
+            Self::ZstdRfc8878SingleFrameV1 => {
+                "86745123584dc79e454f8f1bbf5a1bd1b75d1334902fd629e8eee8f251aa9d19"
             }
             #[cfg(test)]
             Self::TestIdentityV1 => {
@@ -409,6 +415,9 @@ impl TransformProfile {
     pub(crate) const fn decoder_parameters(self) -> &'static [u8] {
         match self {
             Self::GzipRfc1952SingleMemberV1 => b"rfc1951-window-bits=15;preset-dictionary=none",
+            Self::ZstdRfc8878SingleFrameV1 => {
+                b"rfc8878-max-window-bytes=8388608;dictionary=none;block-decoding=bounded-incremental"
+            }
             #[cfg(test)]
             Self::TestIdentityV1 => b"mode=identity;window=none",
             #[cfg(test)]
@@ -420,6 +429,9 @@ impl TransformProfile {
         match self {
             Self::GzipRfc1952SingleMemberV1 => {
                 "c835627b01c4b54041c627319fab4d5af294a203ac26fbe91cadb6d1f17cd5e1"
+            }
+            Self::ZstdRfc8878SingleFrameV1 => {
+                "a4a46d31cf8acbbfe043745ba1df4f43b7a955efc28ee8913804a99bae79d503"
             }
             #[cfg(test)]
             Self::TestIdentityV1 => {
@@ -1545,6 +1557,19 @@ mod tests {
         assert_eq!(
             hex_sha256(gzip_profile.decoder_parameters()),
             gzip_profile.decoder_parameters_digest()
+        );
+        let zstd_profile = TransformProfile::ZstdRfc8878SingleFrameV1;
+        assert!(zstd_profile.validates());
+        assert_eq!(
+            transform_profile_sha256(zstd_profile.id(), zstd_profile.definition()).as_deref(),
+            Some(zstd_profile.digest()),
+            "observed zstd transform digest: {:?}",
+            transform_profile_sha256(zstd_profile.id(), zstd_profile.definition())
+        );
+        assert_eq!(
+            hex_sha256(zstd_profile.decoder_parameters()),
+            zstd_profile.decoder_parameters_digest(),
+            "observed zstd decoder-parameter digest",
         );
 
         let (mut snapshots, mut graph) = one_transform();

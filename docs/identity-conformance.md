@@ -1,13 +1,13 @@
 # Identity conformance and independent verification
 
-> Status: introduced in Alpha.4, extended through Alpha.8 with the repository-only wheel and supported portable UTF-8 profiles, extended in Alpha.9 with portable ustar, extended in Alpha.10 with strict ZIP64 `sealrTreeV3` plus strict gzip-wrapped ustar `sealrTreeV4`, and extended in Alpha.11 with restricted raw PAX `sealrTreeV5`. The vectors and verifier protect preview identities. They do not make any profile stable or turn unsigned evidence into an attestation.
+> Status: introduced in Alpha.4, extended through Alpha.8 with the repository-only wheel and supported portable UTF-8 profiles, extended in Alpha.9 with portable ustar, extended in Alpha.10 with strict ZIP64 `sealrTreeV3` plus strict gzip-wrapped ustar `sealrTreeV4`, extended in Alpha.11 with restricted raw PAX `sealrTreeV5`, and extended on current main with restricted GNU long-name `sealrTreeV6`, the gzip-wrapped PAX `sealrTreeV7` and gzip-wrapped GNU `sealrTreeV8` compositions, and the zstd-wrapped ustar `sealrTreeV9` profile. The vectors and verifier protect preview identities. They do not make any profile stable or turn unsigned evidence into an attestation.
 
 Sealr now publishes a small, versioned identity-conformance bundle and checks it two ways:
 
-- the production integration tests apply the embedded ZIP, gzip-TAR, and restricted PAX source bytes plus separately reconstructed exact raw-TAR producer bytes, requiring their semantic axes, findings, `ArchiveIR`, and roots to equal the committed evidence;
-- the separate `sealr-identity-verifier` workspace tool consumes those recorded facts without depending on the `sealr` crate. It checks exact ZIP, gzip wrapper, and PAX sources and coverings, validates raw and derived TAR covering geometry, PAX state and provenance, and evidence digests, and independently reconstructs each profile, layout, and content preimage.
+- the production integration tests apply the embedded ZIP, gzip-TAR, restricted PAX, restricted GNU, and gzip-composition source bytes plus separately reconstructed exact raw-TAR producer bytes, requiring their semantic axes, findings, `ArchiveIR`, and roots to equal the committed evidence;
+- the separate `sealr-identity-verifier` workspace tool consumes those recorded facts without depending on the `sealr` crate. It checks exact ZIP, gzip wrapper, PAX, and GNU sources and coverings, validates raw and derived TAR covering geometry, PAX state and provenance, GNU carrier state, and evidence digests, and independently reconstructs each profile, layout, and content preimage.
 
-The canonical artifacts are the [ZIP32 v1 conformance manifest](../crates/sealr/tests/conformance/identity-v1.json), the [ZIP64 v1 conformance manifest](../crates/sealr/tests/conformance/zip64-identity-v1.json), the [portable ustar profile vector](../crates/sealr/tests/conformance/tar-ustar-portable-v1.json), the [TAR layout v2 vector](../crates/sealr/tests/conformance/tar-layout-v2.json), the [gzip-TAR TreeV4 manifest](../crates/sealr/tests/conformance/tar-gzip-identity-v1.json), the [restricted PAX profile vector](../crates/sealr/tests/conformance/tar-pax-profile-v1.json), the [PAX TreeV5 manifest](../crates/sealr/tests/conformance/tar-pax-identity-v1.json), the [independent verifier](../tools/identity-verifier), and the production [ZIP32](../crates/sealr/tests/golden_identity.rs), [ZIP64](../crates/sealr/tests/zip64_public_api.rs), [raw TAR](../crates/sealr/tests/tar_public_api.rs), [gzip-TAR](../crates/sealr/tests/tar_gzip_public_api.rs), and [PAX](../crates/sealr/tests/tar_pax_public_api.rs) tests.
+The canonical artifacts are the [ZIP32 v1 conformance manifest](../crates/sealr/tests/conformance/identity-v1.json), the [ZIP64 v1 conformance manifest](../crates/sealr/tests/conformance/zip64-identity-v1.json), the [portable ustar profile vector](../crates/sealr/tests/conformance/tar-ustar-portable-v1.json), the [TAR layout v2 vector](../crates/sealr/tests/conformance/tar-layout-v2.json), the [gzip-TAR TreeV4 manifest](../crates/sealr/tests/conformance/tar-gzip-identity-v1.json), the [restricted PAX profile vector](../crates/sealr/tests/conformance/tar-pax-profile-v1.json), the [PAX TreeV5 manifest](../crates/sealr/tests/conformance/tar-pax-identity-v1.json), the [GNU long-name profile vector](../crates/sealr/tests/conformance/tar-gnu-longname-profile-v1.json), the [GNU TreeV6 manifest](../crates/sealr/tests/conformance/tar-gnu-longname-identity-v1.json), the [gzip-PAX TreeV7 manifest](../crates/sealr/tests/conformance/tar-gzip-pax-identity-v1.json), the [gzip-GNU TreeV8 manifest](../crates/sealr/tests/conformance/tar-gzip-gnu-longname-identity-v1.json), the [zstd TreeV9 manifest](../crates/sealr/tests/conformance/tar-zstd-identity-v1.json), the [independent verifier](../tools/identity-verifier), and the production [ZIP32](../crates/sealr/tests/golden_identity.rs), [ZIP64](../crates/sealr/tests/zip64_public_api.rs), [raw TAR](../crates/sealr/tests/tar_public_api.rs), [gzip-TAR](../crates/sealr/tests/tar_gzip_public_api.rs), [PAX](../crates/sealr/tests/tar_pax_public_api.rs), [GNU long-name](../crates/sealr/tests/tar_gnu_longname_public_api.rs), [gzip-PAX](../crates/sealr/tests/tar_gzip_pax_public_api.rs), [gzip-GNU](../crates/sealr/tests/tar_gzip_gnu_longname_public_api.rs), and [zstd](../crates/sealr/tests/tar_zstd_public_api.rs) tests.
 
 ## Verification boundary
 
@@ -82,6 +82,20 @@ The PAX layout uses the label `sealr.tree.layout.tar-pax.v1`. Its body binds the
 
 The verifier reparses only the closed `path` and `size` grammar and replays the fixed four-field PAX state. A redundant override changes `sealrTreeV5` even if the effective files are unchanged. A portable ustar and restricted PAX source may share `sealrTreeV1` only after complete content verification; their interpretation and layout identities remain distinct.
 
+## Restricted GNU long-name `sealrTreeV6`
+
+The GNU layout uses the label `sealr.tree.layout.tar-gnu-longname.v1`. Its body binds the complete source covering, ordered `L` carriers, carrier names and ranges, carrier path bytes and payload digests, every ordinary member's underlying header name, and exact header-or-carrier path provenance. The verifier independently replays the single-depth carrier state: every carrier must be consumed by exactly the next ordinary member, and orphan or chained carriers fail.
+
+## Gzip compositions `sealrTreeV7` and `sealrTreeV8`
+
+The gzip-wrapped restricted PAX layout uses the label `sealr.tree.layout.tar-gzip-pax.v1`, and the gzip-wrapped GNU long-name layout uses `sealr.tree.layout.tar-gzip-gnu-longname.v1`. Each body binds the same wrapper prefix as `sealrTreeV4` — transform profile ID and digest, decoder-parameter digest, original domain and complete input range, original SHA-256, output domain, derived length and SHA-256, every wrapper fixed and optional field, payload and trailer ranges, declared CRC32 and ISIZE — followed by the complete inner `sealrTreeV5` or `sealrTreeV6` layout body over the derived domain.
+
+Each composition manifest contains `optional-default` and `minimal-stored-deflate` cases encoding one committed derived dialect TAR through different Deflate streams. Their source and composed roots differ, while both share the raw dialect's `sealrTreeV1` content root, and the manifest additionally binds the raw dialect layout root of the derived bytes. The verifier rejects mutations across transform constants, wrapper fields, derived-byte integrity, inner dialect geometry and provenance, and every root.
+
+## Zstd-wrapped ustar `sealrTreeV9`
+
+The zstd layout uses the label `sealr.tree.layout.tar-zstd-ustar.v1`. Its body binds the zstd transform identifiers, both domain identities, the exact frame descriptor and decoded flags, window descriptor and effective window, optional frame content size, header, block-payload, and trailer ranges, the declared XXH64 checksum when present, and the complete inner portable-ustar layout body. Its manifest carries a pinned Zstandard CLI 1.5.7 producer case beside a handcrafted raw-block case over one committed derived TAR, and the verifier independently replays the wrapper grammar, re-hashes the derived bytes with a self-contained XXH64, and reconstructs `sealrTreeV9`, the raw `sealrTreeV2` relationship, and the shared `sealrTreeV1` content root without a decompressor.
+
 ## Run locally
 
 ```powershell
@@ -90,10 +104,18 @@ cargo run --locked -p sealr-identity-verifier -- crates/sealr/tests/conformance/
 cargo run --locked -p sealr-identity-verifier -- crates/sealr/tests/conformance/zip64-identity-v1.json
 cargo run --locked -p sealr-identity-verifier -- crates/sealr/tests/conformance/tar-gzip-identity-v1.json
 cargo run --locked -p sealr-identity-verifier -- crates/sealr/tests/conformance/tar-pax-identity-v1.json
+cargo run --locked -p sealr-identity-verifier -- crates/sealr/tests/conformance/tar-gnu-longname-identity-v1.json
+cargo run --locked -p sealr-identity-verifier -- crates/sealr/tests/conformance/tar-gzip-pax-identity-v1.json
+cargo run --locked -p sealr-identity-verifier -- crates/sealr/tests/conformance/tar-gzip-gnu-longname-identity-v1.json
+cargo run --locked -p sealr-identity-verifier -- crates/sealr/tests/conformance/tar-zstd-identity-v1.json
 cargo test --locked -p sealr --test golden_identity
 cargo test --locked -p sealr --test tar_public_api
 cargo test --locked -p sealr --test tar_gzip_public_api
 cargo test --locked -p sealr --test tar_pax_public_api
+cargo test --locked -p sealr --test tar_gnu_longname_public_api
+cargo test --locked -p sealr --test tar_gzip_pax_public_api
+cargo test --locked -p sealr --test tar_gzip_gnu_longname_public_api
+cargo test --locked -p sealr --test tar_zstd_public_api
 ```
 
 Required CI runs the production comparison, verifier tamper tests, and the verifier command. A change to a source fixture, serialized IR, profile bytes, semantic state, finding, range, or root therefore needs one deliberate manifest review.
