@@ -6,6 +6,8 @@
 mod apply;
 mod covering;
 mod findings;
+#[allow(dead_code)]
+mod gzip;
 mod identity;
 mod interval;
 mod ir;
