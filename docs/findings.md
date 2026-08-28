@@ -111,6 +111,8 @@ Unknown error codes must be treated as rejection by consumers.
 | `codec.zstd.trailing_input` | One valid Zstandard frame ended before the source ended. Concatenated frames, skippable frames, and every other trailing byte are rejected. |
 | `codec.xz.invalid_stream` | The declared XZ payload is not one valid stream within the restricted language, a structural CRC32 or index relation fails, the stream is truncated, or decoder accounting is inconsistent. |
 | `codec.xz.trailing_input` | One valid XZ stream ended before the source ended. Concatenated streams, stream padding, and every other trailing byte are rejected. |
+| `codec.bzip2.invalid_stream` | The declared bzip2 payload is not one valid stream within the restricted language, the footer or block-CRC chain fold fails, the stream is truncated, or decoder accounting is inconsistent. |
+| `codec.bzip2.trailing_input` | One valid bzip2 stream ended before the source ended. Concatenated streams and every other trailing byte are rejected. |
 | `crc.mismatch` | Expanded member CRC32 disagrees with the archive. |
 
 ### Gzip wrapper
