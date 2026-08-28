@@ -1,0 +1,134 @@
+{
+  "schema": "sealr.tar-gnu-longname-fuzz-seeds.v1",
+  "target": "tar_gnu_longname_portable_v1",
+  "toolchain": "nightly-2026-08-01",
+  "cargoFuzzVersion": "0.13.2",
+  "libfuzzerSysVersion": "0.4.13",
+  "sanitizer": "address",
+  "bounds": {
+    "maxInputBytes": 4194304,
+    "maxTotalSeconds": 600,
+    "perInputTimeoutSeconds": 5,
+    "rssLimitMiB": 1024,
+    "jobs": 1
+  },
+  "failureArtifact": {
+    "directoryName": "sealr-tar-gnu-longname-fuzz-artifacts",
+    "uploadOn": "failure",
+    "retentionDays": 7
+  },
+  "dictionary": {
+    "path": "fuzz/dictionaries/tar_gnu_longname_portable_v1_dictionary",
+    "bytes": 152,
+    "sha256": "b9caadeab7d22894fad357bb54d107b97c8a45a54121de569d8f2cca5eb37390"
+  },
+  "targetSource": {
+    "path": "fuzz/fuzz_targets/tar_gnu_longname_portable_v1.rs",
+    "bytes": 135,
+    "sha256": "9deaaa5c9a2a19370ce9c93e6c7990bba1308ed1107f8bbf03fece2d080bea27"
+  },
+  "generator": "fuzz/generate_tar_gnu_longname_fuzz_seeds.ps1",
+  "generatorSource": {
+    "path": "fuzz/generate_tar_gnu_longname_fuzz_seeds.ps1",
+    "bytes": 9463,
+    "sha256": "cba8d79fa86f12d4120c361d3699342a4868e61b8466183803d20bb02dbd8324"
+  },
+  "seeds": [
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/invalid-base256-size",
+      "bytes": 1536,
+      "sha256": "1fee98305b1c845a76fa50ab4103688dc506b678d546a660e7b9c6f240f42c64",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/invalid-chained-carrier",
+      "bytes": 3072,
+      "sha256": "ea71f9cf1e264c45a760bdebfaba6601e5c4ef03cf722ba9ea3445963560fa4c",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/invalid-embedded-nul",
+      "bytes": 2560,
+      "sha256": "23cad97d3c6d5b23fccf0c6d60e09099a447b71b317ce1f594ef7b82b329beea",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/invalid-missing-final-nul",
+      "bytes": 2560,
+      "sha256": "a40785456c25ebc7647d222b0f7fb94b5cdc42bd20d62e79fa5a2a91a442d848",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/invalid-nonzero-carrier-padding",
+      "bytes": 3072,
+      "sha256": "b6a114e8b65ab46051ba71aa5bd7c4cd8522e2eadb3e06bd3943da57fa500ce1",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/invalid-orphan-carrier",
+      "bytes": 2048,
+      "sha256": "9872d24eb8fd88e0b39b023d2b013c98246b62d3d7869ca5d5ed9b76d46a2b64",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/invalid-oversized-carrier",
+      "bytes": 1536,
+      "sha256": "6811316883c23aa02edea9c9a3460346304a5d879340af120937f2a17e3b500e",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/unsupported-cve-2026-53655-pax-gnu-state",
+      "bytes": 5632,
+      "sha256": "573ff0d132f633892e11a718b07f9bd5044ab9ed727ebbe5846aa7a3b83c224a",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/unsupported-long-link-k",
+      "bytes": 2048,
+      "sha256": "56f9c6c7e150819c442b211c72f69de7d5a4e6b4d5b1a2cecc7c23ec8e29dfb5",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/unsupported-sparse",
+      "bytes": 1536,
+      "sha256": "c94099e5a4e9cb8d6383c0c12ff6ce300a9009eb563c7677047e80fad747bd9b",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/valid-empty-oldgnu",
+      "bytes": 1024,
+      "sha256": "5f70bf18a086007016e948b04aed3b82103a36bea41755b6cddfaf10ace3c6ef",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/valid-gnu-longlink",
+      "bytes": 3072,
+      "sha256": "132b20dfd04c497e6005fa18696ccba483e9890bd02ba7846311c2f05a50bf51",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/valid-libarchive-longname",
+      "bytes": 3072,
+      "sha256": "b03caef10ebd5c3603bdec53723d285c5997daa47f378ad8d76bcac020e92c04",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/valid-ordinary-oldgnu",
+      "bytes": 2048,
+      "sha256": "5faeef2a9853e856f59d3aa2214cc040a4136a4c680951257f265bb820cdc075",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/valid-short-redundant-carrier",
+      "bytes": 3072,
+      "sha256": "4860ed13151a20633625c07db86f792abc24de2f3fb1494641f31c343027338d",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/tar_gnu_longname_portable_v1/valid-two-carrier-pairs",
+      "bytes": 5120,
+      "sha256": "e074dbb763ea6d9d5f2775ebd9f8f8e19673e8eeab49707954a8ab7b65a72b5f",
+      "generated": true
+    }
+  ]
+}

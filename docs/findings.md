@@ -107,6 +107,8 @@ Unknown error codes must be treated as rejection by consumers.
 | `zip.flags` | Non-encryption CDH and LFH flags disagree. |
 | `codec.deflate.invalid_stream` | The declared DEFLATE payload is not one valid raw DEFLATE stream, or decoder accounting is inconsistent. |
 | `codec.deflate.trailing_input` | One valid DEFLATE stream ended before the declared compressed payload ended. Trailing bytes and concatenated streams are rejected. |
+| `codec.zstd.invalid_frame` | The declared Zstandard payload is not one valid RFC 8878 frame within the restricted language, the frame is truncated, or decoder accounting is inconsistent. |
+| `codec.zstd.trailing_input` | One valid Zstandard frame ended before the source ended. Concatenated frames, skippable frames, and every other trailing byte are rejected. |
 | `crc.mismatch` | Expanded member CRC32 disagrees with the archive. |
 
 ### Gzip wrapper
@@ -129,6 +131,8 @@ Unknown error codes must be treated as rejection by consumers.
 | `tar.feature_unsupported` | A recognized PAX, GNU, link, special-file, or base-256 extension is outside the selected portable ustar profile. |
 | `tar.pax.record` | A PAX record violates the restricted profile's canonical length, delimiter, keyword, value, or complete-consumption grammar. |
 | `tar.pax.state` | Local or global PAX state violates the restricted profile's ordering, lifetime, or precedence contract. |
+| `tar.gnu.long_name` | A GNU long-name carrier violates the portable profile's canonical length, delimiter, single NUL terminator, or payload grammar. |
+| `tar.gnu.state` | GNU long-name carrier state violates the portable profile's immediate-consumption, single-carrier, or ordering contract. |
 
 ## Reserved registry work
 

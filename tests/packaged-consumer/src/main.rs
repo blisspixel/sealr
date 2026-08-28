@@ -3,11 +3,13 @@ use std::io::{Cursor, Write};
 
 use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelLimits, CONSUMER_PROFILE_ID};
 use sealr::{
-    apply_supervised, apply_with_options, ApplyOptions, ArchiveFormat, LinuxWorker,
-    MemberReadErrorKind, Policy, Request, RetentionPlan, RetentionStatus, Source,
-    TarInterpretationProfile, TarPaxInterpretationProfile, TreeRoot, VerifiedArchive,
-    ZipInterpretationProfile, TAR_PAX_PORTABLE_V1, TAR_USTAR_PORTABLE_V1,
-    ZIP_STRICT_ASCII_V2,
+    apply_supervised, apply_with_options, AdmissionStatus, ApplyOptions, ArchiveFormat,
+    LinuxWorker, MemberReadErrorKind, Policy, Request, RetentionPlan, RetentionStatus, Source,
+    TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
+    TarPaxInterpretationProfile, TarZstdInterpretationProfile, TreeRoot, VerificationStatus,
+    VerifiedArchive, ZipInterpretationProfile, TAR_GNU_LONGNAME_PORTABLE_V1,
+    TAR_GZIP_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_PAX_PORTABLE_V1, TAR_PAX_PORTABLE_V1,
+    TAR_USTAR_PORTABLE_V1, TAR_ZSTD_USTAR_PORTABLE_V1, ZIP_STRICT_ASCII_V2,
 };
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
@@ -245,6 +247,244 @@ fn main() {
         pax_archive.read_member("mars/retained.txt", 4).unwrap(),
         b"mars"
     );
+
+    let gnu_path = format!("mission/{}/status.txt", "segment".repeat(15));
+    let gnu_policy = Policy::default_v6();
+    let gnu_options = ApplyOptions::new()
+        .with_tar_gnu_longname_interpretation_profile(
+            TarGnuLongNameInterpretationProfile::PortableV1,
+        )
+        .with_retention(
+            RetentionPlan::new(7, 7)
+                .with_path(&gnu_path)
+                .expect("canonical GNU long-name retention path"),
+        );
+    let gnu_outcome = {
+        let gnu_bytes = portable_gnu_longname(&gnu_path);
+        apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("portable-gnu.tar"),
+                    data: &gnu_bytes,
+                },
+                policy: &gnu_policy,
+                dest: None,
+            },
+            &gnu_options,
+        )
+    };
+    assert!(!gnu_outcome.rejected(), "{:?}", gnu_outcome.view.findings);
+    let gnu_ir = gnu_outcome.archive_ir().expect("portable GNU long-name IR");
+    assert_eq!(gnu_ir.format(), ArchiveFormat::TarGnuLongName);
+    assert_eq!(gnu_ir.profile(), TAR_GNU_LONGNAME_PORTABLE_V1);
+    assert_eq!(
+        gnu_ir
+            .gnu_longname_carriers()
+            .expect("GNU carrier evidence")
+            .len(),
+        1
+    );
+    assert!(matches!(
+        gnu_outcome.receipt.identities.layout,
+        TreeRoot::SealrTreeV6 { .. }
+    ));
+    let gnu_archive = gnu_outcome
+        .into_verified_archive()
+        .expect("portable GNU long-name TAR must expose verified authority");
+    assert_eq!(
+        gnu_archive.retention_status(&gnu_path),
+        RetentionStatus::Retained
+    );
+    assert_eq!(
+        gnu_archive.retained_member(&gnu_path),
+        Some(b"nominal".as_slice())
+    );
+    assert_eq!(gnu_archive.read_member(&gnu_path, 7).unwrap(), b"nominal");
+
+    let gzip_pax_policy = Policy::default_v7();
+    let gzip_pax_options = ApplyOptions::new()
+        .with_tar_gzip_interpretation_profile(TarGzipInterpretationProfile::PaxPortableV1)
+        .with_retention(
+            RetentionPlan::new(4, 4)
+                .with_path("mars/retained.txt")
+                .expect("canonical gzip-wrapped PAX retention path"),
+        );
+    let gzip_pax_tar = portable_pax();
+    let gzip_pax_outcome = {
+        let gzip_pax_bytes = gzip_wrapped(&gzip_pax_tar);
+        apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("portable-pax.tar.gz"),
+                    data: &gzip_pax_bytes,
+                },
+                policy: &gzip_pax_policy,
+                dest: None,
+            },
+            &gzip_pax_options,
+        )
+    };
+    assert!(
+        !gzip_pax_outcome.rejected(),
+        "{:?}",
+        gzip_pax_outcome.view.findings
+    );
+    let gzip_pax_ir = gzip_pax_outcome.archive_ir().expect("gzip-wrapped PAX IR");
+    assert_eq!(gzip_pax_ir.format(), ArchiveFormat::TarGzipPax);
+    assert_eq!(gzip_pax_ir.profile(), TAR_GZIP_PAX_PORTABLE_V1);
+    let gzip_pax_wrapper = gzip_pax_ir
+        .gzip_evidence()
+        .expect("gzip-wrapped PAX wrapper evidence");
+    assert_eq!(gzip_pax_wrapper.derived_output_len, gzip_pax_tar.len() as u64);
+    assert_eq!(
+        gzip_pax_ir
+            .tar_pax_evidence()
+            .expect("gzip-wrapped PAX extension evidence")
+            .extensions
+            .len(),
+        1
+    );
+    assert!(matches!(
+        gzip_pax_outcome.receipt.identities.layout,
+        TreeRoot::SealrTreeV7 { .. }
+    ));
+    let gzip_pax_archive = gzip_pax_outcome
+        .into_verified_archive()
+        .expect("gzip-wrapped PAX must expose verified authority");
+    assert_eq!(
+        gzip_pax_archive.retention_status("mars/retained.txt"),
+        RetentionStatus::Retained
+    );
+    assert_eq!(
+        gzip_pax_archive.retained_member("mars/retained.txt"),
+        Some(b"mars".as_slice())
+    );
+    assert_eq!(
+        gzip_pax_archive.read_member("mars/retained.txt", 4).unwrap(),
+        b"mars"
+    );
+
+    let gzip_gnu_policy = Policy::default_v7();
+    let gzip_gnu_options = ApplyOptions::new()
+        .with_tar_gzip_interpretation_profile(TarGzipInterpretationProfile::GnuLongNamePortableV1)
+        .with_retention(
+            RetentionPlan::new(7, 7)
+                .with_path(&gnu_path)
+                .expect("canonical gzip-wrapped GNU long-name retention path"),
+        );
+    let gzip_gnu_tar = portable_gnu_longname(&gnu_path);
+    let gzip_gnu_outcome = {
+        let gzip_gnu_bytes = gzip_wrapped(&gzip_gnu_tar);
+        apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("portable-gnu.tar.gz"),
+                    data: &gzip_gnu_bytes,
+                },
+                policy: &gzip_gnu_policy,
+                dest: None,
+            },
+            &gzip_gnu_options,
+        )
+    };
+    assert!(
+        !gzip_gnu_outcome.rejected(),
+        "{:?}",
+        gzip_gnu_outcome.view.findings
+    );
+    let gzip_gnu_ir = gzip_gnu_outcome
+        .archive_ir()
+        .expect("gzip-wrapped GNU long-name IR");
+    assert_eq!(gzip_gnu_ir.format(), ArchiveFormat::TarGzipGnuLongName);
+    assert_eq!(gzip_gnu_ir.profile(), TAR_GZIP_GNU_LONGNAME_PORTABLE_V1);
+    let gzip_gnu_wrapper = gzip_gnu_ir
+        .gzip_evidence()
+        .expect("gzip-wrapped GNU long-name wrapper evidence");
+    assert_eq!(gzip_gnu_wrapper.derived_output_len, gzip_gnu_tar.len() as u64);
+    assert_eq!(
+        gzip_gnu_ir
+            .tar_gnu_longname_evidence()
+            .expect("gzip-wrapped GNU carrier evidence")
+            .carriers
+            .len(),
+        1
+    );
+    assert!(matches!(
+        gzip_gnu_outcome.receipt.identities.layout,
+        TreeRoot::SealrTreeV8 { .. }
+    ));
+    let gzip_gnu_archive = gzip_gnu_outcome
+        .into_verified_archive()
+        .expect("gzip-wrapped GNU long-name TAR must expose verified authority");
+    assert_eq!(
+        gzip_gnu_archive.retention_status(&gnu_path),
+        RetentionStatus::Retained
+    );
+    assert_eq!(
+        gzip_gnu_archive.retained_member(&gnu_path),
+        Some(b"nominal".as_slice())
+    );
+    assert_eq!(gzip_gnu_archive.read_member(&gnu_path, 7).unwrap(), b"nominal");
+
+    let zstd_policy = Policy::default_v8();
+    let zstd_options = ApplyOptions::new()
+        .with_tar_zstd_interpretation_profile(TarZstdInterpretationProfile::UstarPortableV1)
+        .with_retention(
+            RetentionPlan::new(8, 8)
+                .with_path("retained.txt")
+                .expect("canonical zstd-wrapped TAR retention path"),
+        );
+    let zstd_tar = portable_tar();
+    let zstd_outcome = {
+        let zstd_bytes = zstd_wrapped(&zstd_tar);
+        apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("portable.tar.zst"),
+                    data: &zstd_bytes,
+                },
+                policy: &zstd_policy,
+                dest: None,
+            },
+            &zstd_options,
+        )
+    };
+    assert!(
+        matches!(zstd_outcome.admission, AdmissionStatus::Admitted),
+        "{:?}",
+        zstd_outcome.view.findings
+    );
+    assert!(matches!(
+        zstd_outcome.verification,
+        VerificationStatus::Complete
+    ));
+    let zstd_ir = zstd_outcome.archive_ir().expect("zstd-wrapped ustar IR");
+    assert_eq!(zstd_ir.format(), ArchiveFormat::TarZstdUstar);
+    assert_eq!(zstd_ir.profile(), TAR_ZSTD_USTAR_PORTABLE_V1);
+    let zstd_wrapper = zstd_ir
+        .zstd_evidence()
+        .expect("zstd-wrapped ustar wrapper evidence");
+    assert_eq!(zstd_wrapper.derived_output_len, zstd_tar.len() as u64);
+    assert!(matches!(
+        zstd_outcome.receipt.identities.layout,
+        TreeRoot::SealrTreeV9 { .. }
+    ));
+    let zstd_archive = zstd_outcome
+        .into_verified_archive()
+        .expect("zstd-wrapped portable ustar must expose verified authority");
+    assert_eq!(
+        zstd_archive.retention_status("retained.txt"),
+        RetentionStatus::Retained
+    );
+    assert_eq!(
+        zstd_archive.retained_member("retained.txt"),
+        Some(b"retained".as_slice())
+    );
+    assert_eq!(zstd_archive.read_member("later.txt", 5).unwrap(), b"later");
+    assert_eq!(
+        zstd_archive.read_member("later.txt", 4).unwrap_err().kind(),
+        MemberReadErrorKind::LimitExceeded
+    );
 }
 
 fn portable_tar() -> Vec<u8> {
@@ -272,6 +512,62 @@ fn portable_pax() -> Vec<u8> {
     bytes.resize(bytes.len().next_multiple_of(512), 0);
     bytes.resize(bytes.len() + 1024, 0);
     bytes
+}
+
+fn portable_gnu_longname(path: &str) -> Vec<u8> {
+    let mut carrier_payload = path.as_bytes().to_vec();
+    carrier_payload.push(0);
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&old_gnu_header(
+        "producer-carrier",
+        carrier_payload.len(),
+        b'L',
+    ));
+    bytes.extend_from_slice(&carrier_payload);
+    bytes.resize(bytes.len().next_multiple_of(512), 0);
+    bytes.extend_from_slice(&old_gnu_header("opaque-base", 7, b'0'));
+    bytes.extend_from_slice(b"nominal");
+    bytes.resize(bytes.len().next_multiple_of(512), 0);
+    bytes.resize(bytes.len() + 1024, 0);
+    bytes
+}
+
+// A deterministic gzip member holding one stored (uncompressed) Deflate block,
+// so the exact wrapper bytes remain reviewable without a compression dependency.
+fn gzip_wrapped(tar: &[u8]) -> Vec<u8> {
+    let len =
+        u16::try_from(tar.len()).expect("consumer TAR fixture fits one stored Deflate block");
+    let mut bytes = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255, 0x01];
+    bytes.extend_from_slice(&len.to_le_bytes());
+    bytes.extend_from_slice(&(!len).to_le_bytes());
+    bytes.extend_from_slice(tar);
+    bytes.extend_from_slice(&crc32(tar).to_le_bytes());
+    bytes.extend_from_slice(&(tar.len() as u32).to_le_bytes());
+    bytes
+}
+
+// A handcrafted RFC 8878 zstd frame carrying its derived TAR as one raw
+// (uncompressed) block with no content checksum, so the exact wrapper bytes
+// remain reviewable without a compression dependency.
+fn zstd_wrapped(tar: &[u8]) -> Vec<u8> {
+    let mut bytes = 0xFD2F_B528_u32.to_le_bytes().to_vec();
+    bytes.push(0x00);
+    bytes.push(0x08);
+    let block_header = ((tar.len() as u32) << 3) | 1;
+    bytes.extend_from_slice(&block_header.to_le_bytes()[..3]);
+    bytes.extend_from_slice(tar);
+    bytes
+}
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = u32::MAX;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xedb8_8320 & (0_u32.wrapping_sub(crc & 1)));
+        }
+    }
+    !crc
 }
 
 fn pax_record(key: &str, value: &str) -> Vec<u8> {
@@ -303,6 +599,24 @@ fn ustar_header_with_type(name: &str, body_len: usize, typeflag: u8) -> [u8; 512
     header[156] = typeflag;
     header[257..263].copy_from_slice(b"ustar\0");
     header[263..265].copy_from_slice(b"00");
+    let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
+    header[148..154].copy_from_slice(format!("{checksum:06o}").as_bytes());
+    header[154] = 0;
+    header[155] = b' ';
+    header
+}
+
+fn old_gnu_header(name: &str, body_len: usize, typeflag: u8) -> [u8; 512] {
+    let mut header = [0_u8; 512];
+    header[..name.len()].copy_from_slice(name.as_bytes());
+    write_ustar_octal(&mut header[100..108], 0o644);
+    write_ustar_octal(&mut header[108..116], 0);
+    write_ustar_octal(&mut header[116..124], 0);
+    write_ustar_octal(&mut header[124..136], body_len as u64);
+    write_ustar_octal(&mut header[136..148], 0);
+    header[148..156].fill(b' ');
+    header[156] = typeflag;
+    header[257..265].copy_from_slice(b"ustar  \0");
     let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
     header[148..154].copy_from_slice(format!("{checksum:06o}").as_bytes());
     header[154] = 0;

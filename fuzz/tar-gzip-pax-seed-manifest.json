@@ -1,0 +1,60 @@
+{
+  "schema": "sealr.tar-gzip-pax-fuzz-seeds.v1",
+  "target": "tar_gzip_pax_portable_v1",
+  "toolchain": "nightly-2026-08-01",
+  "cargoFuzzVersion": "0.13.2",
+  "libfuzzerSysVersion": "0.4.13",
+  "sanitizer": "address",
+  "bounds": {
+    "maxInputBytes": 262144,
+    "maxDerivedArchiveBytes": 131072,
+    "maxMetadataBytes": 32768,
+    "maxFiles": 64,
+    "maxMemberBytes": 32768,
+    "maxTotalBytes": 65536,
+    "maxPathDepth": 16,
+    "maxRatio": 32,
+    "maxTotalSeconds": 600,
+    "perInputTimeoutSeconds": 5,
+    "rssLimitMiB": 1024,
+    "jobs": 1
+  },
+  "failureArtifact": {
+    "directoryName": "sealr-tar-gzip-pax-fuzz-artifacts",
+    "uploadOn": "failure",
+    "retentionDays": 7
+  },
+  "dictionary": {
+    "path": "fuzz/dictionaries/tar_gzip_pax_portable_v1_dictionary",
+    "bytes": 481,
+    "sha256": "6f310992ad4122c3aad65ece4228b879046b489a3efccf16c77c9079ec13b425"
+  },
+  "targetSource": {
+    "path": "fuzz/fuzz_targets/tar_gzip_pax_portable_v1.rs",
+    "bytes": 2747,
+    "sha256": "5510b150c3ab01d97f299236397e43038b63e32fef1ac887de727866e760f3ff"
+  },
+  "generatorSource": {
+    "path": "fuzz/generate_tar_gzip_pax_fuzz_seeds.ps1",
+    "bytes": 13419,
+    "sha256": "c8889c731d17f2a1a3b5cf0e09bfe322043f51567c5c1c9a7d2c74d314b6cbf4"
+  },
+  "generator": "fuzz/generate_tar_gzip_pax_fuzz_seeds.ps1",
+  "seeds": [
+    {"path":"fuzz/corpus/tar_gzip_pax_portable_v1/invalid-extension-over-cap","bytes":67612,"sha256":"7e48af8f791b0a3b39c211b78fb66a382d5539911c6adc528bd5d755327b6e5b","generated":true},
+    {"path":"fuzz/corpus/tar_gzip_pax_portable_v1/invalid-malformed-record-length","bytes":2583,"sha256":"1f976db90a1dce66fac7b8427e40c3b46677b5f7e037c9f9fe12d304008ac758","generated":true},
+    {"path":"fuzz/corpus/tar_gzip_pax_portable_v1/invalid-orphan-local","bytes":2071,"sha256":"e58c97e1eb78e2a4855bfe4f71985a86da0739bea863458b3f370f99db7a727c","generated":true},
+    {"path":"fuzz/corpus/tar_gzip_pax_portable_v1/invalid-wrapper-bad-data-crc","bytes":2071,"sha256":"8c1988261140d4beb4b2bd007de26dc083b6b854b856e9ecc3566a85370d470d","generated":true},
+    {"path":"fuzz/corpus/tar_gzip_pax_portable_v1/invalid-wrapper-concatenated-members","bytes":3118,"sha256":"fd92bdc5f47e4df54dfdf8800c5f2804939a818a1883e437c17405075358757b","generated":true},
+    {"path":"fuzz/corpus/tar_gzip_pax_portable_v1/invalid-wrapper-trailing-byte","bytes":1048,"sha256":"162e88a962bf11f2744976748c9c7ebd88674d47076bbac70f5f1b6405b1b531","generated":true},
+    {"path":"fuzz/corpus/tar_gzip_pax_portable_v1/resource-derived-over-cap","bytes":132129,"sha256":"6f210294b761b1026b10451f1e4770438c1f3efce2dbd9af644b826e87d6491a","generated":true},
+    {"path":"fuzz/corpus/tar_gzip_pax_portable_v1/unsupported-gnu-longlink-carrier","bytes":2583,"sha256":"6fdaf3d822ee3006230f5cc6a54d6fa5b8815334198785e2b91549392aa27056","generated":true},
+    {"path":"fuzz/corpus/tar_gzip_pax_portable_v1/unsupported-keyword","bytes":2583,"sha256":"2ef22ac317167237e95af0819d25e5799e4ea3f6417e2f4c396b03cb57e26a16","generated":true},
+    {"path":"fuzz/corpus/tar_gzip_pax_portable_v1/valid-all-optional-stored","bytes":2105,"sha256":"8b029f5d59377d04c224bf844275ba7d92d7be505a6c6dae773f4e7c30a64efc","generated":true},
+    {"path":"fuzz/corpus/tar_gzip_pax_portable_v1/valid-empty-pax","bytes":1047,"sha256":"b08193cf43a91db41bab4fe3cb9221c8e3ab5ecc9c6ece59e4990c7da59a13fc","generated":true},
+    {"path":"fuzz/corpus/tar_gzip_pax_portable_v1/valid-global-local-precedence","bytes":5143,"sha256":"720bf7184d7b2b212ca3b6fa91ff3137b8693ea166eeda078db30ae6c1487bbb","generated":true},
+    {"path":"fuzz/corpus/tar_gzip_pax_portable_v1/valid-local-path-size","bytes":3095,"sha256":"a82fdb0031aa56a0623fcf2c1eb295a0ef7158a12220f8ff0cd6b0088e5d51b6","generated":true},
+    {"path":"fuzz/corpus/tar_gzip_pax_portable_v1/valid-ordinary-ustar-subset","bytes":2071,"sha256":"616bb4e92dc06babbd647ae3f45c49ac15cfef3dd65f56c252f206bda05528a6","generated":true},
+    {"path":"fuzz/corpus/tar_gzip_pax_portable_v1/valid-quota-boundary-two-files","bytes":2071,"sha256":"05dc4b487459cd8a4b059b06411260a31dab3bf28a8d0977d0124497016a3a0a","generated":true}
+  ]
+}
