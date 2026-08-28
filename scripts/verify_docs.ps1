@@ -272,6 +272,7 @@ if ($qualityStart -lt 0 -or
 }
 $qualityJob = $ciWorkflow.Substring($qualityStart, $platformStart - $qualityStart)
 $platformJob = $ciWorkflow.Substring($platformStart, $zipDiffStart - $platformStart)
+$supplyChainJob = $ciWorkflow.Substring($supplyChainStart, $kernelFloorStart - $supplyChainStart)
 $semanticPeakCommand = @'
 cargo test --locked --release -p sealr --lib semantic_record::peak_live::completion_reconstruction_peak_live_is_bounded -- --ignored --exact --nocapture --test-threads=1
 '@.Trim()
@@ -295,6 +296,15 @@ foreach ($job in @(
         ([regex]::Matches($job.Text, '(?m)^\s*- name: Measure near-limit semantic completion heap\s*$')).Count -ne 1 -or
         ([regex]::Matches($normalizedJob, [regex]::Escape($semanticPeakCommand))).Count -ne 1) {
         throw "The $($job.Name) CI job does not contain the exact required semantic peak-live probe"
+    }
+}
+
+foreach ($fragment in @(
+    '      - name: Verify runtime dependency budget',
+    'run: pwsh -NoLogo -NoProfile -File scripts/verify_dependency_budget.ps1'
+)) {
+    if (-not $supplyChainJob.Contains($fragment, [StringComparison]::Ordinal)) {
+        throw "The supply-chain CI job is missing its runtime dependency contract: $fragment"
     }
 }
 
