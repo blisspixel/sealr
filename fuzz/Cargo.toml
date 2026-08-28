@@ -34,4 +34,11 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "gzip_rfc1952_single_member_v1"
+path = "fuzz_targets/gzip_rfc1952_single_member_v1.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

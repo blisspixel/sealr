@@ -48,6 +48,14 @@ pub fn __fuzz_tar_ustar_portable_v1(input: &[u8]) {
     tar::exercise_fuzz_input(input);
 }
 
+/// Exercises the bounded single-member gzip decoder and its private transform
+/// authority without making gzip a supported archive selection.
+#[cfg(feature = "__internal-fuzzing")]
+#[doc(hidden)]
+pub fn __fuzz_gzip_rfc1952_single_member_v1(input: &[u8]) {
+    gzip::exercise_fuzz_input(input);
+}
+
 /// Repository-only bridge used by the Linux worker conformance lab.
 ///
 /// This module is absent unless the private `__internal-worker-lab` feature is

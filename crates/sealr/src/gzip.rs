@@ -654,6 +654,138 @@ impl VerifiedDeflateReader<'_, '_> {
     }
 }
 
+#[cfg(feature = "__internal-fuzzing")]
+#[derive(Debug, PartialEq, Eq)]
+enum FuzzClassification {
+    Accepted {
+        header: GzipHeader,
+        compressed_payload: ByteRange,
+        trailer: ByteRange,
+        declared_crc32: u32,
+        declared_isize: u32,
+        output_len: u64,
+        output_sha256: String,
+    },
+    Rejected {
+        kind: GzipErrorKind,
+        code: FindingCode,
+    },
+}
+
+#[cfg(feature = "__internal-fuzzing")]
+const FUZZ_LIMITS: GzipLimits = GzipLimits {
+    max_metadata_bytes: 4 * 1024,
+    max_output_bytes: 64 * 1024,
+};
+
+#[cfg(feature = "__internal-fuzzing")]
+pub(crate) fn exercise_fuzz_input(input: &[u8]) {
+    const MAX_FUZZ_INPUT_BYTES: usize = 1024 * 1024;
+    if input.len() > MAX_FUZZ_INPUT_BYTES {
+        return;
+    }
+
+    let first = classify_fuzz_input(input);
+    let second = classify_fuzz_input(input);
+    assert_eq!(first, second);
+
+    let FuzzClassification::Accepted {
+        header,
+        compressed_payload,
+        trailer,
+        declared_crc32,
+        declared_isize,
+        output_len,
+        output_sha256,
+    } = first
+    else {
+        return;
+    };
+
+    let source_len = u64::try_from(input.len()).unwrap();
+    assert_eq!(header.header.offset, 0);
+    assert_eq!(compressed_payload.offset, header.header.end());
+    assert_eq!(trailer.offset, compressed_payload.end());
+    assert_eq!(trailer.len, TRAILER_LEN);
+    assert_eq!(trailer.end(), source_len);
+    assert!(header.header.len + trailer.len <= FUZZ_LIMITS.max_metadata_bytes);
+    assert!(output_len <= FUZZ_LIMITS.max_output_bytes);
+
+    let mut header_cursor = FIXED_HEADER_LEN;
+    for optional in [
+        header.extra,
+        header.original_name,
+        header.comment,
+        header.header_crc16,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        assert_eq!(optional.offset, header_cursor);
+        header_cursor = optional.end();
+    }
+    assert_eq!(header_cursor, header.header.end());
+    assert_eq!(header.extra.is_some(), header.flags & FLAG_EXTRA != 0);
+    assert_eq!(
+        header.original_name.is_some(),
+        header.flags & FLAG_NAME != 0
+    );
+    assert_eq!(header.comment.is_some(), header.flags & FLAG_COMMENT != 0);
+    assert_eq!(
+        header.header_crc16.is_some(),
+        header.flags & FLAG_HEADER_CRC != 0
+    );
+    assert_eq!(header.flags & FLAG_RESERVED, 0);
+
+    let mut snapshots = SnapshotSet::from_original(SourceSnapshot::borrowed(None, input));
+    let mut transforms = TransformGraph::empty();
+    let transformed =
+        transform_single_member(&mut snapshots, &mut transforms, FUZZ_LIMITS).unwrap();
+    assert_eq!(snapshots.len(), 2);
+    assert!(transforms.validates(&snapshots));
+    assert_eq!(transforms.records().len(), 1);
+    assert_eq!(transformed.header, header);
+    assert_eq!(transformed.compressed_payload, compressed_payload);
+    assert_eq!(transformed.trailer, trailer);
+    assert_eq!(transformed.declared_crc32, declared_crc32);
+    assert_eq!(transformed.declared_isize, declared_isize);
+
+    let record = &transforms.records()[0];
+    assert_eq!(record.profile, TransformProfile::GzipRfc1952SingleMemberV1);
+    assert_eq!(
+        record.input,
+        DomainRange::original(ByteRange {
+            offset: 0,
+            len: source_len,
+        })
+    );
+    assert_eq!(record.output_domain, transformed.output_domain);
+    assert_eq!(record.output_len, output_len);
+    assert_eq!(record.output_sha256, output_sha256);
+    let retained = snapshots.domain(transformed.output_domain).unwrap();
+    assert_eq!(retained.len(), output_len);
+    assert_eq!(retained.digest().sha256(), Some(output_sha256.as_str()));
+}
+
+#[cfg(feature = "__internal-fuzzing")]
+fn classify_fuzz_input(input: &[u8]) -> FuzzClassification {
+    match decode_single_member(&SourceSnapshot::borrowed(None, input), FUZZ_LIMITS) {
+        Ok(decoded) => FuzzClassification::Accepted {
+            header: decoded.header,
+            compressed_payload: decoded.compressed_payload,
+            trailer: decoded.trailer,
+            declared_crc32: decoded.declared_crc32,
+            declared_isize: decoded.declared_isize,
+            output_len: decoded.output.len(),
+            output_sha256: decoded.output.digest().sha256().unwrap().to_owned(),
+        },
+        Err(error) => FuzzClassification::Rejected {
+            kind: error.kind,
+            code: error.finding().code,
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
