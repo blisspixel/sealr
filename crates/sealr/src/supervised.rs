@@ -184,6 +184,10 @@ fn supervised_zip_profile(
             SupervisionErrorKind::IsolationUnavailable,
             "xz-wrapped TAR requires a future semantic-record worker contract",
         )),
+        ArchiveSelection::TarBzip2Ustar(_) => Err(SupervisionError::new(
+            SupervisionErrorKind::IsolationUnavailable,
+            "bzip2-wrapped TAR requires a future semantic-record worker contract",
+        )),
     }
 }
 
@@ -193,9 +197,9 @@ mod selection_tests {
     #[cfg(not(target_os = "linux"))]
     use crate::{Policy, Source};
     use crate::{
-        TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile,
-        TarInterpretationProfile, TarPaxInterpretationProfile, TarXzInterpretationProfile,
-        TarZstdInterpretationProfile,
+        TarBzip2InterpretationProfile, TarGnuLongNameInterpretationProfile,
+        TarGzipInterpretationProfile, TarInterpretationProfile, TarPaxInterpretationProfile,
+        TarXzInterpretationProfile, TarZstdInterpretationProfile,
     };
 
     #[test]
@@ -251,6 +255,12 @@ mod selection_tests {
         let error = supervised_zip_profile(&tar_xz).unwrap_err();
         assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
         assert!(error.to_string().contains("xz-wrapped TAR"));
+
+        let tar_bzip2 = ApplyOptions::new()
+            .with_tar_bzip2_interpretation_profile(TarBzip2InterpretationProfile::UstarPortableV1);
+        let error = supervised_zip_profile(&tar_bzip2).unwrap_err();
+        assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
+        assert!(error.to_string().contains("bzip2-wrapped TAR"));
     }
 
     #[cfg(not(target_os = "linux"))]

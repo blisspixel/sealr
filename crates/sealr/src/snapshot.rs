@@ -365,6 +365,7 @@ pub(crate) enum TransformProfile {
     GzipRfc1952SingleMemberV1,
     ZstdRfc8878SingleFrameV1,
     XzSingleStreamV1,
+    Bzip2SingleStreamV1,
     #[cfg(test)]
     TestIdentityV1,
     #[cfg(test)]
@@ -377,6 +378,7 @@ impl TransformProfile {
             Self::GzipRfc1952SingleMemberV1 => "sealr.transform.gzip.rfc1952-single-member.v1",
             Self::ZstdRfc8878SingleFrameV1 => "sealr.transform.zstd.rfc8878-single-frame.v1",
             Self::XzSingleStreamV1 => "sealr.transform.xz.xzfmt-single-stream.v1",
+            Self::Bzip2SingleStreamV1 => "sealr.transform.bzip2.bzip2fmt-single-stream.v1",
             #[cfg(test)]
             Self::TestIdentityV1 => "sealr.transform.test.identity.v1",
             #[cfg(test)]
@@ -389,6 +391,7 @@ impl TransformProfile {
             Self::GzipRfc1952SingleMemberV1 => b"algorithm=rfc1952-gzip;members=exactly-one;reserved-flags=zero;extra-fields=exact-subfield-framing-si2-nonzero-unique-ids;trailing-data=forbidden;header-crc=verify-when-present;data-crc32=verify;isize=verify;payload=rfc1951-deflate;output=bounded",
             Self::ZstdRfc8878SingleFrameV1 => b"algorithm=rfc8878-zstd;frames=exactly-one;skippable-frames=forbidden;reserved-descriptor-bit=zero;unused-descriptor-bit=zero;dictionary=forbidden;window-size-max-bytes=8388608;frame-content-size=verify-when-present;content-checksum-xxh64=verify-when-present;trailing-data=forbidden;payload=rfc8878-blocks;output=bounded",
             Self::XzSingleStreamV1 => b"algorithm=xz-file-format-1.2.1;streams=exactly-one;blocks=one-to-4096;filter-chain=exactly-lzma2;dictionary-max-bytes=8388608;checks=crc32-crc64-sha256-verified-twice;check-none=forbidden;declared-block-sizes=both-or-neither-verified;backward-size=verify;reserved-bits=zero;stream-padding=forbidden;trailing-data=forbidden;output=bounded",
+            Self::Bzip2SingleStreamV1 => b"algorithm=bzip2fmt-1.0.8;streams=exactly-one;blocks=one-to-65536;header-level=1-to-9;randomized-blocks=forbidden;block-magic-scan=chain-fold-verified;block-crcs=decoder-verified-single-block-verified-twice;combined-crc=extracted-and-verified;footer-padding-bits=zero;trailing-data=forbidden;output=bounded",
             #[cfg(test)]
             Self::TestIdentityV1 => b"algorithm=test-identity;version=1",
             #[cfg(test)]
@@ -406,6 +409,9 @@ impl TransformProfile {
             }
             Self::XzSingleStreamV1 => {
                 "b3c323849a366141edc28e0c5ab0028253430d0f6a5bda2ebec728c3a6543667"
+            }
+            Self::Bzip2SingleStreamV1 => {
+                "3520def23a770b24a29ae037ae31d3bfefeb3faf7132b07913ae71dbf028ece4"
             }
             #[cfg(test)]
             Self::TestIdentityV1 => {
@@ -427,6 +433,9 @@ impl TransformProfile {
             Self::XzSingleStreamV1 => {
                 b"lzma2-dictionary-max-bytes=8388608;decoder-memory-limit-kib=8256;multiple-streams=denied;stream-decoding=bounded-incremental"
             }
+            Self::Bzip2SingleStreamV1 => {
+                b"libbz2-rs-decompress-small=false;memory-ceiling-bytes=3700000;multiple-streams=denied;stream-decoding=bounded-incremental"
+            }
             #[cfg(test)]
             Self::TestIdentityV1 => b"mode=identity;window=none",
             #[cfg(test)]
@@ -444,6 +453,9 @@ impl TransformProfile {
             }
             Self::XzSingleStreamV1 => {
                 "ebdf4f3d9624cad6b245054d78f84ca50f8cea18a368e0025d2812dae8799032"
+            }
+            Self::Bzip2SingleStreamV1 => {
+                "c5c288439edcf5710a640215400fa2481f06fb0a2381ec96db29f7e1ace36195"
             }
             #[cfg(test)]
             Self::TestIdentityV1 => {
@@ -1581,6 +1593,16 @@ mod tests {
         assert_eq!(
             hex_sha256(xz_profile.decoder_parameters()),
             xz_profile.decoder_parameters_digest()
+        );
+        let bzip2_profile = TransformProfile::Bzip2SingleStreamV1;
+        assert!(bzip2_profile.validates());
+        assert_eq!(
+            transform_profile_sha256(bzip2_profile.id(), bzip2_profile.definition()).as_deref(),
+            Some(bzip2_profile.digest())
+        );
+        assert_eq!(
+            hex_sha256(bzip2_profile.decoder_parameters()),
+            bzip2_profile.decoder_parameters_digest()
         );
         assert_eq!(
             transform_profile_sha256(zstd_profile.id(), zstd_profile.definition()).as_deref(),

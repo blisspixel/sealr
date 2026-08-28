@@ -7,7 +7,7 @@ Set-StrictMode -Version Latest
 $workspace = Split-Path -Parent $PSScriptRoot
 $expected = [ordered]@{
     'x86_64-unknown-linux-gnu' = [pscustomobject]@{
-        Components = 70
+        Components = 72
         Notices = 14
         Present = @(
             'linux-raw-sys 0.12.1',
@@ -16,7 +16,9 @@ $expected = [ordered]@{
             'enumflags2 0.7.12',
             'enumflags2_derive 0.7.12',
             'syn 2.0.119',
-            'lzma-rust2 0.20.0'
+            'lzma-rust2 0.20.0',
+            'bzip2 0.6.1',
+            'libbz2-rs-sys 0.2.5'
         )
         Absent = @(
             'errno 0.3.14',
@@ -29,19 +31,28 @@ $expected = [ordered]@{
         )
     }
     'aarch64-apple-darwin' = [pscustomobject]@{
-        Components = 65
+        Components = 67
         Notices = 11
-        Present = @('errno 0.3.14', 'rustix 1.1.4', 'libc 0.2.189', 'lzma-rust2 0.20.0')
+        Present = @(
+            'errno 0.3.14',
+            'rustix 1.1.4',
+            'libc 0.2.189',
+            'lzma-rust2 0.20.0',
+            'bzip2 0.6.1',
+            'libbz2-rs-sys 0.2.5'
+        )
         Absent = @('linux-raw-sys 0.12.1', 'windows-sys 0.61.2')
     }
     'x86_64-pc-windows-msvc' = [pscustomobject]@{
-        Components = 73
+        Components = 75
         Notices = 10
         Present = @(
             'windows-sys 0.61.2',
             'winx 0.36.4',
             'once_cell_polyfill 1.70.2',
-            'lzma-rust2 0.20.0'
+            'lzma-rust2 0.20.0',
+            'bzip2 0.6.1',
+            'libbz2-rs-sys 0.2.5'
         )
         Absent = @('rustix 1.1.4', 'libc 0.2.189', 'errno 0.3.14')
     }

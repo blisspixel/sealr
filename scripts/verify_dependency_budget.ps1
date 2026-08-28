@@ -58,6 +58,7 @@ if ($contract.schema -cne 'sealr.runtime-dependency-contract.v1' -or
 $expectedForbidden = @(
     'autotools',
     'bindgen',
+    'bzip2-sys',
     'cc',
     'clang-sys',
     'cmake',

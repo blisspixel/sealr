@@ -68,6 +68,14 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar.xz --format tar-xz-ustar
 
 `--format tar-xz-ustar` accepts exactly one restricted XZ stream — one to 4096 LZMA2-only blocks, dictionaries at most 8 MiB, CRC32/CRC64/SHA-256 checks verified twice with check `None` denied — whose bounded decoded output is exact portable ustar. Other filter chains, stream padding, concatenation, and trailing bytes fail closed.
 
+The bzip2-wrapped portable ustar profile is a separate current-main in-process preview under policy v10, and the third promoted codec:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.tar.bz2 --format tar-bzip2-ustar
+```
+
+`--format tar-bzip2-ustar` accepts exactly one restricted bzip2 stream — levels 1 to 9, one to 65,536 blocks, the bit-aligned container independently replayed with a footer shift-scan and a block-CRC chain fold — whose bounded decoded output is exact portable ustar. Bzip1, randomized blocks, empty streams, concatenated streams, and trailing bytes fail closed.
+
 Strict ZIP64 is a separate current-main in-process preview under policy v3:
 
 ```text
@@ -108,6 +116,7 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-pax 
 cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-gnu-longname --dest ./new-output
 cargo run --locked -p sealr-cli -- path/to/archive.tar.zst --format tar-zstd-ustar --dest ./new-output
 cargo run --locked -p sealr-cli -- path/to/archive.tar.xz --format tar-xz-ustar --dest ./new-output
+cargo run --locked -p sealr-cli -- path/to/archive.tar.bz2 --format tar-bzip2-ustar --dest ./new-output
 ```
 
 For strict ZIP64 in process:
@@ -137,7 +146,7 @@ establish the complete supervised boundary or the command exits unsuccessfully
 without invoking the in-process payload path. macOS and Windows return
 isolation unavailable if this option is selected.
 
-The authenticated worker currently carries semantic-record v2 ZIP32 plans only. Combining `--format tar-ustar`, `--format tar-gzip-ustar`, `--format tar-pax`, `--format tar-gnu-longname`, `--format tar-gzip-pax`, `--format tar-gzip-gnu-longname`, `--format tar-zstd-ustar`, `--format tar-xz-ustar`, or `--format zip64` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it refuses before source access, never creates a destination effect, and never falls back to in-process verification. Worker support waits for later semantic records that bind each format-specific evidence model.
+The authenticated worker currently carries semantic-record v2 ZIP32 plans only. Combining `--format tar-ustar`, `--format tar-gzip-ustar`, `--format tar-pax`, `--format tar-gnu-longname`, `--format tar-gzip-pax`, `--format tar-gzip-gnu-longname`, `--format tar-zstd-ustar`, `--format tar-xz-ustar`, `--format tar-bzip2-ustar`, or `--format zip64` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it refuses before source access, never creates a destination effect, and never falls back to in-process verification. Worker support waits for later semantic records that bind each format-specific evidence model.
 
 ## Output contract
 
@@ -188,7 +197,7 @@ Arguments:
   <ARCHIVE>  Archive file
 
 Options:
-      --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar, tar-gzip-ustar, tar-pax, tar-gnu-longname, tar-gzip-pax, tar-gzip-gnu-longname, tar-zstd-ustar, tar-xz-ustar]
+      --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar, tar-gzip-ustar, tar-pax, tar-gnu-longname, tar-gzip-pax, tar-gzip-gnu-longname, tar-zstd-ustar, tar-xz-ustar, tar-bzip2-ustar]
       --dest <DEST>                      Materialize into a new directory below an existing parent
       --worker-manifest <ABSOLUTE_PATH>  Use the exact packaged Linux worker bound by this manifest
   -h, --help                             Print help

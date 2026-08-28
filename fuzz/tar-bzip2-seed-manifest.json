@@ -1,0 +1,59 @@
+{
+  "schema": "sealr.tar-bzip2-fuzz-seeds.v1",
+  "target": "tar_bzip2_ustar_portable_v1",
+  "toolchain": "nightly-2026-08-01",
+  "cargoFuzzVersion": "0.13.2",
+  "libfuzzerSysVersion": "0.4.13",
+  "sanitizer": "address",
+  "bounds": {
+    "maxInputBytes": 262144,
+    "maxDerivedArchiveBytes": 131072,
+    "maxMetadataBytes": 32768,
+    "maxFiles": 64,
+    "maxMemberBytes": 32768,
+    "maxTotalBytes": 65536,
+    "maxPathDepth": 16,
+    "maxRatio": 32,
+    "maxTotalSeconds": 600,
+    "perInputTimeoutSeconds": 5,
+    "rssLimitMiB": 1024,
+    "jobs": 1
+  },
+  "failureArtifact": {
+    "directoryName": "sealr-tar-bzip2-fuzz-artifacts",
+    "uploadOn": "failure",
+    "retentionDays": 7
+  },
+  "dictionary": {
+    "path": "fuzz/dictionaries/tar_bzip2_ustar_portable_v1_dictionary",
+    "bytes": 425,
+    "sha256": "370eff71769ecb3fd10a93e71ffe81f6ebbc9686dd6d626816e4d25d6bd7283a"
+  },
+  "targetSource": {
+    "path": "fuzz/fuzz_targets/tar_bzip2_ustar_portable_v1.rs",
+    "bytes": 2762,
+    "sha256": "abc133cd0667c2ad25129aca31de020346e5a8eb09b382df6c88535de81e041f"
+  },
+  "generatorSource": {
+    "path": "fuzz/generate_tar_bzip2_fuzz_seeds.ps1",
+    "bytes": 6882,
+    "sha256": "bafed11cd7559e6ef134fcd6ce56cd4cee22c61e62faaa4883b5fa64fd05aced"
+  },
+  "generator": "fuzz/generate_tar_bzip2_fuzz_seeds.ps1",
+  "seeds": [
+    {"path":"fuzz/corpus/tar_bzip2_ustar_portable_v1/invalid-block-crc","bytes":147,"sha256":"ae1de1e5d87f85be7a9a91a561a9d464a94e0399cf4657cda4eab4269c0b5f65","generated":true},
+    {"path":"fuzz/corpus/tar_bzip2_ustar_portable_v1/invalid-footer-corruption","bytes":147,"sha256":"753df6d6f4695cb4cd28f4515620f152030aa2bdc18c495ac4c22356d98f57fc","generated":true},
+    {"path":"fuzz/corpus/tar_bzip2_ustar_portable_v1/invalid-magic","bytes":147,"sha256":"7f762e24c1248fe98498cff1676db79acfbefef86cd1215b00e711a830b451bf","generated":true},
+    {"path":"fuzz/corpus/tar_bzip2_ustar_portable_v1/invalid-payload-corruption","bytes":147,"sha256":"a9fb476fcd171f57ff28c392c3bef7059e85a97a71abd4180db554753c4a702b","generated":true},
+    {"path":"fuzz/corpus/tar_bzip2_ustar_portable_v1/invalid-trailing-byte","bytes":148,"sha256":"6d76e4260809aec75778d31accb4daf33f9ab1adf08f33134e9180fc1e278fca","generated":true},
+    {"path":"fuzz/corpus/tar_bzip2_ustar_portable_v1/invalid-truncated","bytes":74,"sha256":"2dd1c8f0406d27e04160d89c8ac8cd4141313292b60c2099be0e6a7e57cc37af","generated":true},
+    {"path":"fuzz/corpus/tar_bzip2_ustar_portable_v1/resource-derived-over-cap","bytes":785,"sha256":"e36e6c753ea7d2ad04ff61ffa2533b068ab7ee87025ef2533a2bc1c3ff2042f7","generated":true},
+    {"path":"fuzz/corpus/tar_bzip2_ustar_portable_v1/unsupported-bzip1-version","bytes":147,"sha256":"770be0d869141eb8adbf6e6c34af555cdb77dafc030fa0a48af3e9ea183f590b","generated":true},
+    {"path":"fuzz/corpus/tar_bzip2_ustar_portable_v1/unsupported-concatenated-streams","bytes":294,"sha256":"bf845641e6b25a8c7a069060b75b655b89aba57835abc602af194d9e18f7b7d7","generated":true},
+    {"path":"fuzz/corpus/tar_bzip2_ustar_portable_v1/unsupported-empty-stream","bytes":14,"sha256":"d3dda84eb03b9738d118eb2be78e246106900493c0ae07819ad60815134a8058","generated":true},
+    {"path":"fuzz/corpus/tar_bzip2_ustar_portable_v1/unsupported-level-zero","bytes":147,"sha256":"213a933643f4b67bca93c4e1300f8c4211e9115ca8ab0488efa0730efe4bf578","generated":true},
+    {"path":"fuzz/corpus/tar_bzip2_ustar_portable_v1/unsupported-randomized-block","bytes":147,"sha256":"64f2fa261647023c24773afcd2be5aa85001ed192a46e9fb20634597f24a594b","generated":true},
+    {"path":"fuzz/corpus/tar_bzip2_ustar_portable_v1/valid-cli-level1-single-block","bytes":147,"sha256":"08c4f988668ad88b8ea3ee244172bfcb32f8b40a58f9bbe1bff890452163e21d","generated":true},
+    {"path":"fuzz/corpus/tar_bzip2_ustar_portable_v1/valid-cli-level9-single-block","bytes":147,"sha256":"6cf9b27f72fca2d3c665b7012e2ee8cfc24e7f1b7d5cc0f3aa8c239812ea5e87","generated":true}
+  ]
+}

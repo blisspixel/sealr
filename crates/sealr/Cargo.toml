@@ -26,6 +26,7 @@ __internal-worker-lab = []
 __internal-lifecycle-lab = []
 
 [dependencies]
+bzip2.workspace = true
 cap-fs-ext.workspace = true
 cap-std.workspace = true
 caseless.workspace = true

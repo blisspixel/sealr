@@ -1094,6 +1094,100 @@ try {
         throw 'packaged xz-wrapped ustar materialization did not preserve the effective admitted tree'
     }
 
+    # CPython 3.12.10 `bz2.compress(tar, 9)` output (bundled libbz2 1.0.8;
+    # byte-identical to `bzip2 -9`) for the same conformance derived TAR
+    # holding mission/plan.txt with `verify twice, decode once`.
+    $bzip2Hex = '425a68393141592653597b1dc2a70000447b91ca0000404005ff0040006f27dfe00400004000' +
+        '08200074226a64f51a64d0340640c4d064a0d341a680034d001e6587e2308c005913503e46a288084216' +
+        '2fc4d83544cc801bd752180f90d0c026e224716664838d467b58fbfac1cf118147687b09c160a4ad2080' +
+        'f498e75a99561f215194f509f0637e2ee48a70a120f63b854e'
+    $bzip2Bytes = [System.Convert]::FromHexString($bzip2Hex)
+    if ($bzip2Bytes.Length -ne 147) {
+        throw "native-package bzip2-wrapped ustar fixture length changed: $($bzip2Bytes.Length)"
+    }
+    $bzip2ArchivePath = Join-Path $temporaryRoot 'portable-ustar.tar.bz2'
+    [System.IO.File]::WriteAllBytes($bzip2ArchivePath, $bzip2Bytes)
+    $bzip2SourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $bzip2ArchivePath).Hash.ToLowerInvariant()
+    if ($bzip2SourceHash -cne '6cf9b27f72fca2d3c665b7012e2ee8cfc24e7f1b7d5cc0f3aa8c239812ea5e87') {
+        throw "native-package bzip2-wrapped ustar fixture identity changed: $bzip2SourceHash"
+    }
+
+    $bzip2Inspect = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-bzip2-ustar', $bzip2ArchivePath) `
+        -Role 'packaged bzip2-wrapped ustar inspect'
+    if ($bzip2Inspect.ExitCode -ne 0) {
+        throw "packaged bzip2-wrapped ustar inspect failed: $($bzip2Inspect.Stderr)"
+    }
+    $bzip2View = $bzip2Inspect.Stdout | ConvertFrom-Json
+    $bzip2Receipt = $bzip2Inspect.Stderr | ConvertFrom-Json
+    if ($bzip2View.schema -cne 'sealr.view.v1' -or
+        $bzip2Receipt.schema -cne 'sealr.receipt.v2' -or
+        $bzip2View.source.magic -cne 'bz2' -or
+        $bzip2View.interpretation.status -cne 'interpreted' -or
+        $bzip2View.admission.status -cne 'admitted' -or
+        $bzip2View.verification.status -cne 'complete' -or
+        $bzip2View.effect.status -cne 'not-requested' -or
+        @($bzip2View.members).Count -ne 1 -or
+        $bzip2View.members[0].path -cne 'mission/plan.txt' -or
+        $bzip2View.members[0].method -cne 'raw' -or
+        $bzip2View.members[0].uncomp_bytes -ne 25 -or
+        $bzip2Receipt.policy.id -cne 'sealr:policy/default/v10' -or
+        $bzip2Receipt.policy.digest.sha256 -cne 'eada8150e14c0f05dcb25b6c9a90b87d3821fbb5f754192aceaea6d942e9f374' -or
+        $bzip2Receipt.identities.interpretation.id -cne 'sealr.profile.tar-bzip2.ustar-portable.v1' -or
+        $bzip2Receipt.identities.interpretation.digest.sha256 -cne 'f6711c0c98cff6e3a2c6b266d159413ef891c202b4898b4e1665081dce0f29ee' -or
+        $bzip2Receipt.identities.layout.sealrTreeV11 -cne '6adec7927d150611af780ea135964e96cf1581d42a407f637ee752b63ac3894e' -or
+        $bzip2Receipt.identities.content.sealrTreeV1 -cne 'bc8f6d6f7870aeab647cff08db25471a729bd2a41e095d49d6254c49afc34278') {
+        throw 'packaged bzip2-wrapped ustar inspect returned unexpected semantic evidence'
+    }
+
+    $bzip2Default = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @($bzip2ArchivePath) `
+        -Role 'packaged bzip2-wrapped ustar compatibility-default refusal'
+    $bzip2DefaultView = $bzip2Default.Stdout | ConvertFrom-Json
+    $bzip2DefaultReceipt = $bzip2Default.Stderr | ConvertFrom-Json
+    if ($bzip2Default.ExitCode -ne 2 -or
+        $bzip2DefaultView.verdict -cne 'rejected' -or
+        $bzip2DefaultView.source.magic -cne 'unknown' -or
+        $bzip2DefaultView.policy.id -cne 'sealr:policy/default/v1' -or
+        $bzip2DefaultView.interpretation.status -cne 'unsupported' -or
+        $bzip2DefaultView.admission.status -cne 'not-evaluated' -or
+        @($bzip2DefaultView.members).Count -ne 0 -or
+        $bzip2DefaultReceipt.identities.interpretation.id -cne 'sealr.profile.zip.strict-ascii.v1' -or
+        $bzip2DefaultReceipt.identities.layout.status -cne 'unavailable' -or
+        $bzip2DefaultReceipt.identities.content.status -cne 'unavailable') {
+        throw 'packaged compatibility default unexpectedly recognized bzip2-wrapped ustar'
+    }
+
+    $bzip2Destination = Join-Path $temporaryRoot 'bzip2-ustar-output'
+    $bzip2Materialize = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-bzip2-ustar', $bzip2ArchivePath, '--dest', $bzip2Destination) `
+        -Role 'packaged bzip2-wrapped ustar materialization'
+    if ($bzip2Materialize.ExitCode -ne 0) {
+        throw "packaged bzip2-wrapped ustar materialization failed: $($bzip2Materialize.Stderr)"
+    }
+    $bzip2MaterializedView = $bzip2Materialize.Stdout | ConvertFrom-Json
+    $bzip2MaterializedReceipt = $bzip2Materialize.Stderr | ConvertFrom-Json
+    $bzip2Files = @(Get-ChildItem -LiteralPath $bzip2Destination -Recurse -Force -File | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($bzip2Destination, $_.FullName).Replace('\', '/')
+        })
+    $bzip2Directories = @(Get-ChildItem -LiteralPath $bzip2Destination -Recurse -Force -Directory | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($bzip2Destination, $_.FullName).Replace('\', '/')
+        })
+    $leakedStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+    if (-not $bzip2MaterializedView.wrote -or
+        $bzip2MaterializedView.effect.status -cne 'committed' -or
+        $bzip2MaterializedReceipt.identities.layout.sealrTreeV11 -cne $bzip2Receipt.identities.layout.sealrTreeV11 -or
+        $bzip2MaterializedReceipt.identities.content.sealrTreeV1 -cne $bzip2Receipt.identities.content.sealrTreeV1 -or
+        $bzip2Files.Count -ne 1 -or $bzip2Files[0] -cne 'mission/plan.txt' -or
+        $bzip2Directories.Count -ne 1 -or $bzip2Directories[0] -cne 'mission' -or
+        [System.IO.File]::ReadAllText((Join-Path $bzip2Destination 'mission/plan.txt')) -cne 'verify twice, decode once' -or
+        $leakedStages.Count -ne 0) {
+        throw 'packaged bzip2-wrapped ustar materialization did not preserve the effective admitted tree'
+    }
+
     if ($TargetTriple -ne $windowsTarget) {
         foreach ($relative in $expectedFiles) {
             $expectedMode = if ($relative -in @($binaryName, 'libexec/sealr/sealr-worker')) { '755' } else { '644' }
@@ -1266,6 +1360,25 @@ try {
             (Test-Path -LiteralPath $xzWorkerDestination) -or
             $workerStages.Count -ne 0) {
             throw 'packaged xz-wrapped ustar worker selection did not fail closed without fallback'
+        }
+        $bzip2WorkerDestination = Join-Path $temporaryRoot 'bzip2-ustar-worker-output'
+        $bzip2Worker = Invoke-Captured `
+            -FilePath $packagedCli `
+            -Arguments @(
+                '--format', 'tar-bzip2-ustar',
+                '--worker-manifest', $manifestPath,
+                $bzip2ArchivePath,
+                '--dest', $bzip2WorkerDestination
+            ) `
+            -Role 'packaged bzip2-wrapped ustar worker refusal'
+        $workerStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+        if ($bzip2Worker.ExitCode -ne 1 -or
+            -not [string]::IsNullOrEmpty($bzip2Worker.Stdout) -or
+            $bzip2Worker.Stderr -notmatch 'isolation unavailable' -or
+            $bzip2Worker.Stderr -notmatch 'bzip2-wrapped TAR' -or
+            (Test-Path -LiteralPath $bzip2WorkerDestination) -or
+            $workerStages.Count -ne 0) {
+            throw 'packaged bzip2-wrapped ustar worker selection did not fail closed without fallback'
         }
         $elfHeader = readelf --file-header $helper | Out-String
         if ($LASTEXITCODE -ne 0 -or

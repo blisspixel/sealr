@@ -36,6 +36,7 @@ Start with the [README](../README.md) for the published Alpha.11 boundary and a 
 | [Gzip-wrapped GNU long-name profile v1](profiles/tar-gzip-gnu-longname-portable-v1.md) | Explicit policy-v7 composition of the frozen wrapper and GNU languages with `sealrTreeV8` |
 | [Zstd-wrapped portable ustar profile v1](profiles/tar-zstd-ustar-portable-v1.md) | Explicit policy-v8 first promoted codec adapter with the ruzstd Gate B review and `sealrTreeV9` |
 | [Xz-wrapped portable ustar profile v1](profiles/tar-xz-ustar-portable-v1.md) | Explicit policy-v9 second promoted codec adapter with the lzma-rust2 Gate B review and `sealrTreeV10` |
+| [Bzip2-wrapped portable ustar profile v1](profiles/tar-bzip2-ustar-portable-v1.md) | Explicit policy-v10 third promoted codec adapter with the bzip2/libbz2-rs-sys Gate B review and `sealrTreeV11` |
 | [Python wheel consumer v1](profiles/python-wheel-v1.md) | Supported bounded wheel artifact and scheme-relative plan evaluator |
 | [Differentials](differentials.md) | Single-interpretation rules and the ZipDiff corpus |
 | [Reduced-authority execution](sandbox.md) | Supervisor and worker design |
