@@ -8,9 +8,8 @@ use crate::jail::jail_name;
 use crate::outcome::SourceDigest;
 use crate::policy::ResourceBudget;
 use crate::quota::QuotaState;
-use crate::snapshot::SourceSnapshot;
-use crate::verification::{digest_hex, verify_payload, PayloadSpec};
-use crate::zip;
+use crate::snapshot::SnapshotSet;
+use crate::verification::{digest_hex, planned_payload_reader, verify_payload, PayloadPlan};
 
 /// Maximum number of distinct exact paths accepted by one retention plan.
 pub const MAX_RETENTION_PATHS: usize = 64;
@@ -376,7 +375,10 @@ struct VerifiedArchiveInner {
 }
 
 enum VerifiedArchiveBackend {
-    InProcess(SourceSnapshot<'static>),
+    InProcess {
+        snapshots: SnapshotSet<'static>,
+        payloads: Box<[PayloadPlan]>,
+    },
     #[cfg(target_os = "linux")]
     Supervised(crate::supervised::WorkerReadAuthority),
 }
@@ -411,8 +413,9 @@ pub struct VerifiedArchive {
 
 impl VerifiedArchive {
     pub(crate) fn new(
-        snapshot: SourceSnapshot<'_>,
+        snapshots: SnapshotSet<'_>,
         ir: ArchiveIR,
+        payloads: Vec<PayloadPlan>,
         budget: ResourceBudget,
         retention: RetentionBuild,
     ) -> Self {
@@ -420,7 +423,12 @@ impl VerifiedArchive {
             .members()
             .iter()
             .all(|member| matches!(&member.verification, MemberVerification::Verified)));
-        debug_assert_eq!(snapshot.digest(), ir.source_digest());
+        debug_assert_eq!(snapshots.original().digest(), ir.source_digest());
+        debug_assert_eq!(payloads.len(), ir.members().len());
+        debug_assert!(payloads
+            .iter()
+            .zip(ir.members())
+            .all(|(payload, member)| payload.matches_member(member)));
 
         let mut members_by_path = BTreeMap::new();
         for (index, member) in ir.members().iter().enumerate() {
@@ -430,7 +438,10 @@ impl VerifiedArchive {
 
         Self {
             inner: Arc::new(VerifiedArchiveInner {
-                backend: VerifiedArchiveBackend::InProcess(snapshot.into_owned()),
+                backend: VerifiedArchiveBackend::InProcess {
+                    snapshots: snapshots.into_owned(),
+                    payloads: payloads.into_boxed_slice(),
+                },
                 ir,
                 budget,
                 members_by_path,
@@ -534,13 +545,18 @@ impl VerifiedArchive {
         canonical_path: &str,
         max_bytes: u64,
     ) -> Result<Vec<u8>, MemberReadError> {
-        let member = self.member(canonical_path).ok_or_else(|| {
-            MemberReadError::new(
-                MemberReadErrorKind::NotFound,
-                canonical_path,
-                "verified member was not found",
-            )
-        })?;
+        let member_index = *self
+            .inner
+            .members_by_path
+            .get(canonical_path)
+            .ok_or_else(|| {
+                MemberReadError::new(
+                    MemberReadErrorKind::NotFound,
+                    canonical_path,
+                    "verified member was not found",
+                )
+            })?;
+        let member = &self.inner.ir.members()[member_index];
         if matches!(member.kind, MemberKind::Directory) {
             return Err(MemberReadError::new(
                 MemberReadErrorKind::NotFile,
@@ -597,7 +613,10 @@ impl VerifiedArchive {
             return Ok(bytes);
         }
         match &self.inner.backend {
-            VerifiedArchiveBackend::InProcess(snapshot) => {
+            VerifiedArchiveBackend::InProcess {
+                snapshots,
+                payloads,
+            } => {
                 let mut bytes = Vec::new();
                 bytes.try_reserve_exact(capacity).map_err(|error| {
                     MemberReadError::new(
@@ -606,9 +625,10 @@ impl VerifiedArchive {
                         format!("could not reserve {expected_size} bytes: {error}"),
                     )
                 })?;
-                let payload_spec = PayloadSpec::from_ir(member);
-                let payload = zip::planned_payload_reader(snapshot, member)
-                    .map_err(|finding| member_read_error(canonical_path, &finding))?;
+                let payload_spec = payloads[member_index];
+                let payload =
+                    planned_payload_reader(snapshots, &payload_spec, &member.decoded_name)
+                        .map_err(|finding| member_read_error(canonical_path, &finding))?;
                 let payload = BufReader::with_capacity(64 * 1024, payload);
                 let (actual, crc, sha256) = verify_payload(
                     payload,

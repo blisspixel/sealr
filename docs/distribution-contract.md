@@ -21,7 +21,7 @@ The package contract at `tests/package-contract/sealr.json` pins:
 - the Apache-2.0 SPDX expression;
 - a package-root `README.md` and `LICENSE` whose bytes match the repository sources.
 
-Required CI packages and verifies the crate, extracts the exact `.crate`, and builds a separately locked downstream consumer against that extraction. The check fails if another workspace crate becomes publishable or any packaged path changes without a reviewed contract update.
+Required CI packages and verifies the crate, extracts the exact `.crate`, and builds a separately locked downstream consumer against that extraction. The consumer exercises supervised ZIP plus in-process portable ustar, including retained and later member reads after the original TAR byte vector is gone. The check fails if another workspace crate becomes publishable or any packaged path changes without a reviewed contract update.
 
 ### Public API review
 
@@ -67,6 +67,8 @@ The exact runners are `ubuntu-24.04`, `macos-15`, and `windows-2022`. The releas
 5. extracts and smoke-tests the packaged CLI;
 6. verifies the target-specific license closure and exact archive contents;
 7. stages only the three expected archives for checksums and provenance.
+
+Every extracted native CLI is exercised through portable ustar inspect and materialization against the same independently produced fixture, with exact source, layout, content, and output bytes. Linux additionally proves that selecting portable ustar with the packaged authenticated worker returns typed isolation unavailability, creates no destination or stage, and does not fall back to in-process execution.
 
 The Linux archive also contains the authenticated static helper and its fixed manifest. The helper is absent from macOS and Windows archives. A separate pinned-kernel QEMU gate proves that explicit Linux supervision fails before source transfer on Landlock ABI 2, while required Linux tests exercise successful ABI 3 setup on the declared release host.
 

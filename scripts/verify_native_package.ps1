@@ -82,6 +82,42 @@ function Invoke-Refusal {
     }
 }
 
+function Invoke-Captured {
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$Arguments,
+        [Parameter(Mandatory)][string]$Role
+    )
+
+    $start = [System.Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $FilePath
+    $start.UseShellExecute = $false
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    foreach ($argument in $Arguments) {
+        $start.ArgumentList.Add($argument)
+    }
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $start
+    if (-not $process.Start()) {
+        throw "$Role did not start"
+    }
+    $process.StandardInput.Close()
+    $stdout = $process.StandardOutput.ReadToEndAsync()
+    $stderr = $process.StandardError.ReadToEndAsync()
+    if (-not $process.WaitForExit(10000)) {
+        $process.Kill($true)
+        $process.WaitForExit()
+        throw "$Role did not finish within ten seconds"
+    }
+    return [pscustomobject]@{
+        ExitCode = $process.ExitCode
+        Stdout = $stdout.GetAwaiter().GetResult()
+        Stderr = $stderr.GetAwaiter().GetResult()
+    }
+}
+
 if ($TargetTriple -notin $supportedTargets) {
     throw "unsupported native release target: $TargetTriple"
 }
@@ -229,6 +265,89 @@ try {
         throw 'packaged CLI help smoke test failed'
     }
 
+    $tarManifestPath = Resolve-RequiredFile `
+        -Path (Join-Path $workspace 'crates/sealr/tests/conformance/tar-producers-v1.json') `
+        -Role 'portable ustar producer corpus'
+    $tarManifest = Get-Content -Raw -LiteralPath $tarManifestPath | ConvertFrom-Json
+    $tarFixture = @($tarManifest.fixtures | Where-Object { $_.id -ceq 'gnu-tar-1.35' })
+    if ($tarManifest.schema -cne 'sealr.tar-producer-fixtures.v1' -or $tarFixture.Count -ne 1) {
+        throw 'portable ustar producer corpus does not contain exactly one GNU tar fixture'
+    }
+    $tarFixture = $tarFixture[0]
+    if ($tarFixture.len -ne 10240 -or
+        $tarFixture.source_sha256 -cne '075e5d93ff213f832023b1ecf614a4c39bdf5975edab3aedcb0df7d649073a42' -or
+        $tarFixture.layout_sha256 -cne 'f01a9bc4f6bc2d6a92fad5ed1860d19e4b9d35345b0d31412bdbdadcc0af061a' -or
+        $tarFixture.content_sha256 -cne '4ae9adac838554433b256510c5a83afc820340d9cdbc720fb37e0ae101b07626') {
+        throw 'portable ustar fixture identity changed'
+    }
+    $tarBytes = [byte[]]::new([int]$tarFixture.len)
+    $previousSpanEnd = 0
+    foreach ($span in $tarFixture.spans) {
+        $spanBytes = [System.Convert]::FromHexString([string]$span.hex)
+        $spanOffset = [int]$span.offset
+        $spanEnd = $spanOffset + $spanBytes.Length
+        if ($spanOffset -lt $previousSpanEnd -or $spanEnd -gt $tarBytes.Length -or
+            @($spanBytes | Where-Object { $_ -eq 0 }).Count -ne 0) {
+            throw 'portable ustar sparse span is unordered, overlapping, out of range, or contains zero bytes'
+        }
+        [System.Array]::Copy($spanBytes, 0, $tarBytes, $spanOffset, $spanBytes.Length)
+        $previousSpanEnd = $spanEnd
+    }
+    $tarArchivePath = Join-Path $temporaryRoot 'gnu-portable-ustar.tar'
+    [System.IO.File]::WriteAllBytes($tarArchivePath, $tarBytes)
+    $tarHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $tarArchivePath).Hash.ToLowerInvariant()
+    if ($tarHash -cne $tarFixture.source_sha256) {
+        throw "reconstructed portable ustar source digest changed: $tarHash"
+    }
+
+    $tarInspect = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-ustar', $tarArchivePath) `
+        -Role 'packaged portable ustar inspect'
+    if ($tarInspect.ExitCode -ne 0) {
+        throw "packaged portable ustar inspect failed: $($tarInspect.Stderr)"
+    }
+    $tarView = $tarInspect.Stdout | ConvertFrom-Json
+    $tarReceipt = $tarInspect.Stderr | ConvertFrom-Json
+    if ($tarView.schema -cne 'sealr.view.v1' -or
+        $tarReceipt.schema -cne 'sealr.receipt.v2' -or
+        $tarView.source.magic -cne 'tar' -or
+        $tarView.interpretation.status -cne 'interpreted' -or
+        $tarView.admission.status -cne 'admitted' -or
+        $tarView.verification.status -cne 'complete' -or
+        $tarView.effect.status -cne 'not-requested' -or
+        @($tarView.members).Count -ne 1 -or
+        $tarView.members[0].path -cne 'gnu.txt' -or
+        $tarReceipt.identities.interpretation.id -cne 'sealr.profile.tar.ustar-portable.v1' -or
+        $tarReceipt.identities.layout.sealrTreeV2 -cne $tarFixture.layout_sha256 -or
+        $tarReceipt.identities.content.sealrTreeV1 -cne $tarFixture.content_sha256) {
+        throw 'packaged portable ustar inspect returned unexpected semantic evidence'
+    }
+
+    $tarDestination = Join-Path $temporaryRoot 'portable-ustar-output'
+    $tarMaterialize = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-ustar', $tarArchivePath, '--dest', $tarDestination) `
+        -Role 'packaged portable ustar materialization'
+    if ($tarMaterialize.ExitCode -ne 0) {
+        throw "packaged portable ustar materialization failed: $($tarMaterialize.Stderr)"
+    }
+    $tarMaterializedView = $tarMaterialize.Stdout | ConvertFrom-Json
+    $tarMaterializedReceipt = $tarMaterialize.Stderr | ConvertFrom-Json
+    $tarFiles = @(Get-ChildItem -LiteralPath $tarDestination -Recurse -Force -File | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($tarDestination, $_.FullName).Replace('\', '/')
+        })
+    $leakedStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+    if (-not $tarMaterializedView.wrote -or
+        $tarMaterializedView.effect.status -cne 'committed' -or
+        $tarMaterializedReceipt.identities.layout.sealrTreeV2 -cne $tarFixture.layout_sha256 -or
+        $tarMaterializedReceipt.identities.content.sealrTreeV1 -cne $tarFixture.content_sha256 -or
+        $tarFiles.Count -ne 1 -or $tarFiles[0] -cne 'gnu.txt' -or
+        [System.IO.File]::ReadAllText((Join-Path $tarDestination 'gnu.txt')) -cne "gnu portable ustar`n" -or
+        $leakedStages.Count -ne 0) {
+        throw 'packaged portable ustar materialization did not preserve the exact admitted tree'
+    }
+
     if ($TargetTriple -ne $windowsTarget) {
         foreach ($relative in $expectedFiles) {
             $expectedMode = if ($relative -in @($binaryName, 'libexec/sealr/sealr-worker')) { '755' } else { '644' }
@@ -268,6 +387,25 @@ try {
             [string]$manifest.sha256 -cnotmatch '^[0-9a-f]{64}$' -or
             $manifest.sha256 -cne $helperHash) {
             throw 'worker manifest does not bind the exact packaged helper identity'
+        }
+        $tarWorkerDestination = Join-Path $temporaryRoot 'portable-ustar-worker-output'
+        $tarWorker = Invoke-Captured `
+            -FilePath $packagedCli `
+            -Arguments @(
+                '--format', 'tar-ustar',
+                '--worker-manifest', $manifestPath,
+                $tarArchivePath,
+                '--dest', $tarWorkerDestination
+            ) `
+            -Role 'packaged portable ustar worker refusal'
+        $workerStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+        if ($tarWorker.ExitCode -ne 1 -or
+            -not [string]::IsNullOrEmpty($tarWorker.Stdout) -or
+            $tarWorker.Stderr -notmatch 'isolation unavailable' -or
+            $tarWorker.Stderr -notmatch 'ZIP profiles only' -or
+            (Test-Path -LiteralPath $tarWorkerDestination) -or
+            $workerStages.Count -ne 0) {
+            throw 'packaged portable ustar worker selection did not fail closed without fallback'
         }
         $elfHeader = readelf --file-header $helper | Out-String
         if ($LASTEXITCODE -ne 0 -or

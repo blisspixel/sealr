@@ -3,9 +3,10 @@ use std::io::{Cursor, Write};
 
 use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelLimits, CONSUMER_PROFILE_ID};
 use sealr::{
-    apply_supervised, ApplyOptions, LinuxWorker, MemberReadErrorKind, Policy, Request,
-    RetentionPlan, RetentionStatus, Source, VerifiedArchive, ZipInterpretationProfile,
-    ZIP_STRICT_ASCII_V2,
+    apply_supervised, apply_with_options, ApplyOptions, ArchiveFormat, LinuxWorker,
+    MemberReadErrorKind, Policy, Request, RetentionPlan, RetentionStatus, Source,
+    TarInterpretationProfile, TreeRoot, VerifiedArchive, ZipInterpretationProfile,
+    TAR_USTAR_PORTABLE_V1, ZIP_STRICT_ASCII_V2,
 };
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
@@ -153,6 +154,90 @@ fn main() {
         .iter()
         .any(|binding| binding.path == "demo/caf\u{e9}.py"));
     assert_eq!(plan.artifact_sha256(), identities.artifact_sha256);
+
+    let tar_policy = Policy::default_v2();
+    let tar_options = ApplyOptions::new()
+        .with_tar_interpretation_profile(TarInterpretationProfile::UstarPortableV1)
+        .with_retention(
+            RetentionPlan::new(8, 8)
+                .with_path("retained.txt")
+                .expect("canonical TAR retention path"),
+        );
+    let tar_outcome = {
+        let tar_bytes = portable_tar();
+        apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("portable.tar"),
+                    data: &tar_bytes,
+                },
+                policy: &tar_policy,
+                dest: None,
+            },
+            &tar_options,
+        )
+    };
+    assert!(!tar_outcome.rejected(), "{:?}", tar_outcome.view.findings);
+    let tar_ir = tar_outcome.archive_ir().expect("portable TAR IR");
+    assert_eq!(tar_ir.format(), ArchiveFormat::TarUstar);
+    assert_eq!(tar_ir.profile(), TAR_USTAR_PORTABLE_V1);
+    assert!(matches!(
+        tar_outcome.receipt.identities.layout,
+        TreeRoot::SealrTreeV2 { .. }
+    ));
+    let tar_archive = tar_outcome
+        .into_verified_archive()
+        .expect("portable TAR must expose verified authority");
+    assert_eq!(
+        tar_archive.retention_status("retained.txt"),
+        RetentionStatus::Retained
+    );
+    assert_eq!(
+        tar_archive.retained_member("retained.txt"),
+        Some(b"retained".as_slice())
+    );
+    assert_eq!(tar_archive.read_member("later.txt", 5).unwrap(), b"later");
+}
+
+fn portable_tar() -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for (name, body) in [
+        ("retained.txt", b"retained".as_slice()),
+        ("later.txt", b"later".as_slice()),
+    ] {
+        bytes.extend_from_slice(&ustar_header(name, body.len()));
+        bytes.extend_from_slice(body);
+        bytes.resize(bytes.len().next_multiple_of(512), 0);
+    }
+    bytes.resize(bytes.len() + 1024, 0);
+    bytes
+}
+
+fn ustar_header(name: &str, body_len: usize) -> [u8; 512] {
+    let mut header = [0_u8; 512];
+    header[..name.len()].copy_from_slice(name.as_bytes());
+    write_ustar_octal(&mut header[100..108], 0o644);
+    write_ustar_octal(&mut header[108..116], 0);
+    write_ustar_octal(&mut header[116..124], 0);
+    write_ustar_octal(&mut header[124..136], body_len as u64);
+    write_ustar_octal(&mut header[136..148], 0);
+    header[148..156].fill(b' ');
+    header[156] = b'0';
+    header[257..263].copy_from_slice(b"ustar\0");
+    header[263..265].copy_from_slice(b"00");
+    let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
+    header[148..154].copy_from_slice(format!("{checksum:06o}").as_bytes());
+    header[154] = 0;
+    header[155] = b' ';
+    header
+}
+
+fn write_ustar_octal(field: &mut [u8], value: u64) {
+    field.fill(b'0');
+    let octal = format!("{value:o}");
+    let digit_len = field.len() - 1;
+    field[digit_len - octal.len()..digit_len].copy_from_slice(octal.as_bytes());
+    field[digit_len] = 0;
 }
 
 fn wheel_bytes() -> Vec<u8> {

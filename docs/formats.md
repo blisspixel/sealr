@@ -1,8 +1,8 @@
 # Format strategy
 
-> Current implementation: classic ZIP32 with Store and Deflate members only. Every other format or ZIP extension is unsupported, rejected, or deferred. Format sequencing is governed by the [roadmap](../ROADMAP.md), not this page.
+> Current implementation: classic ZIP32 with Store and Deflate plus an explicitly selected raw portable POSIX ustar profile for regular files and directories. Rich TAR dialects, compressed wrappers, ZIP64, and the other tracked families remain profile-specific work. Format sequencing is governed by the [roadmap](../ROADMAP.md) and the detailed [format support architecture](format-support.md).
 
-## Current profiles
+## Current ZIP profiles
 
 Sealr exposes four separately identified ZIP32 interpretations. The compatibility default accepts ASCII or explicitly flagged strict UTF-8 names. Strict ASCII v2 rejects non-ASCII names. Portable UTF-8 v1 is the supported Unicode profile. Wheel UTF-8 v1 preserves the narrower Alpha.7 research language. None changes the default. All four share these structural rules:
 
@@ -14,15 +14,17 @@ Sealr exposes four separately identified ZIP32 interpretations. The compatibilit
 - profile-specific ASCII or strict UTF-8 NFC path rules, with no CP437 fallback;
 - no links, devices, nested extraction, or archive mode restoration.
 
+The separately identified [portable ustar profile](profiles/tar-ustar-portable-v1.md) validates exact ustar magic, version, checksums, bounded octal fields, record geometry, padding, and termination. It accepts regular files and directories only, uses TAR-native IR evidence and `sealrTreeV2` layout identity, and shares the portable path, quota, verification, retention, read, and atomic materialization core.
+
 The [API contract](api.md), [safety specification](safety.md), and [finding registry](findings.md) are normative for current behavior.
 
 ## Common codecs
 
 The product destination includes the lossless methods ordinary ZIP and TAR producers actually emit. They are codec adapters, not a second unarchiver. Sequencing is in the [roadmap](../ROADMAP.md#common-compression-one-boundary).
 
-ZIP methods in scope: Store, Deflate, Deflate64, BZip2, LZMA, XZ, and Zstandard. TAR wrappers in scope: uncompressed, gzip, bzip2, xz, and zstd. Each adapter must consume declared compressed input exactly, bound its window, fail closed, and reuse the same `ArchiveIR`, path, quota, and publication core.
+ZIP methods in scope: Store, Deflate, Deflate64, BZip2, LZMA, XZ, and Zstandard. TAR wrappers in scope: uncompressed, gzip, bzip2, xz, and zstd. Each adapter must consume declared compressed input exactly, bind every transform and snapshot domain, bound its window and output, fail closed, and reuse the same path, quota, verification, and publication core.
 
-PPMd, encrypted methods, RAR, and shelling out to another extractor are out of scope. ZIP64 is a structural profile, not a codec.
+PPMd and encrypted payload decoding are outside the current default direction. RAR4 and RAR5 remain separate research targets subject to decoder-license and trusted-code decisions. Shelling out to another extractor is out of scope. ZIP64 is a structural profile, not a codec.
 
 ## Expansion rule
 
@@ -54,16 +56,21 @@ The first layer constructs one archive tree. The second assigns Python packaging
 | Private file-backed ZIP snapshot | Alpha.5 released | Copy-hash-retain source capability, checked random access, native mutation controls, required resource bounds, and scheduled 3 GiB sparse evidence |
 | Supervised Linux ZIP worker | Alpha.6 released | Explicit x86_64 Linux activation, authenticated packaged helper, Landlock ABI 3 plus seccomp, source replay, and supervisor audit and publication |
 | Portable UTF-8 ZIP path and tree profile | Alpha.8 supported preview | Strict UTF-8 NFC, explicit flagging, no extras, component ceilings, target collision model, and independent vector |
-| ZIP Zstd, XZ/LZMA, BZip2, Deflate64 adapters | After Phase 0.1 | Same exact-consumption, bounded-window, and dependency rules as Deflate; no second parser |
-| TAR plus PAX and GNU name handling | Phase 1 | ZIP trust gate and codec adapters exist so TAR wrappers reuse them |
-| gzip, bzip2, xz, and zstd wrappers | Phase 1 with TAR | Exact stream, window, metadata, and cancellation semantics via the ZIP codec adapters |
-| ZIP64 | Deferred and consumer-driven | A named consumer demonstrates compatibility need and receives new offset, size, and corpus gates |
+| Raw portable POSIX ustar | Alpha.9 supported preview | Explicit selection, policy v2 authorization, no new runtime dependency, TAR-native evidence, independent roots, external producer corpus, native package and fuzz gates |
+| ZIP64 | Next structural increment | Exact saturated legacy and redundant ZIP64 field agreement with no new runtime dependency |
+| gzip-wrapped TAR | After transform-chain architecture | Bounded derived snapshot, exact RFC 1952 consumption and checksum, existing `flate2`, outer plus inner identities |
+| PAX and GNU TAR dialects | Separate later profiles | Bounded keyword precedence, long-name behavior, link and sparse decisions, and no implicit widening of portable ustar |
+| zstd, xz/LZMA, and bzip2 wrappers | Independently promoted | One measured decoder at a time with exact input, memory, work, checksum, and dependency evidence |
+| ZIP Zstd, XZ/LZMA, BZip2, Deflate64 adapters | After each codec promotion | Same exact-consumption, bounded-window, and dependency rules as Deflate; no second parser |
 | Wheel-oriented UTF-8 ZIP profile | Alpha.7 research evidence preserved | Exact research bytes remain available for historical verification |
 | Python wheel consumer profile | Alpha.8 supported preview | Verified-member API plus wheel metadata, `RECORD`, artifact identity, scheme-relative install-plan rules, and public-surface corpus replay |
-| JAR, APK, OCI, Office, and other ZIP consumers | Later consumer profiles | Signature, relocation, layer, or document semantics specified independently |
-| 7z and other archive families | Deliberately deferred | Concrete consumer, maintained parser strategy, and equivalent assurance evidence |
+| JAR, wheel, and NuGet | ZIP consumer profiles | Package-specific manifests, signatures, and effects specified independently |
+| APK | ZIP-derived structural plus consumer profile | APK signing block and signature semantics cannot pass through ordinary unique-covering ZIP unchanged |
+| OCI layers | TAR dialect plus stateful consumer | Whiteouts, links, metadata, and prior-tree application specified independently |
+| cpio, ar, deb, RPM, and CAB | Tracked structural and composed profiles | Local parsers, promoted codecs only, equivalent covering, identity, package, and fuzz evidence |
+| 7z | Tracked Tier 1 container | Local bounded coder-graph parser, Copy first, reviewed LZMA adapter later, no full extractor crate |
+| RAR4 and RAR5 | Separate research gates | Store-first structure, licensing decision, solid and volume authority model, and equivalent assurance evidence |
 | Encrypted or spanned archives | Refused in the current direction | Separate key, volume, and streaming trust models would be required |
-| RAR | Not planned for the default binary | Licensing, parser, and consumer case do not justify current trusted surface |
 
 ## No permissive fallback
 

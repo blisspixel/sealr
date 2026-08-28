@@ -252,7 +252,7 @@ fn prepare_case(mode: &str) -> PreparedCase {
             panic!("near-limit fixture reached terminal planning: {terminal:?}")
         }
     };
-    let (snapshot, pending, planning_findings, planning_context) = ready.into_parts();
+    let (snapshot, pending, _payloads, planning_findings, planning_context) = ready.into_parts();
     assert!(planning_findings.is_empty());
     assert_eq!(planning_context.controls(), controls);
     assert_eq!(planning_context.profile(), profile);

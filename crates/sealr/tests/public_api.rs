@@ -4,9 +4,10 @@ use std::io::{Cursor, Write};
 
 use sealr::{
     apply, apply_with_options, ApplyOptions, EnvMeta, MaterializationMeta, MemberContainerFacts,
-    MemberReadErrorKind, Outcome, OutcomeIdentities, Policy, PolicyMeta, Receipt, Request,
-    RetentionPlan, RetentionStatus, SnapshotKind, Source, SourceMeta, ToolMeta, VerifiedArchive,
-    View, ZipInterpretationProfile, ZIP_PORTABLE_UTF8_V1, ZIP_STRICT_ASCII_V2, ZIP_WHEEL_UTF8_V1,
+    MemberEvidence, MemberReadErrorKind, Outcome, OutcomeIdentities, Policy, PolicyMeta, Receipt,
+    Request, RetentionPlan, RetentionStatus, SnapshotKind, Source, SourceMeta, ToolMeta,
+    VerifiedArchive, View, ZipInterpretationProfile, ZipMemberEvidence, ZIP_PORTABLE_UTF8_V1,
+    ZIP_STRICT_ASCII_V2, ZIP_WHEEL_UTF8_V1,
 };
 #[cfg(not(target_os = "linux"))]
 use sealr::{LinuxWorker, SupervisionErrorKind};
@@ -153,7 +154,17 @@ fn downstream_callers_can_name_research_wheel_container_facts() {
 
     assert!(!outcome.rejected(), "{:?}", outcome.view.findings);
     assert_eq!(outcome.archive_ir().unwrap().profile(), ZIP_WHEEL_UTF8_V1);
-    let facts: MemberContainerFacts = outcome.archive_ir().unwrap().members()[0].container_facts();
+    let member = &outcome.archive_ir().unwrap().members()[0];
+    assert!(matches!(&member.evidence, MemberEvidence::Zip(_)));
+    let zip: &ZipMemberEvidence = member.zip_evidence().expect("ZIP evidence");
+    let _: u16 = zip.method;
+    let _: u16 = zip.flags;
+    let _: u32 = zip.declared_crc;
+    let _: u64 = zip.declared_comp_size;
+    let _ = &zip.source_ranges;
+    let _ = &zip.extra_fields;
+    assert!(member.tar_evidence().is_none());
+    let facts: MemberContainerFacts = member.container_facts().expect("ZIP container facts");
     let _: u8 = facts.creator_system;
     let _: u32 = facts.external_attributes;
     let _: Option<u16> = facts.unix_mode();

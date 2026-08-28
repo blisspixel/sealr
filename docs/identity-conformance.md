@@ -1,29 +1,31 @@
 # Identity conformance and independent verification
 
-> Status: introduced in Alpha.4 and extended through Alpha.8 with the repository-only wheel profile and supported portable UTF-8 profile. The vectors and verifier protect preview identities. They do not make any profile stable or turn unsigned evidence into an attestation.
+> Status: introduced in Alpha.4, extended through Alpha.8 with the repository-only wheel and supported portable UTF-8 profiles, and extended in Alpha.9 with a portable ustar profile plus independent TAR layout and content reconstruction. The vectors and verifier protect preview identities. They do not make any profile stable or turn unsigned evidence into an attestation.
 
 Sealr now publishes a small, versioned identity-conformance bundle and checks it two ways:
 
-- the production integration test applies the embedded source bytes and requires its semantic axes, findings, `ArchiveIR`, and roots to equal the committed cases;
-- the separate `sealr-identity-verifier` workspace tool consumes those recorded facts without depending on the `sealr` crate and independently reconstructs the covering, profile digest, layout preimage, and content preimage.
+- the production integration tests apply the embedded ZIP source bytes and separately reconstructed exact TAR producer bytes, requiring their semantic axes, findings, `ArchiveIR`, and roots to equal the committed evidence;
+- the separate `sealr-identity-verifier` workspace tool consumes those recorded facts without depending on the `sealr` crate. It checks the exact ZIP sources and covering, validates TAR covering geometry and evidence digests, and independently reconstructs each profile, layout, and content preimage.
 
-The canonical artifacts are the [v1 conformance manifest](../crates/sealr/tests/conformance/identity-v1.json), the [independent verifier](../tools/identity-verifier), and the [production golden test](../crates/sealr/tests/golden_identity.rs).
+The canonical artifacts are the [ZIP v1 conformance manifest](../crates/sealr/tests/conformance/identity-v1.json), the [portable ustar profile vector](../crates/sealr/tests/conformance/tar-ustar-portable-v1.json), the [TAR layout v2 vector](../crates/sealr/tests/conformance/tar-layout-v2.json), the [independent verifier](../tools/identity-verifier), and the production [ZIP](../crates/sealr/tests/golden_identity.rs) and [TAR](../crates/sealr/tests/tar_public_api.rs) tests.
 
 ## Verification boundary
 
-The verifier has no Sealr dependency, ZIP discovery parser, decompressor, path-policy implementation, or filesystem effect. Its deliberate duplication is limited to a strict manifest model, a codec-free range checker, and the documented identity encodings.
+The verifier has no Sealr dependency, ZIP or TAR discovery parser, decompressor, path-policy implementation, or filesystem effect. Its deliberate duplication is limited to strict vector models, codec-free range checkers, and the documented identity encodings.
 
 For each bundle it checks:
 
 1. The manifest schema and tree encoding are supported, every object rejects unknown fields, identifiers are unique, and the complete file is at most 16 MiB.
-2. Every lowercase hexadecimal field is well formed. Exact embedded source bytes and exact canonical profile bytes reproduce their SHA-256 values.
+2. Every lowercase hexadecimal field is well formed. Exact ZIP source bytes and exact canonical profile bytes reproduce their SHA-256 values. TAR source-byte reproduction belongs to the separately pinned sparse producer fixtures.
 3. A case references a published profile vector, and its IR repeats the same source and interpretation identities.
 4. Semantic axes are coherent. Complete verification requires interpreted, admitted, complete evidence; committed effect requires admission and complete verification; a partial view names a finding that caused it.
 5. The claimed ZIP32 covering forms an exact partition of the embedded bytes. Fixed signatures occur at the claimed LFH, CDH, EOCD, and signed-descriptor offsets; EOCD counts and ranges match; and member local and central ranges form complete nonoverlapping partitions. The checker follows recorded offsets and never searches for an EOCD.
 6. Canonical paths are unique, range arithmetic is checked, encoding counts fit their specified widths, and verified members carry measured size, CRC32, and SHA-256 facts.
 7. Independently encoded layout and content preimages reproduce the committed roots. Unavailable IR cannot carry a root, and incomplete verification cannot carry a content root.
 
-The verifier does not independently interpret ZIP flags, names, extras, or methods. It does not inflate content, recompute member CRC32 or content SHA-256 from compressed payloads, prove SHA-256, authenticate a signer, or establish behavior outside the finite published cases. Production verification supplies member content facts; this tool verifies the evidence structure and its identities.
+For `tar-layout-v2.json`, it separately checks complete header, payload, padding, two-block terminator, and trailing-zero geometry; well-formed member evidence and header digests; the ustar profile digest; and the `sealr.tree.layout.v2` and format-neutral content preimages. It does not carry source bytes. Production tests reconstruct exact GNU tar, bsdtar, and Python archives from sparse fixtures, hash those bytes, apply them, and compare their roots and member content. Mutation tests change every bound TAR field family and require either structural rejection or a root mismatch.
+
+The verifier does not independently interpret ZIP flags, names, extras, or methods, and it does not parse ustar headers from source bytes. It does not inflate content, recompute member integrity or content SHA-256 from payloads, prove SHA-256, authenticate a signer, or establish behavior outside the finite published cases. Production verification supplies member content facts; this tool verifies the evidence structure and its identities.
 
 ## Manifest contract
 
@@ -41,7 +43,7 @@ The verifier does not independently interpret ZIP flags, names, extras, or metho
 | `cases[].archive_ir` | Full serializable IR evidence, or `null` when no IR exists |
 | `layout_root`, `content_root` | `sealrTreeV1` root or explicit unavailability |
 
-The current bundle has four profile vectors and four source cases. The strict ASCII v1, strict ASCII v2, wheel UTF-8 v1, and portable UTF-8 v1 canonical profile bytes are compared directly with production serialization before the standalone verifier independently hashes them. Source cases currently exercise strict ASCII v1 tree evidence; separate cross-platform production goldens pin strict ASCII v2 empty-tree identities and the supported wheel consumer source, archive-tree, artifact, and install-plan identities. The wheel vector preserves the Alpha.7 research container language, while the portable vector binds the Alpha.8 supported Unicode contract.
+The ZIP bundle has four profile vectors and four source cases. The strict ASCII v1, strict ASCII v2, wheel UTF-8 v1, and portable UTF-8 v1 canonical profile bytes are compared directly with production serialization before the standalone verifier independently hashes them. Source cases exercise strict ASCII v1 tree evidence; separate cross-platform production goldens pin strict ASCII v2 empty-tree identities and the supported wheel consumer source, archive-tree, artifact, and install-plan identities. The separate TAR vectors bind portable ustar canonical bytes, one complete declared source covering, three TAR-native member records, a `sealrTreeV2` layout root, and a format-neutral content root. They are evidence-encoding vectors, not embedded-source parser vectors.
 
 The source cases are:
 
@@ -74,6 +76,7 @@ The content body starts with a `u32` member count. Each member binds canonical p
 cargo test --locked -p sealr-identity-verifier
 cargo run --locked -p sealr-identity-verifier -- crates/sealr/tests/conformance/identity-v1.json
 cargo test --locked -p sealr --test golden_identity
+cargo test --locked -p sealr --test tar_public_api
 ```
 
 Required CI runs the production comparison, verifier tamper tests, and the verifier command. A change to a source fixture, serialized IR, profile bytes, semantic state, finding, range, or root therefore needs one deliberate manifest review.

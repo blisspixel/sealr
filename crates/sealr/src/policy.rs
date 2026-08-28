@@ -4,7 +4,10 @@ use sha2::{Digest, Sha256};
 use crate::findings::{Finding, FindingCode};
 pub use crate::ratio::ratio_exceeds;
 
-/// Pre-release `sealr.policy.v1`, hashed in this struct's deterministic serialized field order.
+pub const POLICY_FORMAT_ZIP: &str = "zip";
+pub const POLICY_FORMAT_TAR_USTAR: &str = "tar-ustar";
+
+/// Pre-release Sealr policy, hashed in this struct's deterministic serialized field order.
 ///
 /// This is the caller constructor and receipt-hashed object. Runtime enforcement
 /// uses [`Policy::compile`] output, not these fields directly.
@@ -73,11 +76,12 @@ pub struct CompiledControls {
 }
 
 impl Policy {
+    /// Construct the Alpha.8 compatibility policy, which authorizes ZIP only.
     pub fn default_v1() -> Self {
         Self {
             schema: "sealr.policy.v1",
             id: "sealr:policy/default/v1".into(),
-            formats: vec!["zip".into()],
+            formats: vec![POLICY_FORMAT_ZIP.into()],
             max_archive_bytes: 512 * 1024 * 1024,
             max_files: 10_000,
             max_member_bytes: 1024 * 1024 * 1024,
@@ -99,6 +103,19 @@ impl Policy {
         }
     }
 
+    /// Construct the multi-format v2 policy, which authorizes ZIP and portable ustar.
+    ///
+    /// Format selection remains a separate explicit operation input. This policy
+    /// only defines which selected formats the operation is allowed to interpret.
+    pub fn default_v2() -> Self {
+        Self {
+            schema: "sealr.policy.v2",
+            id: "sealr:policy/default/v2".into(),
+            formats: vec![POLICY_FORMAT_ZIP.into(), POLICY_FORMAT_TAR_USTAR.into()],
+            ..Self::default_v1()
+        }
+    }
+
     pub fn digest_hex(&self) -> String {
         let json = serde_json::to_vec(self).expect("policy serializes");
         hex_sha256(&json)
@@ -113,17 +130,27 @@ impl Policy {
     /// Reserved constructor fields must still equal the default values. Mutating
     /// them does not enable behavior; it is an unsupported policy.
     pub fn compile(&self) -> Result<CompiledControls, Finding> {
-        if self.schema != "sealr.policy.v1" {
-            return Err(unsupported(format!(
-                "policy schema {} is unsupported",
-                self.schema
-            )));
-        }
-        if self.formats.as_slice() != ["zip"] {
-            return Err(unsupported(format!(
-                "formats {:?} are unsupported; only [\"zip\"] is implemented",
-                self.formats
-            )));
+        match self.schema {
+            "sealr.policy.v1" if self.formats.as_slice() == [POLICY_FORMAT_ZIP] => {}
+            "sealr.policy.v1" => {
+                return Err(unsupported(format!(
+                    "formats {:?} are unsupported by sealr.policy.v1; only [\"zip\"] is implemented",
+                    self.formats
+                )));
+            }
+            "sealr.policy.v2" if valid_v2_formats(&self.formats) => {}
+            "sealr.policy.v2" => {
+                return Err(unsupported(format!(
+                    "formats {:?} are not a canonical nonempty subset of [\"zip\", \"tar-ustar\"]",
+                    self.formats
+                )));
+            }
+            _ => {
+                return Err(unsupported(format!(
+                    "policy schema {} is unsupported",
+                    self.schema
+                )));
+            }
         }
         let defaults = Self::default_v1();
         check_reserved("symlinks", self.symlinks, defaults.symlinks)?;
@@ -154,6 +181,12 @@ impl Policy {
                 self.max_dict_bytes, defaults.max_dict_bytes
             )));
         }
+        if self.schema == "sealr.policy.v2" && self.max_files > u64::from(u32::MAX) {
+            return Err(unsupported(format!(
+                "max_files={} exceeds the u32 identity-encoding limit",
+                self.max_files
+            )));
+        }
 
         Ok(CompiledControls {
             budget: ResourceBudget {
@@ -171,6 +204,27 @@ impl Policy {
                 member_sync: self.atomic,
             },
         })
+    }
+
+    /// Compile the policy and require it to authorize the explicitly selected format.
+    pub fn compile_for_format(&self, format: &str) -> Result<CompiledControls, Finding> {
+        let controls = self.compile()?;
+        if self.allows_format(format) {
+            Ok(controls)
+        } else {
+            Err(unsupported(format!(
+                "selected format {format:?} is not authorized by policy formats {:?}",
+                self.formats
+            )))
+        }
+    }
+}
+
+fn valid_v2_formats(formats: &[String]) -> bool {
+    match formats {
+        [only] => only == POLICY_FORMAT_ZIP || only == POLICY_FORMAT_TAR_USTAR,
+        [first, second] => first == POLICY_FORMAT_ZIP && second == POLICY_FORMAT_TAR_USTAR,
+        _ => false,
     }
 }
 
@@ -202,6 +256,14 @@ mod tests {
         assert_eq!(
             Policy::default_v1().digest_hex(),
             "8298b205c981ed140a52ba555c0499712436969faf4ebc28d88d8d9e7024c340"
+        );
+    }
+
+    #[test]
+    fn multi_format_policy_digest_is_stable() {
+        assert_eq!(
+            Policy::default_v2().digest_hex(),
+            "a02984fd88cb3fed1d60a339485eb0742da418681427dadcf699b4303f17d14a"
         );
     }
 
@@ -243,10 +305,64 @@ mod tests {
     }
 
     #[test]
+    fn selected_format_must_be_authorized() {
+        assert_eq!(
+            Policy::default_v1()
+                .compile_for_format(POLICY_FORMAT_TAR_USTAR)
+                .unwrap_err()
+                .code,
+            FindingCode::PolicyUnsupported
+        );
+        assert!(Policy::default_v2()
+            .compile_for_format(POLICY_FORMAT_ZIP)
+            .is_ok());
+        assert!(Policy::default_v2()
+            .compile_for_format(POLICY_FORMAT_TAR_USTAR)
+            .is_ok());
+    }
+
+    #[test]
+    fn multi_format_policy_requires_a_canonical_known_subset() {
+        for formats in [
+            Vec::new(),
+            vec![POLICY_FORMAT_TAR_USTAR.into(), POLICY_FORMAT_ZIP.into()],
+            vec![POLICY_FORMAT_ZIP.into(), POLICY_FORMAT_ZIP.into()],
+            vec![POLICY_FORMAT_ZIP.into(), "7z".into()],
+        ] {
+            let mut policy = Policy::default_v2();
+            policy.formats = formats;
+            assert_eq!(
+                policy.compile().unwrap_err().code,
+                FindingCode::PolicyUnsupported
+            );
+        }
+    }
+
+    #[test]
     fn atomic_true_compiles_to_member_sync() {
         let mut policy = Policy::default_v1();
         policy.atomic = true;
         let compiled = policy.compile().unwrap();
         assert!(compiled.effect.member_sync);
+    }
+
+    #[test]
+    fn member_cap_cannot_exceed_the_identity_encoding() {
+        let mut policy = Policy::default_v2();
+        policy.max_files = u64::from(u32::MAX) + 1;
+        assert_eq!(
+            policy.compile().unwrap_err().code,
+            FindingCode::PolicyUnsupported
+        );
+    }
+
+    #[test]
+    fn compatibility_policy_preserves_its_pre_alpha9_member_cap_language() {
+        let mut policy = Policy::default_v1();
+        policy.max_files = u64::from(u32::MAX) + 1;
+        assert_eq!(
+            policy.compile().unwrap().budget.max_files,
+            u64::from(u32::MAX) + 1
+        );
     }
 }

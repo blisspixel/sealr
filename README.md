@@ -4,7 +4,7 @@
 
 > **Goal: one archive, one tree, and evidence for the decision.**
 
-sealr is an early attempt to make archive ingestion easier to reason about. The Alpha.8 preview implements a deliberately narrow ZIP32 path: it builds one versioned interpretation from an immutable source snapshot, verifies accepted members, and either publishes the requested tree without replacement or publishes no destination. An explicit x86_64 Linux mode moves payload verification, stage writes, and later non-retained reads into an authenticated worker restricted with Landlock ABI 3 and seccomp, while the supervisor retains structural planning and publication authority. Sealr does not yet provide a general process sandbox or production security claim.
+sealr is an early attempt to make archive ingestion easier to reason about. The published Alpha.9 preview implements deliberately narrow ZIP32 and raw portable ustar paths. Portable ustar is explicitly selected and adds no runtime dependency or widening of the ZIP compatibility default. Both formats build one versioned interpretation from an immutable source snapshot, verify accepted members, and either publish the requested tree without replacement or publish no destination. An explicit x86_64 Linux mode moves ZIP payload verification, stage writes, and later non-retained reads into an authenticated worker restricted with Landlock ABI 3 and seccomp, while the supervisor retains structural planning and publication authority. Non-ZIP worker selection fails closed without fallback. Sealr does not yet provide a general process sandbox or production security claim.
 
 ```text
 Untrusted archive x policy
@@ -13,9 +13,9 @@ Untrusted archive x policy
 
 The longer-term aim is an archive-to-tree admission boundary whose decision and evidence can be reused by other systems. The current release is a small step toward that aim, not proof that the category or design is finished. Usefulness is not “more unzip.” It is: same bytes and policy produce one tree or no tree on Linux, macOS, and Windows, and the next tool consumes that tree instead of opening the ZIP again. Until a dependent does that, a receipt is just a receipt. The [usefulness test](docs/usefulness.md) is the quality bar.
 
-> Status: `v0.1.0-alpha.8` is the eighth development preview of the ZIP boundary. It is useful for evaluation, development, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. The limitations below are security boundaries, not fine print.
+> Status: `v0.1.0-alpha.9` is the ninth development preview of the archive boundary. It is useful for evaluation, development, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. The limitations below are security boundaries, not fine print.
 
-> Release contents: Alpha.8 adds the supported portable UTF-8 ZIP profile, exact Unicode name and component rules, the public bounded `sealr::wheel` evaluator, a source-deletion downstream contract, and a predecessor-bound replay over the pinned 20-wheel corpus. It preserves the Alpha.7 research evidence and the Alpha.6 supervised Linux boundary. The [Alpha.8 release notes](docs/releases/v0.1.0-alpha.8.md) define the shipped delta and remaining limitations.
+> Release contents: Alpha.9 adds explicitly selected zero-new-dependency raw portable ustar, policy v2, TAR-native evidence and layout identity, independent producer and conformance vectors, packaged-client coverage, and a dedicated bounded TAR fuzz campaign. It preserves all Alpha.8 ZIP and wheel evidence and the Alpha.6 supervised Linux boundary. The [Alpha.9 release notes](docs/releases/v0.1.0-alpha.9.md) define the shipped delta and remaining limitations.
 
 ## Why this exists
 
@@ -36,14 +36,15 @@ Every outcome contains:
 - a receipt binding the available source digest, policy, view, tool, and environment;
 - publication of the requested destination only after every member and the complete archive pass.
 
-## Alpha.8 preview boundary
+## Current release boundary
 
-The Alpha.8 Rust implementation supports classic ZIP32 archives with stored or Deflate members.
+The published Alpha.9 Rust implementation supports classic ZIP32 archives with stored or Deflate members and raw portable POSIX ustar regular files and directories through explicit selection and policy v2 authorization.
 
 - CD-first parsing with exact EOCD, central-directory, local-header, and data-descriptor agreement.
 - Rejection of hidden stream records, unreferenced layout bytes, overlapping records, spanned archives, ZIP64, traditional or strong encryption indicators, masked headers, unsupported methods, and mismatched flags or metadata.
 - Pure lexical path jailing for absolute paths, parent traversal, ADS colons, reserved Windows names, trailing dots and spaces, control characters, empty components, depth, duplicates, case-fold collisions, and file/directory topology conflicts.
 - Strict filename handling. The compatibility default accepts either ASCII names or explicitly flagged strict UTF-8 names, while strict ASCII v2 rejects non-ASCII. The opt-in [portable UTF-8 profile](docs/profiles/zip-portable-utf8-v1.md) requires strict UTF-8, NFC, explicit non-ASCII flagging, closed flags and extras, a pinned Unicode repertoire and full case-fold relation, and fixed component bounds. Unflagged non-ASCII and legacy CP437 names remain unsupported rather than guessed.
+- An explicitly selected [portable POSIX ustar profile](docs/profiles/tar-ustar-portable-v1.md). It adds no runtime dependency, accepts only regular files and directories under the same portable UTF-8 path contract, validates exact header checksums, octal fields, member padding, two-block termination, and trailing record padding, and reuses the existing quota, verification, retention, read, and atomic materialization core.
 - An opt-in [strict ASCII ZIP32 v2 profile](docs/profiles/zip-strict-ascii-v2.md) with an exhaustive 16-bit flag table and an all-extra-fields-denied rule. `apply()` preserves v1 compatibility; `apply_with_options` records the selected profile in IR and receipt identity.
 - Bounded source reads, metadata, file count, declared and actual member size, total expanded size, and declared and actual compression ratio.
 - Checked `u64` snapshot access for magic detection, ZIP discovery, local and central metadata, covering audit, and payload verification. Path inputs are opened once, copied and hashed through a fixed 64 KiB buffer into a random private directory, reopened read-only, unlinked before ingest returns, and then served with positional reads. Caller byte slices remain memory-backed. Structural scratch reads are fixed-size or metadata-capped, and compressed member ranges stream through fixed 64 KiB buffers.
@@ -52,8 +53,9 @@ The Alpha.8 Rust implementation supports classic ZIP32 archives with stored or D
 - Deterministic JSON view and versioned unsigned receipt on allow and reject paths. Receipts record the materializer backend, stage mode, stage-creation primitive, component-resolution guarantee, durability, publication primitive, outcome, and cleanup state.
 - Fully verified admitted outcomes expose an opaque `VerifiedArchive`. Callers may use `apply_with_options` to select a small exact-path set for independently capped retention during the original verification pass. Retained bytes can be borrowed without another parse, inflation, allocation, or hash; unretained reads remain caller-bounded and revalidate size, CRC32, and SHA-256 from the recorded payload range. See the [API contract](docs/api.md#bounded-one-pass-retention).
 - A pinned 5,927-file, 14-class ZipDiff construction gate with a deterministically generated aggregate corpus digest, exact finding-count expectations, and an explicit 73-file control allowlist.
-- An adversarial unit suite, an external-crate API fixture, a separate consumer that runs against the extracted packaged crate, strict Clippy, rustfmt, documentation checks, cross-platform tests, and cargo-deny policy in CI.
-- A versioned four-case identity-conformance bundle with four exact profile vectors, checked by both the production API and a standalone workspace verifier that has no dependency on the Sealr crate. It hashes exact source and profile bytes, checks the claimed covering without searching or inflating, and independently reproduces three layout and three content roots.
+- An adversarial unit suite, an external-crate API fixture, a separate consumer that runs against the extracted packaged crate and exercises supervised ZIP plus in-process portable ustar, strict Clippy, rustfmt, documentation checks, cross-platform tests, and cargo-deny policy in CI.
+- A versioned four-case ZIP identity-conformance bundle with four exact ZIP profile vectors plus separate portable ustar profile and layout vectors, checked by both production APIs and a standalone workspace verifier that has no dependency on the Sealr crate. For ZIP it hashes embedded source and profile bytes and checks the claimed covering without searching or inflating. For TAR it independently validates the declared geometry and reconstructs the published layout and content roots, while producer fixtures separately reconstruct, hash, and apply exact TAR bytes.
+- Exact portable ustar fixtures from GNU tar 1.35, bsdtar 3.8.4, and Python 3.12.10, a codec-free TAR covering oracle that independently rescans all zero padding, native packaged-CLI inspect and materialization checks on all three release platforms, and a dedicated bounded checksum-aware TAR fuzz campaign with 15 exact starting states.
 - A non-shipping, byte-addressed [20-wheel compatibility pilot](docs/wheel-compatibility-pilot.md) analyzed only through Sealr's public API under strict ASCII v2. The profile admits 19 artifacts; one SciPy wheel is denied by three per-member `quota.ratio` findings. The sample is judgmental evidence, not a PyPI-wide compatibility claim or supported wheel admission.
 - The immutable Alpha.7 [wheel semantic inventory](docs/wheel-compatibility-v2.md) and consumer laboratory preserve the exact research profile, hostile fixtures, distinct identities, and external PyPA `installer` 0.7.0 bridge that never receives or reopens the original wheel.
 - A supported-preview [`sealr::wheel`](docs/profiles/python-wheel-v1.md) evaluator that consumes only `VerifiedArchive` under the portable UTF-8 profile, returns admitted, denied, unsupported, or infrastructure-failure outcomes, and produces domain-separated artifact, plan, and realization identities. Its [v3 inventory](docs/wheel-compatibility-v3.md) replays the same pinned 20 wheels through the public surface.
@@ -92,7 +94,7 @@ The following work must land before a production-readiness claim:
 - The inspectable `View` remains invocation evidence. Its digest covers verdict, write state, findings, and members. Receipts now also carry separate `sealrTreeV1` layout and content-tree identities derived from `ArchiveIR`. Those roots are unsigned, preview-line encodings; they are not yet a lock, an authenticated subject, or a claim that every extra-field payload is semantic. Materialization failures still map into the end-to-end `Rejected` verdict.
 - The independent identity verifier establishes internal consistency for the finite committed vectors. It does not run a second ZIP interpretation, execute codecs, recompute member hashes from compressed payloads, prove SHA-256, authenticate evidence, or establish correctness outside those cases.
 - The Kani results establish only the three scalar relations, exact domains, assumptions, and unwind bound in the assurance manifest. The proof-only crate compiles the exact production interval, quota, and ratio modules with Kani's Rust 1.93 compiler while required CI compiles the complete product with Rust 1.98. The model checks do not cover parsing, codecs, filesystem effects, worker containment, or dependencies and do not make Sealr a formally verified extractor.
-- ZIP64, TAR, compressed TAR, gzip, zstd, and 7z are not implemented.
+- ZIP64, PAX and GNU TAR extensions, compressed TAR wrappers, 7z, RAR4, RAR5, cpio, ar, deb, RPM, and CAB are not implemented. Uncompressed portable ustar regular files and directories are supported only through explicit profile selection. The authenticated Linux worker remains ZIP-only and fails without fallback when any non-ZIP format is selected.
 - There is no external security audit or stable production-supported release.
 
 See [SECURITY.md](SECURITY.md), [the threat model](docs/threat-model.md), and [the invariants](docs/invariants.md) before integrating the crate.
@@ -103,7 +105,7 @@ The repository pins Rust 1.98.0 in `rust-toolchain.toml`; rustup selects it auto
 
 The crate's current minimum supported Rust version is 1.98, declared through `rust-version`. CI selects exactly 1.98.0. Preview releases may raise this minimum only as a documented compatibility change; patch releases within a stable 1.x line will not.
 
-Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.8` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.8). Runnable checksum and provenance commands are in [release verification](docs/release-verification.md). To build from source:
+Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.9` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.9). Runnable checksum and provenance commands are in [release verification](docs/release-verification.md). To build from source:
 
 ```text
 git clone https://github.com/blisspixel/sealr.git
@@ -184,20 +186,20 @@ The semantic walkthrough is enforced by CLI integration tests on the native plat
 - Unknown or unsupported structure fails closed.
 - Declared sizes never authorize allocation or output. Actual bytes are counted as they arrive.
 - Rejection is evidence-bearing. It still returns a view and receipt.
-- Format breadth and acceleration come after the boundary is measurable. Common ZIP/TAR codecs are in scope as adapters on that boundary, not as a second extractor or a large codec framework.
-- Do not add TAR, 7z, or a richer CLI as a substitute for a dependent that imports the crate and stops unzipping. Wheel admission is the first consumer that would prove the category.
+- Format breadth and acceleration use the measurable boundary. Common ZIP and TAR codecs are adapters on that boundary, not a second extractor or a large codec framework. Portable raw ustar is the first zero-dependency proof that the boundary is container-neutral.
+- 7z, RAR, cpio, ar, and CAB are tracked in the [format support architecture](docs/format-support.md). Each receives its own structural profile and threat model rather than a vendor-process fallback.
 - Unique covering is sequential. Independent member verification may use many cores after one IR exists. A second parse is not a use of extra cores.
 - The shipped library keeps a small trusted computing base. New runtime dependencies need a written capability need; unknown methods fail closed.
 
 ## What comes next
 
-The next milestone remains the Phase 0.1 ZIP trust gate, not another archive format. Alpha.8 closes the first portable Unicode and supported non-reparsing consumer increment. The next product work is targeted compatibility evidence for benign Unicode, `.data`, and descriptor-bearing wheels, followed by stable identity and API review, authenticated crash recovery, and explicit durability evidence. This comes next because the mechanism now works, while production confidence still depends on representative consequences, recoverable lifecycle authority, and contracts that can be frozen without guesswork.
+The next milestone combines two bounded lanes. The Phase 0.1 ZIP trust gate continues with targeted wheel evidence, stable identity and API review, authenticated crash recovery, and durability. In parallel, Alpha.9 proves the multi-format architecture with a strict zero-new-dependency ustar profile and separately versioned layout evidence. Before another decoder, the internal plan must carry exact format variants and bind original versus derived snapshot domains. ZIP64 is the next zero-dependency structural increment. gzip-wrapped TAR then reuses existing `flate2`; PAX and GNU TAR, zstd, xz/LZMA, bzip2, cpio, ar/deb, 7z, CAB, RPM, and separate RAR4 and RAR5 research gates follow only through explicit profiles and measured dependency budgets.
 
 The landed [private semantic-record assurance](docs/semantic-record.md) includes an immutable 12-case v1 baseline, 12 additive v2 cases with explicit oracle ownership, plan-native inspect and materialize executors, a shared owning plan seam, and a required near-limit completion heap probe. The Linux bootstrap closes no-descendant and permission-mutation authority before source transfer, validates raw ancillary data, and enforces supervisor-owned absolute monotonic deadlines across every authority round. Deterministic stalls and separate 500-iteration bootstrap and writer campaigns prove bounded termination, exact reap, descriptor stability, and checked cleanup. Bounded `SLRBLOB1` memfds carry the canonical semantic plan, completion, and retained-content bundle. The worker binds the plan to the exact file-backed snapshot, invokes no structural parser during execution, and reads only planned payload ranges. After worker exit and reap, the supervisor treats both sealed outputs as untrusted proposals, independently replays the accepted plan against its retained exact source descriptor, and requires byte-for-byte canonical agreement. Public non-retained reads use a fresh restricted worker with no stage or destination authority and preserve the originating inspect or materialize binding. Public supervised materialization gives the worker only the supervisor-created stage root and sealed plan; destination setup, exact post-reap audit, cleanup, and no-replace publication remain supervisor-owned. The [Linux helper packaging contract](docs/helper-packaging.md) fixes release placement, artifact identity, manifest, modes, helper-aware license closure, and extracted-package proof while requiring helper absence from macOS and Windows archives. A required QEMU gate proves typed fail-closed behavior on an actual Landlock ABI 2 kernel. The explicit CLI, wheel-laboratory, and extracted-package-consumer paths now load the exact manifest and use this same boundary without fallback. Protocol v1 remains unchanged.
 
 Assurance now advances with each increment rather than waiting for a late phase. Three scalar Kani harnesses, targeted mutation discovery, source-coverage discovery, fuzzing, native resource evidence, and required deterministic gates remain distinct in the [promotion ledger](docs/assurance-promotion.md). The Alpha.7 laboratory proves the external consumer shape, and the Alpha.8 public evaluator proves the supported capability-only boundary. Authenticated recovery, durability, targeted wheel coverage, and scheduled assurance history continue in parallel.
 
-See the [near-term execution plan](docs/near-term.md) for release-sized work and acceptance gates, the [assurance promotion contract](docs/assurance-promotion.md) for exact claims and promotion rules, the [identity-conformance contract](docs/identity-conformance.md) for the independent root checks, the [supported-preview wheel inventory](docs/wheel-compatibility-v3.md) for bounded measurement, the [distribution contract](docs/distribution-contract.md) for separate source and native promises, the [roadmap](ROADMAP.md) for the full trust gate, and the [wheel consumer profile](docs/profiles/python-wheel-v1.md) for the first shipped consumer. The CLI still has no wheel installation mode.
+See the [near-term execution plan](docs/near-term.md) for release-sized work and acceptance gates, the [format support architecture](docs/format-support.md) for the major-format and dependency matrix, the [assurance promotion contract](docs/assurance-promotion.md) for exact claims and promotion rules, the [identity-conformance contract](docs/identity-conformance.md) for the independent root checks, the [supported-preview wheel inventory](docs/wheel-compatibility-v3.md) for bounded measurement, the [distribution contract](docs/distribution-contract.md) for separate source and native promises, the [roadmap](ROADMAP.md) for the full trust gate, and the [wheel consumer profile](docs/profiles/python-wheel-v1.md) for the first shipped consumer. The CLI still has no wheel installation mode.
 
 ## Research basis
 
@@ -216,14 +218,14 @@ See the [near-term execution plan](docs/near-term.md) for release-sized work and
 | Document | Purpose |
 |---|---|
 | [Documentation index](docs/index.md) | Guided map of current contracts, security material, plans, and operations |
-| [Near-term execution plan](docs/near-term.md) | Alpha.4 through Alpha.6 work packages and measurable gates |
+| [Near-term execution plan](docs/near-term.md) | Release-sized work through Alpha.9 and the next measurable gates |
 | [Distribution contract](docs/distribution-contract.md) | Exact source-package scope, SemVer and MSRV policy, and native archive floors |
 | [Wheel semantic inventory](docs/wheel-compatibility-v2.md) | Predecessor-bound wheel-profile and consumer research over the exact pilot bytes |
 | [Identity conformance](docs/identity-conformance.md) | Independent profile, covering, and tree-root vectors with exact nonclaims |
 | [Private semantic record](docs/semantic-record.md) | Crate-private Alpha.6 planning/completion codec, worker executors, validation rules, evidence, and remaining gates |
 | [Roadmap](ROADMAP.md) | Full capability order, release gate, and non-goals |
 | [Safety specification](docs/safety.md) | Normative safety rules and supported boundary |
-| [API contract](docs/api.md) | Current Alpha.8 Rust and JSON surface |
+| [API contract](docs/api.md) | Published Alpha.9 Rust and JSON surface |
 | [Release verification](docs/release-verification.md) | Checksums, provenance, tag, and immutable release verification |
 
 ## License

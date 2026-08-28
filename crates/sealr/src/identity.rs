@@ -10,14 +10,16 @@ use serde::ser::{SerializeMap, Serializer};
 use serde::Serialize;
 
 use crate::ir::{
-    ArchiveIR, ExtraDisposition, ExtraSite, IrMember, MemberKind, MemberVerification,
-    NormalizationAction, ZipInterpretationProfile,
+    ArchiveFormat, ArchiveIR, ExtraDisposition, ExtraSite, IrMember, MemberKind,
+    MemberVerification, NormalizationAction, TarInterpretationProfile, ZipInterpretationProfile,
 };
 use crate::outcome::{DigestHex, SourceDigest, VerificationStatus};
 use crate::policy::hex_sha256;
 
 pub const TREE_ENCODING_ID: &str = "sealrTreeV1";
+pub const TREE_ENCODING_V2_ID: &str = "sealrTreeV2";
 const LAYOUT_LABEL: &str = "sealr.tree.layout.v1";
+const TAR_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-ustar.v1";
 const CONTENT_LABEL: &str = "sealr.tree.content.v1";
 const FILE: u8 = 1;
 const DIRECTORY: u8 = 2;
@@ -33,6 +35,7 @@ const NORM_DROP_DOT: u8 = 2;
 #[non_exhaustive]
 pub enum TreeRoot {
     SealrTreeV1 { hex: String },
+    SealrTreeV2 { hex: String },
     Unavailable,
 }
 
@@ -47,9 +50,16 @@ impl TreeRoot {
         }
     }
 
+    pub fn from_v2_bytes(bytes: &[u8]) -> Self {
+        Self::SealrTreeV2 {
+            hex: hex_sha256(bytes),
+        }
+    }
+
     pub fn hex(&self) -> Option<&str> {
         match self {
             Self::SealrTreeV1 { hex } => Some(hex),
+            Self::SealrTreeV2 { hex } => Some(hex),
             Self::Unavailable => None,
         }
     }
@@ -61,6 +71,11 @@ impl Serialize for TreeRoot {
             Self::SealrTreeV1 { hex } => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 map.serialize_entry(TREE_ENCODING_ID, hex)?;
+                map.end()
+            }
+            Self::SealrTreeV2 { hex } => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry(TREE_ENCODING_V2_ID, hex)?;
                 map.end()
             }
             Self::Unavailable => {
@@ -94,13 +109,19 @@ impl OutcomeIdentities {
     }
 
     pub fn unavailable_for(source: SourceDigest, profile: ZipInterpretationProfile) -> Self {
+        Self::unavailable_for_named(source, profile.id(), profile.digest())
+    }
+
+    pub fn unavailable_for_tar(source: SourceDigest, profile: TarInterpretationProfile) -> Self {
+        Self::unavailable_for_named(source, profile.id(), profile.digest())
+    }
+
+    fn unavailable_for_named(source: SourceDigest, id: &'static str, digest: String) -> Self {
         Self {
             source,
             interpretation: InterpretationIdentity {
-                id: profile.id().into(),
-                digest: DigestHex {
-                    sha256: profile.digest(),
-                },
+                id: id.into(),
+                digest: DigestHex { sha256: digest },
             },
             layout: TreeRoot::unavailable(),
             content: TreeRoot::unavailable(),
@@ -165,12 +186,18 @@ fn sorted_members(ir: &ArchiveIR) -> Vec<&IrMember> {
 
 pub fn encode_layout(ir: &ArchiveIR) -> Vec<u8> {
     let members = sorted_members(ir);
+    let covering = ir
+        .zip_covering()
+        .expect("ZIP layout encoding requires ZIP archive evidence");
     let mut body = Vec::new();
-    encode_range(&mut body, ir.covering.local_records);
-    encode_range(&mut body, ir.covering.central_directory);
-    encode_range(&mut body, ir.covering.eocd);
-    encode_range(&mut body, ir.covering.comment);
-    push_u32(&mut body, members.len() as u32);
+    encode_range(&mut body, covering.local_records);
+    encode_range(&mut body, covering.central_directory);
+    encode_range(&mut body, covering.eocd);
+    encode_range(&mut body, covering.comment);
+    push_u32(
+        &mut body,
+        u32::try_from(members.len()).expect("planned member count is bounded by policy"),
+    );
     for member in members {
         encode_layout_member(&mut body, member);
     }
@@ -180,11 +207,57 @@ pub fn encode_layout(ir: &ArchiveIR) -> Vec<u8> {
 pub fn encode_content(ir: &ArchiveIR) -> Vec<u8> {
     let members = sorted_members(ir);
     let mut body = Vec::new();
-    push_u32(&mut body, members.len() as u32);
+    push_u32(
+        &mut body,
+        u32::try_from(members.len()).expect("planned member count is bounded by policy"),
+    );
     for member in members {
         encode_content_member(&mut body, member);
     }
     preimage(CONTENT_LABEL, &body)
+}
+
+pub fn encode_tar_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
+    let covering = ir.tar_covering()?;
+    let members = sorted_members(ir);
+    let mut body = Vec::new();
+    encode_range(&mut body, covering.member_records);
+    encode_range(&mut body, covering.terminator);
+    encode_range(&mut body, covering.trailing_zeros);
+    push_u32(
+        &mut body,
+        u32::try_from(members.len()).expect("planned member count is bounded by policy"),
+    );
+    for member in members {
+        let evidence = member.tar_evidence()?;
+        push_bytes(&mut body, member.canonical_path.as_bytes());
+        body.push(match member.kind {
+            MemberKind::File => FILE,
+            MemberKind::Directory => DIRECTORY,
+        });
+        push_bytes(&mut body, &member.raw_name_bytes);
+        push_u64(&mut body, member.declared_uncomp_size);
+        encode_range(&mut body, evidence.header);
+        encode_range(&mut body, evidence.payload);
+        encode_range(&mut body, evidence.padding);
+        push_u32(&mut body, evidence.mode);
+        push_u64(&mut body, evidence.mtime);
+        push_u32(&mut body, evidence.header_checksum);
+        body.extend_from_slice(&parse_hex32(&evidence.header_sha256)?);
+        push_u32(&mut body, member.normalization_actions.len() as u32);
+        for action in &member.normalization_actions {
+            match action {
+                NormalizationAction::StripDirectoryTrailingSlash => {
+                    body.push(NORM_STRIP_DIR_SLASH);
+                }
+                NormalizationAction::DropDotComponent { component_index } => {
+                    body.push(NORM_DROP_DOT);
+                    push_u32(&mut body, *component_index);
+                }
+            }
+        }
+    }
+    Some(preimage(TAR_LAYOUT_LABEL, &body))
 }
 
 fn encode_range(out: &mut Vec<u8>, range: crate::ir::ByteRange) {
@@ -193,27 +266,30 @@ fn encode_range(out: &mut Vec<u8>, range: crate::ir::ByteRange) {
 }
 
 fn encode_layout_member(out: &mut Vec<u8>, member: &IrMember) {
+    let evidence = member
+        .zip_evidence()
+        .expect("ZIP layout member encoding requires ZIP evidence");
     push_bytes(out, member.canonical_path.as_bytes());
     out.push(match member.kind {
         MemberKind::File => FILE,
         MemberKind::Directory => DIRECTORY,
     });
     push_bytes(out, &member.raw_name_bytes);
-    push_u16(out, member.method);
-    push_u16(out, member.flags);
-    push_u64(out, member.declared_comp_size);
+    push_u16(out, evidence.method);
+    push_u16(out, evidence.flags);
+    push_u64(out, evidence.declared_comp_size);
     push_u64(out, member.declared_uncomp_size);
-    push_u32(out, member.declared_crc);
-    encode_range(out, member.source_ranges.local_header);
-    encode_range(out, member.source_ranges.compressed_payload);
-    if let Some(descriptor) = member.source_ranges.data_descriptor {
+    push_u32(out, evidence.declared_crc);
+    encode_range(out, evidence.source_ranges.local_header);
+    encode_range(out, evidence.source_ranges.compressed_payload);
+    if let Some(descriptor) = evidence.source_ranges.data_descriptor {
         out.push(1);
         encode_range(out, descriptor);
     } else {
         out.push(0);
     }
-    encode_range(out, member.source_ranges.central_header);
-    let mut extras = member.extra_fields.clone();
+    encode_range(out, evidence.source_ranges.central_header);
+    let mut extras = evidence.extra_fields.clone();
     extras.sort_by(|a, b| {
         (site_tag(a.site), a.id, a.data_range.offset).cmp(&(
             site_tag(b.site),
@@ -300,7 +376,12 @@ fn parse_hex32(hex: &str) -> Option<[u8; 32]> {
 
 /// SHA-256 of canonical layout bytes. Distinct from `view_digest`.
 pub fn layout_root(ir: &ArchiveIR) -> TreeRoot {
-    TreeRoot::from_bytes(&encode_layout(ir))
+    match ir.format() {
+        ArchiveFormat::Zip32 => TreeRoot::from_bytes(&encode_layout(ir)),
+        ArchiveFormat::TarUstar => encode_tar_layout(ir)
+            .map(|bytes| TreeRoot::from_v2_bytes(&bytes))
+            .unwrap_or_else(TreeRoot::unavailable),
+    }
 }
 
 /// SHA-256 of canonical content-tree bytes. Requires verified members.
@@ -323,7 +404,7 @@ pub fn content_root(ir: &ArchiveIR) -> TreeRoot {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{ByteRange, MemberSourceRanges};
+    use crate::ir::{ByteRange, MemberEvidence, MemberSourceRanges, ZipMemberEvidence};
     use crate::outcome::SourceDigest;
 
     fn empty_ir() -> ArchiveIR {
@@ -374,7 +455,12 @@ mod tests {
         let mut first = empty_ir();
         first.members = vec![sample_member("a.txt", 10)];
         let mut second = first.clone();
-        second.members[0].source_ranges.central_header.offset += 1;
+        second.members[0]
+            .zip_evidence_mut()
+            .expect("sample member is ZIP")
+            .source_ranges
+            .central_header
+            .offset += 1;
         assert_ne!(layout_root(&first), layout_root(&second));
     }
 
@@ -398,29 +484,31 @@ mod tests {
             canonical_path: path.to_string(),
             components: vec![path.to_string()],
             kind: MemberKind::File,
-            method: 0,
-            flags: 0,
-            creator_system: 0,
-            external_attributes: 0,
-            declared_crc: 0,
-            declared_comp_size: 1,
             declared_uncomp_size: 1,
-            source_ranges: MemberSourceRanges {
-                local_header: ByteRange {
-                    offset,
-                    len: 30 + path.len() as u64,
+            evidence: MemberEvidence::Zip(ZipMemberEvidence {
+                method: 0,
+                flags: 0,
+                creator_system: 0,
+                external_attributes: 0,
+                declared_crc: 0,
+                declared_comp_size: 1,
+                source_ranges: MemberSourceRanges {
+                    local_header: ByteRange {
+                        offset,
+                        len: 30 + path.len() as u64,
+                    },
+                    compressed_payload: ByteRange {
+                        offset: offset + 30 + path.len() as u64,
+                        len: 1,
+                    },
+                    data_descriptor: None,
+                    central_header: ByteRange {
+                        offset: 100 + offset,
+                        len: 46 + path.len() as u64,
+                    },
                 },
-                compressed_payload: ByteRange {
-                    offset: offset + 30 + path.len() as u64,
-                    len: 1,
-                },
-                data_descriptor: None,
-                central_header: ByteRange {
-                    offset: 100 + offset,
-                    len: 46 + path.len() as u64,
-                },
-            },
-            extra_fields: Vec::new(),
+                extra_fields: Vec::new(),
+            }),
             actual_uncomp_size: Some(1),
             actual_crc: Some(0),
             content_sha256: Some(

@@ -14,7 +14,7 @@ concurrency:
 
 env:
   MACOSX_DEPLOYMENT_TARGET: "15.0"
-  RELEASE_VERSION: 0.1.0-alpha.8
+  RELEASE_VERSION: 0.1.0-alpha.9
   RUST_VERSION: 1.98.0
 
 jobs:
@@ -223,6 +223,7 @@ jobs:
           required_fuzz_jobs=(
             "Bounded worker protocol"
             "Bounded semantic records"
+            "Bounded raw POSIX ustar"
           )
           for required in "${required_fuzz_jobs[@]}"; do
             count="$(jq --arg name "${required}" '[.jobs[] | select(.name == $name)] | length' <<<"${jobs_json}")"
@@ -422,7 +423,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          release_title="sealr ${RELEASE_VERSION}: portable Unicode and supported wheel evaluation"
+          release_title="sealr ${RELEASE_VERSION}: portable ustar and multi-format core"
           notes_file="docs/releases/v${RELEASE_VERSION}.md"
           if [[ ! -f "${notes_file}" ]]; then
             echo "::error::missing release notes: ${notes_file}"

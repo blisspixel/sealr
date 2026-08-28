@@ -17,6 +17,7 @@ mod quota;
 mod ratio;
 mod snapshot;
 mod supervised;
+mod tar;
 mod verification;
 #[cfg(any(target_os = "linux", feature = "__internal-worker-lab", test))]
 #[allow(dead_code)]
@@ -35,6 +36,14 @@ mod zip;
 #[doc(hidden)]
 pub fn __fuzz_semantic_records(input: &[u8]) {
     semantic_record::exercise_fuzz_input(input);
+}
+
+/// Exercises the bounded portable ustar parser and its public inspect path from
+/// the separate fuzz workspace without exposing parser internals.
+#[cfg(feature = "__internal-fuzzing")]
+#[doc(hidden)]
+pub fn __fuzz_tar_ustar_portable_v1(input: &[u8]) {
+    tar::exercise_fuzz_input(input);
 }
 
 /// Repository-only bridge used by the Linux worker conformance lab.
@@ -98,20 +107,26 @@ pub mod __materialization_lifecycle_lab {
 }
 
 pub use apply::{
-    apply, apply_with_options, ApplyOptions, EnvMeta, MemberView, Outcome, PolicyMeta, Receipt,
-    Request, Source, SourceMeta, ToolMeta, Verdict, View,
+    apply, apply_with_options, ApplyOptions, ArchiveSelection, EnvMeta, MemberView, Outcome,
+    PolicyMeta, Receipt, Request, Source, SourceMeta, ToolMeta, Verdict, View,
 };
 pub use findings::{Finding, FindingCode, Severity};
-pub use identity::{content_root, layout_root, OutcomeIdentities, TreeRoot, TREE_ENCODING_ID};
+pub use identity::{
+    content_root, encode_tar_layout, layout_root, OutcomeIdentities, TreeRoot, TREE_ENCODING_ID,
+    TREE_ENCODING_V2_ID,
+};
 pub use ir::{
+    tar_ustar_portable_v1_canonical_bytes, tar_ustar_portable_v1_digest,
     zip_portable_utf8_v1_canonical_bytes, zip_portable_utf8_v1_digest,
     zip_strict_ascii_v1_canonical_bytes, zip_strict_ascii_v1_digest,
     zip_strict_ascii_v2_canonical_bytes, zip_strict_ascii_v2_digest,
-    zip_wheel_utf8_v1_canonical_bytes, zip_wheel_utf8_v1_digest, ArchiveCovering, ArchiveIR,
-    ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite, IrMember, MemberContainerFacts,
-    MemberKind, MemberSourceRanges, MemberVerification, NormalizationAction,
-    ZipInterpretationProfile, ARCHIVE_IR_SCHEMA, ZIP_PORTABLE_UTF8_V1, ZIP_STRICT_ASCII_V1,
-    ZIP_STRICT_ASCII_V2, ZIP_WHEEL_UTF8_V1,
+    zip_wheel_utf8_v1_canonical_bytes, zip_wheel_utf8_v1_digest, ArchiveCovering, ArchiveEvidence,
+    ArchiveFormat, ArchiveIR, ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite, IrMember,
+    MemberContainerFacts, MemberEvidence, MemberKind, MemberSourceRanges, MemberVerification,
+    NormalizationAction, TarArchiveCovering, TarInterpretationProfile, TarMemberEvidence,
+    ZipInterpretationProfile, ZipMemberEvidence, ARCHIVE_IR_SCHEMA, TAR_ARCHIVE_IR_SCHEMA,
+    TAR_USTAR_PORTABLE_V1, ZIP_PORTABLE_UTF8_V1, ZIP_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2,
+    ZIP_WHEEL_UTF8_V1,
 };
 pub use jail::{
     jail_name, jail_relative, join_under_dest, JailedName, PORTABLE_NAME_MAX_COMPONENT_UTF16_UNITS,
@@ -122,7 +137,10 @@ pub use outcome::{
     AdmissionStatus, DigestHex, EffectStatus, InterpretationStatus, SourceDigest, StoppingPhase,
     VerificationStatus, ViewCompleteness,
 };
-pub use policy::{hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget};
+pub use policy::{
+    hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget, POLICY_FORMAT_TAR_USTAR,
+    POLICY_FORMAT_ZIP,
+};
 pub use snapshot::SnapshotKind;
 pub use supervised::{
     apply_supervised, inspect_supervised, LinuxWorker, SupervisionError, SupervisionErrorKind,

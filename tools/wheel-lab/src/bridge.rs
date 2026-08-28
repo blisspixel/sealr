@@ -138,6 +138,9 @@ pub fn stage_installer_bridge(
         let record = records
             .get(member.canonical_path.as_str())
             .ok_or_else(|| BridgeError::new("bridge member is absent from bound RECORD"))?;
+        let facts = member
+            .container_facts()
+            .ok_or_else(|| BridgeError::new("bridge member lacks ZIP container facts"))?;
         let blob = format!("{member_index:06}.bin");
         let mut output = OpenOptions::new()
             .create_new(true)
@@ -158,7 +161,7 @@ pub fn stage_installer_bridge(
             record_size: record
                 .size
                 .map_or_else(String::new, |value| value.to_string()),
-            executable: member.container_facts().pypa_installer_0_7_executable(),
+            executable: facts.pypa_installer_0_7_executable(),
         });
     }
 

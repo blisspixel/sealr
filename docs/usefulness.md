@@ -19,13 +19,13 @@ If something still reparses the archive, the receipt is just a receipt and the c
 
 Current main supplies the generic `VerifiedArchive` capability, the supported portable UTF-8 profile, and the public `sealr::wheel` evaluator for filenames, metadata, `RECORD`, relocation, generated targets, and distinct identities. A downstream contract deletes the original Unicode wheel before evaluation and proves deterministic output through the capability alone. The Alpha.7 laboratory separately preserves the hash-pinned external PyPA installer proof. This passes the supported mechanism test. Stable usefulness remains open because no external adopter treats the public representation as authority and the public same-digest, different-tree demonstration remains open.
 
-Until then, keep the ZIP32 path strict, fail closed, and do not add TAR, 7z, or a desktop CLI as a substitute for a dependent.
+Until then, keep every admitted language strict and fail closed. Format work counts only when it strengthens the shared admission boundary with a concrete profile, dependency budget, conformance evidence, and downstream capability path. Raw portable ustar is the zero-dependency proof; adding 7z or a desktop CLI without equivalent semantics would not substitute for a dependent.
 
 ## Checklist
 
 - Inspect and materialize share one interpretation. No recovery parser, no second opinion on the same bytes.
 - Policy is data in the receipt. No `--insecure`, no “just this once.”
-- Unknown structure, ZIP64, encryption, and unsupported methods fail closed. The compatibility default requires explicit strict UTF-8 flagging for non-ASCII paths, strict ASCII v2 rejects them, and portable UTF-8 v1 admits only its pinned Unicode 16.0 repertoire in NFC under an exhaustive contract.
+- Unknown structure, unsupported ZIP64 or encryption, rich TAR extensions, wrappers, and unsupported methods fail closed. The ZIP compatibility default requires explicit strict UTF-8 flagging for non-ASCII paths, strict ASCII v2 rejects them, portable UTF-8 v1 admits only its pinned Unicode 16.0 repertoire in NFC, and raw portable ustar uses that same closed path contract.
 - Rejection still returns a view and a receipt. Silence is a bug.
 - A digest of the archive is not a digest of the tree. Semantic identity (layout root, content root, versioned IR) has to land before anyone should reuse the result.
 - Cross-platform sameness is the product. If Windows writes a different tree, that is a fail, not a port quirk.

@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-08-26.
+Updated 2026-08-27.
 
 sealr's product is the boundary:
 
@@ -66,7 +66,8 @@ In-scope TAR wrappers, after the ZIP trust gate and as reuse of the same adapter
 
 | Wrapper | Current status |
 |---|---|
-| uncompressed TAR | Planned format adapter |
+| uncompressed portable POSIX ustar | Implemented for Alpha.9 with zero new runtime dependencies |
+| POSIX PAX | Planned separate structural profile |
 | gzip | Planned wrapper |
 | bzip2 | Planned wrapper |
 | xz | Planned wrapper |
@@ -74,17 +75,17 @@ In-scope TAR wrappers, after the ZIP trust gate and as reuse of the same adapter
 
 Each adapter must preserve exact compressed-input consumption, bounded windows and dictionaries, quota accounting, the same `ArchiveIR`, the same path and publication core, and the same findings discipline. Inspect and materialize must still agree. A method that cannot be consumed exactly is `unsupported`, not best-effort.
 
-Out of scope for the default binary: PPMd, JPEG/WavPack-style specialized methods, encrypted ZIP methods, RAR, and becoming a 7-Zip replacement. ZIP64 remains a separate structural profile, not a codec.
+Specialized codecs, encryption, recovery records, and multi-volume behavior remain outside the first profile for every container. RAR 5, cpio, ar/deb, and CAB are now explicit research or Tier 2 targets in the [format support architecture](docs/format-support.md), not implicit exclusions. ZIP64 remains a separate structural profile, not a codec.
 
 Codec breadth follows the ZIP trust gate. Adding Zstd today would multiply trusted code before identity, isolation, Unicode paths, and assurance are done. The order is what makes common compression compatible with the reliability bar.
 
 ## Executive decision
 
-The next milestone is **Phase 0.1: the ZIP trust gate**.
+The next milestone is **Alpha.9: prove the multi-format core without pausing the Phase 0.1 ZIP trust gate**.
 
 Sealr is an archive-ingress boundary. It is not a general agent-execution proxy, model verifier, credential broker, or enterprise control plane.
 
-Do not add TAR, 7z, MCP, language bindings, accelerators, extra ZIP methods, a desktop CLI, or archive-decision signing first. Those are not substitutes for a dependent. The current implementation has a strict ZIP32 parser, an executable ZipDiff gate, component-bound output, a private snapshot, a shared owning plan seam, a split-phase semantic contract, an explicit reduced-authority Linux path, a supported portable UTF-8 profile, and a public capability-only wheel evaluator. Alpha.7 preserves the external non-reopening installer proof; Alpha.8 promotes its bounded evaluator shape through `sealr::wheel` and replays the exact 20-wheel corpus under the portable profile. Targeted wheel feature coverage, stable identity and API review, authenticated recovery, durability, and scheduled history are next because they now measure a real supported consumer rather than a repository-only prototype. Layered adversarial assurance continues with every increment.
+Format breadth is now an explicit second lane, not a substitute for a dependent. Alpha.9 begins with portable raw ustar because its fixed-block parser requires no new runtime dependency and can reuse the existing snapshot, path, quota, verification, capability, materialization, and content-identity core. gzip follows by reusing `flate2`. PAX, ZIP64, 7z, RAR, cpio, ar/deb, CAB, and additional codecs remain separately promoted profiles. Targeted wheel feature coverage, stable identity and API review, authenticated recovery, durability, and scheduled history continue because they measure the first real supported consumer.
 
 This order matters because format and codec breadth multiply every unresolved parser, path, resource, and materialization mistake. Testing one narrow ZIP profile thoroughly gives later codecs and formats a boundary they can reuse instead of a second extractor.
 
@@ -123,6 +124,7 @@ The repository now has:
 - the `v0.1.0-alpha.6` reduced-authority Linux preview line, built from protected `main` through all six underlying required-CI gates, exact-commit on-demand fuzz evidence, and the release workflow, with immutable releases enabled.
 - the `v0.1.0-alpha.7` wheel-research and distribution-contract preview line, with an exact repository-only UTF-8 wheel profile, bounded consumer evaluator, hostile corpus, non-reopening PyPA installer bridge, one allowlisted source crate, exact package contents, and pinned native build floors.
 - the `v0.1.0-alpha.8` portable-Unicode and supported-consumer preview line, with a predecessor-bound public-surface corpus replay and exact consumer identity goldens.
+- the `v0.1.0-alpha.9` portable-ustar and multi-format-core preview line, with zero-new-dependency raw ustar, separate policy authorization, TAR-native evidence, independently reconstructed roots, external producer fixtures, extracted-package and native CLI coverage, and a dedicated bounded fuzz campaign.
 
 The Alpha.6 reduced-authority boundary remains the foundation for the later preview lines. It is incomplete and is not a production security boundary. The explicit x86_64 Linux worker reduces authority for payload verification, stage writes, and later non-retained reads, while structural planning and final publication remain supervisor-owned. Default APIs remain in process, caller byte inputs remain memory-backed by definition, and broader native, kernel, resource, and semantic history continues as assurance work.
 
@@ -144,9 +146,10 @@ The detailed release-sized plan is [docs/near-term.md](docs/near-term.md). It co
 4. **Continuous assurance lane: governance active.** Pure range and quota models, property tests, three scalar Kani harnesses, fuzzing, native race stress, targeted mutation discovery, source-coverage discovery, and a five-category promotion ledger now run under explicit bounds and nonclaims. Stable scheduled history remains an accumulating observation, not a reason to weaken or duplicate required CI. Step 8 continues with path and lifecycle models and new targets driven by concrete gaps.
 5. **Parallel wheel laboratory: research implementation complete.** The first reproducible benign [compatibility pilot](docs/wheel-compatibility-pilot.md) remains immutable. A separate [v2 semantic inventory](docs/wheel-compatibility-v2.md) binds that predecessor and evaluates the exact bytes under an exhaustive wheel UTF-8 profile through `VerifiedArchive` only. The pure bounded evaluator validates filenames, wheel and core metadata, `RECORD`, entry points, relocation, generated targets, and distinct identity domains. Minimized hostile fixtures pin every implemented decision boundary. A hash-pinned PyPA installer bridge receives bounded verified-member blobs after the original wheel is deleted and an audit hook denies every wheel open. The lab remains non-published research, not supported wheel admission.
 6. **Alpha.8 portable names and supported wheel evaluation: implemented.** The [portable UTF-8 profile](docs/profiles/zip-portable-utf8-v1.md) closes strict decoding, NFC, flag, extra-field, component, reserved-name, and collision meaning under a fourth independent vector. The public [`sealr::wheel`](docs/profiles/python-wheel-v1.md) evaluator requires that profile, receives only `VerifiedArchive`, returns four distinct outcome classes, and binds source, tree, artifact, plan, and realization identities. A downstream test removes the original Unicode wheel before evaluation. The predecessor-bound [v3 inventory](docs/wheel-compatibility-v3.md) preserves the 16 admitted, two denied, and two unsupported results while documenting one tightened executable-mode decision.
-7. **Stable distribution mechanics: executable before the stable claim.** Only the `sealr` crate is crates.io-allowlisted; exact package files, README, license, MSRV, registry, extracted consumer, and public API fixture are required checks. Native workflows use exact Ubuntu 24.04, macOS 15 arm64, and Windows Server 2022 runners and assert the architecture, ABI, kernel or deployment contract before testing and packaging. The [distribution contract](docs/distribution-contract.md) keeps source and native promises separate. The remaining 1.0 blockers are trust-gate completion, supported consumer promotion, stable assurance history, API and schema freeze, and independent review.
+7. **Alpha.9 portable ustar and multi-format core: implementation active.** Explicit `ArchiveSelection` and policy v2 authorization select exactly one parser before source ingestion. Raw portable ustar accepts only regular files and directories, adds no runtime dependency, emits TAR-native evidence, uses a separately versioned layout root, and shares verification, retention, later reads, and atomic materialization. Independent profile and layout vectors, a codec-free covering oracle, exact GNU tar, bsdtar, and Python producer fixtures, extracted-package and native CLI exercises, and a dedicated checksum-aware fuzz lane close the first multi-format assurance gates. The worker remains typed ZIP-only without fallback.
+8. **Stable distribution mechanics: executable before the stable claim.** Only the `sealr` crate is crates.io-allowlisted; exact package files, README, license, MSRV, registry, extracted consumer, and public API fixture are required checks. Native workflows use exact Ubuntu 24.04, macOS 15 arm64, and Windows Server 2022 runners and assert the architecture, ABI, kernel or deployment contract before testing and packaging. The [distribution contract](docs/distribution-contract.md) keeps source and native promises separate. The remaining 1.0 blockers are trust-gate completion, supported consumer promotion, stable assurance history, API and schema freeze, and independent review.
 
-After Alpha.8, targeted benign Unicode, `.data`, and descriptor-bearing wheel evidence plus stable identity and API review are the highest-value consumer work. Authenticated recovery, durability, stable evidence, and avoided-work performance continue in parallel as Phase 0.1 gates. Common ZIP codec adapters still follow that trust gate. TAR waits so its wrappers reuse the same codec boundary.
+After raw portable ustar, format-native archive and member evidence, explicit retained payload plans, one non-cloneable `ReadyArchive` execution authority, and domain-zero raw snapshots with an empty transform graph are landed. The remaining architectural gate is a bounded private derived-snapshot constructor plus transformation identity binding, then exhaustively typed supervised selection. ZIP64 follows as a zero-new-dependency structural increment. gzip-wrapped TAR then reuses existing `flate2` through a bounded derived snapshot. PAX and GNU dialects, zstd, xz/LZMA, bzip2, cpio, ar/deb, 7z, CAB, RPM, and separate RAR4 and RAR5 research gates follow in the measured order documented in [format support architecture](docs/format-support.md). Targeted wheel evidence, authenticated recovery, durability, stable identities, and avoided-work performance continue in parallel.
 
 ## Repository tooling and dependency rule
 
@@ -521,7 +524,8 @@ Done when repeated consumers can reuse one admitted tree without a second parser
 
 ## Phase 1: TAR without weakening the gate
 
-- TAR, PAX, and GNU long-name parsing through the same canonical path and quota core;
+- raw portable POSIX ustar through the same canonical path, quota, verification, identity, and materialization core is implemented in Alpha.9;
+- PAX and GNU long-name parsing remain separate dialect profiles rather than widening portable ustar;
 - gzip, bzip2, xz, and zstd wrappers that call the ZIP codec adapters, with bounded window and metadata policy;
 - default denial of symlinks, hardlinks, devices, sparse surprises, and unsafe modes;
 - TAR checksum, duplicate path, extension-header, and truncation fixtures;
@@ -577,7 +581,6 @@ Any backend must:
 
 ## Not planned
 
-- RAR in the default binary
 - recursive nested extraction
 - a format-conversion GUI
 - cloud-hosted extraction

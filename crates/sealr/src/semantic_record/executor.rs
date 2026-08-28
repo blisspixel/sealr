@@ -15,7 +15,7 @@ use crate::ir::{IrMember, MemberKind};
 use crate::materialize::{process_member_to_file, StageWriteRoot};
 use crate::quota::{QuotaError, QuotaState};
 use crate::snapshot::SourceSnapshot;
-use crate::verification::{verify_payload, PayloadSpec};
+use crate::verification::{verify_payload, PayloadPlan};
 use crate::verified::{RetentionBuild, RetentionEntry};
 use crate::zip;
 
@@ -231,6 +231,13 @@ fn execute_completion(
             "ready execution plan lost its pending IR",
         )
     })?;
+    if ir.zip_covering().is_none() {
+        return Err(RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "semantic-record execution requires ZIP archive evidence",
+        ));
+    }
     let mut members = Vec::new();
     reserve_member_states(&mut members, ir.members.len())?;
     let mut actual_total = QuotaState::new(planning.record.binding.budget.max_total_bytes);
@@ -241,6 +248,13 @@ fn execute_completion(
     crate::snapshot::arm_test_read_failure();
 
     for member in &ir.members {
+        let zip = member.zip_evidence().ok_or_else(|| {
+            RecordError::new(
+                RecordErrorKind::InvalidSemanticState,
+                0,
+                "semantic-record execution requires ZIP member evidence",
+            )
+        })?;
         if matches!(member.kind, MemberKind::Directory) {
             if let Some(stage) = stage {
                 if let Err(finding) =
@@ -272,7 +286,7 @@ fn execute_completion(
             stage.create_file(&member.components).and_then(|file| {
                 process_member_to_file(
                     payload,
-                    PayloadSpec::from_ir(member),
+                    PayloadPlan::from_ir(member),
                     planning.record.binding.budget,
                     actual_total.remaining(),
                     planning.record.binding.member_sync,
@@ -284,7 +298,7 @@ fn execute_completion(
             match capture.as_mut() {
                 Some(bytes) => verify_payload(
                     payload,
-                    PayloadSpec::from_ir(member),
+                    PayloadPlan::from_ir(member),
                     planning.record.binding.budget,
                     actual_total.remaining(),
                     bytes,
@@ -293,7 +307,7 @@ fn execute_completion(
                     let mut sink = io::sink();
                     verify_payload(
                         payload,
-                        PayloadSpec::from_ir(member),
+                        PayloadPlan::from_ir(member),
                         planning.record.binding.budget,
                         actual_total.remaining(),
                         &mut sink,
@@ -312,10 +326,10 @@ fn execute_completion(
                 return finish_execution(planning, completion, retention.into_entries());
             }
         };
-        if crc != member.declared_crc {
+        if crc != zip.declared_crc {
             let finding = Finding::error(
                 FindingCode::CrcMismatch,
-                format!("got {crc:08x} want {:08x}", member.declared_crc),
+                format!("got {crc:08x} want {:08x}", zip.declared_crc),
             )
             .on(&member.decoded_name);
             let completion = stopped_completion(planning, members, ir.members.len(), finding)?;
@@ -414,7 +428,7 @@ pub(super) fn inspect_failure_reachable(member: &IrMember, code: FindingCode) ->
     matches!(
         code,
         FindingCode::SourceIo | FindingCode::QuotaDeclaredLie | FindingCode::CrcMismatch
-    ) || (member.method == 8
+    ) || (member.zip_evidence().is_some_and(|zip| zip.method == 8)
         && matches!(
             code,
             FindingCode::CodecDeflateInvalidStream | FindingCode::CodecDeflateTrailingInput

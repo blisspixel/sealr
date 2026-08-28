@@ -16,7 +16,7 @@ use crate::materialize::{CapabilityMaterializer, StageWriteRoot};
 use crate::outcome::VerificationStatus;
 use crate::policy::Policy;
 use crate::snapshot::SourceSnapshot;
-use crate::verification::{verify_payload, PayloadSpec};
+use crate::verification::{verify_payload, PayloadPlan};
 use crate::verified::RetentionPlan;
 use crate::zip as zip_ranges;
 
@@ -195,7 +195,7 @@ fn plan_materialize_with_retention(
             ));
         }
     };
-    let (snapshot, ir, findings, context) = ready.into_parts();
+    let (snapshot, ir, _payloads, findings, context) = ready.into_parts();
     let binding = materialize_binding(&snapshot, &context, operation_id, retention)?;
     encode_planning(&PlanningRecord {
         binding,
@@ -234,7 +234,7 @@ fn plan_inspect_with_retention(
             ));
         }
     };
-    let (snapshot, ir, findings, context) = ready.into_parts();
+    let (snapshot, ir, _payloads, findings, context) = ready.into_parts();
     let binding = inspect_binding(&snapshot, &context, operation_id, retention)?;
     encode_planning(&PlanningRecord {
         binding,
@@ -978,7 +978,7 @@ impl ValidatedInspectMemberRead {
         let payload = BufReader::with_capacity(64 * 1024, payload);
         let (actual, crc, sha256) = verify_payload(
             payload,
-            PayloadSpec::from_ir(planned),
+            PayloadPlan::from_ir(planned),
             self.planning.record.binding.budget,
             self.request.expected_size,
             output,

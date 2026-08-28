@@ -14,9 +14,9 @@ use crate::covering::audit_covering;
 use crate::covering::{audit_covering_fallible, CoveringAuditError};
 use crate::findings::{Finding, FindingCode, Severity};
 use crate::ir::{
-    ArchiveCovering, ArchiveIR, ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite, IrMember,
-    MemberKind, MemberSourceRanges, MemberVerification, NormalizationAction,
-    ZipInterpretationProfile,
+    ArchiveCovering, ArchiveEvidence, ArchiveIR, ByteRange, ExtraDisposition, ExtraFieldRecord,
+    ExtraSite, IrMember, MemberEvidence, MemberKind, MemberSourceRanges, MemberVerification,
+    NormalizationAction, ZipInterpretationProfile, ZipMemberEvidence,
 };
 use crate::jail::{
     jail_name_fallible, jail_name_fallible_for_profile, portable_name_violation, profile_case_fold,
@@ -1252,6 +1252,14 @@ fn finding_code_tag(code: FindingCode) -> u16 {
         FindingCode::CodecDeflateTrailingInput => 54,
         FindingCode::CrcMismatch => 55,
         FindingCode::MethodUnsupported => 56,
+        FindingCode::TarChecksum => 57,
+        FindingCode::TarDialect => 58,
+        FindingCode::TarNumeric => 59,
+        FindingCode::TarPadding => 60,
+        FindingCode::TarTerminator => 61,
+        FindingCode::TarTruncated => 62,
+        FindingCode::TarType => 63,
+        FindingCode::TarFeatureUnsupported => 64,
     }
 }
 
@@ -1314,6 +1322,14 @@ fn finding_code_from_tag(tag: u16, offset: usize) -> Result<FindingCode, RecordE
         54 => FindingCode::CodecDeflateTrailingInput,
         55 => FindingCode::CrcMismatch,
         56 => FindingCode::MethodUnsupported,
+        57 => FindingCode::TarChecksum,
+        58 => FindingCode::TarDialect,
+        59 => FindingCode::TarNumeric,
+        60 => FindingCode::TarPadding,
+        61 => FindingCode::TarTerminator,
+        62 => FindingCode::TarTruncated,
+        63 => FindingCode::TarType,
+        64 => FindingCode::TarFeatureUnsupported,
         _ => {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidEnum,
@@ -1337,11 +1353,32 @@ fn decode_range(cursor: &mut Cursor<'_>) -> Result<ByteRange, RecordError> {
     })
 }
 
+fn require_zip_covering(ir: &ArchiveIR) -> Result<&ArchiveCovering, RecordError> {
+    ir.zip_covering().ok_or_else(|| {
+        RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "semantic records require ZIP archive evidence",
+        )
+    })
+}
+
+fn require_zip_evidence(member: &IrMember) -> Result<&ZipMemberEvidence, RecordError> {
+    member.zip_evidence().ok_or_else(|| {
+        RecordError::new(
+            RecordErrorKind::InvalidSemanticState,
+            0,
+            "semantic records require ZIP member evidence",
+        )
+    })
+}
+
 fn encode_ir(encoder: &mut Encoder, ir: &ArchiveIR) -> Result<(), RecordError> {
-    encode_range(encoder, ir.covering.local_records);
-    encode_range(encoder, ir.covering.central_directory);
-    encode_range(encoder, ir.covering.eocd);
-    encode_range(encoder, ir.covering.comment);
+    let covering = require_zip_covering(ir)?;
+    encode_range(encoder, covering.local_records);
+    encode_range(encoder, covering.central_directory);
+    encode_range(encoder, covering.eocd);
+    encode_range(encoder, covering.comment);
     encoder.u32(u32::try_from(ir.members.len()).map_err(|_| {
         RecordError::new(
             RecordErrorKind::LimitExceeded,
@@ -1350,6 +1387,7 @@ fn encode_ir(encoder: &mut Encoder, ir: &ArchiveIR) -> Result<(), RecordError> {
         )
     })?);
     for member in &ir.members {
+        let zip = require_zip_evidence(member)?;
         encoder.bytes(&member.raw_name_bytes)?;
         encoder.string(&member.decoded_name)?;
         encoder.string(&member.canonical_path)?;
@@ -1357,31 +1395,31 @@ fn encode_ir(encoder: &mut Encoder, ir: &ArchiveIR) -> Result<(), RecordError> {
             MemberKind::File => 0,
             MemberKind::Directory => 1,
         });
-        encoder.u16(member.method);
-        encoder.u16(member.flags);
-        encoder.u8(member.creator_system);
-        encoder.u32(member.external_attributes);
-        encoder.u32(member.declared_crc);
-        encoder.u64(member.declared_comp_size);
+        encoder.u16(zip.method);
+        encoder.u16(zip.flags);
+        encoder.u8(zip.creator_system);
+        encoder.u32(zip.external_attributes);
+        encoder.u32(zip.declared_crc);
+        encoder.u64(zip.declared_comp_size);
         encoder.u64(member.declared_uncomp_size);
-        encode_range(encoder, member.source_ranges.local_header);
-        encode_range(encoder, member.source_ranges.compressed_payload);
-        match member.source_ranges.data_descriptor {
+        encode_range(encoder, zip.source_ranges.local_header);
+        encode_range(encoder, zip.source_ranges.compressed_payload);
+        match zip.source_ranges.data_descriptor {
             None => encoder.u8(0),
             Some(range) => {
                 encoder.u8(1);
                 encode_range(encoder, range);
             }
         }
-        encode_range(encoder, member.source_ranges.central_header);
-        encoder.u32(u32::try_from(member.extra_fields.len()).map_err(|_| {
+        encode_range(encoder, zip.source_ranges.central_header);
+        encoder.u32(u32::try_from(zip.extra_fields.len()).map_err(|_| {
             RecordError::new(
                 RecordErrorKind::LimitExceeded,
                 encoder.bytes.len(),
                 "extra-field count exceeds the record integer limit",
             )
         })?);
-        for extra in &member.extra_fields {
+        for extra in &zip.extra_fields {
             encoder.u8(match extra.site {
                 ExtraSite::Central => 0,
                 ExtraSite::Local => 1,
@@ -1586,20 +1624,22 @@ fn decode_ir(
             canonical_path,
             components,
             kind,
-            method,
-            flags,
-            creator_system,
-            external_attributes,
-            declared_crc,
-            declared_comp_size,
             declared_uncomp_size,
-            source_ranges: MemberSourceRanges {
-                local_header,
-                compressed_payload,
-                data_descriptor,
-                central_header,
-            },
-            extra_fields,
+            evidence: MemberEvidence::Zip(ZipMemberEvidence {
+                method,
+                flags,
+                creator_system,
+                external_attributes,
+                declared_crc,
+                declared_comp_size,
+                source_ranges: MemberSourceRanges {
+                    local_header,
+                    compressed_payload,
+                    data_descriptor,
+                    central_header,
+                },
+                extra_fields,
+            }),
             actual_uncomp_size: None,
             actual_crc: None,
             content_sha256: None,
@@ -1674,7 +1714,8 @@ fn validate_pending_ir(ir: &ArchiveIR, binding: &InvocationBinding) -> Result<()
             "IR member count exceeds its bound",
         ));
     }
-    if !covering_is_exact(ir.covering(), binding.source_len)? {
+    let covering = require_zip_covering(ir)?;
+    if !covering_is_exact(covering, binding.source_len)? {
         return Err(RecordError::new(
             RecordErrorKind::InvalidSemanticState,
             0,
@@ -1708,9 +1749,10 @@ fn validate_pending_ir(ir: &ArchiveIR, binding: &InvocationBinding) -> Result<()
                 "bounded local-range allocation failed",
             )
         })?;
-    let mut expected_central = ir.covering.central_directory.offset;
+    let mut expected_central = covering.central_directory.offset;
 
     for member in &ir.members {
+        let zip = require_zip_evidence(member)?;
         validate_pending_member(member, binding)?;
         let is_dir = matches!(member.kind, MemberKind::Directory);
         paths.push((member.canonical_path.as_str(), is_dir));
@@ -1723,11 +1765,7 @@ fn validate_pending_ir(ir: &ArchiveIR, binding: &InvocationBinding) -> Result<()
             ));
         }
         if binding.budget.max_ratio.is_some_and(|ratio| {
-            ratio_exceeds(
-                member.declared_uncomp_size,
-                member.declared_comp_size,
-                ratio,
-            )
+            ratio_exceeds(member.declared_uncomp_size, zip.declared_comp_size, ratio)
         }) {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidSemanticState,
@@ -1752,22 +1790,22 @@ fn validate_pending_ir(ir: &ArchiveIR, binding: &InvocationBinding) -> Result<()
             ));
         }
 
-        let local_end = member_record_end(&member.source_ranges)?;
-        local_intervals.push((member.source_ranges.local_header.offset, local_end));
-        if member.source_ranges.central_header.offset != expected_central {
+        let local_end = member_record_end(&zip.source_ranges)?;
+        local_intervals.push((zip.source_ranges.local_header.offset, local_end));
+        if zip.source_ranges.central_header.offset != expected_central {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidSemanticState,
                 0,
                 "central headers do not preserve exact source order",
             ));
         }
-        expected_central = checked_end(member.source_ranges.central_header)?;
+        expected_central = checked_end(zip.source_ranges.central_header)?;
     }
 
     validate_path_topology(&mut paths, None)?;
     validate_path_topology(&mut paths, Some(binding.profile))?;
 
-    if expected_central != checked_end(ir.covering.central_directory)? {
+    if expected_central != checked_end(covering.central_directory)? {
         return Err(RecordError::new(
             RecordErrorKind::InvalidSemanticState,
             0,
@@ -1775,7 +1813,7 @@ fn validate_pending_ir(ir: &ArchiveIR, binding: &InvocationBinding) -> Result<()
         ));
     }
     local_intervals.sort_unstable();
-    let mut expected_local = ir.covering.local_records.offset;
+    let mut expected_local = covering.local_records.offset;
     for (start, end) in local_intervals {
         if start != expected_local || end < start {
             return Err(RecordError::new(
@@ -1786,7 +1824,7 @@ fn validate_pending_ir(ir: &ArchiveIR, binding: &InvocationBinding) -> Result<()
         }
         expected_local = end;
     }
-    if expected_local != checked_end(ir.covering.local_records)? {
+    if expected_local != checked_end(covering.local_records)? {
         return Err(RecordError::new(
             RecordErrorKind::InvalidSemanticState,
             0,
@@ -1797,11 +1835,11 @@ fn validate_pending_ir(ir: &ArchiveIR, binding: &InvocationBinding) -> Result<()
 }
 
 fn planning_metadata_bytes(ir: &ArchiveIR) -> Result<u64, RecordError> {
-    let mut metadata_bytes = ir
-        .covering
+    let covering = require_zip_covering(ir)?;
+    let mut metadata_bytes = covering
         .comment
         .len
-        .checked_add(ir.covering.central_directory.len)
+        .checked_add(covering.central_directory.len)
         .ok_or_else(|| {
             RecordError::new(
                 RecordErrorKind::IntegerOverflow,
@@ -1810,11 +1848,12 @@ fn planning_metadata_bytes(ir: &ArchiveIR) -> Result<u64, RecordError> {
             )
         })?;
     for member in &ir.members {
+        let zip = require_zip_evidence(member)?;
         // The parser charges the complete variable-width local-header region:
         // the encoded name plus every local extra-field byte. Derive that value
         // from source geometry so a hostile record cannot understate the budget
         // by omitting semantic ExtraFieldRecord entries.
-        let local_metadata_bytes = member
+        let local_metadata_bytes = zip
             .source_ranges
             .local_header
             .len
@@ -1843,6 +1882,7 @@ fn validate_pending_member(
     member: &IrMember,
     binding: &InvocationBinding,
 ) -> Result<(), RecordError> {
+    let zip = require_zip_evidence(member)?;
     if !matches!(member.verification, MemberVerification::Pending)
         || member.actual_uncomp_size.is_some()
         || member.actual_crc.is_some()
@@ -1926,21 +1966,21 @@ fn validate_pending_member(
             "member normalization actions do not match path derivation",
         ));
     }
-    if member.method != 0 && member.method != 8 {
+    if zip.method != 0 && zip.method != 8 {
         return Err(RecordError::new(
             RecordErrorKind::InvalidSemanticState,
             0,
             "admitted IR uses an unsupported compression method",
         ));
     }
-    if (member.flags & ((1 << 0) | (1 << 6) | (1 << 13))) != 0 {
+    if (zip.flags & ((1 << 0) | (1 << 6) | (1 << 13))) != 0 {
         return Err(RecordError::new(
             RecordErrorKind::InvalidSemanticState,
             0,
             "admitted IR carries encryption-related flags",
         ));
     }
-    if binding.profile == ZipInterpretationProfile::StrictAsciiV2 && (member.flags & !0x0008) != 0 {
+    if binding.profile == ZipInterpretationProfile::StrictAsciiV2 && (zip.flags & !0x0008) != 0 {
         return Err(RecordError::new(
             RecordErrorKind::InvalidSemanticState,
             0,
@@ -1948,8 +1988,8 @@ fn validate_pending_member(
         ));
     }
     if binding.profile == ZipInterpretationProfile::WheelUtf8V1
-        && ((member.flags & !0x0800) != 0
-            || (!member.raw_name_bytes.is_ascii() && (member.flags & 0x0800) == 0)
+        && ((zip.flags & !0x0800) != 0
+            || (!member.raw_name_bytes.is_ascii() && (zip.flags & 0x0800) == 0)
             || member
                 .normalization_actions
                 .iter()
@@ -1962,8 +2002,8 @@ fn validate_pending_member(
         ));
     }
     if binding.profile == ZipInterpretationProfile::PortableUtf8V1
-        && ((member.flags & !0x0808) != 0
-            || (!member.raw_name_bytes.is_ascii() && (member.flags & 0x0800) == 0)
+        && ((zip.flags & !0x0808) != 0
+            || (!member.raw_name_bytes.is_ascii() && (zip.flags & 0x0800) == 0)
             || portable_name_violation(&jailed).is_some())
     {
         return Err(RecordError::new(
@@ -1973,10 +2013,10 @@ fn validate_pending_member(
         ));
     }
     if is_dir
-        && (member.method != 0
-            || member.declared_comp_size != 0
+        && (zip.method != 0
+            || zip.declared_comp_size != 0
             || member.declared_uncomp_size != 0
-            || member.declared_crc != 0)
+            || zip.declared_crc != 0)
     {
         return Err(RecordError::new(
             RecordErrorKind::InvalidSemanticState,
@@ -1990,7 +2030,8 @@ fn validate_pending_member(
 }
 
 fn validate_member_ranges(member: &IrMember, source_len: u64) -> Result<(), RecordError> {
-    let ranges = &member.source_ranges;
+    let zip = require_zip_evidence(member)?;
+    let ranges = &zip.source_ranges;
     for range in [
         ranges.local_header,
         ranges.compressed_payload,
@@ -2027,7 +2068,7 @@ fn validate_member_ranges(member: &IrMember, source_len: u64) -> Result<(), Reco
         ));
     }
     if checked_end(ranges.local_header)? != ranges.compressed_payload.offset
-        || ranges.compressed_payload.len != member.declared_comp_size
+        || ranges.compressed_payload.len != zip.declared_comp_size
     {
         return Err(RecordError::new(
             RecordErrorKind::InvalidSemanticState,
@@ -2037,9 +2078,9 @@ fn validate_member_ranges(member: &IrMember, source_len: u64) -> Result<(), Reco
     }
     let payload_end = checked_end(ranges.compressed_payload)?;
     match ranges.data_descriptor {
-        None if (member.flags & 0x0008) == 0 => {}
+        None if (zip.flags & 0x0008) == 0 => {}
         Some(descriptor)
-            if (member.flags & 0x0008) != 0
+            if (zip.flags & 0x0008) != 0
                 && descriptor.offset == payload_end
                 && matches!(descriptor.len, 12 | 16)
                 && checked_end(descriptor)? <= source_len => {}
@@ -2058,7 +2099,8 @@ fn validate_extra_fields(
     member: &IrMember,
     profile: ZipInterpretationProfile,
 ) -> Result<(), RecordError> {
-    if member.extra_fields.len() > MAX_EXTRA_FIELDS_PER_MEMBER {
+    let zip = require_zip_evidence(member)?;
+    if zip.extra_fields.len() > MAX_EXTRA_FIELDS_PER_MEMBER {
         return Err(RecordError::new(
             RecordErrorKind::LimitExceeded,
             0,
@@ -2070,7 +2112,7 @@ fn validate_extra_fields(
         ZipInterpretationProfile::StrictAsciiV2
             | ZipInterpretationProfile::PortableUtf8V1
             | ZipInterpretationProfile::WheelUtf8V1
-    ) && !member.extra_fields.is_empty()
+    ) && !zip.extra_fields.is_empty()
     {
         return Err(RecordError::new(
             RecordErrorKind::InvalidSemanticState,
@@ -2084,7 +2126,7 @@ fn validate_extra_fields(
     let mut last_local_end = None;
     let mut central_extra_bytes = 0_u64;
     let mut local_extra_bytes = 0_u64;
-    for extra in &member.extra_fields {
+    for extra in &zip.extra_fields {
         if site == ExtraSite::Local && extra.site == ExtraSite::Central {
             return Err(RecordError::new(
                 RecordErrorKind::NonCanonicalOrder,
@@ -2125,8 +2167,8 @@ fn validate_extra_fields(
             ));
         }
         let owner = match extra.site {
-            ExtraSite::Central => member.source_ranges.central_header,
-            ExtraSite::Local => member.source_ranges.local_header,
+            ExtraSite::Central => zip.source_ranges.central_header,
+            ExtraSite::Local => zip.source_ranges.local_header,
         };
         let fixed_header_bytes = match extra.site {
             ExtraSite::Central => 46_u64,
@@ -2199,7 +2241,7 @@ fn validate_extra_fields(
             last_local_end = previous_end;
         }
     }
-    let local_extra_start = member
+    let local_extra_start = zip
         .source_ranges
         .local_header
         .offset
@@ -2212,9 +2254,7 @@ fn validate_extra_fields(
                 "local extra-field start calculation overflowed",
             )
         })?;
-    if last_local_end.unwrap_or(local_extra_start)
-        != checked_end(member.source_ranges.local_header)?
-    {
+    if last_local_end.unwrap_or(local_extra_start) != checked_end(zip.source_ranges.local_header)? {
         return Err(RecordError::new(
             RecordErrorKind::InvalidSemanticState,
             0,
@@ -2587,10 +2627,11 @@ fn validate_ready_ir_source_fields(
 ) -> Result<(), RecordError> {
     validate_ready_ir_global_source_fields(snapshot, ir)?;
     for member in &ir.members {
+        let zip = require_zip_evidence(member)?;
         let mut local_fixed = [0_u8; 30];
         read_snapshot_exact(
             snapshot,
-            member.source_ranges.local_header.offset,
+            zip.source_ranges.local_header.offset,
             &mut local_fixed,
             "cannot read the claimed local header from the supervisor snapshot",
         )?;
@@ -2611,7 +2652,7 @@ fn validate_ready_ir_source_fields(
                     "source local-header length calculation overflowed",
                 )
             })?;
-        if member.source_ranges.local_header.len != expected_local_len
+        if zip.source_ranges.local_header.len != expected_local_len
             || local_name_len != member.raw_name_bytes.len() as u64
         {
             return Err(RecordError::new(
@@ -2620,21 +2661,21 @@ fn validate_ready_ir_source_fields(
                 "planning local-header geometry does not match the supervisor snapshot",
             ));
         }
-        if local_flags != member.flags || local_method != member.method {
+        if local_flags != zip.flags || local_method != zip.method {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidSemanticState,
                 0,
                 "planning local-header method or flags do not match the supervisor snapshot",
             ));
         }
-        let uses_descriptor = (member.flags & 0x0008) != 0;
+        let uses_descriptor = (zip.flags & 0x0008) != 0;
         let local_values_match = if uses_descriptor {
-            (local_crc == 0 || local_crc == member.declared_crc)
-                && (local_comp_size == 0 || local_comp_size == member.declared_comp_size)
+            (local_crc == 0 || local_crc == zip.declared_crc)
+                && (local_comp_size == 0 || local_comp_size == zip.declared_comp_size)
                 && (local_uncomp_size == 0 || local_uncomp_size == member.declared_uncomp_size)
         } else {
-            local_crc == member.declared_crc
-                && local_comp_size == member.declared_comp_size
+            local_crc == zip.declared_crc
+                && local_comp_size == zip.declared_comp_size
                 && local_uncomp_size == member.declared_uncomp_size
         };
         if !local_values_match {
@@ -2644,7 +2685,7 @@ fn validate_ready_ir_source_fields(
                 "planning local-header CRC or sizes do not match the supervisor snapshot",
             ));
         }
-        let local_name_offset = member
+        let local_name_offset = zip
             .source_ranges
             .local_header
             .offset
@@ -2678,7 +2719,7 @@ fn validate_ready_ir_source_fields(
         let mut central_fixed = [0_u8; 46];
         read_snapshot_exact(
             snapshot,
-            member.source_ranges.central_header.offset,
+            zip.source_ranges.central_header.offset,
             &mut central_fixed,
             "cannot read the claimed central header from the supervisor snapshot",
         )?;
@@ -2708,7 +2749,7 @@ fn validate_ready_ir_source_fields(
                     "source central-header length calculation overflowed",
                 )
             })?;
-        if member.source_ranges.central_header.len != expected_central_len
+        if zip.source_ranges.central_header.len != expected_central_len
             || central_name_len != member.raw_name_bytes.len() as u64
         {
             return Err(RecordError::new(
@@ -2728,12 +2769,12 @@ fn validate_ready_ir_source_fields(
                 "planning central header uses a ZIP64 sentinel",
             ));
         }
-        if central_flags != member.flags
-            || central_method != member.method
-            || central_crc != member.declared_crc
-            || central_comp_size != member.declared_comp_size
+        if central_flags != zip.flags
+            || central_method != zip.method
+            || central_crc != zip.declared_crc
+            || central_comp_size != zip.declared_comp_size
             || central_uncomp_size != member.declared_uncomp_size
-            || central_local_offset != member.source_ranges.local_header.offset
+            || central_local_offset != zip.source_ranges.local_header.offset
             || central_disk_start != 0
         {
             return Err(RecordError::new(
@@ -2742,8 +2783,8 @@ fn validate_ready_ir_source_fields(
                 "planning central-header semantics do not match the supervisor snapshot",
             ));
         }
-        if member.creator_system != (central_version_made_by >> 8) as u8
-            || member.external_attributes != central_external_attributes
+        if zip.creator_system != (central_version_made_by >> 8) as u8
+            || zip.external_attributes != central_external_attributes
         {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidSemanticState,
@@ -2752,7 +2793,7 @@ fn validate_ready_ir_source_fields(
             ));
         }
         validate_source_member_kind(member, central_version_made_by, central_external_attributes)?;
-        let central_name_offset = member
+        let central_name_offset = zip
             .source_ranges
             .central_header
             .offset
@@ -2800,10 +2841,10 @@ fn validate_ready_ir_source_fields(
             "planning central comment contains an archive-record signature",
         )?;
         validate_source_data_descriptor(snapshot, member)?;
-        if member.method == 0 && uses_descriptor {
+        if zip.method == 0 && uses_descriptor {
             validate_no_source_signatures(
                 snapshot,
-                member.source_ranges.compressed_payload,
+                zip.source_ranges.compressed_payload,
                 SourceSignatureClass::Stream,
                 "planning stored descriptor payload contains an alternate record signature",
             )?;
@@ -2816,10 +2857,11 @@ fn validate_ready_ir_global_source_fields(
     snapshot: &SourceSnapshot<'_>,
     ir: &ArchiveIR,
 ) -> Result<(), RecordError> {
+    let covering = require_zip_covering(ir)?;
     let mut eocd = [0_u8; 22];
     read_snapshot_exact(
         snapshot,
-        ir.covering.eocd.offset,
+        covering.eocd.offset,
         &mut eocd,
         "cannot read the claimed EOCD from the supervisor snapshot",
     )?;
@@ -2841,9 +2883,9 @@ fn validate_ready_ir_global_source_fields(
         || central_disk != 0
         || usize::from(this_disk_entries) != ir.members.len()
         || usize::from(total_entries) != ir.members.len()
-        || u64::from(central_len) != ir.covering.central_directory.len
-        || u64::from(central_offset) != ir.covering.central_directory.offset
-        || u64::from(comment_len) != ir.covering.comment.len
+        || u64::from(central_len) != covering.central_directory.len
+        || u64::from(central_offset) != covering.central_directory.offset
+        || u64::from(comment_len) != covering.comment.len
     {
         return Err(RecordError::new(
             RecordErrorKind::InvalidSemanticState,
@@ -2853,7 +2895,7 @@ fn validate_ready_ir_global_source_fields(
     }
     validate_no_source_signatures(
         snapshot,
-        ir.covering.comment,
+        covering.comment,
         SourceSignatureClass::StructuralMetadata,
         "planning EOCD comment contains an archive-record signature",
     )
@@ -2888,7 +2930,8 @@ fn validate_source_data_descriptor(
     snapshot: &SourceSnapshot<'_>,
     member: &IrMember,
 ) -> Result<(), RecordError> {
-    let Some(range) = member.source_ranges.data_descriptor else {
+    let zip = require_zip_evidence(member)?;
+    let Some(range) = zip.source_ranges.data_descriptor else {
         return Ok(());
     };
     let mut bytes = [0_u8; 16];
@@ -2916,8 +2959,8 @@ fn validate_source_data_descriptor(
             ));
         }
     };
-    if source_u32(&bytes, values_offset) != member.declared_crc
-        || u64::from(source_u32(&bytes, values_offset + 4)) != member.declared_comp_size
+    if source_u32(&bytes, values_offset) != zip.declared_crc
+        || u64::from(source_u32(&bytes, values_offset + 4)) != zip.declared_comp_size
         || u64::from(source_u32(&bytes, values_offset + 8)) != member.declared_uncomp_size
     {
         return Err(RecordError::new(
@@ -3040,6 +3083,7 @@ fn validate_source_extra_fields(
     start: u64,
     len: u64,
 ) -> Result<(), RecordError> {
+    let zip = require_zip_evidence(member)?;
     let expected_end = start.checked_add(len).ok_or_else(|| {
         RecordError::new(
             RecordErrorKind::IntegerOverflow,
@@ -3048,11 +3092,7 @@ fn validate_source_extra_fields(
         )
     })?;
     let mut expected_offset = start;
-    for extra in member
-        .extra_fields
-        .iter()
-        .filter(|extra| extra.site == site)
-    {
+    for extra in zip.extra_fields.iter().filter(|extra| extra.site == site) {
         if extra.header_range.offset != expected_offset {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidSemanticState,
@@ -3628,8 +3668,9 @@ fn validate_completion<'plan>(
                     ));
                 }
                 let planned = &ir.members[index];
+                let planned_zip = require_zip_evidence(planned)?;
                 if *actual_uncomp_size != planned.declared_uncomp_size
-                    || *actual_crc != planned.declared_crc
+                    || *actual_crc != planned_zip.declared_crc
                 {
                     return Err(RecordError::new(
                         RecordErrorKind::InvalidSemanticState,
@@ -3842,6 +3883,7 @@ fn materialize_completion(
 }
 
 fn try_clone_archive_ir(ir: &ArchiveIR) -> Result<ArchiveIR, RecordError> {
+    let covering = require_zip_covering(ir)?.clone();
     let profile_digest = try_clone_string(
         &ir.profile_digest,
         "bounded completion profile-digest allocation failed",
@@ -3872,12 +3914,13 @@ fn try_clone_archive_ir(ir: &ArchiveIR) -> Result<ArchiveIR, RecordError> {
         profile: ir.profile,
         profile_digest,
         source_digest,
-        covering: ir.covering.clone(),
+        evidence: ArchiveEvidence::Zip(covering),
         members,
     })
 }
 
 fn try_clone_pending_member(member: &IrMember) -> Result<IrMember, RecordError> {
+    let zip = require_zip_evidence(member)?;
     let mut raw_name_bytes = Vec::new();
     completion_allocation_gate(
         "bounded completion raw-name allocation failed",
@@ -3918,10 +3961,10 @@ fn try_clone_pending_member(member: &IrMember) -> Result<IrMember, RecordError> 
     let mut extra_fields = Vec::new();
     completion_allocation_gate(
         "bounded completion extra-field allocation failed",
-        allocation_bytes::<ExtraFieldRecord>(member.extra_fields.len())?,
+        allocation_bytes::<ExtraFieldRecord>(zip.extra_fields.len())?,
     )?;
     extra_fields
-        .try_reserve_exact(member.extra_fields.len())
+        .try_reserve_exact(zip.extra_fields.len())
         .map_err(|_| {
             RecordError::new(
                 RecordErrorKind::AllocationFailed,
@@ -3929,7 +3972,7 @@ fn try_clone_pending_member(member: &IrMember) -> Result<IrMember, RecordError> 
                 "bounded completion extra-field allocation failed",
             )
         })?;
-    extra_fields.extend_from_slice(&member.extra_fields);
+    extra_fields.extend_from_slice(&zip.extra_fields);
 
     let mut normalization_actions = Vec::new();
     completion_allocation_gate(
@@ -3959,15 +4002,17 @@ fn try_clone_pending_member(member: &IrMember) -> Result<IrMember, RecordError> 
         )?,
         components,
         kind: member.kind,
-        method: member.method,
-        flags: member.flags,
-        creator_system: member.creator_system,
-        external_attributes: member.external_attributes,
-        declared_crc: member.declared_crc,
-        declared_comp_size: member.declared_comp_size,
         declared_uncomp_size: member.declared_uncomp_size,
-        source_ranges: member.source_ranges.clone(),
-        extra_fields,
+        evidence: MemberEvidence::Zip(ZipMemberEvidence {
+            method: zip.method,
+            flags: zip.flags,
+            creator_system: zip.creator_system,
+            external_attributes: zip.external_attributes,
+            declared_crc: zip.declared_crc,
+            declared_comp_size: zip.declared_comp_size,
+            source_ranges: zip.source_ranges.clone(),
+            extra_fields,
+        }),
         actual_uncomp_size: None,
         actual_crc: None,
         content_sha256: None,
@@ -4382,7 +4427,8 @@ mod fuzzing {
                 panic!("valid fuzz fixture reached terminal planning: {terminal:?}")
             }
         };
-        let (planning_snapshot, pending, planning_findings, planning_context) = ready.into_parts();
+        let (planning_snapshot, pending, _payloads, planning_findings, planning_context) =
+            ready.into_parts();
         assert!(planning_findings.is_empty());
         assert_eq!(planning_context.controls(), controls);
         assert_eq!(planning_context.profile(), profile);
@@ -4638,6 +4684,32 @@ mod tests {
         inject_read_failure, reset_test_read_ranges, test_read_failure_is_armed, test_read_ranges,
     };
     use crate::verification::{reset_verify_payload_calls, verify_payload_calls};
+
+    fn test_zip_evidence(member: &IrMember) -> &ZipMemberEvidence {
+        member
+            .zip_evidence()
+            .expect("semantic-record test member must carry ZIP evidence")
+    }
+
+    fn test_zip_evidence_mut(member: &mut IrMember) -> &mut ZipMemberEvidence {
+        member
+            .zip_evidence_mut()
+            .expect("semantic-record test member must carry ZIP evidence")
+    }
+
+    fn test_zip_covering(ir: &ArchiveIR) -> &ArchiveCovering {
+        ir.zip_covering()
+            .expect("semantic-record test archive must carry ZIP evidence")
+    }
+
+    fn test_zip_covering_mut(ir: &mut ArchiveIR) -> &mut ArchiveCovering {
+        match &mut ir.evidence {
+            ArchiveEvidence::Zip(covering) => covering,
+            ArchiveEvidence::Tar(_) => {
+                panic!("semantic-record test archive must carry ZIP evidence")
+            }
+        }
+    }
 
     fn reset_completion_materializations() {
         COMPLETION_IR_MATERIALIZATIONS.with(|count| count.set(0));
@@ -4916,7 +4988,8 @@ mod tests {
             }
         };
         assert_eq!(verify_payload_calls(), verify_calls_before);
-        let (snapshot, pending, planning_findings, planning_context) = ready.into_parts();
+        let (snapshot, pending, _payloads, planning_findings, planning_context) =
+            ready.into_parts();
         assert!(planning_findings.is_empty());
         assert_eq!(planning_context.controls(), controls);
         assert_eq!(planning_context.profile(), profile);
@@ -5441,7 +5514,8 @@ mod tests {
         if let Some(file) = &mut source_file {
             file.remove();
         }
-        let (execution_snapshot, pending, planning_findings, planning_context) = ready.into_parts();
+        let (execution_snapshot, pending, _payloads, planning_findings, planning_context) =
+            ready.into_parts();
         assert_eq!(planning_context.controls(), controls, "{name}");
         let binding = binding_for_planned(
             &execution_snapshot,
@@ -5608,7 +5682,7 @@ mod tests {
         let valid_bytes = make_zip(&[("covering.txt", b"covering")]);
         let (_, mut retained_ir, _) = reference_with_policy(&valid_bytes, profile, policy);
         let mut bytes = valid_bytes;
-        let eocd_offset = usize::try_from(retained_ir.covering.eocd.offset).unwrap();
+        let eocd_offset = usize::try_from(test_zip_covering(&retained_ir).eocd.offset).unwrap();
         bytes[eocd_offset] ^= 0xff;
 
         let binding = binding_for(&bytes, profile, policy, RequestedEffect::Inspect);
@@ -5760,7 +5834,7 @@ mod tests {
 
         caller_file.remove();
         assert!(!caller_path.exists());
-        let (snapshot, pending, planning_findings, context) = ready.into_parts();
+        let (snapshot, pending, _payloads, planning_findings, context) = ready.into_parts();
         assert_eq!(snapshot.kind(), crate::snapshot::SnapshotKind::PrivateFile);
         assert_eq!(snapshot.len(), bytes.len() as u64);
         assert_eq!(
@@ -5831,7 +5905,8 @@ mod tests {
             }
         };
         assert_eq!(verify_payload_calls(), verify_calls_before);
-        let (snapshot, pending, planning_findings, planning_context) = ready.into_parts();
+        let (snapshot, pending, _payloads, planning_findings, planning_context) =
+            ready.into_parts();
         let binding =
             binding_for_planned(&snapshot, &planning_context, RequestedEffect::Materialize);
         let destination = temp_shadow_dest("existing");
@@ -6241,7 +6316,7 @@ mod tests {
             pending
                 .members
                 .iter()
-                .map(|member| member.method)
+                .map(|member| test_zip_evidence(member).method)
                 .collect::<Vec<_>>(),
             vec![0, 0, 8]
         );
@@ -6249,7 +6324,7 @@ mod tests {
             pending
                 .members
                 .iter()
-                .map(|member| member.flags)
+                .map(|member| test_zip_evidence(member).flags)
                 .collect::<Vec<_>>(),
             vec![0, 0, 0x0008]
         );
@@ -6296,16 +6371,19 @@ mod tests {
             None,
         );
         let extra_ir = extra_v1_artifact.plan.record.ir.as_ref().unwrap();
-        assert_eq!(extra_ir.members[0].extra_fields.len(), 2);
-        assert!(extra_ir.members[0]
+        assert_eq!(
+            test_zip_evidence(&extra_ir.members[0]).extra_fields.len(),
+            2
+        );
+        assert!(test_zip_evidence(&extra_ir.members[0])
             .extra_fields
             .iter()
             .all(|extra| extra.disposition == ExtraDisposition::Ignored));
-        assert!(extra_ir.members[0]
+        assert!(test_zip_evidence(&extra_ir.members[0])
             .extra_fields
             .iter()
             .any(|extra| extra.site == ExtraSite::Local));
-        assert!(extra_ir.members[0]
+        assert!(test_zip_evidence(&extra_ir.members[0])
             .extra_fields
             .iter()
             .any(|extra| extra.site == ExtraSite::Central));
@@ -6621,10 +6699,13 @@ mod tests {
                 panic!("wire-v2 fixture reached terminal planning: {terminal:?}")
             }
         };
-        let (snapshot, pending, findings, context) = ready.into_parts();
+        let (snapshot, pending, _payloads, findings, context) = ready.into_parts();
         assert!(findings.is_empty());
-        assert_eq!(pending.members[0].creator_system, 3);
-        assert_eq!(pending.members[0].external_attributes, 0o100755_u32 << 16);
+        assert_eq!(test_zip_evidence(&pending.members[0]).creator_system, 3);
+        assert_eq!(
+            test_zip_evidence(&pending.members[0]).external_attributes,
+            0o100755_u32 << 16
+        );
 
         let binding = binding_for_planned(&snapshot, &context, RequestedEffect::Inspect);
         let frame = encode_planning(&ready_plan_with_findings(
@@ -6641,14 +6722,16 @@ mod tests {
         );
 
         let plan = decode_planning(&frame, &binding, &snapshot).unwrap();
-        let facts = plan.record.ir.as_ref().unwrap().members[0].container_facts();
+        let facts = plan.record.ir.as_ref().unwrap().members[0]
+            .container_facts()
+            .expect("semantic-record test member must expose ZIP container facts");
         assert_eq!(facts.creator_system, 3);
         assert_eq!(facts.external_attributes, 0o100755_u32 << 16);
         assert_eq!(facts.unix_mode(), Some(0o100755));
         assert!(facts.pypa_installer_0_7_executable());
 
         let mut forged = plan.record.clone();
-        forged.ir.as_mut().unwrap().members[0].creator_system = 0;
+        test_zip_evidence_mut(&mut forged.ir.as_mut().unwrap().members[0]).creator_system = 0;
         let forged_frame = encode_planning(&forged).unwrap();
         assert_eq!(
             decode_planning(&forged_frame, &binding, &snapshot)
@@ -6680,7 +6763,7 @@ mod tests {
             let plan_bytes =
                 encode_planning(&ready_plan(binding.clone(), pending.clone())).unwrap();
             let plan = decode_plan(&plan_bytes, &binding, &bytes).unwrap();
-            let structural = pending.covering.eocd;
+            let structural = test_zip_covering(&pending).eocd;
             let structural_failure = inject_read_failure(structural.offset, structural.len);
             reset_verify_payload_calls();
             let bound = plan
@@ -6696,7 +6779,7 @@ mod tests {
                 .members
                 .iter()
                 .filter(|member| !matches!(member.kind, MemberKind::Directory))
-                .map(|member| member.source_ranges.compressed_payload)
+                .map(|member| test_zip_evidence(member).source_ranges.compressed_payload)
                 .collect();
             for (offset, len) in test_read_ranges() {
                 let end = offset.checked_add(len).unwrap();
@@ -6924,7 +7007,9 @@ mod tests {
 
         let source_io = make_zip(&[("first.txt", b"first"), ("second.txt", b"second")]);
         let (_, pending, _) = reference(&source_io, ZipInterpretationProfile::StrictAsciiV1);
-        let second_payload = pending.members[1].source_ranges.compressed_payload;
+        let second_payload = test_zip_evidence(&pending.members[1])
+            .source_ranges
+            .compressed_payload;
         let source_io_failure = inject_read_failure(second_payload.offset, second_payload.len);
         run_completion_shadow(
             "source-io-after-prefix",
@@ -6954,7 +7039,9 @@ mod tests {
             ("third.txt", b"third"),
         ]);
         let (_, pending, _) = reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
-        let third_payload = pending.members[2].source_ranges.compressed_payload;
+        let third_payload = test_zip_evidence(&pending.members[2])
+            .source_ranges
+            .compressed_payload;
         corrupt_member_crc(&mut bytes, 1);
         let later_payload_failure = inject_read_failure(third_payload.offset, third_payload.len);
         reset_verify_payload_calls();
@@ -7096,7 +7183,7 @@ mod tests {
         let ratio_member = &ratio_pending.members[0];
         let exact_ratio = ratio_member
             .declared_uncomp_size
-            .div_ceil(ratio_member.declared_comp_size);
+            .div_ceil(test_zip_evidence(ratio_member).declared_comp_size);
         assert!(exact_ratio > 0);
         let mut ratio_exact = Policy::default_v1();
         ratio_exact.max_ratio = Some(exact_ratio);
@@ -7604,7 +7691,7 @@ mod tests {
         );
 
         let mut inconsistent_bytes = bytes.clone();
-        let eocd_offset = usize::try_from(pending.covering.eocd.offset).unwrap();
+        let eocd_offset = usize::try_from(test_zip_covering(&pending).eocd.offset).unwrap();
         inconsistent_bytes[eocd_offset] ^= 0xff;
         let source_sha256: [u8; 32] = Sha256::digest(&inconsistent_bytes).into();
         let mut covering_binding = binding.clone();
@@ -7889,12 +7976,60 @@ mod tests {
         );
 
         let mut overflow = pending;
-        overflow.members[0].source_ranges.local_header.offset = u64::MAX;
+        test_zip_evidence_mut(&mut overflow.members[0])
+            .source_ranges
+            .local_header
+            .offset = u64::MAX;
         assert_eq!(
             encode_planning(&ready_plan(binding, overflow))
                 .unwrap_err()
                 .kind,
             RecordErrorKind::IntegerOverflow
+        );
+    }
+
+    #[test]
+    fn semantic_records_reject_non_zip_archive_and_member_evidence() {
+        let bytes = make_zip(&[("a.txt", b"a")]);
+        let (binding, pending, _) = reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
+
+        let mut tar_archive = pending.clone();
+        tar_archive.evidence = ArchiveEvidence::Tar(crate::ir::TarArchiveCovering {
+            member_records: ByteRange { offset: 0, len: 0 },
+            terminator: ByteRange { offset: 0, len: 0 },
+            trailing_zeros: ByteRange { offset: 0, len: 0 },
+        });
+        assert_eq!(
+            encode_planning(&ready_plan(binding.clone(), tar_archive))
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::InvalidSemanticState
+        );
+
+        let mut tar_member = pending;
+        tar_member.members[0].evidence = MemberEvidence::Tar(crate::ir::TarMemberEvidence {
+            header: ByteRange {
+                offset: 0,
+                len: 512,
+            },
+            payload: ByteRange {
+                offset: 512,
+                len: 1,
+            },
+            padding: ByteRange {
+                offset: 513,
+                len: 511,
+            },
+            mode: 0o644,
+            mtime: 0,
+            header_checksum: 0,
+            header_sha256: "0".repeat(64),
+        });
+        assert_eq!(
+            encode_planning(&ready_plan(binding, tar_member))
+                .unwrap_err()
+                .kind,
+            RecordErrorKind::InvalidSemanticState
         );
     }
 
@@ -7906,13 +8041,13 @@ mod tests {
         let required = planning_metadata_bytes(&pending).unwrap();
         let parsed = crate::zip::parse_zip(&bytes, u64::MAX, u64::MAX).unwrap();
         assert_eq!(required, parsed.metadata_bytes);
-        assert!(pending.members[0]
+        assert!(test_zip_evidence(&pending.members[0])
             .extra_fields
             .iter()
             .any(|extra| extra.site == ExtraSite::Local));
 
         let mut omitted = pending.clone();
-        omitted.members[0]
+        test_zip_evidence_mut(&mut omitted.members[0])
             .extra_fields
             .retain(|extra| extra.site != ExtraSite::Local);
         assert_eq!(
@@ -7923,14 +8058,13 @@ mod tests {
         );
 
         let mut fabricated = pending.clone();
-        let member = &mut fabricated.members[0];
-        member
-            .extra_fields
+        let zip = test_zip_evidence_mut(&mut fabricated.members[0]);
+        zip.extra_fields
             .retain(|extra| extra.site != ExtraSite::Local);
-        member.source_ranges.local_header.len -= 4;
-        member.source_ranges.compressed_payload.offset -= 4;
-        member.source_ranges.compressed_payload.len += 4;
-        member.declared_comp_size += 4;
+        zip.source_ranges.local_header.len -= 4;
+        zip.source_ranges.compressed_payload.offset -= 4;
+        zip.source_ranges.compressed_payload.len += 4;
+        zip.declared_comp_size += 4;
         let understated = planning_metadata_bytes(&fabricated).unwrap();
         assert_eq!(understated + 4, required);
         let mut fabricated_binding = binding.clone();
@@ -7945,7 +8079,7 @@ mod tests {
         );
 
         let mut relabeled = pending.clone();
-        relabeled.members[0]
+        test_zip_evidence_mut(&mut relabeled.members[0])
             .extra_fields
             .iter_mut()
             .find(|extra| extra.site == ExtraSite::Local)
@@ -7994,7 +8128,7 @@ mod tests {
         let (binding, pending, _) = reference(&bytes, ZipInterpretationProfile::StrictAsciiV1);
 
         let mut forged_crc = pending.clone();
-        forged_crc.members[0].declared_crc ^= 1;
+        test_zip_evidence_mut(&mut forged_crc.members[0]).declared_crc ^= 1;
         let encoded = encode_planning(&ready_plan(binding.clone(), forged_crc)).unwrap();
         assert_eq!(
             decode_plan(&encoded, &binding, &bytes).unwrap_err().kind,
@@ -8068,7 +8202,7 @@ mod tests {
         add_matching_data_descriptor(&mut descriptor_source);
         let (descriptor_binding, descriptor_ir, _) =
             reference(&descriptor_source, ZipInterpretationProfile::StrictAsciiV1);
-        let descriptor = descriptor_ir.members[0]
+        let descriptor = test_zip_evidence(&descriptor_ir.members[0])
             .source_ranges
             .data_descriptor
             .unwrap();
@@ -8104,18 +8238,17 @@ mod tests {
         );
         let mut ambiguous_binding = descriptor_binding;
         let mut ambiguous_ir = descriptor_ir;
-        ambiguous_ir.members[0].declared_crc = 0x0807_4b50;
-        ambiguous_ir.members[0]
-            .source_ranges
-            .data_descriptor
-            .as_mut()
-            .unwrap()
-            .len = 12;
-        ambiguous_ir.members[0].source_ranges.central_header.offset -= 4;
-        ambiguous_ir.covering.local_records.len -= 4;
-        ambiguous_ir.covering.central_directory.offset -= 4;
-        ambiguous_ir.covering.eocd.offset -= 4;
-        ambiguous_ir.covering.comment.offset -= 4;
+        {
+            let zip = test_zip_evidence_mut(&mut ambiguous_ir.members[0]);
+            zip.declared_crc = 0x0807_4b50;
+            zip.source_ranges.data_descriptor.as_mut().unwrap().len = 12;
+            zip.source_ranges.central_header.offset -= 4;
+        }
+        let covering = test_zip_covering_mut(&mut ambiguous_ir);
+        covering.local_records.len -= 4;
+        covering.central_directory.offset -= 4;
+        covering.eocd.offset -= 4;
+        covering.comment.offset -= 4;
         rebind_source(&mut ambiguous_binding, &mut ambiguous_ir, &ambiguous_source);
         let encoded =
             encode_planning(&ready_plan(ambiguous_binding.clone(), ambiguous_ir)).unwrap();
@@ -8130,7 +8263,9 @@ mod tests {
         add_central_comment(&mut comment_source, b"safe");
         let (comment_binding, comment_ir, _) =
             reference(&comment_source, ZipInterpretationProfile::StrictAsciiV1);
-        let comment_range = comment_ir.members[0].source_ranges.central_header;
+        let comment_range = test_zip_evidence(&comment_ir.members[0])
+            .source_ranges
+            .central_header;
         let comment_offset = usize::try_from(checked_end(comment_range).unwrap() - 4).unwrap();
         let mut hostile_comment_source = comment_source.clone();
         hostile_comment_source[comment_offset..comment_offset + 4]

@@ -40,6 +40,7 @@
     "src/supervised.rs",
     "src/supervised/linux.rs",
     "src/supervised/linux/materialize.rs",
+    "src/tar.rs",
     "src/verification.rs",
     "src/verified.rs",
     "src/worker_protocol/frame.rs",
@@ -57,8 +58,12 @@
     "tests/conformance/identity-v1.json",
     "tests/conformance/semantic-shadow-v1.json",
     "tests/conformance/semantic-shadow-v2.json",
+    "tests/conformance/tar-layout-v2.json",
+    "tests/conformance/tar-producers-v1.json",
+    "tests/conformance/tar-ustar-portable-v1.json",
     "tests/golden_identity.rs",
     "tests/public_api.rs",
+    "tests/tar_public_api.rs",
     "tests/wheel_consumer_api.rs"
   ]
 }

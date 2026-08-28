@@ -6,7 +6,7 @@ Goals: no path escape, no disk/RAM bomb, no silent corruption, no extra files (A
 
 Language: MUST / SHOULD / MAY.
 
-This is the target safety specification. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) record current implementation status. Options described as future policy surfaces are not accepted by the Alpha.8 CLI.
+This is the target safety specification. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) record current implementation status. Options described as future policy surfaces are not accepted by the current CLI.
 
 ## Path jail (hard, not a flag)
 
@@ -20,7 +20,7 @@ Let `dest` be the user destination after `abspath`. Let `raw` be the member name
 4. `.` MAY be dropped.
 5. Reject absolute: leading `/`, `//server/share`, or `^[A-Za-z]:`.
 6. Join `dest` + components. Reject unless the result is `dest` or a strict child. Canonicalize **dest root** once; do not `canonicalize` children that do not exist yet.
-7. Decode according to the selected format profile, then jail one canonical string. Compatibility v1 requires valid UTF-8 when ZIP bit 11 is set and accepts only ASCII when it is clear. Strict ASCII v2 denies bit 11 and every non-ASCII member name. Portable UTF-8 v1 requires strict UTF-8, bit 11 for non-ASCII, NFC, no dot normalization, and fixed UTF-8 and UTF-16 component ceilings. CP437 transcoding remains unimplemented and is never an implicit fallback.
+7. Decode according to the selected format profile, then jail one canonical string. Compatibility v1 requires valid UTF-8 when ZIP bit 11 is set and accepts only ASCII when it is clear. Strict ASCII v2 denies bit 11 and every non-ASCII member name. Portable UTF-8 v1 requires strict UTF-8, bit 11 for non-ASCII, NFC, no dot normalization, and fixed UTF-8 and UTF-16 component ceilings. Portable ustar composes its fixed prefix and name bytes once, requires strict UTF-8 and NFC under the same portable repertoire, and carries no ZIP flag semantics. CP437 transcoding remains unimplemented and is never an implicit fallback.
 
 Do the jail in a pure function on strings **before** any `open`. Re-check after join.
 
@@ -38,7 +38,7 @@ On Windows, sealr supports only a retained parent handle that reports non-remote
 
 ## Symlinks and reparse points
 
-Current Alpha.8 behavior: **do not create them.** ZIP external attributes that describe a special file type are rejected, and file/directory attribute disagreements are rejected.
+Current preview behavior: **do not create them.** ZIP external attributes that describe a special file type are rejected, file/directory attribute disagreements are rejected, and portable ustar admits only regular files plus zero-size directories while denying all link and special-file typeflags.
 
 A future named policy may allow constrained links only after the target passes the jail relative to the link parent and is proven non-absolute. Such links must be created only after regular files. Member creation never opens through a symlink or reparse point: each canonical component is opened separately with no-follow semantics from a retained directory handle. Windows also rejects a reparse-point attribute on each opened directory or file handle. Alpha.6 has no link-enabling CLI option. Repeated hostile race stress remains a Phase 0.1 gate.
 

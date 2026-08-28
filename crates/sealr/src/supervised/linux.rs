@@ -19,6 +19,7 @@ use crate::apply::{
     with_verified_archive, ApplyOptions, PlanDecision, PlanningContext, Request, Source,
 };
 use crate::identity::OutcomeIdentities;
+use crate::ir::ZipInterpretationProfile;
 use crate::materialize::MaterializationMeta;
 use crate::outcome::{
     AdmissionStatus, EffectStatus, SemanticAxes, SourceDigest, VerificationStatus,
@@ -90,6 +91,7 @@ impl EpochDeadline {
 pub(super) fn apply(
     request: Request<'_>,
     options: &ApplyOptions,
+    profile: ZipInterpretationProfile,
     worker: &LinuxWorker,
 ) -> Result<crate::Outcome, SupervisionError> {
     let Request {
@@ -98,8 +100,10 @@ pub(super) fn apply(
         dest,
     } = request;
     match dest {
-        Some(destination) => materialize::run(source, destination, policy, options, worker),
-        None => inspect(source, policy, options, worker),
+        Some(destination) => {
+            materialize::run(source, destination, policy, options, profile, worker)
+        }
+        None => inspect(source, policy, options, profile, worker),
     }
 }
 
@@ -118,10 +122,10 @@ enum PreparedOperation {
 fn prepare_operation(
     source: &Source<'_>,
     policy: &Policy,
-    options: &ApplyOptions,
+    profile: ZipInterpretationProfile,
     materialization_requested: bool,
 ) -> PreparedOperation {
-    let context = match PlanningContext::compile(policy, options.interpretation_profile()) {
+    let context = match PlanningContext::compile(policy, profile) {
         Ok(context) => context,
         Err(finding) => {
             return PreparedOperation::Outcome(Box::new(reject_only(
@@ -131,7 +135,7 @@ fn prepare_operation(
                 MaterializationMeta::not_started(materialization_requested, policy.atomic),
                 SemanticAxes::policy_compile_failed(&finding),
                 SnapshotKind::Unavailable,
-                OutcomeIdentities::without_source_for(options.interpretation_profile()),
+                OutcomeIdentities::without_source_for(profile),
             )));
         }
     };
@@ -151,14 +155,14 @@ fn prepare_operation(
                 MaterializationMeta::not_started(materialization_requested, policy.atomic),
                 SemanticAxes::source_failure(&failure.finding, admission),
                 failure.snapshot_kind,
-                OutcomeIdentities::unavailable_for(digest, options.interpretation_profile()),
+                OutcomeIdentities::unavailable_for(digest, profile),
             )));
         }
     };
 
     match planning {
         PlanDecision::Ready(ready) => {
-            let (snapshot, ir, findings, context) = ready.into_parts();
+            let (snapshot, ir, _payloads, findings, context) = ready.into_parts();
             PreparedOperation::Ready(Box::new(ReadyOperation {
                 snapshot,
                 ir,
@@ -196,9 +200,10 @@ fn inspect(
     source: Source<'_>,
     policy: &Policy,
     options: &ApplyOptions,
+    profile: ZipInterpretationProfile,
     worker: &LinuxWorker,
 ) -> Result<crate::Outcome, SupervisionError> {
-    let ready = match prepare_operation(&source, policy, options, false) {
+    let ready = match prepare_operation(&source, policy, profile, false) {
         PreparedOperation::Outcome(outcome) => return Ok(*outcome),
         PreparedOperation::Ready(ready) => *ready,
     };

@@ -1,15 +1,19 @@
-use serde::Serialize;
+use serde::ser::SerializeStruct;
+use serde::{Serialize, Serializer};
 
 use crate::jail::{PORTABLE_PATH_GRAMMAR_ID, PORTABLE_RESERVED_NAMES_ID};
 use crate::outcome::SourceDigest;
 use crate::policy::hex_sha256;
+use crate::tar::TarMember;
 use crate::zip::ZipMember;
 
 pub const ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.v1";
+pub const TAR_ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.tar-ustar.v1";
 pub const ZIP_STRICT_ASCII_V1: &str = "sealr.profile.zip.strict-ascii.v1";
 pub const ZIP_STRICT_ASCII_V2: &str = "sealr.profile.zip.strict-ascii.v2";
 pub const ZIP_PORTABLE_UTF8_V1: &str = "sealr.profile.zip.portable-utf8.v1";
 pub const ZIP_WHEEL_UTF8_V1: &str = "sealr.profile.zip.wheel-utf8.v1";
+pub const TAR_USTAR_PORTABLE_V1: &str = "sealr.profile.tar.ustar-portable.v1";
 
 const DENIED_EXTRA_ZIP64: u16 = 0x0001;
 const DENIED_EXTRA_UNICODE_PATH: u16 = 0x7075;
@@ -55,6 +59,40 @@ impl ZipInterpretationProfile {
             Self::WheelUtf8V1 => zip_wheel_utf8_v1_digest(),
         }
     }
+}
+
+/// TAR interpretation selected for one operation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TarInterpretationProfile {
+    /// Exact POSIX ustar regular files and directories under Sealr's portable
+    /// UTF-8 path contract. PAX, GNU extensions, links, sparse entries,
+    /// special files, base-256 numbers, and concatenation are denied.
+    #[default]
+    UstarPortableV1,
+}
+
+impl TarInterpretationProfile {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::UstarPortableV1 => TAR_USTAR_PORTABLE_V1,
+        }
+    }
+
+    pub fn digest(self) -> String {
+        match self {
+            Self::UstarPortableV1 => tar_ustar_portable_v1_digest(),
+        }
+    }
+}
+
+/// Container format represented by an [`ArchiveIR`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum ArchiveFormat {
+    Zip32,
+    TarUstar,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -120,6 +158,44 @@ pub struct MemberSourceRanges {
     pub compressed_payload: ByteRange,
     pub data_descriptor: Option<ByteRange>,
     pub central_header: ByteRange,
+}
+
+/// Exact source evidence for one portable POSIX ustar member.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct TarMemberEvidence {
+    pub header: ByteRange,
+    pub payload: ByteRange,
+    pub padding: ByteRange,
+    pub mode: u32,
+    pub mtime: u64,
+    pub header_checksum: u32,
+    pub header_sha256: String,
+}
+
+/// Exact ZIP-specific evidence for one interpreted member.
+///
+/// These fields remain serialized at their historical top-level member keys so
+/// the ZIP preview JSON and `sealrTreeV1` encodings stay byte-for-byte stable.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct ZipMemberEvidence {
+    pub method: u16,
+    pub flags: u16,
+    pub declared_crc: u32,
+    pub declared_comp_size: u64,
+    pub source_ranges: MemberSourceRanges,
+    pub extra_fields: Vec<ExtraFieldRecord>,
+    pub(crate) creator_system: u8,
+    pub(crate) external_attributes: u32,
+}
+
+/// Format-native structural evidence for one interpreted member.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum MemberEvidence {
+    Zip(ZipMemberEvidence),
+    Tar(TarMemberEvidence),
 }
 
 impl MemberSourceRanges {
@@ -386,6 +462,92 @@ struct ZipPortableUtf8V1Profile {
     redundant_metadata: &'static str,
 }
 
+#[derive(Clone, Debug, Serialize)]
+struct TarUstarPortableV1Profile {
+    schema: &'static str,
+    status: &'static str,
+    format: &'static str,
+    block_bytes: u16,
+    header_magic: &'static str,
+    header_version: &'static str,
+    accepted_types: [&'static str; 2],
+    numeric_encoding: &'static str,
+    checksum: &'static str,
+    fixed_text_fields: &'static str,
+    owner_names: &'static str,
+    mode: &'static str,
+    linkname: &'static str,
+    device_numbers: &'static str,
+    reserved_bytes: &'static str,
+    member_padding: &'static str,
+    termination: &'static str,
+    destination_metadata: &'static str,
+    names: &'static str,
+    unicode_repertoire_version: &'static str,
+    unicode_repertoire: &'static str,
+    unicode_repertoire_implementation: &'static str,
+    character_restrictions: &'static str,
+    path_grammar: &'static str,
+    reserved_names: &'static str,
+    normalization_unicode_version: &'static str,
+    normalization_implementation: &'static str,
+    case_folding_unicode_version: &'static str,
+    case_folding_implementation: &'static str,
+    normalization: &'static str,
+    case_collision: &'static str,
+    component_limit: &'static str,
+    denied_features: [&'static str; 10],
+}
+
+fn tar_ustar_portable_v1_profile() -> TarUstarPortableV1Profile {
+    TarUstarPortableV1Profile {
+        schema: TAR_USTAR_PORTABLE_V1,
+        status: "supported-preview",
+        format: "posix-ustar",
+        block_bytes: 512,
+        header_magic: "757374617200",
+        header_version: "3030",
+        accepted_types: ["regular-0-or-nul", "directory-5-size-zero"],
+        numeric_encoding: "one-or-more-ascii-octal-digits;one-or-more-nul-or-space-terminators;no-leading-space;gnu-base256-denied",
+        checksum: "six-octal-digits-nul-space;unsigned-byte-sum-with-spaces",
+        fixed_text_fields: "name-and-prefix-may-fill-field;after-first-nul-all-bytes-zero",
+        owner_names: "nul-terminated-printable-ascii;remaining-bytes-zero",
+        mode: "ascii-octal-permission-bits<=07777",
+        linkname: "all-zero",
+        device_numbers: "all-zero-bytes-or-ascii-octal-zero;never-applied",
+        reserved_bytes: "header-500-through-511-all-zero",
+        member_padding: "zero-to-512-byte-boundary",
+        termination: "two-zero-blocks;remaining-complete-blocks-zero",
+        destination_metadata: "uid-gid-uname-gname-mtime-not-applied;mode-recorded-not-applied;setid-and-special-effects-never-applied",
+        names: "strict-utf8-name-plus-optional-prefix",
+        unicode_repertoire_version: "16.0.0",
+        unicode_repertoire: "public-assigned-no-private-use",
+        unicode_repertoire_implementation: "unicode-general-category-1.1.0-exact",
+        character_restrictions: "unicode-16-general-category-cc;white-space-0085-00a0-1680-2000..200a-2028-2029-202f-205f-3000;bidi-control-061c-200e-200f-202a..202e-2066..2069",
+        path_grammar: PORTABLE_PATH_GRAMMAR_ID,
+        reserved_names: PORTABLE_RESERVED_NAMES_ID,
+        normalization_unicode_version: "17.0.0-stable-for-16.0.0-repertoire",
+        normalization_implementation: "unicode-normalization-0.1.25-exact",
+        case_folding_unicode_version: "16.0.0",
+        case_folding_implementation: "caseless-0.2.2-exact",
+        normalization: "unicode-17-full-nfc-over-unicode-16-repertoire-no-dot-component",
+        case_collision: "unicode-16-full-default-case-fold-then-nfc",
+        component_limit: "utf8-bytes<=255-and-utf16-code-units<=255",
+        denied_features: [
+            "pax-local-header",
+            "pax-global-header",
+            "gnu-long-name",
+            "gnu-long-link",
+            "sparse-file",
+            "hard-link",
+            "symbolic-link",
+            "device-or-fifo",
+            "multi-volume",
+            "concatenated-archive",
+        ],
+    }
+}
+
 fn zip_portable_utf8_v1_profile() -> ZipPortableUtf8V1Profile {
     ZipPortableUtf8V1Profile {
         schema: ZIP_PORTABLE_UTF8_V1,
@@ -644,6 +806,10 @@ pub fn zip_wheel_utf8_v1_digest() -> String {
     hex_sha256(&zip_wheel_utf8_v1_canonical_bytes())
 }
 
+pub fn tar_ustar_portable_v1_digest() -> String {
+    hex_sha256(&tar_ustar_portable_v1_canonical_bytes())
+}
+
 /// Canonical JSON bytes hashed by the v1 interpretation identity.
 pub fn zip_strict_ascii_v1_canonical_bytes() -> Vec<u8> {
     serde_json::to_vec(&zip_strict_ascii_profile()).expect("profile serializes")
@@ -664,12 +830,20 @@ pub fn zip_wheel_utf8_v1_canonical_bytes() -> Vec<u8> {
     serde_json::to_vec(&zip_wheel_utf8_v1_profile()).expect("profile serializes")
 }
 
+/// Canonical JSON bytes hashed by the portable POSIX ustar interpretation.
+pub fn tar_ustar_portable_v1_canonical_bytes() -> Vec<u8> {
+    serde_json::to_vec(&tar_ustar_portable_v1_profile()).expect("profile serializes")
+}
+
 pub fn is_denied_extra_id(id: u16) -> bool {
     id == DENIED_EXTRA_ZIP64 || id == DENIED_EXTRA_UNICODE_PATH
 }
 
-/// One member of a versioned, effect-independent ZIP interpretation.
-#[derive(Clone, Debug, Serialize)]
+/// One member of a versioned, effect-independent archive interpretation.
+///
+/// Names, destination meaning, declared output size, and measured verification
+/// are common. Container-specific structure is carried only by [`MemberEvidence`].
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct IrMember {
     pub raw_name_bytes: Vec<u8>,
@@ -677,17 +851,8 @@ pub struct IrMember {
     pub canonical_path: String,
     pub components: Vec<String>,
     pub kind: MemberKind,
-    pub method: u16,
-    pub flags: u16,
-    #[serde(skip)]
-    pub(crate) creator_system: u8,
-    #[serde(skip)]
-    pub(crate) external_attributes: u32,
-    pub declared_crc: u32,
-    pub declared_comp_size: u64,
     pub declared_uncomp_size: u64,
-    pub source_ranges: MemberSourceRanges,
-    pub extra_fields: Vec<ExtraFieldRecord>,
+    pub evidence: MemberEvidence,
     pub actual_uncomp_size: Option<u64>,
     pub actual_crc: Option<u32>,
     pub content_sha256: Option<String>,
@@ -712,15 +877,51 @@ impl IrMember {
             canonical_path: components.join("/"),
             components,
             kind,
-            method: zip.method,
-            flags: zip.flags,
-            creator_system: zip.creator_system,
-            external_attributes: zip.external_attributes,
-            declared_crc: zip.crc,
-            declared_comp_size: zip.comp_size,
             declared_uncomp_size: zip.uncomp_size,
-            source_ranges: zip.source_ranges,
-            extra_fields: zip.extra_fields,
+            evidence: MemberEvidence::Zip(ZipMemberEvidence {
+                method: zip.method,
+                flags: zip.flags,
+                declared_crc: zip.crc,
+                declared_comp_size: zip.comp_size,
+                source_ranges: zip.source_ranges,
+                extra_fields: zip.extra_fields,
+                creator_system: zip.creator_system,
+                external_attributes: zip.external_attributes,
+            }),
+            actual_uncomp_size: None,
+            actual_crc: None,
+            content_sha256: None,
+            verification: MemberVerification::Pending,
+            normalization_actions,
+        }
+    }
+
+    pub(crate) fn from_tar_planned(
+        tar: TarMember,
+        components: Vec<String>,
+        normalization_actions: Vec<NormalizationAction>,
+    ) -> Self {
+        let kind = if tar.is_dir {
+            MemberKind::Directory
+        } else {
+            MemberKind::File
+        };
+        Self {
+            raw_name_bytes: tar.raw_name,
+            decoded_name: tar.name,
+            canonical_path: components.join("/"),
+            components,
+            kind,
+            declared_uncomp_size: tar.size,
+            evidence: MemberEvidence::Tar(TarMemberEvidence {
+                header: tar.header,
+                payload: tar.payload,
+                padding: tar.padding,
+                mode: tar.mode,
+                mtime: tar.mtime,
+                header_checksum: tar.header_checksum,
+                header_sha256: tar.header_sha256,
+            }),
             actual_uncomp_size: None,
             actual_crc: None,
             content_sha256: None,
@@ -731,7 +932,10 @@ impl IrMember {
 
     pub(crate) fn mark_directory_verified(&mut self) {
         self.actual_uncomp_size = Some(0);
-        self.actual_crc = Some(self.declared_crc);
+        self.actual_crc = Some(
+            self.zip_evidence()
+                .map_or(0, |evidence| evidence.declared_crc),
+        );
         self.content_sha256 = Some(hex_sha256(&[]));
         self.verification = MemberVerification::Verified;
     }
@@ -749,15 +953,90 @@ impl IrMember {
         };
     }
 
-    pub fn container_facts(&self) -> MemberContainerFacts {
-        MemberContainerFacts {
-            creator_system: self.creator_system,
-            external_attributes: self.external_attributes,
+    /// Return the format whose evidence this member carries.
+    pub fn format(&self) -> ArchiveFormat {
+        match &self.evidence {
+            MemberEvidence::Zip(_) => ArchiveFormat::Zip32,
+            MemberEvidence::Tar(_) => ArchiveFormat::TarUstar,
         }
+    }
+
+    /// Return exact ZIP evidence, or `None` for a non-ZIP member.
+    pub fn zip_evidence(&self) -> Option<&ZipMemberEvidence> {
+        match &self.evidence {
+            MemberEvidence::Zip(evidence) => Some(evidence),
+            MemberEvidence::Tar(_) => None,
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn zip_evidence_mut(&mut self) -> Option<&mut ZipMemberEvidence> {
+        match &mut self.evidence {
+            MemberEvidence::Zip(evidence) => Some(evidence),
+            MemberEvidence::Tar(_) => None,
+        }
+    }
+
+    /// Return exact portable-ustar evidence, or `None` for a ZIP member.
+    pub fn tar_evidence(&self) -> Option<&TarMemberEvidence> {
+        match &self.evidence {
+            MemberEvidence::Zip(_) => None,
+            MemberEvidence::Tar(evidence) => Some(evidence),
+        }
+    }
+
+    /// Return ZIP creator and external-attribute facts when ZIP supplied them.
+    pub fn container_facts(&self) -> Option<MemberContainerFacts> {
+        self.zip_evidence().map(|evidence| MemberContainerFacts {
+            creator_system: evidence.creator_system,
+            external_attributes: evidence.external_attributes,
+        })
     }
 }
 
-/// Labeled partition of the source interval under the current ZIP32 profile.
+impl Serialize for IrMember {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct(
+            "IrMember",
+            match &self.evidence {
+                MemberEvidence::Zip(_) => 17,
+                MemberEvidence::Tar(_) => 12,
+            },
+        )?;
+        state.serialize_field("raw_name_bytes", &self.raw_name_bytes)?;
+        state.serialize_field("decoded_name", &self.decoded_name)?;
+        state.serialize_field("canonical_path", &self.canonical_path)?;
+        state.serialize_field("components", &self.components)?;
+        state.serialize_field("kind", &self.kind)?;
+        if let MemberEvidence::Zip(evidence) = &self.evidence {
+            state.serialize_field("method", &evidence.method)?;
+            state.serialize_field("flags", &evidence.flags)?;
+            state.serialize_field("declared_crc", &evidence.declared_crc)?;
+            state.serialize_field("declared_comp_size", &evidence.declared_comp_size)?;
+        }
+        state.serialize_field("declared_uncomp_size", &self.declared_uncomp_size)?;
+        match &self.evidence {
+            MemberEvidence::Zip(evidence) => {
+                state.serialize_field("source_ranges", &evidence.source_ranges)?;
+                state.serialize_field("extra_fields", &evidence.extra_fields)?;
+            }
+            MemberEvidence::Tar(evidence) => {
+                state.serialize_field("tar", evidence)?;
+            }
+        }
+        state.serialize_field("actual_uncomp_size", &self.actual_uncomp_size)?;
+        state.serialize_field("actual_crc", &self.actual_crc)?;
+        state.serialize_field("content_sha256", &self.content_sha256)?;
+        state.serialize_field("verification", &self.verification)?;
+        state.serialize_field("normalization_actions", &self.normalization_actions)?;
+        state.end()
+    }
+}
+
+/// Labeled partition of the source interval under a ZIP32 profile.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct ArchiveCovering {
@@ -765,6 +1044,23 @@ pub struct ArchiveCovering {
     pub central_directory: ByteRange,
     pub eocd: ByteRange,
     pub comment: ByteRange,
+}
+
+/// Exact partition of a portable POSIX ustar source.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct TarArchiveCovering {
+    pub member_records: ByteRange,
+    pub terminator: ByteRange,
+    pub trailing_zeros: ByteRange,
+}
+
+/// Format-native source covering for one interpreted archive.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ArchiveEvidence {
+    Zip(ArchiveCovering),
+    Tar(TarArchiveCovering),
 }
 
 impl ArchiveCovering {
@@ -805,7 +1101,7 @@ impl ArchiveCovering {
     }
 }
 
-/// Effect-independent interpretation of one ZIP snapshot under a named profile.
+/// Effect-independent interpretation of one archive snapshot under a named profile.
 ///
 /// The value is produced only by Sealr. Callers can inspect and serialize it,
 /// but cannot construct or mutate an object that purports to be Sealr's
@@ -816,14 +1112,14 @@ impl ArchiveCovering {
 ///
 /// let _forged = ArchiveIR::new(SourceDigest::available("not-an-archive"), Vec::new());
 /// ```
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug)]
 #[non_exhaustive]
 pub struct ArchiveIR {
     pub(crate) schema: &'static str,
     pub(crate) profile: &'static str,
     pub(crate) profile_digest: String,
     pub(crate) source_digest: SourceDigest,
-    pub(crate) covering: ArchiveCovering,
+    pub(crate) evidence: ArchiveEvidence,
     pub(crate) members: Vec<IrMember>,
 }
 
@@ -849,7 +1145,23 @@ impl ArchiveIR {
             profile: profile.id(),
             profile_digest: profile.digest(),
             source_digest,
-            covering,
+            evidence: ArchiveEvidence::Zip(covering),
+            members,
+        }
+    }
+
+    pub(crate) fn with_tar(
+        profile: TarInterpretationProfile,
+        source_digest: SourceDigest,
+        covering: TarArchiveCovering,
+        members: Vec<IrMember>,
+    ) -> Self {
+        Self {
+            schema: TAR_ARCHIVE_IR_SCHEMA,
+            profile: profile.id(),
+            profile_digest: profile.digest(),
+            source_digest,
+            evidence: ArchiveEvidence::Tar(covering),
             members,
         }
     }
@@ -866,16 +1178,74 @@ impl ArchiveIR {
         &self.profile_digest
     }
 
+    pub fn format(&self) -> ArchiveFormat {
+        match &self.evidence {
+            ArchiveEvidence::Zip(_) => ArchiveFormat::Zip32,
+            ArchiveEvidence::Tar(_) => ArchiveFormat::TarUstar,
+        }
+    }
+
     pub fn source_digest(&self) -> &SourceDigest {
         &self.source_digest
     }
 
-    pub fn covering(&self) -> &ArchiveCovering {
-        &self.covering
+    /// Return exact format-native archive evidence.
+    pub fn evidence(&self) -> &ArchiveEvidence {
+        &self.evidence
+    }
+
+    /// Return exact ZIP covering evidence, or `None` for another format.
+    pub fn covering(&self) -> Option<&ArchiveCovering> {
+        self.zip_covering()
+    }
+
+    /// Return exact ZIP covering evidence, or `None` for TAR.
+    pub fn zip_covering(&self) -> Option<&ArchiveCovering> {
+        match &self.evidence {
+            ArchiveEvidence::Zip(covering) => Some(covering),
+            ArchiveEvidence::Tar(_) => None,
+        }
+    }
+
+    pub fn tar_covering(&self) -> Option<&TarArchiveCovering> {
+        match &self.evidence {
+            ArchiveEvidence::Zip(_) => None,
+            ArchiveEvidence::Tar(covering) => Some(covering),
+        }
     }
 
     pub fn members(&self) -> &[IrMember] {
         &self.members
+    }
+}
+
+impl Serialize for ArchiveIR {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct(
+            "ArchiveIR",
+            match &self.evidence {
+                ArchiveEvidence::Zip(_) => 6,
+                ArchiveEvidence::Tar(_) => 7,
+            },
+        )?;
+        state.serialize_field("schema", self.schema)?;
+        state.serialize_field("profile", self.profile)?;
+        state.serialize_field("profile_digest", &self.profile_digest)?;
+        state.serialize_field("source_digest", &self.source_digest)?;
+        match &self.evidence {
+            ArchiveEvidence::Zip(covering) => {
+                state.serialize_field("covering", covering)?;
+            }
+            ArchiveEvidence::Tar(covering) => {
+                state.serialize_field("format", &ArchiveFormat::TarUstar)?;
+                state.serialize_field("tar_covering", covering)?;
+            }
+        }
+        state.serialize_field("members", &self.members)?;
+        state.end()
     }
 }
 
