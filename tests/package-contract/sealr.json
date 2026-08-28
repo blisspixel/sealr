@@ -17,6 +17,7 @@
     "src/apply.rs",
     "src/covering.rs",
     "src/findings.rs",
+    "src/gzip.rs",
     "src/identity.rs",
     "src/interval.rs",
     "src/ir.rs",
@@ -58,12 +59,16 @@
     "tests/conformance/identity-v1.json",
     "tests/conformance/semantic-shadow-v1.json",
     "tests/conformance/semantic-shadow-v2.json",
+    "tests/conformance/tar-gzip-identity-v1.json",
     "tests/conformance/tar-layout-v2.json",
     "tests/conformance/tar-producers-v1.json",
     "tests/conformance/tar-ustar-portable-v1.json",
+    "tests/conformance/zip64-identity-v1.json",
     "tests/golden_identity.rs",
     "tests/public_api.rs",
+    "tests/tar_gzip_public_api.rs",
     "tests/tar_public_api.rs",
-    "tests/wheel_consumer_api.rs"
+    "tests/wheel_consumer_api.rs",
+    "tests/zip64_public_api.rs"
   ]
 }

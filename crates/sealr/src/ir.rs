@@ -5,15 +5,21 @@ use crate::jail::{PORTABLE_PATH_GRAMMAR_ID, PORTABLE_RESERVED_NAMES_ID};
 use crate::outcome::SourceDigest;
 use crate::policy::hex_sha256;
 use crate::tar::TarMember;
-use crate::zip::ZipMember;
+use crate::zip::{
+    DataDescriptorWidth, Zip64LocalValueShape as ParsedZip64LocalValueShape, ZipMember,
+};
 
 pub const ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.v1";
+pub const ZIP64_ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.zip64.v1";
 pub const TAR_ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.tar-ustar.v1";
+pub const TAR_GZIP_ARCHIVE_IR_SCHEMA: &str = "sealr.archive-ir.tar-gzip-ustar.v1";
 pub const ZIP_STRICT_ASCII_V1: &str = "sealr.profile.zip.strict-ascii.v1";
 pub const ZIP_STRICT_ASCII_V2: &str = "sealr.profile.zip.strict-ascii.v2";
 pub const ZIP_PORTABLE_UTF8_V1: &str = "sealr.profile.zip.portable-utf8.v1";
 pub const ZIP_WHEEL_UTF8_V1: &str = "sealr.profile.zip.wheel-utf8.v1";
+pub const ZIP64_STRICT_ASCII_V1: &str = "sealr.profile.zip64.strict-ascii.v1";
 pub const TAR_USTAR_PORTABLE_V1: &str = "sealr.profile.tar.ustar-portable.v1";
+pub const TAR_GZIP_USTAR_PORTABLE_V1: &str = "sealr.profile.tar-gzip.ustar-portable.v1";
 
 const DENIED_EXTRA_ZIP64: u16 = 0x0001;
 const DENIED_EXTRA_UNICODE_PATH: u16 = 0x7075;
@@ -39,6 +45,9 @@ pub enum ZipInterpretationProfile {
     StrictAsciiV2,
     PortableUtf8V1,
     WheelUtf8V1,
+    /// Closed ZIP64 language for ASCII Store and Deflate members, fixed
+    /// single-disk end records, and producer-compatible size and offset forms.
+    Zip64StrictAsciiV1,
 }
 
 impl ZipInterpretationProfile {
@@ -48,6 +57,7 @@ impl ZipInterpretationProfile {
             Self::StrictAsciiV2 => ZIP_STRICT_ASCII_V2,
             Self::PortableUtf8V1 => ZIP_PORTABLE_UTF8_V1,
             Self::WheelUtf8V1 => ZIP_WHEEL_UTF8_V1,
+            Self::Zip64StrictAsciiV1 => ZIP64_STRICT_ASCII_V1,
         }
     }
 
@@ -57,7 +67,32 @@ impl ZipInterpretationProfile {
             Self::StrictAsciiV2 => zip_strict_ascii_v2_digest(),
             Self::PortableUtf8V1 => zip_portable_utf8_v1_digest(),
             Self::WheelUtf8V1 => zip_wheel_utf8_v1_digest(),
+            Self::Zip64StrictAsciiV1 => zip64_strict_ascii_v1_digest(),
         }
+    }
+
+    pub const fn archive_format(self) -> ArchiveFormat {
+        match self {
+            Self::Zip64StrictAsciiV1 => ArchiveFormat::Zip64,
+            Self::StrictAsciiV1
+            | Self::StrictAsciiV2
+            | Self::PortableUtf8V1
+            | Self::WheelUtf8V1 => ArchiveFormat::Zip32,
+        }
+    }
+
+    pub const fn policy_format(self) -> &'static str {
+        match self {
+            Self::Zip64StrictAsciiV1 => crate::policy::POLICY_FORMAT_ZIP64,
+            Self::StrictAsciiV1
+            | Self::StrictAsciiV2
+            | Self::PortableUtf8V1
+            | Self::WheelUtf8V1 => crate::policy::POLICY_FORMAT_ZIP,
+        }
+    }
+
+    pub const fn is_zip64(self) -> bool {
+        matches!(self, Self::Zip64StrictAsciiV1)
     }
 }
 
@@ -86,13 +121,39 @@ impl TarInterpretationProfile {
     }
 }
 
+/// Gzip-wrapped TAR interpretation selected for one operation.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum TarGzipInterpretationProfile {
+    /// Exactly one strict RFC 1952 member whose bounded output is exact
+    /// portable POSIX ustar.
+    #[default]
+    UstarPortableV1,
+}
+
+impl TarGzipInterpretationProfile {
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::UstarPortableV1 => TAR_GZIP_USTAR_PORTABLE_V1,
+        }
+    }
+
+    pub fn digest(self) -> String {
+        match self {
+            Self::UstarPortableV1 => tar_gzip_ustar_portable_v1_digest(),
+        }
+    }
+}
+
 /// Container format represented by an [`ArchiveIR`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 #[non_exhaustive]
 pub enum ArchiveFormat {
     Zip32,
+    Zip64,
     TarUstar,
+    TarGzipUstar,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
@@ -173,6 +234,28 @@ pub struct TarMemberEvidence {
     pub header_sha256: String,
 }
 
+/// Exact RFC 1952 wrapper evidence for a gzip-derived archive domain.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct GzipWrapperEvidence {
+    pub flags: u8,
+    pub modification_time: u32,
+    pub extra_flags: u8,
+    pub operating_system: u8,
+    pub header: ByteRange,
+    pub extra: Option<ByteRange>,
+    pub extra_subfield_count: u32,
+    pub original_name: Option<ByteRange>,
+    pub comment: Option<ByteRange>,
+    pub header_crc16: Option<ByteRange>,
+    pub compressed_payload: ByteRange,
+    pub trailer: ByteRange,
+    pub declared_crc32: u32,
+    pub declared_isize: u32,
+    pub derived_output_len: u64,
+    pub derived_output_sha256: String,
+}
+
 /// Exact ZIP-specific evidence for one interpreted member.
 ///
 /// These fields remain serialized at their historical top-level member keys so
@@ -190,12 +273,80 @@ pub struct ZipMemberEvidence {
     pub(crate) external_attributes: u32,
 }
 
+/// Width selected for a signed ZIP64-profile data descriptor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum Zip64DataDescriptorWidth {
+    Zip32,
+    Zip64,
+}
+
+/// Admitted semantic shape of the local ZIP64 size values.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+#[non_exhaustive]
+pub enum Zip64LocalValueShape {
+    Absent,
+    Exact,
+    StreamingZeros,
+    StreamingMaxima,
+}
+
+/// Exact ZIP64-specific evidence layered over the common ZIP member facts.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct Zip64MemberEvidence {
+    pub zip: ZipMemberEvidence,
+    pub local_version_needed: u16,
+    pub central_version_needed: u16,
+    /// Unique `U,C,O` presence mask selected for the central ZIP64 extra.
+    pub central_presence_mask: u8,
+    pub central_legacy_sentinel_mask: u8,
+    pub local_legacy_sentinel_mask: u8,
+    pub local_value_shape: Zip64LocalValueShape,
+    pub local_zip64_extra: Option<ByteRange>,
+    pub central_zip64_extra: Option<ByteRange>,
+    pub descriptor_width: Option<Zip64DataDescriptorWidth>,
+}
+
+#[derive(Serialize)]
+struct Zip64SpecificEvidence {
+    local_version_needed: u16,
+    central_version_needed: u16,
+    central_presence_mask: u8,
+    central_legacy_sentinel_mask: u8,
+    local_legacy_sentinel_mask: u8,
+    local_value_shape: Zip64LocalValueShape,
+    local_zip64_extra: Option<ByteRange>,
+    central_zip64_extra: Option<ByteRange>,
+    descriptor_width: Option<Zip64DataDescriptorWidth>,
+}
+
+impl Zip64MemberEvidence {
+    fn specific(&self) -> Zip64SpecificEvidence {
+        Zip64SpecificEvidence {
+            local_version_needed: self.local_version_needed,
+            central_version_needed: self.central_version_needed,
+            central_presence_mask: self.central_presence_mask,
+            central_legacy_sentinel_mask: self.central_legacy_sentinel_mask,
+            local_legacy_sentinel_mask: self.local_legacy_sentinel_mask,
+            local_value_shape: self.local_value_shape,
+            local_zip64_extra: self.local_zip64_extra,
+            central_zip64_extra: self.central_zip64_extra,
+            descriptor_width: self.descriptor_width,
+        }
+    }
+}
+
 /// Format-native structural evidence for one interpreted member.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum MemberEvidence {
     Zip(ZipMemberEvidence),
+    Zip64(Zip64MemberEvidence),
     Tar(TarMemberEvidence),
+    TarGzip(TarMemberEvidence),
 }
 
 impl MemberSourceRanges {
@@ -417,6 +568,43 @@ fn zip_strict_ascii_v2_profile() -> ZipStrictAsciiV2Profile {
 }
 
 #[derive(Clone, Debug, Serialize)]
+struct Zip64StrictAsciiV1Profile {
+    schema: &'static str,
+    format: &'static str,
+    methods: [u16; 2],
+    general_purpose_bits: [GeneralPurposeBitRule; 16],
+    names: &'static str,
+    extra_fields: &'static str,
+    local_zip64: &'static str,
+    central_zip64: &'static str,
+    descriptor_width: &'static str,
+    descriptors: &'static str,
+    global_end_records: &'static str,
+    spanning: &'static str,
+    directories: &'static str,
+    redundant_metadata: &'static str,
+}
+
+fn zip64_strict_ascii_v1_profile() -> Zip64StrictAsciiV1Profile {
+    Zip64StrictAsciiV1Profile {
+        schema: ZIP64_STRICT_ASCII_V1,
+        format: "zip64",
+        methods: [0, 8],
+        general_purpose_bits: zip_strict_ascii_v2_profile().general_purpose_bits,
+        names: "strict-ascii",
+        extra_fields: "exactly-one-semantic-zip64-per-site-or-none-all-other-ids-denied",
+        local_zip64: "exact-u-c-or-cpython-zero-pair-or-zip-rs-max-pair",
+        central_zip64: "unique-fixed-order-u-c-o-mask-with-exact-redundancy",
+        descriptor_width: "zip64-iff-local-zip64-or-resolved-size-at-least-u32-max",
+        descriptors: "signed-only-exact-crc-compressed-uncompressed",
+        global_end_records: "optional-fixed-56-byte-eocd-plus-adjacent-20-byte-locator",
+        spanning: "denied-single-disk-only",
+        directories: "trailing-slash-store-empty-crc32-zero",
+        redundant_metadata: "exact-producer-compatible-lfh-cdh-descriptor-and-end-records",
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
 struct ZipWheelUtf8V1Profile {
     schema: &'static str,
     status: &'static str,
@@ -499,6 +687,23 @@ struct TarUstarPortableV1Profile {
     denied_features: [&'static str; 10],
 }
 
+#[derive(Clone, Debug, Serialize)]
+struct TarGzipUstarPortableV1Profile {
+    schema: &'static str,
+    status: &'static str,
+    format: &'static str,
+    wrapper_profile: &'static str,
+    wrapper_profile_sha256: &'static str,
+    decoder_parameters_sha256: &'static str,
+    gzip_members: &'static str,
+    gzip_optional_fields: &'static str,
+    gzip_integrity: &'static str,
+    gzip_trailing_input: &'static str,
+    derived_output: &'static str,
+    inner_profile: &'static str,
+    inner_profile_sha256: String,
+}
+
 fn tar_ustar_portable_v1_profile() -> TarUstarPortableV1Profile {
     TarUstarPortableV1Profile {
         schema: TAR_USTAR_PORTABLE_V1,
@@ -545,6 +750,25 @@ fn tar_ustar_portable_v1_profile() -> TarUstarPortableV1Profile {
             "multi-volume",
             "concatenated-archive",
         ],
+    }
+}
+
+fn tar_gzip_ustar_portable_v1_profile() -> TarGzipUstarPortableV1Profile {
+    TarGzipUstarPortableV1Profile {
+        schema: TAR_GZIP_USTAR_PORTABLE_V1,
+        status: "supported-preview",
+        format: "tar-gzip-ustar",
+        wrapper_profile: "sealr.transform.gzip.rfc1952-single-member.v1",
+        wrapper_profile_sha256: "795a124c278eacf1fb9b4fc3825a74240d6d0e89c29ffdfe6118ff6db53c0a45",
+        decoder_parameters_sha256:
+            "c835627b01c4b54041c627319fab4d5af294a203ac26fbe91cadb6d1f17cd5e1",
+        gzip_members: "exactly-one",
+        gzip_optional_fields: "bounded-exact-rfc1952-framing-si2-nonzero-unique-ids",
+        gzip_integrity: "fhcrc-when-present-and-crc32-and-isize",
+        gzip_trailing_input: "denied-including-zero-padding-and-concatenation",
+        derived_output: "private-immutable-bounded-and-sha256-bound",
+        inner_profile: TAR_USTAR_PORTABLE_V1,
+        inner_profile_sha256: tar_ustar_portable_v1_digest(),
     }
 }
 
@@ -806,8 +1030,16 @@ pub fn zip_wheel_utf8_v1_digest() -> String {
     hex_sha256(&zip_wheel_utf8_v1_canonical_bytes())
 }
 
+pub fn zip64_strict_ascii_v1_digest() -> String {
+    hex_sha256(&zip64_strict_ascii_v1_canonical_bytes())
+}
+
 pub fn tar_ustar_portable_v1_digest() -> String {
     hex_sha256(&tar_ustar_portable_v1_canonical_bytes())
+}
+
+pub fn tar_gzip_ustar_portable_v1_digest() -> String {
+    hex_sha256(&tar_gzip_ustar_portable_v1_canonical_bytes())
 }
 
 /// Canonical JSON bytes hashed by the v1 interpretation identity.
@@ -830,9 +1062,19 @@ pub fn zip_wheel_utf8_v1_canonical_bytes() -> Vec<u8> {
     serde_json::to_vec(&zip_wheel_utf8_v1_profile()).expect("profile serializes")
 }
 
+/// Canonical JSON bytes hashed by the strict ZIP64 interpretation.
+pub fn zip64_strict_ascii_v1_canonical_bytes() -> Vec<u8> {
+    serde_json::to_vec(&zip64_strict_ascii_v1_profile()).expect("profile serializes")
+}
+
 /// Canonical JSON bytes hashed by the portable POSIX ustar interpretation.
 pub fn tar_ustar_portable_v1_canonical_bytes() -> Vec<u8> {
     serde_json::to_vec(&tar_ustar_portable_v1_profile()).expect("profile serializes")
+}
+
+/// Canonical JSON bytes hashed by the gzip-wrapped portable ustar interpretation.
+pub fn tar_gzip_ustar_portable_v1_canonical_bytes() -> Vec<u8> {
+    serde_json::to_vec(&tar_gzip_ustar_portable_v1_profile()).expect("profile serializes")
 }
 
 pub fn is_denied_extra_id(id: u16) -> bool {
@@ -896,15 +1138,110 @@ impl IrMember {
         }
     }
 
+    pub(crate) fn from_zip64_planned(
+        zip: ZipMember,
+        components: Vec<String>,
+        normalization_actions: Vec<NormalizationAction>,
+    ) -> Self {
+        let kind = if zip.is_dir {
+            MemberKind::Directory
+        } else {
+            MemberKind::File
+        };
+        let local_zip64_extra = zip
+            .extra_fields
+            .iter()
+            .find(|field| field.site == ExtraSite::Local && field.id == DENIED_EXTRA_ZIP64)
+            .map(|field| field.data_range);
+        let central_zip64_extra = zip
+            .extra_fields
+            .iter()
+            .find(|field| field.site == ExtraSite::Central && field.id == DENIED_EXTRA_ZIP64)
+            .map(|field| field.data_range);
+        let parsed = zip
+            .zip64_evidence
+            .expect("ZIP64 planning requires parser-native ZIP64 evidence");
+        let descriptor_width = parsed.descriptor_width.map(|width| match width {
+            DataDescriptorWidth::Zip32 => Zip64DataDescriptorWidth::Zip32,
+            DataDescriptorWidth::Zip64 => Zip64DataDescriptorWidth::Zip64,
+        });
+        let local_value_shape = match parsed.local_value_shape {
+            ParsedZip64LocalValueShape::Absent => Zip64LocalValueShape::Absent,
+            ParsedZip64LocalValueShape::Exact => Zip64LocalValueShape::Exact,
+            ParsedZip64LocalValueShape::StreamingZeros => Zip64LocalValueShape::StreamingZeros,
+            ParsedZip64LocalValueShape::StreamingMaxima => Zip64LocalValueShape::StreamingMaxima,
+        };
+        Self {
+            raw_name_bytes: zip.raw_name,
+            decoded_name: zip.name,
+            canonical_path: components.join("/"),
+            components,
+            kind,
+            declared_uncomp_size: zip.uncomp_size,
+            evidence: MemberEvidence::Zip64(Zip64MemberEvidence {
+                zip: ZipMemberEvidence {
+                    method: zip.method,
+                    flags: zip.flags,
+                    declared_crc: zip.crc,
+                    declared_comp_size: zip.comp_size,
+                    source_ranges: zip.source_ranges,
+                    extra_fields: zip.extra_fields,
+                    creator_system: zip.creator_system,
+                    external_attributes: zip.external_attributes,
+                },
+                local_version_needed: parsed.local_version_needed,
+                central_version_needed: parsed.central_version_needed,
+                central_presence_mask: parsed.central_presence_mask,
+                central_legacy_sentinel_mask: parsed.central_legacy_sentinel_mask,
+                local_legacy_sentinel_mask: parsed.local_legacy_sentinel_mask,
+                local_value_shape,
+                local_zip64_extra,
+                central_zip64_extra,
+                descriptor_width,
+            }),
+            actual_uncomp_size: None,
+            actual_crc: None,
+            content_sha256: None,
+            verification: MemberVerification::Pending,
+            normalization_actions,
+        }
+    }
+
     pub(crate) fn from_tar_planned(
         tar: TarMember,
         components: Vec<String>,
         normalization_actions: Vec<NormalizationAction>,
     ) -> Self {
+        Self::from_tar_planned_for_format(tar, components, normalization_actions, false)
+    }
+
+    pub(crate) fn from_tar_gzip_planned(
+        tar: TarMember,
+        components: Vec<String>,
+        normalization_actions: Vec<NormalizationAction>,
+    ) -> Self {
+        Self::from_tar_planned_for_format(tar, components, normalization_actions, true)
+    }
+
+    fn from_tar_planned_for_format(
+        tar: TarMember,
+        components: Vec<String>,
+        normalization_actions: Vec<NormalizationAction>,
+        gzip_wrapped: bool,
+    ) -> Self {
         let kind = if tar.is_dir {
             MemberKind::Directory
         } else {
             MemberKind::File
+        };
+        let evidence = TarMemberEvidence {
+            header: tar.header,
+            payload: tar.payload,
+            padding: tar.padding,
+            mode: tar.mode,
+            mtime: tar.mtime,
+            header_checksum: tar.header_checksum,
+            header_sha256: tar.header_sha256,
         };
         Self {
             raw_name_bytes: tar.raw_name,
@@ -913,15 +1250,11 @@ impl IrMember {
             components,
             kind,
             declared_uncomp_size: tar.size,
-            evidence: MemberEvidence::Tar(TarMemberEvidence {
-                header: tar.header,
-                payload: tar.payload,
-                padding: tar.padding,
-                mode: tar.mode,
-                mtime: tar.mtime,
-                header_checksum: tar.header_checksum,
-                header_sha256: tar.header_sha256,
-            }),
+            evidence: if gzip_wrapped {
+                MemberEvidence::TarGzip(evidence)
+            } else {
+                MemberEvidence::Tar(evidence)
+            },
             actual_uncomp_size: None,
             actual_crc: None,
             content_sha256: None,
@@ -957,7 +1290,9 @@ impl IrMember {
     pub fn format(&self) -> ArchiveFormat {
         match &self.evidence {
             MemberEvidence::Zip(_) => ArchiveFormat::Zip32,
+            MemberEvidence::Zip64(_) => ArchiveFormat::Zip64,
             MemberEvidence::Tar(_) => ArchiveFormat::TarUstar,
+            MemberEvidence::TarGzip(_) => ArchiveFormat::TarGzipUstar,
         }
     }
 
@@ -965,7 +1300,8 @@ impl IrMember {
     pub fn zip_evidence(&self) -> Option<&ZipMemberEvidence> {
         match &self.evidence {
             MemberEvidence::Zip(evidence) => Some(evidence),
-            MemberEvidence::Tar(_) => None,
+            MemberEvidence::Zip64(evidence) => Some(&evidence.zip),
+            MemberEvidence::Tar(_) | MemberEvidence::TarGzip(_) => None,
         }
     }
 
@@ -973,7 +1309,8 @@ impl IrMember {
     pub(crate) fn zip_evidence_mut(&mut self) -> Option<&mut ZipMemberEvidence> {
         match &mut self.evidence {
             MemberEvidence::Zip(evidence) => Some(evidence),
-            MemberEvidence::Tar(_) => None,
+            MemberEvidence::Zip64(evidence) => Some(&mut evidence.zip),
+            MemberEvidence::Tar(_) | MemberEvidence::TarGzip(_) => None,
         }
     }
 
@@ -981,7 +1318,16 @@ impl IrMember {
     pub fn tar_evidence(&self) -> Option<&TarMemberEvidence> {
         match &self.evidence {
             MemberEvidence::Zip(_) => None,
-            MemberEvidence::Tar(evidence) => Some(evidence),
+            MemberEvidence::Zip64(_) => None,
+            MemberEvidence::Tar(evidence) | MemberEvidence::TarGzip(evidence) => Some(evidence),
+        }
+    }
+
+    /// Return exact ZIP64-specific evidence, or `None` for another format.
+    pub fn zip64_evidence(&self) -> Option<&Zip64MemberEvidence> {
+        match &self.evidence {
+            MemberEvidence::Zip64(evidence) => Some(evidence),
+            MemberEvidence::Zip(_) | MemberEvidence::Tar(_) | MemberEvidence::TarGzip(_) => None,
         }
     }
 
@@ -1003,7 +1349,8 @@ impl Serialize for IrMember {
             "IrMember",
             match &self.evidence {
                 MemberEvidence::Zip(_) => 17,
-                MemberEvidence::Tar(_) => 12,
+                MemberEvidence::Zip64(_) => 18,
+                MemberEvidence::Tar(_) | MemberEvidence::TarGzip(_) => 12,
             },
         )?;
         state.serialize_field("raw_name_bytes", &self.raw_name_bytes)?;
@@ -1011,7 +1358,7 @@ impl Serialize for IrMember {
         state.serialize_field("canonical_path", &self.canonical_path)?;
         state.serialize_field("components", &self.components)?;
         state.serialize_field("kind", &self.kind)?;
-        if let MemberEvidence::Zip(evidence) = &self.evidence {
+        if let Some(evidence) = self.zip_evidence() {
             state.serialize_field("method", &evidence.method)?;
             state.serialize_field("flags", &evidence.flags)?;
             state.serialize_field("declared_crc", &evidence.declared_crc)?;
@@ -1023,7 +1370,12 @@ impl Serialize for IrMember {
                 state.serialize_field("source_ranges", &evidence.source_ranges)?;
                 state.serialize_field("extra_fields", &evidence.extra_fields)?;
             }
-            MemberEvidence::Tar(evidence) => {
+            MemberEvidence::Zip64(evidence) => {
+                state.serialize_field("source_ranges", &evidence.zip.source_ranges)?;
+                state.serialize_field("extra_fields", &evidence.zip.extra_fields)?;
+                state.serialize_field("zip64", &evidence.specific())?;
+            }
+            MemberEvidence::Tar(evidence) | MemberEvidence::TarGzip(evidence) => {
                 state.serialize_field("tar", evidence)?;
             }
         }
@@ -1046,6 +1398,18 @@ pub struct ArchiveCovering {
     pub comment: ByteRange,
 }
 
+/// Exact partition of a source interpreted by the strict ZIP64 profile.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct Zip64ArchiveCovering {
+    pub local_records: ByteRange,
+    pub central_directory: ByteRange,
+    pub zip64_eocd: Option<ByteRange>,
+    pub zip64_locator: Option<ByteRange>,
+    pub eocd: ByteRange,
+    pub comment: ByteRange,
+}
+
 /// Exact partition of a portable POSIX ustar source.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
@@ -1055,12 +1419,22 @@ pub struct TarArchiveCovering {
     pub trailing_zeros: ByteRange,
 }
 
+/// Exact original-wrapper and derived-TAR evidence for one gzip-wrapped ustar.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct TarGzipArchiveEvidence {
+    pub gzip: GzipWrapperEvidence,
+    pub tar: TarArchiveCovering,
+}
+
 /// Format-native source covering for one interpreted archive.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ArchiveEvidence {
     Zip(ArchiveCovering),
+    Zip64(Zip64ArchiveCovering),
     Tar(TarArchiveCovering),
+    TarGzip(TarGzipArchiveEvidence),
 }
 
 impl ArchiveCovering {
@@ -1089,6 +1463,38 @@ impl ArchiveCovering {
                 offset: cd_offset,
                 len: cd_size,
             },
+            eocd: ByteRange {
+                offset: eocd_offset,
+                len: 22,
+            },
+            comment: ByteRange {
+                offset: eocd_offset + 22,
+                len: comment_len,
+            },
+        }
+    }
+}
+
+impl Zip64ArchiveCovering {
+    pub(crate) fn from_parsed(
+        cd_offset: u64,
+        cd_size: u64,
+        zip64_eocd: Option<ByteRange>,
+        zip64_locator: Option<ByteRange>,
+        eocd_offset: u64,
+        comment_len: u64,
+    ) -> Self {
+        Self {
+            local_records: ByteRange {
+                offset: 0,
+                len: cd_offset,
+            },
+            central_directory: ByteRange {
+                offset: cd_offset,
+                len: cd_size,
+            },
+            zip64_eocd,
+            zip64_locator,
             eocd: ByteRange {
                 offset: eocd_offset,
                 len: 22,
@@ -1166,6 +1572,40 @@ impl ArchiveIR {
         }
     }
 
+    pub(crate) fn with_tar_gzip(
+        profile: TarGzipInterpretationProfile,
+        source_digest: SourceDigest,
+        gzip: GzipWrapperEvidence,
+        tar: TarArchiveCovering,
+        members: Vec<IrMember>,
+    ) -> Self {
+        Self {
+            schema: TAR_GZIP_ARCHIVE_IR_SCHEMA,
+            profile: profile.id(),
+            profile_digest: profile.digest(),
+            source_digest,
+            evidence: ArchiveEvidence::TarGzip(TarGzipArchiveEvidence { gzip, tar }),
+            members,
+        }
+    }
+
+    pub(crate) fn with_zip64(
+        profile: ZipInterpretationProfile,
+        source_digest: SourceDigest,
+        covering: Zip64ArchiveCovering,
+        members: Vec<IrMember>,
+    ) -> Self {
+        debug_assert_eq!(profile, ZipInterpretationProfile::Zip64StrictAsciiV1);
+        Self {
+            schema: ZIP64_ARCHIVE_IR_SCHEMA,
+            profile: profile.id(),
+            profile_digest: profile.digest(),
+            source_digest,
+            evidence: ArchiveEvidence::Zip64(covering),
+            members,
+        }
+    }
+
     pub fn schema(&self) -> &'static str {
         self.schema
     }
@@ -1181,7 +1621,9 @@ impl ArchiveIR {
     pub fn format(&self) -> ArchiveFormat {
         match &self.evidence {
             ArchiveEvidence::Zip(_) => ArchiveFormat::Zip32,
+            ArchiveEvidence::Zip64(_) => ArchiveFormat::Zip64,
             ArchiveEvidence::Tar(_) => ArchiveFormat::TarUstar,
+            ArchiveEvidence::TarGzip(_) => ArchiveFormat::TarGzipUstar,
         }
     }
 
@@ -1194,23 +1636,42 @@ impl ArchiveIR {
         &self.evidence
     }
 
-    /// Return exact ZIP covering evidence, or `None` for another format.
+    /// Return historical ZIP32 covering evidence, or `None` for another format.
     pub fn covering(&self) -> Option<&ArchiveCovering> {
         self.zip_covering()
     }
 
-    /// Return exact ZIP covering evidence, or `None` for TAR.
+    /// Return exact ZIP32 covering evidence, or `None` for ZIP64 or TAR.
     pub fn zip_covering(&self) -> Option<&ArchiveCovering> {
         match &self.evidence {
             ArchiveEvidence::Zip(covering) => Some(covering),
-            ArchiveEvidence::Tar(_) => None,
+            ArchiveEvidence::Zip64(_) | ArchiveEvidence::Tar(_) | ArchiveEvidence::TarGzip(_) => {
+                None
+            }
+        }
+    }
+
+    /// Return exact ZIP64 covering evidence, or `None` for another format.
+    pub fn zip64_covering(&self) -> Option<&Zip64ArchiveCovering> {
+        match &self.evidence {
+            ArchiveEvidence::Zip64(covering) => Some(covering),
+            ArchiveEvidence::Zip(_) | ArchiveEvidence::Tar(_) | ArchiveEvidence::TarGzip(_) => None,
         }
     }
 
     pub fn tar_covering(&self) -> Option<&TarArchiveCovering> {
         match &self.evidence {
-            ArchiveEvidence::Zip(_) => None,
+            ArchiveEvidence::Zip(_) | ArchiveEvidence::Zip64(_) => None,
             ArchiveEvidence::Tar(covering) => Some(covering),
+            ArchiveEvidence::TarGzip(evidence) => Some(&evidence.tar),
+        }
+    }
+
+    /// Return exact RFC 1952 evidence for a gzip-wrapped TAR, if selected.
+    pub fn gzip_evidence(&self) -> Option<&GzipWrapperEvidence> {
+        match &self.evidence {
+            ArchiveEvidence::TarGzip(evidence) => Some(&evidence.gzip),
+            ArchiveEvidence::Zip(_) | ArchiveEvidence::Zip64(_) | ArchiveEvidence::Tar(_) => None,
         }
     }
 
@@ -1228,7 +1689,9 @@ impl Serialize for ArchiveIR {
             "ArchiveIR",
             match &self.evidence {
                 ArchiveEvidence::Zip(_) => 6,
+                ArchiveEvidence::Zip64(_) => 7,
                 ArchiveEvidence::Tar(_) => 7,
+                ArchiveEvidence::TarGzip(_) => 8,
             },
         )?;
         state.serialize_field("schema", self.schema)?;
@@ -1239,9 +1702,18 @@ impl Serialize for ArchiveIR {
             ArchiveEvidence::Zip(covering) => {
                 state.serialize_field("covering", covering)?;
             }
+            ArchiveEvidence::Zip64(covering) => {
+                state.serialize_field("format", &ArchiveFormat::Zip64)?;
+                state.serialize_field("zip64_covering", covering)?;
+            }
             ArchiveEvidence::Tar(covering) => {
                 state.serialize_field("format", &ArchiveFormat::TarUstar)?;
                 state.serialize_field("tar_covering", covering)?;
+            }
+            ArchiveEvidence::TarGzip(evidence) => {
+                state.serialize_field("format", &ArchiveFormat::TarGzipUstar)?;
+                state.serialize_field("gzip", &evidence.gzip)?;
+                state.serialize_field("tar_covering", &evidence.tar)?;
             }
         }
         state.serialize_field("members", &self.members)?;

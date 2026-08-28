@@ -8,7 +8,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 pub const MAX_MANIFEST_BYTES: usize = 16 * 1024 * 1024;
@@ -22,6 +22,23 @@ const CONTENT_LABEL: &str = "sealr.tree.content.v1";
 const TAR_LAYOUT_VECTOR_SCHEMA: &str = "sealr.tar-layout-conformance.v1";
 const TAR_TREE_ENCODING: &str = "sealrTreeV2";
 const TAR_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-ustar.v1";
+const ZIP64_MANIFEST_SCHEMA: &str = "sealr.zip64-identity-conformance.v1";
+const ZIP64_IR_SCHEMA: &str = "sealr.archive-ir.zip64.v1";
+const ZIP64_PROFILE_SCHEMA: &str = "sealr.profile.zip64.strict-ascii.v1";
+const ZIP64_TREE_ENCODING: &str = "sealrTreeV3";
+const ZIP64_LAYOUT_LABEL: &str = "sealr.tree.layout.zip64.v1";
+const TAR_GZIP_MANIFEST_SCHEMA: &str = "sealr.tar-gzip-identity-conformance.v1";
+const TAR_GZIP_PROFILE_SCHEMA: &str = "sealr.profile.tar-gzip.ustar-portable.v1";
+const TAR_GZIP_IR_SCHEMA: &str = "sealr.archive-ir.tar-gzip-ustar.v1";
+const TAR_GZIP_TREE_ENCODING: &str = "sealrTreeV4";
+const TAR_GZIP_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gzip-ustar.v1";
+const TAR_PORTABLE_PROFILE_SCHEMA: &str = "sealr.profile.tar.ustar-portable.v1";
+const TAR_PORTABLE_PROFILE_DIGEST: &str =
+    "3c87c5ec4c1ad5377eb60ebb308e9e394aaf7a4133dddf5587829b4510af1700";
+const GZIP_TRANSFORM_ID: &str = "sealr.transform.gzip.rfc1952-single-member.v1";
+const GZIP_TRANSFORM_DEFINITION: &[u8] = b"algorithm=rfc1952-gzip;members=exactly-one;reserved-flags=zero;extra-fields=exact-subfield-framing-si2-nonzero-unique-ids;trailing-data=forbidden;header-crc=verify-when-present;data-crc32=verify;isize=verify;payload=rfc1951-deflate;output=bounded";
+const GZIP_DECODER_PARAMETERS: &[u8] = b"rfc1951-window-bits=15;preset-dictionary=none";
+const MAX_DERIVED_TAR_BYTES: u64 = 64 * 1024 * 1024;
 
 const FILE: u8 = 1;
 const DIRECTORY: u8 = 2;
@@ -74,6 +91,246 @@ struct Manifest {
     tree_encoding: String,
     profiles: Vec<ProfileVector>,
     cases: Vec<Case>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ManifestEnvelope {
+    schema: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Zip64Manifest {
+    schema: String,
+    profile: Zip64ProfileVector,
+    layout_encoding: String,
+    layout_label: String,
+    content_encoding: String,
+    content_label: String,
+    cases: Vec<Zip64Case>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Zip64ProfileVector {
+    id: String,
+    digest: DigestHex,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Zip64Case {
+    id: String,
+    source_bytes_hex: String,
+    source: DigestHex,
+    archive_ir: Zip64ArchiveIr,
+    layout_preimage_hex: String,
+    layout_root: Zip64LayoutRoot,
+    content_root: Zip64ContentRoot,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Zip64ArchiveIr {
+    schema: String,
+    profile: String,
+    profile_digest: String,
+    source_digest: DigestHex,
+    format: String,
+    zip64_covering: Zip64Covering,
+    members: Vec<Zip64Member>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Zip64Covering {
+    local_records: ByteRange,
+    central_directory: ByteRange,
+    zip64_eocd: Option<ByteRange>,
+    zip64_locator: Option<ByteRange>,
+    eocd: ByteRange,
+    comment: ByteRange,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Zip64Member {
+    raw_name_bytes: Vec<u8>,
+    decoded_name: String,
+    canonical_path: String,
+    components: Vec<String>,
+    kind: MemberKind,
+    method: u16,
+    flags: u16,
+    declared_crc: u32,
+    declared_comp_size: u64,
+    declared_uncomp_size: u64,
+    source_ranges: MemberSourceRanges,
+    extra_fields: Vec<ExtraField>,
+    zip64: Zip64MemberEvidence,
+    actual_uncomp_size: Option<u64>,
+    actual_crc: Option<u32>,
+    content_sha256: Option<String>,
+    verification: MemberVerification,
+    normalization_actions: Vec<NormalizationAction>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Zip64MemberEvidence {
+    local_version_needed: u16,
+    central_version_needed: u16,
+    central_presence_mask: u8,
+    central_legacy_sentinel_mask: u8,
+    local_legacy_sentinel_mask: u8,
+    local_value_shape: Zip64LocalValueShape,
+    local_zip64_extra: Option<ByteRange>,
+    central_zip64_extra: Option<ByteRange>,
+    descriptor_width: Option<Zip64DescriptorWidth>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum Zip64LocalValueShape {
+    Absent,
+    Exact,
+    StreamingZeros,
+    StreamingMaxima,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+enum Zip64DescriptorWidth {
+    Zip32,
+    Zip64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Zip64LayoutRoot {
+    #[serde(rename = "sealrTreeV3")]
+    sealr_tree_v3: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Zip64ContentRoot {
+    #[serde(rename = "sealrTreeV1")]
+    sealr_tree_v1: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipManifest {
+    schema: String,
+    archive_ir_schema: String,
+    profile: TarGzipProfileVector,
+    transform: TarGzipTransformVector,
+    inner_profile: TarGzipProfileVector,
+    layout_encoding: String,
+    layout_label: String,
+    content_encoding: String,
+    content_label: String,
+    derived_tar: TarGzipDerivedTar,
+    cases: Vec<TarGzipCase>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipProfileVector {
+    id: String,
+    digest: DigestHex,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipTransformVector {
+    id: String,
+    definition_hex: String,
+    digest: DigestHex,
+    decoder_parameters_hex: String,
+    decoder_parameters_digest: DigestHex,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipDerivedTar {
+    bytes_hex: String,
+    source: DigestHex,
+    covering: TarCovering,
+    members: Vec<TarGzipMember>,
+    raw_layout_preimage_hex: String,
+    raw_layout_root: TarLayoutRoot,
+    content_root: TarContentRoot,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipMember {
+    raw_name_bytes: Vec<u8>,
+    decoded_name: String,
+    canonical_path: String,
+    components: Vec<String>,
+    kind: MemberKind,
+    declared_uncomp_size: u64,
+    tar: TarGzipMemberEvidence,
+    actual_uncomp_size: u64,
+    actual_crc: u32,
+    content_sha256: String,
+    verification: MemberVerification,
+    normalization_actions: Vec<NormalizationAction>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipMemberEvidence {
+    header: ByteRange,
+    payload: ByteRange,
+    padding: ByteRange,
+    mode: u32,
+    mtime: u64,
+    header_checksum: u32,
+    header_sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipCase {
+    id: String,
+    source_bytes_hex: String,
+    source: DigestHex,
+    gzip: GzipWrapperVector,
+    layout_preimage_hex: String,
+    layout_root: TarGzipLayoutRoot,
+    content_root: TarContentRoot,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GzipWrapperVector {
+    flags: u8,
+    modification_time: u32,
+    extra_flags: u8,
+    operating_system: u8,
+    header: ByteRange,
+    extra: Option<ByteRange>,
+    extra_subfield_count: u32,
+    original_name: Option<ByteRange>,
+    comment: Option<ByteRange>,
+    header_crc16: Option<ByteRange>,
+    compressed_payload: ByteRange,
+    trailer: ByteRange,
+    declared_crc32: u32,
+    declared_isize: u32,
+    derived_output_len: u64,
+    derived_output_sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipLayoutRoot {
+    #[serde(rename = "sealrTreeV4")]
+    sealr_tree_v4: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -224,7 +481,7 @@ struct ArchiveIr {
     members: Vec<Member>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize)]
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct ByteRange {
     offset: u64,
@@ -374,15 +631,91 @@ enum NormalizationAction {
     DropDotComponent { component_index: u32 },
 }
 
+#[derive(Clone, Copy, Serialize)]
+struct Zip64ProfileBitRule {
+    bit: u8,
+    mask: u16,
+    disposition: &'static str,
+    meaning: &'static str,
+}
+
+#[derive(Serialize)]
+struct Zip64ProfileDefinition {
+    schema: &'static str,
+    format: &'static str,
+    methods: [u16; 2],
+    general_purpose_bits: [Zip64ProfileBitRule; 16],
+    names: &'static str,
+    extra_fields: &'static str,
+    local_zip64: &'static str,
+    central_zip64: &'static str,
+    descriptor_width: &'static str,
+    descriptors: &'static str,
+    global_end_records: &'static str,
+    spanning: &'static str,
+    directories: &'static str,
+    redundant_metadata: &'static str,
+}
+
+#[derive(Serialize)]
+struct TarGzipProfileDefinition {
+    schema: &'static str,
+    status: &'static str,
+    format: &'static str,
+    wrapper_profile: &'static str,
+    wrapper_profile_sha256: String,
+    decoder_parameters_sha256: String,
+    gzip_members: &'static str,
+    gzip_optional_fields: &'static str,
+    gzip_integrity: &'static str,
+    gzip_trailing_input: &'static str,
+    derived_output: &'static str,
+    inner_profile: &'static str,
+    inner_profile_sha256: String,
+}
+
 pub fn verify_manifest_json(bytes: &[u8]) -> Result<VerificationSummary, VerifyError> {
     if bytes.len() > MAX_MANIFEST_BYTES {
         return Err(VerifyError::new(format!(
             "manifest exceeds {MAX_MANIFEST_BYTES} bytes"
         )));
     }
-    let manifest: Manifest = serde_json::from_slice(bytes)
+    let envelope: ManifestEnvelope = serde_json::from_slice(bytes)
         .map_err(|error| VerifyError::new(format!("JSON: {error}")))?;
-    verify_manifest(&manifest)
+    match envelope.schema.as_str() {
+        MANIFEST_SCHEMA => {
+            let manifest: Manifest = serde_json::from_slice(bytes)
+                .map_err(|error| VerifyError::new(format!("JSON: {error}")))?;
+            verify_manifest(&manifest)
+        }
+        ZIP64_MANIFEST_SCHEMA => verify_zip64_identity_vector_json(bytes),
+        TAR_GZIP_MANIFEST_SCHEMA => verify_tar_gzip_identity_vector_json(bytes),
+        schema => Err(VerifyError::new(format!("unsupported schema {schema:?}"))),
+    }
+}
+
+pub fn verify_tar_gzip_identity_vector_json(
+    bytes: &[u8],
+) -> Result<VerificationSummary, VerifyError> {
+    if bytes.len() > MAX_MANIFEST_BYTES {
+        return Err(VerifyError::new(format!(
+            "TAR/gzip manifest exceeds {MAX_MANIFEST_BYTES} bytes"
+        )));
+    }
+    let manifest: TarGzipManifest = serde_json::from_slice(bytes)
+        .map_err(|error| VerifyError::new(format!("TAR/gzip JSON: {error}")))?;
+    verify_tar_gzip_manifest(&manifest)
+}
+
+pub fn verify_zip64_identity_vector_json(bytes: &[u8]) -> Result<VerificationSummary, VerifyError> {
+    if bytes.len() > MAX_MANIFEST_BYTES {
+        return Err(VerifyError::new(format!(
+            "ZIP64 manifest exceeds {MAX_MANIFEST_BYTES} bytes"
+        )));
+    }
+    let manifest: Zip64Manifest = serde_json::from_slice(bytes)
+        .map_err(|error| VerifyError::new(format!("ZIP64 JSON: {error}")))?;
+    verify_zip64_manifest(&manifest)
 }
 
 pub fn verify_tar_layout_vector_json(bytes: &[u8]) -> Result<TarVerificationSummary, VerifyError> {
@@ -557,6 +890,1954 @@ fn range_end(range: ByteRange, label: &str) -> Result<u64, VerifyError> {
         .offset
         .checked_add(range.len)
         .ok_or_else(|| VerifyError::new(format!("{label} overflows u64")))
+}
+
+fn verify_zip64_manifest(manifest: &Zip64Manifest) -> Result<VerificationSummary, VerifyError> {
+    if manifest.schema != ZIP64_MANIFEST_SCHEMA
+        || manifest.layout_encoding != ZIP64_TREE_ENCODING
+        || manifest.layout_label != ZIP64_LAYOUT_LABEL
+        || manifest.content_encoding != TREE_ENCODING
+        || manifest.content_label != CONTENT_LABEL
+    {
+        return Err(VerifyError::new("unsupported ZIP64 manifest contract"));
+    }
+    verify_zip64_profile(&manifest.profile)?;
+    if manifest.cases.is_empty() {
+        return Err(VerifyError::new("ZIP64 manifest has no cases"));
+    }
+    if manifest.cases.len() > MAX_CASES {
+        return Err(VerifyError::new(format!(
+            "ZIP64 manifest exceeds the {MAX_CASES}-case limit"
+        )));
+    }
+
+    let mut case_ids = HashSet::new();
+    for case in &manifest.cases {
+        if case.id.is_empty() || !case_ids.insert(case.id.as_str()) {
+            return Err(VerifyError::new("ZIP64 case ids are empty or duplicate"));
+        }
+        verify_zip64_case(case, &manifest.profile)
+            .map_err(|error| error.context(&format!("ZIP64 case {}", case.id)))?;
+    }
+
+    Ok(VerificationSummary {
+        profiles: 1,
+        cases: manifest.cases.len(),
+        layout_roots: manifest.cases.len(),
+        content_roots: manifest.cases.len(),
+    })
+}
+
+fn verify_zip64_profile(profile: &Zip64ProfileVector) -> Result<(), VerifyError> {
+    if profile.id != ZIP64_PROFILE_SCHEMA {
+        return Err(VerifyError::new("unsupported ZIP64 profile id"));
+    }
+    verify_digest(&profile.digest.sha256, "ZIP64 profile digest")?;
+    let canonical = zip64_profile_canonical_bytes()?;
+    if sha256_hex(&canonical) != profile.digest.sha256 {
+        return Err(VerifyError::new(
+            "ZIP64 profile digest does not match the independently reconstructed profile",
+        ));
+    }
+    Ok(())
+}
+
+fn zip64_profile_canonical_bytes() -> Result<Vec<u8>, VerifyError> {
+    const fn rule(
+        bit: u8,
+        disposition: &'static str,
+        meaning: &'static str,
+    ) -> Zip64ProfileBitRule {
+        Zip64ProfileBitRule {
+            bit,
+            mask: 1_u16 << bit,
+            disposition,
+            meaning,
+        }
+    }
+    let definition = Zip64ProfileDefinition {
+        schema: ZIP64_PROFILE_SCHEMA,
+        format: "zip64",
+        methods: [0, 8],
+        general_purpose_bits: [
+            rule(0, "denied", "traditional-encryption"),
+            rule(1, "denied", "method-dependent-option-1"),
+            rule(2, "denied", "method-dependent-option-2"),
+            rule(3, "semantic", "data-descriptor"),
+            rule(4, "denied", "enhanced-deflating"),
+            rule(5, "denied", "compressed-patched-data"),
+            rule(6, "denied", "strong-encryption"),
+            rule(7, "denied", "unused"),
+            rule(8, "denied", "unused"),
+            rule(9, "denied", "unused"),
+            rule(10, "denied", "unused"),
+            rule(11, "denied", "utf8-name"),
+            rule(12, "denied", "reserved-enhanced-compression"),
+            rule(13, "denied", "masked-local-header"),
+            rule(14, "denied", "alternate-streams"),
+            rule(15, "denied", "reserved"),
+        ],
+        names: "strict-ascii",
+        extra_fields: "exactly-one-semantic-zip64-per-site-or-none-all-other-ids-denied",
+        local_zip64: "exact-u-c-or-cpython-zero-pair-or-zip-rs-max-pair",
+        central_zip64: "unique-fixed-order-u-c-o-mask-with-exact-redundancy",
+        descriptor_width: "zip64-iff-local-zip64-or-resolved-size-at-least-u32-max",
+        descriptors: "signed-only-exact-crc-compressed-uncompressed",
+        global_end_records: "optional-fixed-56-byte-eocd-plus-adjacent-20-byte-locator",
+        spanning: "denied-single-disk-only",
+        directories: "trailing-slash-store-empty-crc32-zero",
+        redundant_metadata: "exact-producer-compatible-lfh-cdh-descriptor-and-end-records",
+    };
+    serde_json::to_vec(&definition)
+        .map_err(|error| VerifyError::new(format!("ZIP64 profile serialization: {error}")))
+}
+
+fn verify_zip64_case(case: &Zip64Case, profile: &Zip64ProfileVector) -> Result<(), VerifyError> {
+    let source = decode_hex(&case.source_bytes_hex, "ZIP64 source_bytes_hex")?;
+    verify_digest(&case.source.sha256, "ZIP64 source digest")?;
+    if sha256_hex(&source) != case.source.sha256 {
+        return Err(VerifyError::new(
+            "ZIP64 source bytes do not match source digest",
+        ));
+    }
+    let ir = &case.archive_ir;
+    if ir.schema != ZIP64_IR_SCHEMA
+        || ir.profile != profile.id
+        || ir.profile_digest != profile.digest.sha256
+        || ir.source_digest.sha256 != case.source.sha256
+        || ir.format != "zip64"
+    {
+        return Err(VerifyError::new(
+            "ZIP64 IR source, format, or profile identity does not match the case",
+        ));
+    }
+    validate_zip64_ir(ir)?;
+    verify_zip64_covering(&source, ir)?;
+
+    verify_digest(&case.layout_root.sealr_tree_v3, "ZIP64 layout root")?;
+    let expected_preimage = decode_hex(&case.layout_preimage_hex, "ZIP64 layout preimage")?;
+    let actual_preimage = encode_zip64_layout(ir)?;
+    if actual_preimage != expected_preimage {
+        return Err(VerifyError::new(
+            "ZIP64 layout preimage does not match reconstructed evidence",
+        ));
+    }
+    let actual_layout = sha256_hex(&actual_preimage);
+    if actual_layout != case.layout_root.sealr_tree_v3 {
+        return Err(VerifyError::new(format!(
+            "ZIP64 layout root mismatch: expected {}, calculated {actual_layout}",
+            case.layout_root.sealr_tree_v3
+        )));
+    }
+
+    verify_digest(&case.content_root.sealr_tree_v1, "ZIP64 content root")?;
+    let actual_content = sha256_hex(&encode_zip64_content(ir)?);
+    if actual_content != case.content_root.sealr_tree_v1 {
+        return Err(VerifyError::new(format!(
+            "ZIP64 content root mismatch: expected {}, calculated {actual_content}",
+            case.content_root.sealr_tree_v1
+        )));
+    }
+    Ok(())
+}
+
+fn validate_zip64_ir(ir: &Zip64ArchiveIr) -> Result<(), VerifyError> {
+    if ir.members.len() > MAX_MEMBERS_PER_CASE {
+        return Err(VerifyError::new("ZIP64 IR member limit exceeded"));
+    }
+    u32::try_from(ir.members.len())
+        .map_err(|_| VerifyError::new("ZIP64 member count exceeds u32"))?;
+    let mut paths = HashSet::new();
+    for member in &ir.members {
+        if member.canonical_path.is_empty() || !paths.insert(member.canonical_path.as_str()) {
+            return Err(VerifyError::new(
+                "ZIP64 canonical paths are empty or duplicate",
+            ));
+        }
+        if member.raw_name_bytes.is_empty()
+            || !member.raw_name_bytes.is_ascii()
+            || member.decoded_name.as_bytes() != member.raw_name_bytes
+            || member.components.join("/") != member.canonical_path
+        {
+            return Err(VerifyError::new("ZIP64 member name evidence is invalid"));
+        }
+        if !matches!(member.method, 0 | 8) || !matches!(member.flags, 0 | 0x0008) {
+            return Err(VerifyError::new("ZIP64 member method or flags are denied"));
+        }
+        for (range, label) in [
+            (member.source_ranges.local_header, "ZIP64 local header"),
+            (
+                member.source_ranges.compressed_payload,
+                "ZIP64 compressed payload",
+            ),
+            (member.source_ranges.central_header, "ZIP64 central header"),
+        ] {
+            validate_range(range, label)?;
+        }
+        if let Some(range) = member.source_ranges.data_descriptor {
+            validate_range(range, "ZIP64 data descriptor")?;
+        }
+        let mut sites = HashSet::new();
+        for extra in &member.extra_fields {
+            validate_range(extra.header_range, "ZIP64 extra header")?;
+            validate_range(extra.data_range, "ZIP64 extra data")?;
+            if extra.id != 1
+                || !matches!(extra.disposition, ExtraDisposition::Semantic)
+                || extra.header_range.len != 4
+                || checked_range_end(extra.header_range, "ZIP64 extra header")?
+                    != extra.data_range.offset
+                || !sites.insert(extra.site)
+            {
+                return Err(VerifyError::new(
+                    "ZIP64 extra evidence is outside the closed semantic language",
+                ));
+            }
+        }
+        if member.zip64.central_presence_mask > 0b111
+            || member.zip64.central_legacy_sentinel_mask > 0b111
+            || member.zip64.local_legacy_sentinel_mask > 0b11
+        {
+            return Err(VerifyError::new("ZIP64 evidence mask is invalid"));
+        }
+        if !matches!(member.verification, MemberVerification::Verified) {
+            return Err(VerifyError::new(
+                "ZIP64 conformance content requires verified members",
+            ));
+        }
+        let actual_size = member
+            .actual_uncomp_size
+            .ok_or_else(|| VerifyError::new("ZIP64 verified member has no actual size"))?;
+        let actual_crc = member
+            .actual_crc
+            .ok_or_else(|| VerifyError::new("ZIP64 verified member has no actual CRC"))?;
+        let content_digest = member
+            .content_sha256
+            .as_deref()
+            .ok_or_else(|| VerifyError::new("ZIP64 verified member has no content digest"))?;
+        verify_digest(content_digest, "ZIP64 member content digest")?;
+        if actual_size != member.declared_uncomp_size || actual_crc != member.declared_crc {
+            return Err(VerifyError::new(
+                "ZIP64 verified member facts differ from their declarations",
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn verify_tar_gzip_manifest(
+    manifest: &TarGzipManifest,
+) -> Result<VerificationSummary, VerifyError> {
+    if manifest.schema != TAR_GZIP_MANIFEST_SCHEMA
+        || manifest.archive_ir_schema != TAR_GZIP_IR_SCHEMA
+        || manifest.layout_encoding != TAR_GZIP_TREE_ENCODING
+        || manifest.layout_label != TAR_GZIP_LAYOUT_LABEL
+        || manifest.content_encoding != TREE_ENCODING
+        || manifest.content_label != CONTENT_LABEL
+    {
+        return Err(VerifyError::new("unsupported TAR/gzip manifest contract"));
+    }
+    const EXPECTED_CASE_IDS: [&str; 2] = ["optional-default", "minimal-stored-deflate"];
+    if manifest.cases.len() != EXPECTED_CASE_IDS.len()
+        || manifest
+            .cases
+            .iter()
+            .map(|case| case.id.as_str())
+            .ne(EXPECTED_CASE_IDS)
+    {
+        return Err(VerifyError::new(
+            "TAR/gzip v1 manifest must contain exactly the two canonical ordered cases",
+        ));
+    }
+    verify_tar_gzip_transform(&manifest.transform)?;
+    verify_tar_gzip_profile(
+        &manifest.profile,
+        &manifest.inner_profile,
+        &manifest.transform,
+    )?;
+    let derived = verify_tar_gzip_derived_tar(&manifest.derived_tar)?;
+    let raw_layout = encode_tar_gzip_inner_layout(&manifest.derived_tar)?;
+    let committed_raw_preimage = decode_hex(
+        &manifest.derived_tar.raw_layout_preimage_hex,
+        "raw TAR layout preimage",
+    )?;
+    if raw_layout != committed_raw_preimage {
+        return Err(VerifyError::new(
+            "raw TAR layout preimage does not match derived evidence",
+        ));
+    }
+    verify_digest(
+        &manifest.derived_tar.raw_layout_root.sealr_tree_v2,
+        "raw TAR layout root",
+    )?;
+    if sha256_hex(&raw_layout) != manifest.derived_tar.raw_layout_root.sealr_tree_v2 {
+        return Err(VerifyError::new("raw TAR layout root mismatch"));
+    }
+    let content_preimage = encode_tar_gzip_content(&manifest.derived_tar)?;
+    verify_digest(
+        &manifest.derived_tar.content_root.sealr_tree_v1,
+        "derived TAR content root",
+    )?;
+    if sha256_hex(&content_preimage) != manifest.derived_tar.content_root.sealr_tree_v1 {
+        return Err(VerifyError::new("derived TAR content root mismatch"));
+    }
+
+    let mut source_digests = HashSet::new();
+    let mut layout_roots = HashSet::new();
+    let mut compressed_payload_digests = HashSet::new();
+    for case in &manifest.cases {
+        verify_tar_gzip_case(case, manifest, &derived)
+            .map_err(|error| error.context(&format!("TAR/gzip case {}", case.id)))?;
+        source_digests.insert(case.source.sha256.as_str());
+        layout_roots.insert(case.layout_root.sealr_tree_v4.as_str());
+        let source = decode_hex(&case.source_bytes_hex, "gzip source bytes")?;
+        compressed_payload_digests.insert(sha256_hex(range_bytes(
+            &source,
+            case.gzip.compressed_payload,
+            "gzip compressed payload",
+        )?));
+    }
+    if source_digests.len() < 2 || layout_roots.len() < 2 || compressed_payload_digests.len() < 2 {
+        return Err(VerifyError::new(
+            "TAR/gzip cases do not prove distinct encodings and source/layout separation",
+        ));
+    }
+    if manifest.derived_tar.raw_layout_root.sealr_tree_v2
+        == manifest.cases[0].layout_root.sealr_tree_v4
+    {
+        return Err(VerifyError::new(
+            "raw TAR and wrapped TAR layouts are not separated",
+        ));
+    }
+
+    Ok(VerificationSummary {
+        profiles: 1,
+        cases: manifest.cases.len(),
+        layout_roots: manifest.cases.len() + 1,
+        content_roots: manifest.cases.len() + 1,
+    })
+}
+
+fn verify_tar_gzip_transform(transform: &TarGzipTransformVector) -> Result<(), VerifyError> {
+    if transform.id != GZIP_TRANSFORM_ID {
+        return Err(VerifyError::new("unsupported gzip transform id"));
+    }
+    let definition = decode_hex(&transform.definition_hex, "gzip transform definition")?;
+    let decoder_parameters =
+        decode_hex(&transform.decoder_parameters_hex, "gzip decoder parameters")?;
+    if definition != GZIP_TRANSFORM_DEFINITION || decoder_parameters != GZIP_DECODER_PARAMETERS {
+        return Err(VerifyError::new(
+            "gzip transform constants differ from the closed verifier registry",
+        ));
+    }
+    verify_digest(&transform.digest.sha256, "gzip transform digest")?;
+    verify_digest(
+        &transform.decoder_parameters_digest.sha256,
+        "gzip decoder-parameter digest",
+    )?;
+    let id_len = u64::try_from(transform.id.len())
+        .map_err(|_| VerifyError::new("gzip transform id length exceeds u64"))?;
+    let definition_len = u64::try_from(definition.len())
+        .map_err(|_| VerifyError::new("gzip transform definition length exceeds u64"))?;
+    let mut profile_preimage = Vec::new();
+    profile_preimage.extend_from_slice(b"sealr.transform-profile.v1\0");
+    profile_preimage.extend_from_slice(&id_len.to_be_bytes());
+    profile_preimage.extend_from_slice(transform.id.as_bytes());
+    profile_preimage.extend_from_slice(&definition_len.to_be_bytes());
+    profile_preimage.extend_from_slice(&definition);
+    if sha256_hex(&profile_preimage) != transform.digest.sha256
+        || sha256_hex(&decoder_parameters) != transform.decoder_parameters_digest.sha256
+    {
+        return Err(VerifyError::new(
+            "gzip transform or decoder parameters do not match their digest",
+        ));
+    }
+    Ok(())
+}
+
+fn verify_tar_gzip_profile(
+    profile: &TarGzipProfileVector,
+    inner: &TarGzipProfileVector,
+    transform: &TarGzipTransformVector,
+) -> Result<(), VerifyError> {
+    if profile.id != TAR_GZIP_PROFILE_SCHEMA
+        || inner.id != TAR_PORTABLE_PROFILE_SCHEMA
+        || inner.digest.sha256 != TAR_PORTABLE_PROFILE_DIGEST
+    {
+        return Err(VerifyError::new(
+            "unsupported TAR/gzip or inner TAR profile identity",
+        ));
+    }
+    verify_digest(&profile.digest.sha256, "TAR/gzip profile digest")?;
+    verify_digest(&inner.digest.sha256, "inner TAR profile digest")?;
+    let canonical = tar_gzip_profile_canonical_bytes(inner, transform)?;
+    if sha256_hex(&canonical) != profile.digest.sha256 {
+        return Err(VerifyError::new(
+            "TAR/gzip profile digest does not match reconstructed canonical bytes",
+        ));
+    }
+    Ok(())
+}
+
+fn tar_gzip_profile_canonical_bytes(
+    inner: &TarGzipProfileVector,
+    transform: &TarGzipTransformVector,
+) -> Result<Vec<u8>, VerifyError> {
+    let definition = TarGzipProfileDefinition {
+        schema: TAR_GZIP_PROFILE_SCHEMA,
+        status: "supported-preview",
+        format: "tar-gzip-ustar",
+        wrapper_profile: GZIP_TRANSFORM_ID,
+        wrapper_profile_sha256: transform.digest.sha256.clone(),
+        decoder_parameters_sha256: transform.decoder_parameters_digest.sha256.clone(),
+        gzip_members: "exactly-one",
+        gzip_optional_fields: "bounded-exact-rfc1952-framing-si2-nonzero-unique-ids",
+        gzip_integrity: "fhcrc-when-present-and-crc32-and-isize",
+        gzip_trailing_input: "denied-including-zero-padding-and-concatenation",
+        derived_output: "private-immutable-bounded-and-sha256-bound",
+        inner_profile: TAR_PORTABLE_PROFILE_SCHEMA,
+        inner_profile_sha256: inner.digest.sha256.clone(),
+    };
+    serde_json::to_vec(&definition)
+        .map_err(|error| VerifyError::new(format!("TAR/gzip profile serialization: {error}")))
+}
+
+fn verify_tar_gzip_derived_tar(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, VerifyError> {
+    let bytes = decode_hex(&derived.bytes_hex, "derived TAR bytes")?;
+    let len = u64::try_from(bytes.len())
+        .map_err(|_| VerifyError::new("derived TAR length exceeds u64"))?;
+    if len > MAX_DERIVED_TAR_BYTES {
+        return Err(VerifyError::new(format!(
+            "derived TAR exceeds the {MAX_DERIVED_TAR_BYTES}-byte verifier cap"
+        )));
+    }
+    verify_digest(&derived.source.sha256, "derived TAR digest")?;
+    if sha256_hex(&bytes) != derived.source.sha256 {
+        return Err(VerifyError::new(
+            "committed derived TAR bytes do not match their digest",
+        ));
+    }
+    if derived.members.len() > MAX_MEMBERS_PER_CASE {
+        return Err(VerifyError::new("derived TAR member limit exceeded"));
+    }
+    let records_end = checked_range_end(derived.covering.member_records, "TAR member records")?;
+    let terminator_end = checked_range_end(derived.covering.terminator, "TAR terminator")?;
+    let trailing_end = checked_range_end(derived.covering.trailing_zeros, "TAR trailing zeros")?;
+    if derived.covering.member_records.offset != 0
+        || derived.covering.terminator.offset != records_end
+        || derived.covering.terminator.len != 1024
+        || derived.covering.trailing_zeros.offset != terminator_end
+        || trailing_end != len
+        || !trailing_end.is_multiple_of(512)
+    {
+        return Err(VerifyError::new(
+            "derived TAR covering does not exactly partition complete blocks",
+        ));
+    }
+
+    let mut members: Vec<_> = derived.members.iter().collect();
+    members.sort_by_key(|member| member.tar.header.offset);
+    let mut expected_header = 0_u64;
+    let mut paths = HashSet::new();
+    for member in members {
+        if member.canonical_path.is_empty()
+            || !paths.insert(member.canonical_path.as_str())
+            || member.components.join("/") != member.canonical_path
+            || member.raw_name_bytes.is_empty()
+            || member.decoded_name.as_bytes() != member.raw_name_bytes
+        {
+            return Err(VerifyError::new(
+                "derived TAR member name evidence is invalid",
+            ));
+        }
+        let evidence = &member.tar;
+        let header_end = checked_range_end(evidence.header, "TAR member header")?;
+        let payload_end = checked_range_end(evidence.payload, "TAR member payload")?;
+        let padding_end = checked_range_end(evidence.padding, "TAR member padding")?;
+        let expected_padding = (512 - (evidence.payload.len % 512)) % 512;
+        if evidence.header.offset != expected_header
+            || evidence.header.len != 512
+            || evidence.payload.offset != header_end
+            || evidence.payload.len != member.declared_uncomp_size
+            || evidence.padding.offset != payload_end
+            || evidence.padding.len != expected_padding
+            || !padding_end.is_multiple_of(512)
+            || padding_end > records_end
+            || member.actual_uncomp_size != member.declared_uncomp_size
+            || !matches!(member.verification, MemberVerification::Verified)
+        {
+            return Err(VerifyError::new("derived TAR member geometry is invalid"));
+        }
+        let header = range_bytes(&bytes, evidence.header, "derived TAR header")?;
+        verify_tar_gzip_header(member, header)?;
+        verify_digest(&evidence.header_sha256, "derived TAR header digest")?;
+        if sha256_hex(header) != evidence.header_sha256 {
+            return Err(VerifyError::new(
+                "derived TAR header digest disagrees with committed bytes",
+            ));
+        }
+        let payload = range_bytes(&bytes, evidence.payload, "derived TAR payload")?;
+        verify_digest(&member.content_sha256, "derived TAR member content digest")?;
+        if sha256_hex(payload) != member.content_sha256
+            || crc32_ieee_bytes(payload) != member.actual_crc
+        {
+            return Err(VerifyError::new(
+                "derived TAR payload digest or CRC disagrees with evidence",
+            ));
+        }
+        if range_bytes(&bytes, evidence.padding, "derived TAR padding")?
+            .iter()
+            .any(|byte| *byte != 0)
+        {
+            return Err(VerifyError::new("derived TAR member padding is nonzero"));
+        }
+        expected_header = padding_end;
+    }
+    if expected_header != records_end {
+        return Err(VerifyError::new(
+            "derived TAR members do not fill their covering",
+        ));
+    }
+    for (range, label) in [
+        (derived.covering.terminator, "derived TAR terminator"),
+        (
+            derived.covering.trailing_zeros,
+            "derived TAR trailing zeros",
+        ),
+    ] {
+        if range_bytes(&bytes, range, label)?
+            .iter()
+            .any(|byte| *byte != 0)
+        {
+            return Err(VerifyError::new(format!("{label} contains nonzero bytes")));
+        }
+    }
+    Ok(bytes)
+}
+
+fn verify_tar_gzip_header(member: &TarGzipMember, header: &[u8]) -> Result<(), VerifyError> {
+    if header.len() != 512 || header[257..263] != *b"ustar\0" || header[263..265] != *b"00" {
+        return Err(VerifyError::new("derived TAR header is not portable ustar"));
+    }
+    if header[500..512].iter().any(|byte| *byte != 0) {
+        return Err(VerifyError::new(
+            "derived TAR reserved ustar header bytes are nonzero",
+        ));
+    }
+    if header[157..257].iter().any(|byte| *byte != 0) {
+        return Err(VerifyError::new(
+            "derived TAR linkname is not empty for the portable subset",
+        ));
+    }
+    if header[148..154]
+        .iter()
+        .any(|byte| !(b'0'..=b'7').contains(byte))
+        || header[154] != 0
+        || header[155] != b' '
+    {
+        return Err(VerifyError::new(
+            "derived TAR checksum field is not six octal digits, NUL, space",
+        ));
+    }
+    let declared_checksum = parse_tar_octal(&header[148..156], "TAR checksum")?;
+    let mut checksum_header = header.to_vec();
+    checksum_header[148..156].fill(b' ');
+    let actual_checksum = checksum_header.iter().try_fold(0_u32, |sum, byte| {
+        sum.checked_add(u32::from(*byte))
+            .ok_or_else(|| VerifyError::new("TAR checksum overflows u32"))
+    })?;
+    if declared_checksum != u64::from(actual_checksum)
+        || member.tar.header_checksum != actual_checksum
+    {
+        return Err(VerifyError::new(
+            "derived TAR checksum evidence disagrees with header bytes",
+        ));
+    }
+    let mode = parse_tar_octal(&header[100..108], "TAR mode")?;
+    let _uid = parse_tar_octal(&header[108..116], "TAR uid")?;
+    let _gid = parse_tar_octal(&header[116..124], "TAR gid")?;
+    let size = parse_tar_octal(&header[124..136], "TAR size")?;
+    let mtime = parse_tar_octal(&header[136..148], "TAR mtime")?;
+    let device_major = parse_tar_device_number(&header[329..337], "TAR devmajor")?;
+    let device_minor = parse_tar_device_number(&header[337..345], "TAR devminor")?;
+    if mode > 0o7777
+        || u32::try_from(mode).ok() != Some(member.tar.mode)
+        || size != member.declared_uncomp_size
+        || mtime != member.tar.mtime
+    {
+        return Err(VerifyError::new(
+            "derived TAR numeric evidence disagrees with header bytes",
+        ));
+    }
+    if device_major != 0 || device_minor != 0 {
+        return Err(VerifyError::new(
+            "derived TAR device numbers must be zero in the portable subset",
+        ));
+    }
+    verify_tar_owner_text(&header[265..297], "TAR uname")?;
+    verify_tar_owner_text(&header[297..329], "TAR gname")?;
+    let name = tar_text_field(&header[..100], "TAR name", false)?;
+    let prefix = tar_text_field(&header[345..500], "TAR prefix", true)?;
+    let mut raw_path = Vec::new();
+    if !prefix.is_empty() {
+        raw_path.extend_from_slice(prefix);
+        raw_path.push(b'/');
+    }
+    raw_path.extend_from_slice(name);
+    if raw_path != member.raw_name_bytes {
+        return Err(VerifyError::new(
+            "derived TAR path evidence disagrees with header bytes",
+        ));
+    }
+    let typeflag = header[156];
+    let source_is_directory = typeflag == b'5';
+    if !matches!(typeflag, 0 | b'0' | b'5')
+        || source_is_directory != matches!(member.kind, MemberKind::Directory)
+        || (source_is_directory && member.declared_uncomp_size != 0)
+    {
+        return Err(VerifyError::new(
+            "derived TAR member kind disagrees with typeflag",
+        ));
+    }
+    Ok(())
+}
+
+fn parse_tar_octal(field: &[u8], label: &str) -> Result<u64, VerifyError> {
+    if field.first().is_some_and(|byte| byte & 0x80 != 0) {
+        return Err(VerifyError::new(format!(
+            "{label} uses denied base-256 encoding"
+        )));
+    }
+    let digit_end = field
+        .iter()
+        .position(|byte| matches!(*byte, 0 | b' '))
+        .unwrap_or(field.len());
+    if digit_end == 0
+        || digit_end == field.len()
+        || field[..digit_end]
+            .iter()
+            .any(|byte| !(b'0'..=b'7').contains(byte))
+        || field[digit_end..]
+            .iter()
+            .any(|byte| !matches!(*byte, 0 | b' '))
+    {
+        return Err(VerifyError::new(format!(
+            "{label} is not canonical ASCII octal"
+        )));
+    }
+    field[..digit_end].iter().try_fold(0_u64, |value, byte| {
+        value
+            .checked_mul(8)
+            .and_then(|value| value.checked_add(u64::from(*byte - b'0')))
+            .ok_or_else(|| VerifyError::new(format!("{label} overflows u64")))
+    })
+}
+
+fn parse_tar_device_number(field: &[u8], label: &str) -> Result<u64, VerifyError> {
+    if field.iter().all(|byte| *byte == 0) {
+        Ok(0)
+    } else {
+        parse_tar_octal(field, label)
+    }
+}
+
+fn tar_text_field<'a>(
+    field: &'a [u8],
+    label: &str,
+    empty_allowed: bool,
+) -> Result<&'a [u8], VerifyError> {
+    let end = field
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(field.len());
+    if field[end..].iter().any(|byte| *byte != 0) {
+        return Err(VerifyError::new(format!(
+            "{label} has nonzero bytes after its first NUL"
+        )));
+    }
+    if !empty_allowed && end == 0 {
+        return Err(VerifyError::new(format!("{label} is empty")));
+    }
+    Ok(&field[..end])
+}
+
+fn verify_tar_owner_text(field: &[u8], label: &str) -> Result<(), VerifyError> {
+    let Some(end) = field.iter().position(|byte| *byte == 0) else {
+        return Err(VerifyError::new(format!("{label} is not NUL-terminated")));
+    };
+    if field[end..].iter().any(|byte| *byte != 0) {
+        return Err(VerifyError::new(format!(
+            "{label} has nonzero bytes after its first NUL"
+        )));
+    }
+    if field[..end]
+        .iter()
+        .any(|byte| !matches!(*byte, b' '..=b'~'))
+    {
+        return Err(VerifyError::new(format!("{label} is not printable ASCII")));
+    }
+    Ok(())
+}
+
+fn verify_tar_gzip_case(
+    case: &TarGzipCase,
+    manifest: &TarGzipManifest,
+    derived: &[u8],
+) -> Result<(), VerifyError> {
+    let source = decode_hex(&case.source_bytes_hex, "gzip source bytes")?;
+    let source_len = u64::try_from(source.len())
+        .map_err(|_| VerifyError::new("gzip source length exceeds u64"))?;
+    if source_len > MAX_DERIVED_TAR_BYTES {
+        return Err(VerifyError::new(format!(
+            "gzip source exceeds the {MAX_DERIVED_TAR_BYTES}-byte verifier cap"
+        )));
+    }
+    verify_digest(&case.source.sha256, "gzip source digest")?;
+    if sha256_hex(&source) != case.source.sha256 {
+        return Err(VerifyError::new(
+            "gzip source bytes do not match their digest",
+        ));
+    }
+    verify_gzip_wrapper(&source, &case.gzip, derived, &manifest.derived_tar)?;
+
+    let actual_preimage = encode_tar_gzip_layout(case, manifest)?;
+    let committed_preimage = decode_hex(&case.layout_preimage_hex, "TAR/gzip layout preimage")?;
+    if actual_preimage != committed_preimage {
+        return Err(VerifyError::new(
+            "TAR/gzip layout preimage does not match reconstructed evidence",
+        ));
+    }
+    verify_digest(&case.layout_root.sealr_tree_v4, "TAR/gzip layout root")?;
+    if sha256_hex(&actual_preimage) != case.layout_root.sealr_tree_v4 {
+        return Err(VerifyError::new("TAR/gzip layout root mismatch"));
+    }
+    verify_digest(&case.content_root.sealr_tree_v1, "TAR/gzip content root")?;
+    if case.content_root.sealr_tree_v1 != manifest.derived_tar.content_root.sealr_tree_v1 {
+        return Err(VerifyError::new("wrapped and raw TAR content roots differ"));
+    }
+    Ok(())
+}
+
+fn verify_gzip_wrapper(
+    source: &[u8],
+    evidence: &GzipWrapperVector,
+    derived: &[u8],
+    derived_vector: &TarGzipDerivedTar,
+) -> Result<(), VerifyError> {
+    const FLAG_HEADER_CRC: u8 = 1 << 1;
+    const FLAG_EXTRA: u8 = 1 << 2;
+    const FLAG_NAME: u8 = 1 << 3;
+    const FLAG_COMMENT: u8 = 1 << 4;
+    const FLAG_RESERVED: u8 = 0b1110_0000;
+
+    let source_len =
+        u64::try_from(source.len()).map_err(|_| VerifyError::new("gzip source exceeds u64"))?;
+    let header_end = checked_range_end(evidence.header, "gzip header")?;
+    let payload_end = checked_range_end(evidence.compressed_payload, "gzip compressed payload")?;
+    let trailer_end = checked_range_end(evidence.trailer, "gzip trailer")?;
+    if evidence.header.offset != 0
+        || evidence.header.len < 10
+        || evidence.compressed_payload.offset != header_end
+        || evidence.trailer.offset != payload_end
+        || evidence.trailer.len != 8
+        || trailer_end != source_len
+    {
+        return Err(VerifyError::new(
+            "gzip ranges do not exactly partition one source member",
+        ));
+    }
+    let fixed = source
+        .get(..10)
+        .ok_or_else(|| VerifyError::new("gzip fixed header is truncated"))?;
+    if fixed[..3] != [0x1f, 0x8b, 8]
+        || fixed[3] & FLAG_RESERVED != 0
+        || fixed[3] != evidence.flags
+        || le_u32(fixed, 4) != evidence.modification_time
+        || fixed[8] != evidence.extra_flags
+        || fixed[9] != evidence.operating_system
+    {
+        return Err(VerifyError::new(
+            "gzip fixed structural signature or fields disagree with evidence",
+        ));
+    }
+
+    let mut cursor = 10_u64;
+    if evidence.flags & FLAG_EXTRA != 0 {
+        let extra = evidence
+            .extra
+            .ok_or_else(|| VerifyError::new("gzip FEXTRA flag has no range"))?;
+        if extra.offset != cursor || extra.len < 2 {
+            return Err(VerifyError::new("gzip FEXTRA range is not canonical"));
+        }
+        let extra_bytes = range_bytes(source, extra, "gzip FEXTRA")?;
+        if u64::from(le_u16(extra_bytes, 0)) + 2 != extra.len {
+            return Err(VerifyError::new("gzip XLEN disagrees with FEXTRA range"));
+        }
+        let mut position = 2_usize;
+        let mut count = 0_u32;
+        let mut ids = HashSet::new();
+        while position < extra_bytes.len() {
+            let header_end = position
+                .checked_add(4)
+                .ok_or_else(|| VerifyError::new("gzip FEXTRA position overflows"))?;
+            let subfield = extra_bytes
+                .get(position..header_end)
+                .ok_or_else(|| VerifyError::new("gzip FEXTRA has an incomplete subfield header"))?;
+            if subfield[1] == 0 {
+                return Err(VerifyError::new(
+                    "gzip FEXTRA subfield uses reserved SI2 zero",
+                ));
+            }
+            let id = le_u16(subfield, 0);
+            if !ids.insert(id) {
+                return Err(VerifyError::new("gzip FEXTRA repeats a subfield id"));
+            }
+            let end = header_end
+                .checked_add(usize::from(le_u16(subfield, 2)))
+                .ok_or_else(|| VerifyError::new("gzip FEXTRA subfield overflows"))?;
+            if end > extra_bytes.len() {
+                return Err(VerifyError::new("gzip FEXTRA subfield exceeds XLEN"));
+            }
+            count = count
+                .checked_add(1)
+                .ok_or_else(|| VerifyError::new("gzip FEXTRA count overflows"))?;
+            position = end;
+        }
+        if count != evidence.extra_subfield_count {
+            return Err(VerifyError::new(
+                "gzip FEXTRA subfield count disagrees with evidence",
+            ));
+        }
+        cursor = checked_range_end(extra, "gzip FEXTRA")?;
+    } else if evidence.extra.is_some() || evidence.extra_subfield_count != 0 {
+        return Err(VerifyError::new(
+            "gzip FEXTRA evidence is present without its flag",
+        ));
+    }
+
+    cursor = verify_gzip_c_string(
+        source,
+        cursor,
+        header_end,
+        evidence.flags & FLAG_NAME != 0,
+        evidence.original_name,
+        "gzip FNAME",
+    )?;
+    cursor = verify_gzip_c_string(
+        source,
+        cursor,
+        header_end,
+        evidence.flags & FLAG_COMMENT != 0,
+        evidence.comment,
+        "gzip FCOMMENT",
+    )?;
+    if evidence.flags & FLAG_HEADER_CRC != 0 {
+        let range = evidence
+            .header_crc16
+            .ok_or_else(|| VerifyError::new("gzip FHCRC flag has no range"))?;
+        if range.offset != cursor || range.len != 2 {
+            return Err(VerifyError::new("gzip FHCRC range is not canonical"));
+        }
+        let prefix = source
+            .get(
+                ..usize::try_from(cursor)
+                    .map_err(|_| VerifyError::new("gzip FHCRC prefix length exceeds usize"))?,
+            )
+            .ok_or_else(|| VerifyError::new("gzip FHCRC prefix is outside source"))?;
+        let declared = range_bytes(source, range, "gzip FHCRC")?;
+        if le_u16(declared, 0) != crc32_ieee_bytes(prefix) as u16 {
+            return Err(VerifyError::new("gzip FHCRC disagrees with header bytes"));
+        }
+        cursor = checked_range_end(range, "gzip FHCRC")?;
+    } else if evidence.header_crc16.is_some() {
+        return Err(VerifyError::new(
+            "gzip FHCRC evidence is present without its flag",
+        ));
+    }
+    if cursor != header_end {
+        return Err(VerifyError::new(
+            "gzip optional fields do not exactly fill the header",
+        ));
+    }
+
+    let trailer = range_bytes(source, evidence.trailer, "gzip trailer")?;
+    let derived_len = u64::try_from(derived.len())
+        .map_err(|_| VerifyError::new("derived TAR length exceeds u64"))?;
+    let derived_isize = u32::try_from(derived_len % (u64::from(u32::MAX) + 1))
+        .map_err(|_| VerifyError::new("gzip ISIZE modulo does not fit u32"))?;
+    let derived_crc = crc32_ieee_bytes(derived);
+    let derived_sha = sha256_hex(derived);
+    if le_u32(trailer, 0) != evidence.declared_crc32
+        || le_u32(trailer, 4) != evidence.declared_isize
+        || evidence.declared_crc32 != derived_crc
+        || evidence.declared_isize != derived_isize
+        || evidence.derived_output_len != derived_len
+        || evidence.derived_output_sha256 != derived_sha
+        || evidence.derived_output_sha256 != derived_vector.source.sha256
+    {
+        return Err(VerifyError::new(
+            "gzip trailer and derived TAR CRC32, ISIZE, length, or SHA-256 disagree",
+        ));
+    }
+    Ok(())
+}
+
+fn verify_gzip_c_string(
+    source: &[u8],
+    cursor: u64,
+    header_end: u64,
+    flagged: bool,
+    range: Option<ByteRange>,
+    label: &str,
+) -> Result<u64, VerifyError> {
+    if !flagged {
+        return if range.is_none() {
+            Ok(cursor)
+        } else {
+            Err(VerifyError::new(format!(
+                "{label} evidence is present without its flag"
+            )))
+        };
+    }
+    let range = range.ok_or_else(|| VerifyError::new(format!("{label} flag has no range")))?;
+    let end = checked_range_end(range, label)?;
+    if range.offset != cursor || range.len == 0 || end > header_end {
+        return Err(VerifyError::new(format!("{label} range is not canonical")));
+    }
+    let bytes = range_bytes(source, range, label)?;
+    if bytes.last() != Some(&0) || bytes[..bytes.len() - 1].contains(&0) {
+        return Err(VerifyError::new(format!(
+            "{label} is not exactly one NUL-terminated byte string"
+        )));
+    }
+    Ok(end)
+}
+
+fn encode_tar_gzip_layout(
+    case: &TarGzipCase,
+    manifest: &TarGzipManifest,
+) -> Result<Vec<u8>, VerifyError> {
+    let gzip = &case.gzip;
+    let mut body = Vec::new();
+    push_bytes(&mut body, manifest.transform.id.as_bytes())?;
+    body.extend_from_slice(&decode_digest(
+        &manifest.transform.digest.sha256,
+        "gzip transform digest",
+    )?);
+    body.extend_from_slice(&decode_digest(
+        &manifest.transform.decoder_parameters_digest.sha256,
+        "gzip decoder-parameter digest",
+    )?);
+    push_u16(&mut body, 0);
+    encode_range(
+        &mut body,
+        ByteRange {
+            offset: 0,
+            len: checked_range_end(gzip.trailer, "gzip source range")?,
+        },
+    );
+    body.extend_from_slice(&decode_digest(&case.source.sha256, "gzip source digest")?);
+    push_u16(&mut body, 1);
+    push_u64(&mut body, gzip.derived_output_len);
+    body.extend_from_slice(&decode_digest(
+        &gzip.derived_output_sha256,
+        "gzip derived output digest",
+    )?);
+    body.push(gzip.flags);
+    push_u32(&mut body, gzip.modification_time);
+    body.push(gzip.extra_flags);
+    body.push(gzip.operating_system);
+    encode_range(&mut body, gzip.header);
+    encode_optional_range(&mut body, gzip.extra);
+    push_u32(&mut body, gzip.extra_subfield_count);
+    encode_optional_range(&mut body, gzip.original_name);
+    encode_optional_range(&mut body, gzip.comment);
+    encode_optional_range(&mut body, gzip.header_crc16);
+    encode_range(&mut body, gzip.compressed_payload);
+    encode_range(&mut body, gzip.trailer);
+    push_u32(&mut body, gzip.declared_crc32);
+    push_u32(&mut body, gzip.declared_isize);
+    push_u64(&mut body, gzip.derived_output_len);
+    body.extend_from_slice(&decode_digest(
+        &gzip.derived_output_sha256,
+        "gzip derived output digest",
+    )?);
+    push_bytes(
+        &mut body,
+        &tar_gzip_inner_layout_body(&manifest.derived_tar)?,
+    )?;
+    Ok(preimage(TAR_GZIP_LAYOUT_LABEL, &body))
+}
+
+fn encode_tar_gzip_inner_layout(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, VerifyError> {
+    Ok(preimage(
+        TAR_LAYOUT_LABEL,
+        &tar_gzip_inner_layout_body(derived)?,
+    ))
+}
+
+fn tar_gzip_inner_layout_body(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, VerifyError> {
+    let mut body = Vec::new();
+    encode_range(&mut body, derived.covering.member_records);
+    encode_range(&mut body, derived.covering.terminator);
+    encode_range(&mut body, derived.covering.trailing_zeros);
+    let mut members: Vec<_> = derived.members.iter().collect();
+    members.sort_by(|left, right| {
+        left.canonical_path
+            .as_bytes()
+            .cmp(right.canonical_path.as_bytes())
+    });
+    push_u32(
+        &mut body,
+        u32::try_from(members.len())
+            .map_err(|_| VerifyError::new("derived TAR member count exceeds u32"))?,
+    );
+    for member in members {
+        push_bytes(&mut body, member.canonical_path.as_bytes())?;
+        body.push(kind_tag(&member.kind));
+        push_bytes(&mut body, &member.raw_name_bytes)?;
+        push_u64(&mut body, member.declared_uncomp_size);
+        encode_range(&mut body, member.tar.header);
+        encode_range(&mut body, member.tar.payload);
+        encode_range(&mut body, member.tar.padding);
+        push_u32(&mut body, member.tar.mode);
+        push_u64(&mut body, member.tar.mtime);
+        push_u32(&mut body, member.tar.header_checksum);
+        body.extend_from_slice(&decode_digest(
+            &member.tar.header_sha256,
+            "derived TAR header digest",
+        )?);
+        push_u32(
+            &mut body,
+            u32::try_from(member.normalization_actions.len())
+                .map_err(|_| VerifyError::new("TAR normalization count exceeds u32"))?,
+        );
+        encode_normalization_actions(&mut body, &member.normalization_actions);
+    }
+    Ok(body)
+}
+
+fn encode_tar_gzip_content(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, VerifyError> {
+    let mut body = Vec::new();
+    let mut members: Vec<_> = derived.members.iter().collect();
+    members.sort_by(|left, right| {
+        left.canonical_path
+            .as_bytes()
+            .cmp(right.canonical_path.as_bytes())
+    });
+    push_u32(
+        &mut body,
+        u32::try_from(members.len())
+            .map_err(|_| VerifyError::new("derived TAR member count exceeds u32"))?,
+    );
+    for member in members {
+        push_bytes(&mut body, member.canonical_path.as_bytes())?;
+        body.push(kind_tag(&member.kind));
+        push_u64(&mut body, member.actual_uncomp_size);
+        body.extend_from_slice(&decode_digest(
+            &member.content_sha256,
+            "derived TAR member content digest",
+        )?);
+    }
+    Ok(preimage(CONTENT_LABEL, &body))
+}
+
+fn crc32_ieee_bytes(bytes: &[u8]) -> u32 {
+    let mut crc = u32::MAX;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xedb8_8320 & 0_u32.wrapping_sub(crc & 1));
+        }
+    }
+    !crc
+}
+
+fn verify_zip64_covering(source: &[u8], ir: &Zip64ArchiveIr) -> Result<(), VerifyError> {
+    const LFH: [u8; 4] = [0x50, 0x4b, 0x03, 0x04];
+    const CDH: [u8; 4] = [0x50, 0x4b, 0x01, 0x02];
+    const ZIP64_EOCD: [u8; 4] = [0x50, 0x4b, 0x06, 0x06];
+    const ZIP64_LOCATOR: [u8; 4] = [0x50, 0x4b, 0x06, 0x07];
+    const EOCD: [u8; 4] = [0x50, 0x4b, 0x05, 0x06];
+
+    let covering = &ir.zip64_covering;
+    let source_len =
+        u64::try_from(source.len()).map_err(|_| VerifyError::new("source exceeds u64"))?;
+    for (range, label) in [
+        (covering.local_records, "ZIP64 local covering"),
+        (covering.central_directory, "ZIP64 central covering"),
+        (covering.eocd, "ZIP64 EOCD covering"),
+        (covering.comment, "ZIP64 comment covering"),
+    ] {
+        validate_range(range, label)?;
+    }
+    let pair = match (covering.zip64_eocd, covering.zip64_locator) {
+        (None, None) => None,
+        (Some(record), Some(locator)) => {
+            validate_range(record, "ZIP64 EOCD record")?;
+            validate_range(locator, "ZIP64 locator")?;
+            Some((record, locator))
+        }
+        _ => {
+            return Err(VerifyError::new(
+                "ZIP64 end-record evidence is only partially present",
+            ));
+        }
+    };
+    if pair.is_none()
+        && !ir.members.iter().any(|member| {
+            member.zip64.local_zip64_extra.is_some()
+                || member.zip64.central_zip64_extra.is_some()
+                || matches!(
+                    member.zip64.descriptor_width,
+                    Some(Zip64DescriptorWidth::Zip64)
+                )
+        })
+    {
+        return Err(VerifyError::new(
+            "ZIP64 profile evidence contains no ZIP64 construct",
+        ));
+    }
+    let after_central = pair.map_or(covering.eocd.offset, |(record, _)| record.offset);
+    if covering.local_records.offset != 0
+        || checked_range_end(covering.local_records, "ZIP64 local covering")?
+            != covering.central_directory.offset
+        || checked_range_end(covering.central_directory, "ZIP64 central covering")? != after_central
+        || covering.eocd.len != 22
+        || checked_range_end(covering.eocd, "ZIP64 EOCD covering")? != covering.comment.offset
+        || checked_range_end(covering.comment, "ZIP64 comment covering")? != source_len
+    {
+        return Err(VerifyError::new(
+            "ZIP64 top-level covering does not exactly partition the source",
+        ));
+    }
+
+    let eocd = range_bytes(source, covering.eocd, "ZIP64 classic EOCD")?;
+    if eocd[0..4] != EOCD || le_u16(eocd, 4) != 0 || le_u16(eocd, 6) != 0 {
+        return Err(VerifyError::new(
+            "ZIP64 classic EOCD is absent, invalid, or spanned",
+        ));
+    }
+    if u64::from(le_u16(eocd, 20)) != covering.comment.len {
+        return Err(VerifyError::new(
+            "ZIP64 classic EOCD comment length disagrees with covering",
+        ));
+    }
+    reject_zip64_structural_metadata(
+        range_bytes(source, covering.comment, "ZIP64 global EOCD comment")?,
+        "global EOCD comment",
+    )?;
+    let classic_count_disk = le_u16(eocd, 8);
+    let classic_count_total = le_u16(eocd, 10);
+    let classic_cd_size = le_u32(eocd, 12);
+    let classic_cd_offset = le_u32(eocd, 16);
+    let member_count = u64::try_from(ir.members.len())
+        .map_err(|_| VerifyError::new("ZIP64 member count exceeds u64"))?;
+    let mut end_version_needed = None;
+
+    if let Some((record_range, locator_range)) = pair {
+        if record_range.len != 56
+            || locator_range.len != 20
+            || checked_range_end(record_range, "ZIP64 EOCD record")? != locator_range.offset
+            || checked_range_end(locator_range, "ZIP64 locator")? != covering.eocd.offset
+        {
+            return Err(VerifyError::new(
+                "ZIP64 end pair does not have fixed adjacent geometry",
+            ));
+        }
+        let record = range_bytes(source, record_range, "ZIP64 EOCD record")?;
+        let locator = range_bytes(source, locator_range, "ZIP64 locator")?;
+        if record[0..4] != ZIP64_EOCD
+            || le_u64(record, 4) != 44
+            || le_u32(record, 16) != 0
+            || le_u32(record, 20) != 0
+            || le_u64(record, 24) != member_count
+            || le_u64(record, 32) != member_count
+            || le_u64(record, 40) != covering.central_directory.len
+            || le_u64(record, 48) != covering.central_directory.offset
+        {
+            return Err(VerifyError::new(
+                "ZIP64 EOCD disagrees with represented archive geometry",
+            ));
+        }
+        end_version_needed = Some(le_u16(record, 14));
+        if locator[0..4] != ZIP64_LOCATOR
+            || le_u32(locator, 4) != 0
+            || le_u64(locator, 8) != record_range.offset
+            || le_u32(locator, 16) != 1
+        {
+            return Err(VerifyError::new(
+                "ZIP64 locator disagrees with represented archive geometry",
+            ));
+        }
+        let has_sentinel = classic_count_disk == u16::MAX
+            || classic_count_total == u16::MAX
+            || classic_cd_size == u32::MAX
+            || classic_cd_offset == u32::MAX;
+        if !has_sentinel
+            || !canonical_zip64_end_u16(classic_count_disk, member_count)
+            || !canonical_zip64_end_u16(classic_count_total, member_count)
+            || !canonical_zip64_end_u32(classic_cd_size, covering.central_directory.len)
+            || !canonical_zip64_end_u32(classic_cd_offset, covering.central_directory.offset)
+        {
+            return Err(VerifyError::new(
+                "classic EOCD is not canonical for the ZIP64 end record",
+            ));
+        }
+    } else if u64::from(classic_count_disk) != member_count
+        || u64::from(classic_count_total) != member_count
+        || u64::from(classic_cd_size) != covering.central_directory.len
+        || u64::from(classic_cd_offset) != covering.central_directory.offset
+    {
+        return Err(VerifyError::new(
+            "classic EOCD disagrees with member-only ZIP64 evidence",
+        ));
+    }
+
+    let mut local_ranges = Vec::with_capacity(ir.members.len());
+    let mut central_ranges = Vec::with_capacity(ir.members.len());
+    for member in &ir.members {
+        let ranges = &member.source_ranges;
+        if ranges.local_header.len < 30 || ranges.central_header.len < 46 {
+            return Err(VerifyError::new("ZIP64 member header is too short"));
+        }
+        let local = range_bytes(
+            source,
+            ByteRange {
+                offset: ranges.local_header.offset,
+                len: 30,
+            },
+            "ZIP64 local fixed header",
+        )?;
+        let central = range_bytes(
+            source,
+            ByteRange {
+                offset: ranges.central_header.offset,
+                len: 46,
+            },
+            "ZIP64 central fixed header",
+        )?;
+        if local[0..4] != LFH || central[0..4] != CDH {
+            return Err(VerifyError::new("ZIP64 member signature is invalid"));
+        }
+        let local_name_len = u64::from(le_u16(local, 26));
+        let local_extra_len = u64::from(le_u16(local, 28));
+        let central_name_len = u64::from(le_u16(central, 28));
+        let central_extra_len = u64::from(le_u16(central, 30));
+        let central_comment_len = u64::from(le_u16(central, 32));
+        if ranges.local_header.len != 30 + local_name_len + local_extra_len
+            || ranges.central_header.len
+                != 46 + central_name_len + central_extra_len + central_comment_len
+            || checked_range_end(ranges.local_header, "ZIP64 local header")?
+                != ranges.compressed_payload.offset
+            || ranges.compressed_payload.len != member.declared_comp_size
+            || !contains_range(covering.local_records, ranges.local_header)?
+            || !contains_range(covering.central_directory, ranges.central_header)?
+        {
+            return Err(VerifyError::new(
+                "ZIP64 member ranges disagree with encoded header lengths",
+            ));
+        }
+        let central_comment_offset = ranges
+            .central_header
+            .offset
+            .checked_add(46 + central_name_len + central_extra_len)
+            .ok_or_else(|| VerifyError::new("ZIP64 central comment offset overflows"))?;
+        reject_zip64_structural_metadata(
+            range_bytes(
+                source,
+                ByteRange {
+                    offset: central_comment_offset,
+                    len: central_comment_len,
+                },
+                "ZIP64 central member comment",
+            )?,
+            "central member comment",
+        )?;
+        let local_name = range_bytes(
+            source,
+            ByteRange {
+                offset: ranges.local_header.offset + 30,
+                len: local_name_len,
+            },
+            "ZIP64 local name",
+        )?;
+        let central_name = range_bytes(
+            source,
+            ByteRange {
+                offset: ranges.central_header.offset + 46,
+                len: central_name_len,
+            },
+            "ZIP64 central name",
+        )?;
+        if local_name != member.raw_name_bytes || central_name != member.raw_name_bytes {
+            return Err(VerifyError::new(
+                "ZIP64 member names disagree with source bytes",
+            ));
+        }
+        verify_zip64_common_member(member, local, central, pair.is_some())?;
+        verify_zip64_extras(source, member, local, central)?;
+        if member.method == 0 && member.flags & 0x0008 != 0 {
+            reject_zip64_stream_signatures(
+                range_bytes(
+                    source,
+                    ranges.compressed_payload,
+                    "ZIP64 stored descriptor payload",
+                )?,
+                "stored descriptor payload",
+            )?;
+        }
+        verify_zip64_descriptor(source, member)?;
+
+        let payload_end = checked_range_end(ranges.compressed_payload, "ZIP64 payload")?;
+        let local_end = if let Some(descriptor) = ranges.data_descriptor {
+            if payload_end != descriptor.offset {
+                return Err(VerifyError::new(
+                    "ZIP64 payload does not abut its descriptor",
+                ));
+            }
+            checked_range_end(descriptor, "ZIP64 descriptor")?
+        } else {
+            payload_end
+        };
+        local_ranges.push((ranges.local_header.offset, local_end));
+        central_ranges.push((
+            ranges.central_header.offset,
+            checked_range_end(ranges.central_header, "ZIP64 central header")?,
+        ));
+    }
+
+    if let Some(version_needed) = end_version_needed {
+        let maximum_member_version = ir
+            .members
+            .iter()
+            .map(|member| member.zip64.central_version_needed)
+            .max()
+            .unwrap_or(0);
+        if version_needed != 45
+            && (maximum_member_version == 0 || version_needed != maximum_member_version)
+        {
+            return Err(VerifyError::new(
+                "ZIP64 EOCD extraction version is not canonical",
+            ));
+        }
+    }
+
+    local_ranges.sort_unstable_by_key(|range| range.0);
+    central_ranges.sort_unstable_by_key(|range| range.0);
+    verify_partition(
+        &local_ranges,
+        covering.local_records,
+        "ZIP64 local record partition",
+    )?;
+    verify_partition(
+        &central_ranges,
+        covering.central_directory,
+        "ZIP64 central header partition",
+    )?;
+    Ok(())
+}
+
+fn reject_zip64_structural_metadata(data: &[u8], context: &str) -> Result<(), VerifyError> {
+    const SIGNATURES: [[u8; 4]; 6] = [
+        [0x50, 0x4b, 0x06, 0x06],
+        [0x50, 0x4b, 0x06, 0x07],
+        [0x50, 0x4b, 0x05, 0x06],
+        [0x50, 0x4b, 0x03, 0x04],
+        [0x50, 0x4b, 0x01, 0x02],
+        [0x50, 0x4b, 0x07, 0x08],
+    ];
+    if SIGNATURES
+        .iter()
+        .any(|signature| data.windows(4).any(|window| window == signature))
+    {
+        return Err(VerifyError::new(format!(
+            "ZIP64 structural signature is denied in {context}"
+        )));
+    }
+    Ok(())
+}
+
+fn reject_zip64_stream_signatures(data: &[u8], context: &str) -> Result<(), VerifyError> {
+    const SIGNATURES: [[u8; 4]; 3] = [
+        [0x50, 0x4b, 0x03, 0x04],
+        [0x50, 0x4b, 0x01, 0x02],
+        [0x50, 0x4b, 0x07, 0x08],
+    ];
+    if SIGNATURES
+        .iter()
+        .any(|signature| data.windows(4).any(|window| window == signature))
+    {
+        return Err(VerifyError::new(format!(
+            "ZIP64 stream signature is denied in {context}"
+        )));
+    }
+    Ok(())
+}
+
+fn verify_zip64_common_member(
+    member: &Zip64Member,
+    local: &[u8],
+    central: &[u8],
+    has_global_end_pair: bool,
+) -> Result<(), VerifyError> {
+    if le_u16(local, 4) != member.zip64.local_version_needed
+        || le_u16(central, 6) != member.zip64.central_version_needed
+        || le_u16(local, 6) != member.flags
+        || le_u16(central, 8) != member.flags
+        || le_u16(local, 8) != member.method
+        || le_u16(central, 10) != member.method
+        || le_u32(central, 16) != member.declared_crc
+        || le_u16(central, 34) != 0
+    {
+        return Err(VerifyError::new(
+            "ZIP64 common member evidence disagrees with source bytes",
+        ));
+    }
+    let source_is_directory = member.raw_name_bytes.ends_with(b"/");
+    if source_is_directory != matches!(member.kind, MemberKind::Directory) {
+        return Err(VerifyError::new(
+            "ZIP64 member kind disagrees with source name",
+        ));
+    }
+    let attributes = le_u32(central, 38);
+    let dos_directory = attributes & 0x10 != 0;
+    let unix_kind = (attributes >> 16) & 0xf000;
+    let attribute_is_directory = dos_directory || unix_kind == 0x4000;
+    let attribute_is_regular = unix_kind == 0x8000;
+    let attribute_is_special = unix_kind != 0 && unix_kind != 0x4000 && unix_kind != 0x8000;
+    if attribute_is_special
+        || (attribute_is_directory && attribute_is_regular)
+        || (attribute_is_directory != source_is_directory
+            && (attribute_is_directory || attribute_is_regular))
+        || (source_is_directory
+            && (member.declared_comp_size != 0
+                || member.declared_uncomp_size != 0
+                || member.method != 0
+                || member.declared_crc != 0))
+    {
+        return Err(VerifyError::new("ZIP64 member attributes are invalid"));
+    }
+
+    let central_legacy_mask = u8::from(le_u32(central, 24) == u32::MAX)
+        | (u8::from(le_u32(central, 20) == u32::MAX) << 1)
+        | (u8::from(le_u32(central, 42) == u32::MAX) << 2);
+    let local_legacy_mask =
+        u8::from(le_u32(local, 22) == u32::MAX) | (u8::from(le_u32(local, 18) == u32::MAX) << 1);
+    if central_legacy_mask != member.zip64.central_legacy_sentinel_mask
+        || local_legacy_mask != member.zip64.local_legacy_sentinel_mask
+    {
+        return Err(VerifyError::new(
+            "ZIP64 legacy sentinel evidence disagrees with source bytes",
+        ));
+    }
+
+    let local_crc = le_u32(local, 14);
+    let local_comp = le_u32(local, 18);
+    let local_uncomp = le_u32(local, 22);
+    let uses_descriptor = member.flags & 0x0008 != 0;
+    if (!uses_descriptor && local_crc != member.declared_crc)
+        || (uses_descriptor && local_crc != 0 && local_crc != member.declared_crc)
+    {
+        return Err(VerifyError::new("ZIP64 local CRC disagrees with evidence"));
+    }
+    match member.zip64.local_value_shape {
+        Zip64LocalValueShape::Absent => {
+            let sizes_match = if uses_descriptor {
+                (local_comp == 0 || u64::from(local_comp) == member.declared_comp_size)
+                    && (local_uncomp == 0 || u64::from(local_uncomp) == member.declared_uncomp_size)
+            } else {
+                u64::from(local_comp) == member.declared_comp_size
+                    && u64::from(local_uncomp) == member.declared_uncomp_size
+            };
+            if member.zip64.local_zip64_extra.is_some() || !sizes_match {
+                return Err(VerifyError::new(
+                    "ZIP64 absent local value shape is invalid",
+                ));
+            }
+        }
+        Zip64LocalValueShape::Exact => {
+            let forced = local_uncomp == u32::MAX && local_comp == u32::MAX;
+            let canonical = canonical_zip64_member_u32(local_uncomp, member.declared_uncomp_size)
+                && canonical_zip64_member_u32(local_comp, member.declared_comp_size);
+            if member.zip64.local_zip64_extra.is_none() || (!forced && !canonical) {
+                return Err(VerifyError::new("ZIP64 exact local value shape is invalid"));
+            }
+        }
+        Zip64LocalValueShape::StreamingZeros => {
+            if !uses_descriptor
+                || member.zip64.local_zip64_extra.is_none()
+                || local_uncomp != u32::MAX
+                || local_comp != u32::MAX
+            {
+                return Err(VerifyError::new(
+                    "ZIP64 zero-streaming local value shape is invalid",
+                ));
+            }
+        }
+        Zip64LocalValueShape::StreamingMaxima => {
+            if !uses_descriptor
+                || member.zip64.local_zip64_extra.is_none()
+                || local_uncomp != 0
+                || local_comp != 0
+            {
+                return Err(VerifyError::new(
+                    "ZIP64 maximum-streaming local value shape is invalid",
+                ));
+            }
+        }
+    }
+    if member.zip64.local_zip64_extra.is_some() && member.zip64.local_version_needed < 45 {
+        return Err(VerifyError::new(
+            "ZIP64 local extra requires extraction version 4.5",
+        ));
+    }
+    let standard_offset_only = member.zip64.central_presence_mask == 0b100
+        && u64::from(le_u32(central, 24)) == member.declared_uncomp_size
+        && u64::from(le_u32(central, 20)) == member.declared_comp_size
+        && matches!(
+            (member.method, member.zip64.central_version_needed),
+            (0, 10) | (8, 20)
+        );
+    let go_offset_only = member.zip64.central_presence_mask == 0b111
+        && le_u32(central, 24) == u32::MAX
+        && le_u32(central, 20) == u32::MAX
+        && member.zip64.central_version_needed == 20
+        && matches!(member.method, 0 | 8);
+    let offset_only = has_global_end_pair
+        && (standard_offset_only || go_offset_only)
+        && le_u32(central, 42) == u32::MAX
+        && member.declared_uncomp_size < u64::from(u32::MAX)
+        && member.declared_comp_size < u64::from(u32::MAX)
+        && member.source_ranges.local_header.offset >= u64::from(u32::MAX);
+    if member.zip64.central_zip64_extra.is_some()
+        && member.zip64.central_version_needed < 45
+        && !offset_only
+    {
+        return Err(VerifyError::new(
+            "ZIP64 central extra has an invalid extraction version",
+        ));
+    }
+    let expected_width = uses_descriptor.then_some(
+        if member.zip64.local_zip64_extra.is_some()
+            || member.declared_comp_size >= u64::from(u32::MAX)
+            || member.declared_uncomp_size >= u64::from(u32::MAX)
+        {
+            Zip64DescriptorWidth::Zip64
+        } else {
+            Zip64DescriptorWidth::Zip32
+        },
+    );
+    if member.zip64.descriptor_width != expected_width {
+        return Err(VerifyError::new(
+            "ZIP64 descriptor width evidence is not canonical",
+        ));
+    }
+    Ok(())
+}
+
+fn verify_zip64_extras(
+    source: &[u8],
+    member: &Zip64Member,
+    local: &[u8],
+    central: &[u8],
+) -> Result<(), VerifyError> {
+    for (site, expected) in [
+        (ExtraSite::Local, member.zip64.local_zip64_extra),
+        (ExtraSite::Central, member.zip64.central_zip64_extra),
+    ] {
+        let mut matching = member
+            .extra_fields
+            .iter()
+            .filter(|field| field.site == site);
+        let actual = matching.next().map(|field| field.data_range);
+        if matching.next().is_some() || actual != expected {
+            return Err(VerifyError::new(
+                "ZIP64 site-specific extra evidence is inconsistent",
+            ));
+        }
+        if let Some(data_range) = expected {
+            let header_offset = data_range
+                .offset
+                .checked_sub(4)
+                .ok_or_else(|| VerifyError::new("ZIP64 extra header underflows"))?;
+            let header = range_bytes(
+                source,
+                ByteRange {
+                    offset: header_offset,
+                    len: 4,
+                },
+                "ZIP64 extra header",
+            )?;
+            if le_u16(header, 0) != 1 || u64::from(le_u16(header, 2)) != data_range.len {
+                return Err(VerifyError::new(
+                    "ZIP64 extra header disagrees with evidence",
+                ));
+            }
+        }
+    }
+
+    let local_extra_start = member
+        .source_ranges
+        .local_header
+        .offset
+        .checked_add(30 + u64::from(le_u16(local, 26)))
+        .ok_or_else(|| VerifyError::new("ZIP64 local extra offset overflows"))?;
+    let local_extra_end = local_extra_start
+        .checked_add(u64::from(le_u16(local, 28)))
+        .ok_or_else(|| VerifyError::new("ZIP64 local extra range overflows"))?;
+    let central_extra_start = member
+        .source_ranges
+        .central_header
+        .offset
+        .checked_add(46 + u64::from(le_u16(central, 28)))
+        .ok_or_else(|| VerifyError::new("ZIP64 central extra offset overflows"))?;
+    let central_extra_end = central_extra_start
+        .checked_add(u64::from(le_u16(central, 30)))
+        .ok_or_else(|| VerifyError::new("ZIP64 central extra range overflows"))?;
+    for (range, start, end) in [
+        (
+            member.zip64.local_zip64_extra,
+            local_extra_start,
+            local_extra_end,
+        ),
+        (
+            member.zip64.central_zip64_extra,
+            central_extra_start,
+            central_extra_end,
+        ),
+    ] {
+        if let Some(range) = range {
+            let header_start = range
+                .offset
+                .checked_sub(4)
+                .ok_or_else(|| VerifyError::new("ZIP64 extra range underflows"))?;
+            if header_start != start || checked_range_end(range, "ZIP64 extra data")? != end {
+                return Err(VerifyError::new(
+                    "ZIP64 extra does not exactly fill its header extra area",
+                ));
+            }
+        } else if start != end {
+            return Err(VerifyError::new(
+                "unrepresented ZIP64 header extra bytes remain",
+            ));
+        }
+    }
+
+    match member.zip64.local_zip64_extra {
+        None => {
+            if member.zip64.local_value_shape != Zip64LocalValueShape::Absent {
+                return Err(VerifyError::new(
+                    "absent ZIP64 local extra has a non-absent shape",
+                ));
+            }
+        }
+        Some(range) => {
+            if range.len != 16 || member.zip64.local_value_shape == Zip64LocalValueShape::Absent {
+                return Err(VerifyError::new(
+                    "ZIP64 local extra has an invalid semantic shape",
+                ));
+            }
+            let data = range_bytes(source, range, "ZIP64 local extra data")?;
+            let values = [le_u64(data, 0), le_u64(data, 8)];
+            let valid = match member.zip64.local_value_shape {
+                Zip64LocalValueShape::Absent => false,
+                Zip64LocalValueShape::Exact => {
+                    values == [member.declared_uncomp_size, member.declared_comp_size]
+                }
+                Zip64LocalValueShape::StreamingZeros => values == [0, 0],
+                Zip64LocalValueShape::StreamingMaxima => values == [u64::MAX, u64::MAX],
+            };
+            if !valid {
+                return Err(VerifyError::new(
+                    "ZIP64 local value shape disagrees with source bytes",
+                ));
+            }
+        }
+    }
+
+    match member.zip64.central_zip64_extra {
+        None => {
+            if member.zip64.central_presence_mask != 0
+                || member.zip64.central_legacy_sentinel_mask != 0
+                || u64::from(le_u32(central, 24)) != member.declared_uncomp_size
+                || u64::from(le_u32(central, 20)) != member.declared_comp_size
+                || u64::from(le_u32(central, 42)) != member.source_ranges.local_header.offset
+            {
+                return Err(VerifyError::new(
+                    "absent ZIP64 central extra disagrees with legacy fields",
+                ));
+            }
+        }
+        Some(range) => {
+            let mask = member.zip64.central_presence_mask;
+            if mask == 0
+                || mask > 0b111
+                || range.len != u64::from(mask.count_ones()) * 8
+                || mask & member.zip64.central_legacy_sentinel_mask
+                    != member.zip64.central_legacy_sentinel_mask
+            {
+                return Err(VerifyError::new("ZIP64 central presence mask is invalid"));
+            }
+            let data = range_bytes(source, range, "ZIP64 central extra data")?;
+            let legacy = [
+                le_u32(central, 24),
+                le_u32(central, 20),
+                le_u32(central, 42),
+            ];
+            let resolved = [
+                member.declared_uncomp_size,
+                member.declared_comp_size,
+                member.source_ranges.local_header.offset,
+            ];
+            let required_mask = legacy
+                .iter()
+                .enumerate()
+                .fold(0_u8, |required, (index, value)| {
+                    required | (u8::from(*value == u32::MAX) << index)
+                });
+            let mut matching_masks = 0_u8;
+            let mut unique_mask = 0_u8;
+            for candidate in 1_u8..8 {
+                if candidate.count_ones() != mask.count_ones()
+                    || candidate & required_mask != required_mask
+                {
+                    continue;
+                }
+                let mut candidate_values = legacy.map(u64::from);
+                let mut cursor = 0_usize;
+                let mut valid = true;
+                for (index, value) in candidate_values.iter_mut().enumerate() {
+                    if candidate & (1 << index) == 0 {
+                        continue;
+                    }
+                    let encoded = le_u64(data, cursor);
+                    cursor += 8;
+                    if legacy[index] == u32::MAX {
+                        *value = encoded;
+                    } else if encoded != u64::from(legacy[index]) {
+                        valid = false;
+                        break;
+                    }
+                }
+                if valid && candidate_values == resolved {
+                    matching_masks = matching_masks.saturating_add(1);
+                    unique_mask = candidate;
+                }
+            }
+            if matching_masks != 1 || unique_mask != mask {
+                return Err(VerifyError::new(
+                    "ZIP64 central values lack one evidence-selected interpretation",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn verify_zip64_descriptor(source: &[u8], member: &Zip64Member) -> Result<(), VerifyError> {
+    const DESCRIPTOR: [u8; 4] = [0x50, 0x4b, 0x07, 0x08];
+    match (
+        member.zip64.descriptor_width,
+        member.source_ranges.data_descriptor,
+    ) {
+        (None, None) if member.flags & 0x0008 == 0 => Ok(()),
+        (Some(width), Some(range)) if member.flags & 0x0008 != 0 => {
+            let expected_len = match width {
+                Zip64DescriptorWidth::Zip32 => 16,
+                Zip64DescriptorWidth::Zip64 => 24,
+            };
+            if range.len != expected_len {
+                return Err(VerifyError::new(
+                    "ZIP64 descriptor range has the wrong width",
+                ));
+            }
+            let data = range_bytes(source, range, "ZIP64 data descriptor")?;
+            if data[0..4] != DESCRIPTOR || le_u32(data, 4) != member.declared_crc {
+                return Err(VerifyError::new(
+                    "ZIP64 descriptor signature or CRC disagrees with evidence",
+                ));
+            }
+            let (compressed, uncompressed) = match width {
+                Zip64DescriptorWidth::Zip32 => {
+                    (u64::from(le_u32(data, 8)), u64::from(le_u32(data, 12)))
+                }
+                Zip64DescriptorWidth::Zip64 => (le_u64(data, 8), le_u64(data, 16)),
+            };
+            if compressed != member.declared_comp_size
+                || uncompressed != member.declared_uncomp_size
+            {
+                return Err(VerifyError::new(
+                    "ZIP64 descriptor sizes disagree with evidence",
+                ));
+            }
+            Ok(())
+        }
+        _ => Err(VerifyError::new(
+            "ZIP64 descriptor evidence disagrees with flag bit 3",
+        )),
+    }
+}
+
+fn canonical_zip64_member_u32(legacy: u32, resolved: u64) -> bool {
+    if resolved < u64::from(u32::MAX) {
+        u64::from(legacy) == resolved
+    } else {
+        legacy == u32::MAX
+    }
+}
+
+fn canonical_zip64_end_u16(legacy: u16, resolved: u64) -> bool {
+    if resolved < u64::from(u16::MAX) {
+        u64::from(legacy) == resolved || legacy == u16::MAX
+    } else {
+        legacy == u16::MAX
+    }
+}
+
+fn canonical_zip64_end_u32(legacy: u32, resolved: u64) -> bool {
+    if resolved < u64::from(u32::MAX) {
+        u64::from(legacy) == resolved || legacy == u32::MAX
+    } else {
+        legacy == u32::MAX
+    }
+}
+
+fn encode_zip64_layout(ir: &Zip64ArchiveIr) -> Result<Vec<u8>, VerifyError> {
+    let covering = &ir.zip64_covering;
+    let members = sorted_zip64_members(ir);
+    let mut body = Vec::new();
+    encode_range(&mut body, covering.local_records);
+    encode_range(&mut body, covering.central_directory);
+    encode_optional_range(&mut body, covering.zip64_eocd);
+    encode_optional_range(&mut body, covering.zip64_locator);
+    encode_range(&mut body, covering.eocd);
+    encode_range(&mut body, covering.comment);
+    push_u32(
+        &mut body,
+        u32::try_from(members.len())
+            .map_err(|_| VerifyError::new("ZIP64 member count exceeds u32"))?,
+    );
+    for member in members {
+        encode_zip64_layout_member(&mut body, member)?;
+        push_u16(&mut body, member.zip64.local_version_needed);
+        push_u16(&mut body, member.zip64.central_version_needed);
+        body.push(member.zip64.central_presence_mask);
+        body.push(member.zip64.central_legacy_sentinel_mask);
+        body.push(member.zip64.local_legacy_sentinel_mask);
+        body.push(match member.zip64.local_value_shape {
+            Zip64LocalValueShape::Absent => 0,
+            Zip64LocalValueShape::Exact => 1,
+            Zip64LocalValueShape::StreamingZeros => 2,
+            Zip64LocalValueShape::StreamingMaxima => 3,
+        });
+        encode_optional_range(&mut body, member.zip64.local_zip64_extra);
+        encode_optional_range(&mut body, member.zip64.central_zip64_extra);
+        body.push(match member.zip64.descriptor_width {
+            None => 0,
+            Some(Zip64DescriptorWidth::Zip32) => 1,
+            Some(Zip64DescriptorWidth::Zip64) => 2,
+        });
+    }
+    Ok(preimage(ZIP64_LAYOUT_LABEL, &body))
+}
+
+fn encode_zip64_layout_member(
+    output: &mut Vec<u8>,
+    member: &Zip64Member,
+) -> Result<(), VerifyError> {
+    push_bytes(output, member.canonical_path.as_bytes())?;
+    output.push(kind_tag(&member.kind));
+    push_bytes(output, &member.raw_name_bytes)?;
+    push_u16(output, member.method);
+    push_u16(output, member.flags);
+    push_u64(output, member.declared_comp_size);
+    push_u64(output, member.declared_uncomp_size);
+    push_u32(output, member.declared_crc);
+    encode_range(output, member.source_ranges.local_header);
+    encode_range(output, member.source_ranges.compressed_payload);
+    if let Some(descriptor) = member.source_ranges.data_descriptor {
+        output.push(1);
+        encode_range(output, descriptor);
+    } else {
+        output.push(0);
+    }
+    encode_range(output, member.source_ranges.central_header);
+    let mut extras: Vec<_> = member.extra_fields.iter().collect();
+    extras.sort_by_key(|extra| (site_tag(extra.site), extra.id, extra.data_range.offset));
+    push_u32(
+        output,
+        u32::try_from(extras.len())
+            .map_err(|_| VerifyError::new("ZIP64 extra-field count exceeds u32"))?,
+    );
+    for extra in extras {
+        output.push(site_tag(extra.site));
+        push_u16(output, extra.id);
+        output.push(match extra.disposition {
+            ExtraDisposition::Ignored => DISP_IGNORED,
+            ExtraDisposition::Semantic => DISP_SEMANTIC,
+            ExtraDisposition::Denied => DISP_DENIED,
+        });
+        push_u64(output, extra.data_range.offset);
+        push_u16(
+            output,
+            u16::try_from(extra.data_range.len)
+                .map_err(|_| VerifyError::new("ZIP64 extra data length exceeds u16"))?,
+        );
+    }
+    push_u32(
+        output,
+        u32::try_from(member.normalization_actions.len())
+            .map_err(|_| VerifyError::new("ZIP64 normalization count exceeds u32"))?,
+    );
+    encode_normalization_actions(output, &member.normalization_actions);
+    Ok(())
+}
+
+fn encode_zip64_content(ir: &Zip64ArchiveIr) -> Result<Vec<u8>, VerifyError> {
+    let members = sorted_zip64_members(ir);
+    let mut body = Vec::new();
+    push_u32(
+        &mut body,
+        u32::try_from(members.len())
+            .map_err(|_| VerifyError::new("ZIP64 member count exceeds u32"))?,
+    );
+    for member in members {
+        push_bytes(&mut body, member.canonical_path.as_bytes())?;
+        body.push(kind_tag(&member.kind));
+        push_u64(
+            &mut body,
+            member
+                .actual_uncomp_size
+                .ok_or_else(|| VerifyError::new("ZIP64 verified member has no actual size"))?,
+        );
+        body.extend_from_slice(&decode_digest(
+            member
+                .content_sha256
+                .as_deref()
+                .ok_or_else(|| VerifyError::new("ZIP64 verified member has no content digest"))?,
+            "ZIP64 member content digest",
+        )?);
+    }
+    Ok(preimage(CONTENT_LABEL, &body))
+}
+
+fn sorted_zip64_members(ir: &Zip64ArchiveIr) -> Vec<&Zip64Member> {
+    let mut members: Vec<_> = ir.members.iter().collect();
+    members.sort_by(|left, right| {
+        left.canonical_path
+            .as_bytes()
+            .cmp(right.canonical_path.as_bytes())
+    });
+    members
+}
+
+fn encode_optional_range(output: &mut Vec<u8>, range: Option<ByteRange>) {
+    if let Some(range) = range {
+        output.push(1);
+        encode_range(output, range);
+    } else {
+        output.push(0);
+    }
 }
 
 fn verify_manifest(manifest: &Manifest) -> Result<VerificationSummary, VerifyError> {
@@ -1101,6 +3382,19 @@ fn le_u32(bytes: &[u8], offset: usize) -> u32 {
     ])
 }
 
+fn le_u64(bytes: &[u8], offset: usize) -> u64 {
+    u64::from_le_bytes([
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+        bytes[offset + 4],
+        bytes[offset + 5],
+        bytes[offset + 6],
+        bytes[offset + 7],
+    ])
+}
+
 fn available_root<'a>(root: &'a Root, label: &str) -> Result<Option<&'a str>, VerifyError> {
     match root {
         Root::Available(root) => {
@@ -1343,6 +3637,110 @@ fn sha256_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    fn hex_bytes(bytes: &[u8]) -> String {
+        let mut output = String::with_capacity(bytes.len() * 2);
+        for byte in bytes {
+            use fmt::Write as _;
+            write!(&mut output, "{byte:02x}").expect("writing to a string cannot fail");
+        }
+        output
+    }
+
+    fn tar_gzip_vector_with_header_mutation(mutate: impl FnOnce(&mut [u8])) -> serde_json::Value {
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut derived = decode_hex(
+            vector["derived_tar"]["bytes_hex"].as_str().unwrap(),
+            "test derived TAR",
+        )
+        .unwrap();
+        mutate(&mut derived[..512]);
+        derived[148..156].fill(b' ');
+        let checksum = derived[..512]
+            .iter()
+            .fold(0_u32, |sum, byte| sum + u32::from(*byte));
+        let checksum_text = format!("{checksum:06o}");
+        assert_eq!(checksum_text.len(), 6);
+        derived[148..154].copy_from_slice(checksum_text.as_bytes());
+        derived[154] = 0;
+        derived[155] = b' ';
+
+        let header_sha = sha256_hex(&derived[..512]);
+        let derived_sha = sha256_hex(&derived);
+        let derived_crc = crc32_ieee_bytes(&derived);
+        vector["derived_tar"]["bytes_hex"] = serde_json::json!(hex_bytes(&derived));
+        vector["derived_tar"]["source"]["sha256"] = serde_json::json!(derived_sha.clone());
+        vector["derived_tar"]["members"][0]["tar"]["header_checksum"] = serde_json::json!(checksum);
+        vector["derived_tar"]["members"][0]["tar"]["header_sha256"] = serde_json::json!(header_sha);
+
+        for case_index in 0..2 {
+            let mut source = decode_hex(
+                vector["cases"][case_index]["source_bytes_hex"]
+                    .as_str()
+                    .unwrap(),
+                "test gzip source",
+            )
+            .unwrap();
+            let trailer_offset = vector["cases"][case_index]["gzip"]["trailer"]["offset"]
+                .as_u64()
+                .and_then(|offset| usize::try_from(offset).ok())
+                .unwrap();
+            source[trailer_offset..trailer_offset + 4].copy_from_slice(&derived_crc.to_le_bytes());
+            vector["cases"][case_index]["source_bytes_hex"] = serde_json::json!(hex_bytes(&source));
+            vector["cases"][case_index]["source"]["sha256"] =
+                serde_json::json!(sha256_hex(&source));
+            vector["cases"][case_index]["gzip"]["declared_crc32"] = serde_json::json!(derived_crc);
+            vector["cases"][case_index]["gzip"]["derived_output_sha256"] =
+                serde_json::json!(derived_sha.clone());
+        }
+
+        let manifest: TarGzipManifest = serde_json::from_value(vector.clone()).unwrap();
+        let raw_preimage = encode_tar_gzip_inner_layout(&manifest.derived_tar).unwrap();
+        vector["derived_tar"]["raw_layout_preimage_hex"] =
+            serde_json::json!(hex_bytes(&raw_preimage));
+        vector["derived_tar"]["raw_layout_root"]["sealrTreeV2"] =
+            serde_json::json!(sha256_hex(&raw_preimage));
+        for case_index in 0..2 {
+            let preimage = encode_tar_gzip_layout(&manifest.cases[case_index], &manifest).unwrap();
+            vector["cases"][case_index]["layout_preimage_hex"] =
+                serde_json::json!(hex_bytes(&preimage));
+            vector["cases"][case_index]["layout_root"]["sealrTreeV4"] =
+                serde_json::json!(sha256_hex(&preimage));
+        }
+        vector
+    }
+
+    fn tar_gzip_case_with_extra_payload(
+        payload: &[u8],
+        subfield_count: u32,
+    ) -> (Vec<u8>, TarGzipManifest) {
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut source = decode_hex(
+            vector["cases"][0]["source_bytes_hex"].as_str().unwrap(),
+            "test gzip source",
+        )
+        .unwrap();
+        let payload_len = u16::try_from(payload.len()).unwrap();
+        let mut replacement = payload_len.to_le_bytes().to_vec();
+        replacement.extend_from_slice(payload);
+        source.splice(10..19, replacement.iter().copied());
+        let extra_len = u64::try_from(replacement.len()).unwrap();
+        let header_len = 28 + extra_len;
+        let payload_offset = header_len;
+        let trailer_offset = payload_offset + 116;
+        vector["cases"][0]["source_bytes_hex"] = serde_json::json!(hex_bytes(&source));
+        vector["cases"][0]["source"]["sha256"] = serde_json::json!(sha256_hex(&source));
+        vector["cases"][0]["gzip"]["header"]["len"] = serde_json::json!(header_len);
+        vector["cases"][0]["gzip"]["extra"]["len"] = serde_json::json!(extra_len);
+        vector["cases"][0]["gzip"]["extra_subfield_count"] = serde_json::json!(subfield_count);
+        vector["cases"][0]["gzip"]["original_name"]["offset"] = serde_json::json!(10 + extra_len);
+        vector["cases"][0]["gzip"]["comment"]["offset"] = serde_json::json!(22 + extra_len);
+        vector["cases"][0]["gzip"]["compressed_payload"]["offset"] =
+            serde_json::json!(payload_offset);
+        vector["cases"][0]["gzip"]["trailer"]["offset"] = serde_json::json!(trailer_offset);
+        let manifest: TarGzipManifest = serde_json::from_value(vector).unwrap();
+        (source, manifest)
+    }
+
     #[test]
     fn portable_ustar_profile_vector_verifies_without_sealr() {
         let vector =
@@ -1358,8 +3756,981 @@ mod tests {
 
     const VECTORS: &[u8] =
         include_bytes!("../../../crates/sealr/tests/conformance/identity-v1.json");
+    const ZIP64_VECTORS: &[u8] =
+        include_bytes!("../../../crates/sealr/tests/conformance/zip64-identity-v1.json");
+    const TAR_GZIP_VECTORS: &[u8] =
+        include_bytes!("../../../crates/sealr/tests/conformance/tar-gzip-identity-v1.json");
     const TAR_LAYOUT_VECTOR: &[u8] =
         include_bytes!("../../../crates/sealr/tests/conformance/tar-layout-v2.json");
+
+    #[test]
+    fn zip64_profile_digest_is_reconstructed_without_sealr() {
+        assert_eq!(
+            sha256_hex(&zip64_profile_canonical_bytes().unwrap()),
+            "167a6d226bbe74e88189ec61c61df10ae5ed35c0294ad0cf3b5194d2f0bc23e2"
+        );
+    }
+
+    #[test]
+    fn committed_zip64_vectors_verify_independently() {
+        let expected = VerificationSummary {
+            profiles: 1,
+            cases: 2,
+            layout_roots: 2,
+            content_roots: 2,
+        };
+        assert_eq!(
+            verify_zip64_identity_vector_json(ZIP64_VECTORS).unwrap(),
+            expected
+        );
+        assert_eq!(verify_manifest_json(ZIP64_VECTORS).unwrap(), expected);
+    }
+
+    #[test]
+    fn committed_tar_gzip_vectors_verify_both_domains_independently() {
+        let expected = VerificationSummary {
+            profiles: 1,
+            cases: 2,
+            layout_roots: 3,
+            content_roots: 3,
+        };
+        assert_eq!(
+            verify_tar_gzip_identity_vector_json(TAR_GZIP_VECTORS).unwrap(),
+            expected
+        );
+        assert_eq!(verify_manifest_json(TAR_GZIP_VECTORS).unwrap(), expected);
+
+        let manifest: TarGzipManifest = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        assert_ne!(
+            manifest.cases[0].source.sha256,
+            manifest.cases[1].source.sha256
+        );
+        assert_ne!(
+            manifest.cases[0].layout_root.sealr_tree_v4,
+            manifest.cases[1].layout_root.sealr_tree_v4
+        );
+        assert_eq!(
+            manifest.cases[0].content_root.sealr_tree_v1,
+            manifest.cases[1].content_root.sealr_tree_v1
+        );
+        assert_eq!(
+            manifest.cases[0].content_root.sealr_tree_v1,
+            manifest.derived_tar.content_root.sealr_tree_v1
+        );
+    }
+
+    #[test]
+    fn tar_gzip_profile_and_transform_constants_are_reconstructed() {
+        let manifest: TarGzipManifest = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        verify_tar_gzip_transform(&manifest.transform).unwrap();
+        verify_tar_gzip_profile(
+            &manifest.profile,
+            &manifest.inner_profile,
+            &manifest.transform,
+        )
+        .unwrap();
+        assert_eq!(
+            sha256_hex(
+                &tar_gzip_profile_canonical_bytes(&manifest.inner_profile, &manifest.transform)
+                    .unwrap()
+            ),
+            "914acdc0eab541483309a6838716fe837488ca80a1b7758383f28e47470925e1"
+        );
+    }
+
+    #[test]
+    fn tar_gzip_structural_magic_trailing_member_and_inner_records_are_denied() {
+        let mut manifest: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut source = decode_hex(
+            manifest["cases"][0]["source_bytes_hex"].as_str().unwrap(),
+            "test gzip source",
+        )
+        .unwrap();
+        source[0..4].copy_from_slice(&[0x50, 0x4b, 0x03, 0x04]);
+        manifest["cases"][0]["source_bytes_hex"] = serde_json::json!(hex_bytes(&source));
+        manifest["cases"][0]["source"]["sha256"] = serde_json::json!(sha256_hex(&source));
+        let error = verify_manifest_json(&serde_json::to_vec(&manifest).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("fixed structural signature"));
+
+        let mut manifest: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut source = decode_hex(
+            manifest["cases"][0]["source_bytes_hex"].as_str().unwrap(),
+            "test gzip source",
+        )
+        .unwrap();
+        source.extend_from_slice(&[0x1f, 0x8b, 0x08, 0x00]);
+        manifest["cases"][0]["source_bytes_hex"] = serde_json::json!(hex_bytes(&source));
+        manifest["cases"][0]["source"]["sha256"] = serde_json::json!(sha256_hex(&source));
+        let error = verify_manifest_json(&serde_json::to_vec(&manifest).unwrap()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("exactly partition one source member"));
+
+        let mut manifest: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut derived = decode_hex(
+            manifest["derived_tar"]["bytes_hex"].as_str().unwrap(),
+            "test derived TAR",
+        )
+        .unwrap();
+        derived[1024..1029].copy_from_slice(b"ustar");
+        manifest["derived_tar"]["bytes_hex"] = serde_json::json!(hex_bytes(&derived));
+        manifest["derived_tar"]["source"]["sha256"] = serde_json::json!(sha256_hex(&derived));
+        let error = verify_manifest_json(&serde_json::to_vec(&manifest).unwrap()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("terminator contains nonzero bytes"));
+    }
+
+    #[test]
+    fn tar_gzip_valid_and_corrupt_fhcrc_are_distinguished_without_decompression() {
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut source = decode_hex(
+            vector["cases"][0]["source_bytes_hex"].as_str().unwrap(),
+            "test gzip source",
+        )
+        .unwrap();
+        source[3] |= 0x02;
+        let fhcrc = (crc32_ieee_bytes(&source[..37]) as u16).to_le_bytes();
+        source.splice(37..37, fhcrc);
+        vector["cases"][0]["source_bytes_hex"] = serde_json::json!(hex_bytes(&source));
+        vector["cases"][0]["source"]["sha256"] = serde_json::json!(sha256_hex(&source));
+        vector["cases"][0]["gzip"]["flags"] = serde_json::json!(30);
+        vector["cases"][0]["gzip"]["header"]["len"] = serde_json::json!(39);
+        vector["cases"][0]["gzip"]["header_crc16"] = serde_json::json!({ "offset": 37, "len": 2 });
+        vector["cases"][0]["gzip"]["compressed_payload"]["offset"] = serde_json::json!(39);
+        vector["cases"][0]["gzip"]["trailer"]["offset"] = serde_json::json!(155);
+        let manifest: TarGzipManifest = serde_json::from_value(vector.clone()).unwrap();
+        let derived = decode_hex(&manifest.derived_tar.bytes_hex, "test derived TAR").unwrap();
+        verify_gzip_wrapper(
+            &source,
+            &manifest.cases[0].gzip,
+            &derived,
+            &manifest.derived_tar,
+        )
+        .expect("valid FHCRC");
+
+        source[37] ^= 1;
+        let manifest: TarGzipManifest = serde_json::from_value(vector).unwrap();
+        let error = verify_gzip_wrapper(
+            &source,
+            &manifest.cases[0].gzip,
+            &derived,
+            &manifest.derived_tar,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("FHCRC disagrees"));
+    }
+
+    #[test]
+    fn tar_gzip_inner_ustar_rejects_targeted_self_consistent_mutations() {
+        type HeaderMutation = (&'static str, fn(&mut [u8]), &'static str);
+        let mutations: [HeaderMutation; 9] = [
+            (
+                "linkname",
+                (|header: &mut [u8]| header[157] = b'x') as fn(&mut [u8]),
+                "linkname",
+            ),
+            (
+                "reserved byte",
+                |header: &mut [u8]| header[500] = 1,
+                "reserved ustar header bytes",
+            ),
+            (
+                "uid grammar",
+                |header: &mut [u8]| header[108] = b' ',
+                "TAR uid is not canonical ASCII octal",
+            ),
+            (
+                "gid base-256",
+                |header: &mut [u8]| header[116] = 0x80,
+                "TAR gid uses denied base-256 encoding",
+            ),
+            (
+                "device number",
+                |header: &mut [u8]| header[329..337].copy_from_slice(b"0000001\0"),
+                "device numbers must be zero",
+            ),
+            (
+                "uname printable ASCII",
+                |header: &mut [u8]| header[265] = 1,
+                "TAR uname is not printable ASCII",
+            ),
+            (
+                "gname zero remainder",
+                |header: &mut [u8]| {
+                    header[297] = b'g';
+                    header[298] = 0;
+                    header[299] = b'x';
+                },
+                "TAR gname has nonzero bytes after its first NUL",
+            ),
+            (
+                "empty name with prefix",
+                |header: &mut [u8]| {
+                    header[..100].fill(0);
+                    header[345..500].fill(0);
+                    header[345..353].copy_from_slice(b"mission\0");
+                },
+                "TAR name is empty",
+            ),
+            (
+                "unterminated octal",
+                |header: &mut [u8]| header[136..148].fill(b'0'),
+                "TAR mtime is not canonical ASCII octal",
+            ),
+        ];
+        for (label, mutate, expected) in mutations {
+            let vector = tar_gzip_vector_with_header_mutation(mutate);
+            let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+            assert!(
+                error.to_string().contains(expected),
+                "{label} reached unexpected rejection: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn tar_gzip_fextra_subfield_grammar_is_closed_and_multi_field_capable() {
+        let manifest: TarGzipManifest = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let derived = decode_hex(&manifest.derived_tar.bytes_hex, "test derived TAR").unwrap();
+
+        let (source, manifest) = tar_gzip_case_with_extra_payload(&[0], 0);
+        let error = verify_gzip_wrapper(
+            &source,
+            &manifest.cases[0].gzip,
+            &derived,
+            &manifest.derived_tar,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("incomplete subfield header"));
+
+        let manifest: TarGzipManifest = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut source =
+            decode_hex(&manifest.cases[0].source_bytes_hex, "test gzip source").unwrap();
+        source[13] = 0;
+        let error = verify_gzip_wrapper(
+            &source,
+            &manifest.cases[0].gzip,
+            &derived,
+            &manifest.derived_tar,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("reserved SI2 zero"));
+
+        let duplicate = [b'A', b'B', 0, 0, b'A', b'B', 0, 0];
+        let (source, manifest) = tar_gzip_case_with_extra_payload(&duplicate, 2);
+        let error = verify_gzip_wrapper(
+            &source,
+            &manifest.cases[0].gzip,
+            &derived,
+            &manifest.derived_tar,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("repeats a subfield id"));
+
+        let manifest: TarGzipManifest = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut source =
+            decode_hex(&manifest.cases[0].source_bytes_hex, "test gzip source").unwrap();
+        source[14..16].copy_from_slice(&4_u16.to_le_bytes());
+        let error = verify_gzip_wrapper(
+            &source,
+            &manifest.cases[0].gzip,
+            &derived,
+            &manifest.derived_tar,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("subfield exceeds XLEN"));
+
+        let valid = [b'A', b'B', 0, 0, b'C', b'D', 0, 0];
+        let (source, manifest) = tar_gzip_case_with_extra_payload(&valid, 2);
+        verify_gzip_wrapper(
+            &source,
+            &manifest.cases[0].gzip,
+            &derived,
+            &manifest.derived_tar,
+        )
+        .expect("two unique canonical FEXTRA subfields must verify");
+    }
+
+    #[test]
+    fn tar_gzip_v1_case_set_is_exact_ordered_and_checked_early() {
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let cloned_case = vector["cases"][0].clone();
+        vector["cases"].as_array_mut().unwrap().push(cloned_case);
+        vector["transform"]["definition_hex"] = serde_json::json!("00");
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("exactly the two canonical ordered cases"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        vector["cases"].as_array_mut().unwrap().swap(0, 1);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("exactly the two canonical ordered cases"));
+    }
+
+    #[test]
+    fn tar_gzip_mutations_across_wrapper_derived_inner_and_roots_are_rejected() {
+        let mutations = [
+            ("/schema", serde_json::json!("sealr.unknown")),
+            (
+                "/archive_ir_schema",
+                serde_json::json!("sealr.archive-ir.v1"),
+            ),
+            ("/profile/id", serde_json::json!("sealr.profile.unknown")),
+            ("/profile/digest/sha256", serde_json::json!("0".repeat(64))),
+            (
+                "/transform/id",
+                serde_json::json!("sealr.transform.unknown"),
+            ),
+            ("/transform/definition_hex", serde_json::json!("00")),
+            (
+                "/transform/digest/sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            ("/transform/decoder_parameters_hex", serde_json::json!("00")),
+            (
+                "/transform/decoder_parameters_digest/sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/inner_profile/id",
+                serde_json::json!("sealr.profile.tar.unknown"),
+            ),
+            (
+                "/inner_profile/digest/sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            ("/layout_encoding", serde_json::json!("sealrTreeV2")),
+            (
+                "/layout_label",
+                serde_json::json!("sealr.tree.layout.tar-ustar.v1"),
+            ),
+            ("/content_encoding", serde_json::json!("sealrTreeV4")),
+            ("/content_label", serde_json::json!("sealr.tree.content.v2")),
+            ("/derived_tar/bytes_hex", serde_json::json!("00")),
+            (
+                "/derived_tar/source/sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/derived_tar/covering/member_records/len",
+                serde_json::json!(1023),
+            ),
+            (
+                "/derived_tar/covering/terminator/offset",
+                serde_json::json!(1023),
+            ),
+            (
+                "/derived_tar/covering/trailing_zeros/len",
+                serde_json::json!(1),
+            ),
+            (
+                "/derived_tar/members/0/raw_name_bytes",
+                serde_json::json!([120]),
+            ),
+            (
+                "/derived_tar/members/0/decoded_name",
+                serde_json::json!("x"),
+            ),
+            (
+                "/derived_tar/members/0/canonical_path",
+                serde_json::json!("x"),
+            ),
+            (
+                "/derived_tar/members/0/components",
+                serde_json::json!(["x"]),
+            ),
+            (
+                "/derived_tar/members/0/kind",
+                serde_json::json!("directory"),
+            ),
+            (
+                "/derived_tar/members/0/declared_uncomp_size",
+                serde_json::json!(24),
+            ),
+            (
+                "/derived_tar/members/0/tar/header/offset",
+                serde_json::json!(1),
+            ),
+            (
+                "/derived_tar/members/0/tar/header/len",
+                serde_json::json!(511),
+            ),
+            (
+                "/derived_tar/members/0/tar/payload/offset",
+                serde_json::json!(511),
+            ),
+            (
+                "/derived_tar/members/0/tar/payload/len",
+                serde_json::json!(24),
+            ),
+            (
+                "/derived_tar/members/0/tar/padding/offset",
+                serde_json::json!(536),
+            ),
+            (
+                "/derived_tar/members/0/tar/padding/len",
+                serde_json::json!(486),
+            ),
+            ("/derived_tar/members/0/tar/mode", serde_json::json!(384)),
+            (
+                "/derived_tar/members/0/tar/mtime",
+                serde_json::json!(1788000001_u64),
+            ),
+            (
+                "/derived_tar/members/0/tar/header_checksum",
+                serde_json::json!(0),
+            ),
+            (
+                "/derived_tar/members/0/tar/header_sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/derived_tar/members/0/actual_uncomp_size",
+                serde_json::json!(24),
+            ),
+            ("/derived_tar/members/0/actual_crc", serde_json::json!(0)),
+            (
+                "/derived_tar/members/0/content_sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/derived_tar/members/0/verification/status",
+                serde_json::json!("pending"),
+            ),
+            (
+                "/derived_tar/members/0/normalization_actions",
+                serde_json::json!([{ "action": "strip-directory-trailing-slash" }]),
+            ),
+            (
+                "/derived_tar/raw_layout_preimage_hex",
+                serde_json::json!("00"),
+            ),
+            (
+                "/derived_tar/raw_layout_root/sealrTreeV2",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/derived_tar/content_root/sealrTreeV1",
+                serde_json::json!("0".repeat(64)),
+            ),
+            ("/cases/1/id", serde_json::json!("optional-default")),
+            ("/cases/0/source_bytes_hex", serde_json::json!("00")),
+            ("/cases/0/source/sha256", serde_json::json!("0".repeat(64))),
+            ("/cases/0/gzip/flags", serde_json::json!(0)),
+            ("/cases/0/gzip/modification_time", serde_json::json!(1)),
+            ("/cases/0/gzip/extra_flags", serde_json::json!(1)),
+            ("/cases/0/gzip/operating_system", serde_json::json!(3)),
+            ("/cases/0/gzip/header/len", serde_json::json!(36)),
+            ("/cases/0/gzip/extra/offset", serde_json::json!(11)),
+            ("/cases/0/gzip/extra/len", serde_json::json!(8)),
+            ("/cases/0/gzip/extra_subfield_count", serde_json::json!(2)),
+            ("/cases/0/gzip/original_name/offset", serde_json::json!(20)),
+            ("/cases/0/gzip/comment/len", serde_json::json!(5)),
+            (
+                "/cases/0/gzip/header_crc16",
+                serde_json::json!({ "offset": 37, "len": 2 }),
+            ),
+            (
+                "/cases/0/gzip/compressed_payload/offset",
+                serde_json::json!(36),
+            ),
+            (
+                "/cases/0/gzip/compressed_payload/len",
+                serde_json::json!(115),
+            ),
+            ("/cases/0/gzip/trailer/offset", serde_json::json!(152)),
+            ("/cases/0/gzip/trailer/len", serde_json::json!(7)),
+            ("/cases/0/gzip/declared_crc32", serde_json::json!(0)),
+            ("/cases/0/gzip/declared_isize", serde_json::json!(2047)),
+            ("/cases/0/gzip/derived_output_len", serde_json::json!(2047)),
+            (
+                "/cases/0/gzip/derived_output_sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            ("/cases/0/layout_preimage_hex", serde_json::json!("00")),
+            (
+                "/cases/0/layout_root/sealrTreeV4",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/cases/0/content_root/sealrTreeV1",
+                serde_json::json!("0".repeat(64)),
+            ),
+        ];
+        for (pointer, replacement) in mutations {
+            let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+            *vector
+                .pointer_mut(pointer)
+                .expect("known TAR/gzip vector pointer") = replacement;
+            assert!(
+                verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).is_err(),
+                "TAR/gzip mutation {pointer} must fail"
+            );
+        }
+    }
+
+    #[test]
+    fn zip64_covering_is_bound_to_source_records_and_semantic_extra_values() {
+        let manifest: Zip64Manifest = serde_json::from_slice(ZIP64_VECTORS).unwrap();
+
+        let case = &manifest.cases[0];
+        let mut source = decode_hex(&case.source_bytes_hex, "test source").unwrap();
+        source[0] ^= 1;
+        assert!(verify_zip64_covering(&source, &case.archive_ir)
+            .unwrap_err()
+            .to_string()
+            .contains("signature"));
+
+        let mut source = decode_hex(&case.source_bytes_hex, "test source").unwrap();
+        source[35] ^= 1;
+        assert!(verify_zip64_covering(&source, &case.archive_ir)
+            .unwrap_err()
+            .to_string()
+            .contains("value shape"));
+
+        let case = &manifest.cases[1];
+        let mut source = decode_hex(&case.source_bytes_hex, "test source").unwrap();
+        source[0] ^= 1;
+        assert!(verify_zip64_covering(&source, &case.archive_ir)
+            .unwrap_err()
+            .to_string()
+            .contains("EOCD"));
+    }
+
+    const ZIP64_STRUCTURAL_SIGNATURES: [[u8; 4]; 6] = [
+        [0x50, 0x4b, 0x06, 0x06],
+        [0x50, 0x4b, 0x06, 0x07],
+        [0x50, 0x4b, 0x05, 0x06],
+        [0x50, 0x4b, 0x03, 0x04],
+        [0x50, 0x4b, 0x01, 0x02],
+        [0x50, 0x4b, 0x07, 0x08],
+    ];
+
+    const ZIP64_STREAM_SIGNATURES: [[u8; 4]; 3] = [
+        [0x50, 0x4b, 0x03, 0x04],
+        [0x50, 0x4b, 0x01, 0x02],
+        [0x50, 0x4b, 0x07, 0x08],
+    ];
+
+    fn zip64_case_with_global_comment(comment: [u8; 4]) -> (Vec<u8>, Zip64ArchiveIr) {
+        let manifest: Zip64Manifest = serde_json::from_slice(ZIP64_VECTORS).unwrap();
+        let case = &manifest.cases[1];
+        let mut source = decode_hex(&case.source_bytes_hex, "test source").unwrap();
+        let eocd = usize::try_from(case.archive_ir.zip64_covering.eocd.offset).unwrap();
+        source[eocd + 20..eocd + 22].copy_from_slice(&4_u16.to_le_bytes());
+        source.extend_from_slice(&comment);
+        let ir_value = serde_json::to_value(
+            serde_json::from_slice::<serde_json::Value>(ZIP64_VECTORS).unwrap()["cases"][1]
+                ["archive_ir"]
+                .clone(),
+        )
+        .unwrap();
+        let mut ir: Zip64ArchiveIr = serde_json::from_value(ir_value).unwrap();
+        ir.zip64_covering.comment.len = 4;
+        ir.source_digest.sha256 = sha256_hex(&source);
+        (source, ir)
+    }
+
+    fn zip64_case_with_central_comment(comment: [u8; 4]) -> (Vec<u8>, Zip64ArchiveIr) {
+        let manifest: Zip64Manifest = serde_json::from_slice(ZIP64_VECTORS).unwrap();
+        let case = &manifest.cases[0];
+        let mut source = decode_hex(&case.source_bytes_hex, "test source").unwrap();
+        let central =
+            usize::try_from(case.archive_ir.zip64_covering.central_directory.offset).unwrap();
+        source[central + 32..central + 34].copy_from_slice(&4_u16.to_le_bytes());
+        let old_eocd = usize::try_from(case.archive_ir.zip64_covering.eocd.offset).unwrap();
+        source.splice(old_eocd..old_eocd, comment);
+        let new_eocd = old_eocd + 4;
+        source[new_eocd + 12..new_eocd + 16].copy_from_slice(&51_u32.to_le_bytes());
+        let ir_value = serde_json::from_slice::<serde_json::Value>(ZIP64_VECTORS).unwrap()["cases"]
+            [0]["archive_ir"]
+            .clone();
+        let mut ir: Zip64ArchiveIr = serde_json::from_value(ir_value).unwrap();
+        ir.zip64_covering.central_directory.len = 51;
+        ir.zip64_covering.eocd.offset += 4;
+        ir.zip64_covering.comment.offset += 4;
+        ir.members[0].source_ranges.central_header.len += 4;
+        ir.source_digest.sha256 = sha256_hex(&source);
+        (source, ir)
+    }
+
+    fn crc32_ieee(bytes: &[u8]) -> u32 {
+        let mut crc = u32::MAX;
+        for byte in bytes {
+            crc ^= u32::from(*byte);
+            for _ in 0..8 {
+                crc = (crc >> 1) ^ (0xedb8_8320 & 0_u32.wrapping_sub(crc & 1));
+            }
+        }
+        !crc
+    }
+
+    fn zip64_store_descriptor_case(payload: [u8; 4]) -> (Vec<u8>, Zip64ArchiveIr) {
+        const LOCAL_HEADER_LEN: u64 = 51;
+        const DESCRIPTOR_OFFSET: u64 = 55;
+        const CENTRAL_OFFSET: u64 = 79;
+        const EOCD_OFFSET: u64 = 126;
+        const SOURCE_LEN: u64 = 148;
+
+        let crc = crc32_ieee(&payload);
+        let content_digest = sha256_hex(&payload);
+        let mut source = Vec::new();
+        source.extend_from_slice(&[0x50, 0x4b, 0x03, 0x04]);
+        push_u16(&mut source, 45);
+        push_u16(&mut source, 0x0008);
+        push_u16(&mut source, 0);
+        push_u16(&mut source, 0);
+        push_u16(&mut source, 0);
+        push_u32(&mut source, 0);
+        push_u32(&mut source, u32::MAX);
+        push_u32(&mut source, u32::MAX);
+        push_u16(&mut source, 1);
+        push_u16(&mut source, 20);
+        source.push(b'a');
+        push_u16(&mut source, 1);
+        push_u16(&mut source, 16);
+        push_u64(&mut source, 4);
+        push_u64(&mut source, 4);
+        assert_eq!(source.len(), usize::try_from(LOCAL_HEADER_LEN).unwrap());
+        source.extend_from_slice(&payload);
+        source.extend_from_slice(&[0x50, 0x4b, 0x07, 0x08]);
+        push_u32(&mut source, crc);
+        push_u64(&mut source, 4);
+        push_u64(&mut source, 4);
+        assert_eq!(source.len(), usize::try_from(CENTRAL_OFFSET).unwrap());
+        source.extend_from_slice(&[0x50, 0x4b, 0x01, 0x02]);
+        push_u16(&mut source, 45);
+        push_u16(&mut source, 45);
+        push_u16(&mut source, 0x0008);
+        push_u16(&mut source, 0);
+        push_u16(&mut source, 0);
+        push_u16(&mut source, 0);
+        push_u32(&mut source, crc);
+        push_u32(&mut source, 4);
+        push_u32(&mut source, 4);
+        push_u16(&mut source, 1);
+        push_u16(&mut source, 0);
+        push_u16(&mut source, 0);
+        push_u16(&mut source, 0);
+        push_u16(&mut source, 0);
+        push_u32(&mut source, 0);
+        push_u32(&mut source, 0);
+        source.push(b'a');
+        assert_eq!(source.len(), usize::try_from(EOCD_OFFSET).unwrap());
+        source.extend_from_slice(&[0x50, 0x4b, 0x05, 0x06]);
+        push_u16(&mut source, 0);
+        push_u16(&mut source, 0);
+        push_u16(&mut source, 1);
+        push_u16(&mut source, 1);
+        push_u32(&mut source, 47);
+        push_u32(&mut source, u32::try_from(CENTRAL_OFFSET).unwrap());
+        push_u16(&mut source, 0);
+        assert_eq!(source.len(), usize::try_from(SOURCE_LEN).unwrap());
+
+        let ir: Zip64ArchiveIr = serde_json::from_value(serde_json::json!({
+            "schema": ZIP64_IR_SCHEMA,
+            "profile": ZIP64_PROFILE_SCHEMA,
+            "profile_digest": "167a6d226bbe74e88189ec61c61df10ae5ed35c0294ad0cf3b5194d2f0bc23e2",
+            "source_digest": { "sha256": sha256_hex(&source) },
+            "format": "zip64",
+            "zip64_covering": {
+                "local_records": { "offset": 0, "len": CENTRAL_OFFSET },
+                "central_directory": { "offset": CENTRAL_OFFSET, "len": 47 },
+                "zip64_eocd": null,
+                "zip64_locator": null,
+                "eocd": { "offset": EOCD_OFFSET, "len": 22 },
+                "comment": { "offset": SOURCE_LEN, "len": 0 }
+            },
+            "members": [{
+                "raw_name_bytes": [97],
+                "decoded_name": "a",
+                "canonical_path": "a",
+                "components": ["a"],
+                "kind": "file",
+                "method": 0,
+                "flags": 8,
+                "declared_crc": crc,
+                "declared_comp_size": 4,
+                "declared_uncomp_size": 4,
+                "source_ranges": {
+                    "local_header": { "offset": 0, "len": LOCAL_HEADER_LEN },
+                    "compressed_payload": { "offset": LOCAL_HEADER_LEN, "len": 4 },
+                    "data_descriptor": { "offset": DESCRIPTOR_OFFSET, "len": 24 },
+                    "central_header": { "offset": CENTRAL_OFFSET, "len": 47 }
+                },
+                "extra_fields": [{
+                    "site": "local",
+                    "id": 1,
+                    "header_range": { "offset": 31, "len": 4 },
+                    "data_range": { "offset": 35, "len": 16 },
+                    "disposition": "semantic"
+                }],
+                "zip64": {
+                    "local_version_needed": 45,
+                    "central_version_needed": 45,
+                    "central_presence_mask": 0,
+                    "central_legacy_sentinel_mask": 0,
+                    "local_legacy_sentinel_mask": 3,
+                    "local_value_shape": "exact",
+                    "local_zip64_extra": { "offset": 35, "len": 16 },
+                    "central_zip64_extra": null,
+                    "descriptor_width": "zip64"
+                },
+                "actual_uncomp_size": 4,
+                "actual_crc": crc,
+                "content_sha256": content_digest,
+                "verification": { "status": "verified" },
+                "normalization_actions": []
+            }]
+        }))
+        .unwrap();
+        (source, ir)
+    }
+
+    #[test]
+    fn zip64_global_comment_rejects_every_production_structural_signature() {
+        let (source, ir) = zip64_case_with_global_comment(*b"safe");
+        verify_zip64_covering(&source, &ir).expect("safe global comment");
+        for signature in ZIP64_STRUCTURAL_SIGNATURES {
+            let (source, ir) = zip64_case_with_global_comment(signature);
+            let error = verify_zip64_covering(&source, &ir).unwrap_err();
+            assert!(
+                error.to_string().contains("global EOCD comment"),
+                "signature {signature:02x?}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn zip64_central_comment_rejects_every_production_structural_signature() {
+        let (source, ir) = zip64_case_with_central_comment(*b"safe");
+        verify_zip64_covering(&source, &ir).expect("safe central comment");
+        for signature in ZIP64_STRUCTURAL_SIGNATURES {
+            let (source, ir) = zip64_case_with_central_comment(signature);
+            let error = verify_zip64_covering(&source, &ir).unwrap_err();
+            assert!(
+                error.to_string().contains("central member comment"),
+                "signature {signature:02x?}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn zip64_store_descriptor_payload_rejects_every_stream_signature() {
+        let (source, ir) = zip64_store_descriptor_case(*b"safe");
+        validate_zip64_ir(&ir).expect("self-consistent stored member IR");
+        verify_zip64_covering(&source, &ir).expect("safe stored descriptor payload");
+        for signature in ZIP64_STREAM_SIGNATURES {
+            let (source, ir) = zip64_store_descriptor_case(signature);
+            validate_zip64_ir(&ir).expect("self-consistent stored member IR");
+            let error = verify_zip64_covering(&source, &ir).unwrap_err();
+            assert!(
+                error.to_string().contains("stored descriptor payload"),
+                "signature {signature:02x?}: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn zip64_mutations_across_each_identity_family_are_rejected() {
+        let mutations = [
+            ("/schema", serde_json::json!("sealr.unknown")),
+            ("/profile/id", serde_json::json!("sealr.profile.unknown")),
+            ("/profile/digest/sha256", serde_json::json!("0".repeat(64))),
+            ("/layout_encoding", serde_json::json!("sealrTreeV1")),
+            ("/layout_label", serde_json::json!("sealr.tree.layout.v1")),
+            ("/content_encoding", serde_json::json!("sealrTreeV3")),
+            ("/content_label", serde_json::json!("sealr.tree.content.v2")),
+            ("/cases/0/source_bytes_hex", serde_json::json!("00")),
+            ("/cases/0/source/sha256", serde_json::json!("0".repeat(64))),
+            (
+                "/cases/0/archive_ir/schema",
+                serde_json::json!("sealr.archive-ir.v1"),
+            ),
+            (
+                "/cases/0/archive_ir/profile",
+                serde_json::json!("sealr.profile.unknown"),
+            ),
+            (
+                "/cases/0/archive_ir/profile_digest",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/cases/0/archive_ir/source_digest/sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            ("/cases/0/archive_ir/format", serde_json::json!("zip32")),
+            (
+                "/cases/0/archive_ir/zip64_covering/local_records/len",
+                serde_json::json!(55),
+            ),
+            (
+                "/cases/0/archive_ir/zip64_covering/central_directory/offset",
+                serde_json::json!(57),
+            ),
+            (
+                "/cases/0/archive_ir/zip64_covering/zip64_eocd",
+                serde_json::json!({ "offset": 103, "len": 56 }),
+            ),
+            (
+                "/cases/1/archive_ir/zip64_covering/zip64_locator/offset",
+                serde_json::json!(57),
+            ),
+            (
+                "/cases/0/archive_ir/zip64_covering/eocd/len",
+                serde_json::json!(23),
+            ),
+            (
+                "/cases/0/archive_ir/zip64_covering/comment/len",
+                serde_json::json!(1),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/raw_name_bytes",
+                serde_json::json!([98]),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/decoded_name",
+                serde_json::json!("b"),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/canonical_path",
+                serde_json::json!("b"),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/components",
+                serde_json::json!(["b"]),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/kind",
+                serde_json::json!("directory"),
+            ),
+            ("/cases/0/archive_ir/members/0/method", serde_json::json!(0)),
+            ("/cases/0/archive_ir/members/0/flags", serde_json::json!(8)),
+            (
+                "/cases/0/archive_ir/members/0/declared_crc",
+                serde_json::json!(3137623818_u32),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/declared_comp_size",
+                serde_json::json!(6),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/declared_uncomp_size",
+                serde_json::json!(17),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/source_ranges/local_header/len",
+                serde_json::json!(50),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/source_ranges/compressed_payload/offset",
+                serde_json::json!(50),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/source_ranges/data_descriptor",
+                serde_json::json!({ "offset": 56, "len": 24 }),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/source_ranges/central_header/offset",
+                serde_json::json!(57),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/extra_fields/0/id",
+                serde_json::json!(2),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/extra_fields/0/header_range/offset",
+                serde_json::json!(30),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/extra_fields/0/data_range/len",
+                serde_json::json!(15),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/extra_fields/0/disposition",
+                serde_json::json!("ignored"),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/zip64/local_version_needed",
+                serde_json::json!(44),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/zip64/central_version_needed",
+                serde_json::json!(44),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/zip64/central_presence_mask",
+                serde_json::json!(1),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/zip64/central_legacy_sentinel_mask",
+                serde_json::json!(1),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/zip64/local_legacy_sentinel_mask",
+                serde_json::json!(2),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/zip64/local_value_shape",
+                serde_json::json!("absent"),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/zip64/local_zip64_extra/offset",
+                serde_json::json!(36),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/zip64/central_zip64_extra",
+                serde_json::json!({ "offset": 103, "len": 8 }),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/zip64/descriptor_width",
+                serde_json::json!("zip64"),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/actual_uncomp_size",
+                serde_json::json!(17),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/actual_crc",
+                serde_json::json!(3137623818_u32),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/content_sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/verification/status",
+                serde_json::json!("pending"),
+            ),
+            (
+                "/cases/0/archive_ir/members/0/normalization_actions",
+                serde_json::json!([{ "action": "strip-directory-trailing-slash" }]),
+            ),
+            ("/cases/0/layout_preimage_hex", serde_json::json!("00")),
+            (
+                "/cases/0/layout_root/sealrTreeV3",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/cases/0/content_root/sealrTreeV1",
+                serde_json::json!("0".repeat(64)),
+            ),
+        ];
+        for (pointer, replacement) in mutations {
+            let mut vector: serde_json::Value = serde_json::from_slice(ZIP64_VECTORS).unwrap();
+            *vector
+                .pointer_mut(pointer)
+                .expect("known ZIP64 vector pointer") = replacement;
+            assert!(
+                verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).is_err(),
+                "ZIP64 mutation {pointer} must fail"
+            );
+        }
+    }
 
     #[test]
     fn tar_layout_and_content_roots_verify_independently() {

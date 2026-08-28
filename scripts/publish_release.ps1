@@ -8,9 +8,9 @@ $ErrorActionPreference = 'Stop'
 
 $Repository = 'blisspixel/sealr'
 $DefaultBranch = 'main'
-$Version = '0.1.0-alpha.9'
+$Version = '0.1.0-alpha.10'
 $ReleaseTag = "v$Version"
-$ReleaseTitle = "sealr ${Version}: portable ustar and multi-format core"
+$ReleaseTitle = "sealr ${Version}: strict ZIP64 and gzip TAR"
 $CiWorkflow = '.github/workflows/ci.yml'
 $ReleaseWorkflow = '.github/workflows/release.yml'
 $GithubActionsAppId = 15368
@@ -21,6 +21,9 @@ $ExpectedFuzzJobs = @(
     'Bounded worker protocol'
     'Bounded semantic records'
     'Bounded raw POSIX ustar'
+    'Bounded RFC 1952 gzip'
+    'Bounded public TAR gzip ustar'
+    'Bounded strict ZIP64'
 )
 $ExpectedCiJobs = @(
     'Format, lint, test, and docs'

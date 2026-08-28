@@ -4,12 +4,12 @@ This is an open assurance problem, not a claim that one implementation is defini
 
 ## Single interpretation (default)
 
-The rules below are normative. The current ZIP32 subset implements the classic-record path and rejects ZIP64. Corpus coverage is executable through the [pinned expectation manifest](../tests/corpus/zipdiff/expectations.txt).
+The rules below are normative for the ZIP32 default. It implements the classic-record path and rejects ZIP64. Strict ZIP64 is a separate explicit in-process profile under policy v3, never a retry or alias. Corpus coverage is executable through the [pinned expectation manifest](../tests/corpus/zipdiff/expectations.txt).
 
 sealr is **one** ZIP parser:
 
 1. Find the unique EOCD whose comment length exactly matches the suffix (C2).
-2. Reject ZIP64 markers until the ZIP64 interpretation and fixtures are implemented (C5).
+2. Reject every ZIP64 marker under a ZIP32 profile; only `Zip64StrictAsciiV1` may interpret it, using its separate ZIP64 covering and identity rules (C5).
 3. Parse the central directory. Count, size, offset MUST agree (C3, C4).
 4. Each CDH: jail the name; LFH at the stated offset MUST agree on method, sizes, name, encryption flag (A1–A5).
 5. Referenced local-record ranges, including headers and data descriptors, MUST form one contiguous prefix before the central directory. Gaps, hidden prefixes, overlap, and bytes crossing into the CD are rejected (C1 + Fifield).

@@ -2,7 +2,7 @@
 
 Policy is an input to `apply()` and is bound into every receipt by id and SHA-256 digest. Caps and behavioral choices must not live only in command-line state.
 
-The implemented pre-release schemas are `sealr.policy.v1` and `sealr.policy.v2`. The Rust API constructs `Policy` directly. `apply()` compiles that constructor into typed supported controls before reading archive bytes. Loading arbitrary JSON policy documents, rejecting unknown serde fields, derived policy ids, and RFC 8785 canonical hashing are planned but not implemented.
+The implemented pre-release schemas are `sealr.policy.v1`, `sealr.policy.v2`, and `sealr.policy.v3`. The Rust API constructs `Policy` directly. `apply()` compiles that constructor into typed supported controls before reading archive bytes. Loading arbitrary JSON policy documents, rejecting unknown serde fields, derived policy ids, and RFC 8785 canonical hashing are planned but not implemented.
 
 There is no insecure mode.
 
@@ -10,7 +10,7 @@ There is no insecure mode.
 
 `apply_with_options` accepts two kinds of operation-scoped input outside the policy object: explicit archive/profile selection and capabilities such as a bounded `RetentionPlan`. Selection changes the container language and interpretation identity. The policy separately authorizes that selected format, so selection cannot widen `formats`. A retention plan does not change interpretation, archive admission, receipt or tree identity, or whether a destination is requested.
 
-`apply()` selects the immutable compatibility profile `sealr.profile.zip.strict-ascii.v1` and requires the ZIP-only `Policy::default_v1()` contract. Callers can explicitly select the [closed strict ASCII v2 profile](profiles/zip-strict-ascii-v2.md) or the [portable ustar profile](profiles/tar-ustar-portable-v1.md) through `ApplyOptions`. TAR selection requires a policy that authorizes `tar-ustar`, normally `Policy::default_v2()`. The same prerelease enum exposes the separately named `sealr.profile.zip.wheel-utf8.v1` repository-research language without changing either supported ASCII profile. A retention plan names only exact canonical paths and supplies independent per-member and aggregate retained-byte ceilings. Failure to retain a requested path is reported through `VerifiedArchive::retention_status`; it does not relax an archive rule or convert a rejection into an admission. A higher-level consumer that requires those bytes must fail its own evaluation unless every required status is `Retained`. The full contract and limits are in [bounded one-pass retention](api.md#bounded-one-pass-retention).
+`apply()` selects the immutable compatibility profile `sealr.profile.zip.strict-ascii.v1` and requires the ZIP32-only `Policy::default_v1()` contract. Callers can explicitly select the [closed strict ASCII v2 profile](profiles/zip-strict-ascii-v2.md), the [strict ZIP64 profile](profiles/zip64-strict-ascii-v1.md), the [portable ustar profile](profiles/tar-ustar-portable-v1.md), or the [gzip-wrapped portable ustar profile](profiles/tar-gzip-ustar-portable-v1.md) through `ApplyOptions`. ZIP64 selection requires policy v3, raw TAR requires authorization for `tar-ustar`, and gzip-wrapped TAR requires policy v4 authorization for `tar-gzip-ustar`. Selection never aliases or retries through another format. The same prerelease enum exposes the separately named `sealr.profile.zip.wheel-utf8.v1` repository-research language without changing either supported ASCII ZIP32 profile. A retention plan names only exact canonical paths and supplies independent per-member and aggregate retained-byte ceilings. Failure to retain a requested path is reported through `VerifiedArchive::retention_status`; it does not relax an archive rule or convert a rejection into an admission. A higher-level consumer that requires those bytes must fail its own evaluation unless every required status is `Retained`. The full contract and limits are in [bounded one-pass retention](api.md#bounded-one-pass-retention).
 
 ## Compatibility default v1
 
@@ -56,18 +56,40 @@ The exact `Policy::default_v1()` digest remains `8298b205c981ed140a52ba555c04997
 
 Its exact digest is `a02984fd88cb3fed1d60a339485eb0742da418681427dadcf699b4303f17d14a`. A v2 caller may narrow `formats` to exactly `["zip"]` or `["tar-ustar"]`. The two-format list must remain in the canonical order shown. Empty, duplicate, reversed, unknown, and three-or-more-element lists fail before source ingestion.
 
+## ZIP64-capable default v3
+
+`Policy::default_v3()` preserves the resource and effect controls, changes the schema and id to `sealr.policy.v3` and `sealr:policy/default/v3`, and authorizes the canonical format list:
+
+```json
+"formats": ["zip", "zip64", "tar-ustar"]
+```
+
+Its exact digest is `2cc96c7a2dd83617b3c80df7ec5ae7e4b92f74b0b391d70aa73f54f3f82068bd`. A v3 caller may use any nonempty canonical subset of that list. Authorization does not select a parser: the caller must still select `Zip64StrictAsciiV1` explicitly, and the ZIP32 default remains unchanged.
+
+## Gzip-TAR-capable default v4
+
+`Policy::default_v4()` preserves all earlier resource and effect controls, changes the schema and id to `sealr.policy.v4` and `sealr:policy/default/v4`, adds the mandatory derived-archive cap, and authorizes the canonical format list:
+
+```json
+"formats": ["zip", "zip64", "tar-ustar", "tar-gzip-ustar"],
+"max_derived_archive_bytes": 536870912
+```
+
+Its exact digest is `ecfca685a8f05c63fd12b7fd1c183a90a3fa705f801493fa4cb003cd57f1d601`. A v4 caller may use any nonempty canonical subset of the format list. The derived cap is serialized only in policy v4; setting it under v1 through v3 or omitting it under v4 fails compilation. `TarGzipInterpretationProfile::UstarPortableV1` must still be selected explicitly.
+
 ## Enforced fields
 
 | Field | Current behavior |
 |---|---|
-| `formats` | Policy v1 must equal `["zip"]`. Policy v2 accepts the canonical nonempty subsets `["zip"]`, `["tar-ustar"]`, or `["zip", "tar-ustar"]`. The explicitly selected format must be present. |
+| `formats` | Policy v1 must equal `["zip"]`. Policy v2 accepts canonical nonempty subsets of `["zip", "tar-ustar"]`. Policy v3 accepts canonical nonempty subsets of `["zip", "zip64", "tar-ustar"]`. Policy v4 accepts canonical nonempty subsets of `["zip", "zip64", "tar-ustar", "tar-gzip-ustar"]`. The explicitly selected format must be present; authorization never implies format detection or fallback. |
 | `max_archive_bytes` | Bounds path reads and borrowed byte inputs before parsing. Path reads use a capped reader so file growth cannot exceed the cap. |
+| `max_derived_archive_bytes` | Policy v4 only. Bounds the immutable decoded TAR while gzip is consumed. It is separate from the original source, member, and total extracted-byte caps. |
 | `max_files` | Checked against both format-declared counts where present and the number of members actually parsed. A false low ZIP EOCD count cannot authorize member-vector growth beyond the cap. Policy v2 caps the configured value at `u32::MAX` because its multi-format identity encodings bind the count as `u32`. Policy v1 preserves the Alpha.8 constructor language; ZIP32 itself bounds actual member counts below that encoding limit. |
 | `max_member_bytes` | Checked against declared size and actual bytes while expanding. |
 | `max_total_bytes` | Checked against declared total and actual running total. |
 | `max_ratio` | Integer uncompressed:compressed bound, compared with widened `u128` arithmetic. The default `100` rejects when uncompressed bytes strictly exceed `100 ×` compressed bytes. `null` disables the ratio check. `0` is not “off”: any positive expansion with a positive compressed size fails. A member with uncompressed size `> 0` and compressed size `0` is an infinite ratio. |
 | `max_path_depth` | Checked after rejecting backslashes and removing dot components. |
-| `max_metadata_bytes` | Bounds format-specific structural metadata. For ZIP this includes the central directory, EOCD comment, and referenced local name and extra bytes. For ustar it bounds admitted headers before trailing zero record padding is scanned. |
+| `max_metadata_bytes` | Bounds format-specific structural metadata. For ZIP this includes the central directory, EOCD comment, and referenced local name and extra bytes. For raw ustar it bounds admitted headers before trailing zero record padding is scanned. For gzip-wrapped ustar it cumulatively bounds the gzip header and trailer plus TAR headers and terminator. |
 | `overwrite` | Existing destinations are refused. Replacement is not implemented even if a caller mutates this field. |
 | `encrypted` | Only `"deny"` compiles. Admission rejects traditional encryption bit 0, strong-encryption bit 6, and masked-header bit 13 even when LFH and CDH flags agree. |
 | `atomic` | Materialization always stages before publication. When true, each completed member file is also synced before commit. Directory durability is not yet guaranteed. |

@@ -72,7 +72,7 @@ with \(\mathrm{Desc}(m)\) empty unless general-purpose bit 3 is set.
 
 `check_layout` in `crates/sealr/src/zip.rs` already asks whether the local ranges are a partition of \([0,C)\): first start \(0\), nonempty, no overlap, no gap, last end \(C\). `find_eocd` selects the rightmost offset whose stored comment length makes the suffix exact. That **choice function** is unique. It does not prove that every other ZIP parser would pick the same record.
 
-Extra fields live inside LFH/CDH intervals. They do not get a fifth top-level role. Denied IDs (`0x0001` ZIP64, `0x7075` Unicode Path) make \(I_\pi\) undefined. Other well-formed extras are recorded as ignored occupancy: they change layout identity and must not become a name channel.
+Extra fields live inside LFH/CDH intervals. They do not get a fifth top-level role. Under `strict-ascii.v1`, denied IDs (`0x0001` ZIP64, `0x7075` Unicode Path) make \(I_\pi\) undefined. Other well-formed extras are recorded as ignored occupancy: they change layout identity and must not become a name channel. The separate strict ZIP64 profile gives `0x0001` one closed semantic interpretation and denies every unrelated identifier.
 
 ### Interpretation
 
@@ -83,7 +83,7 @@ I_\pi : \mathbb{B}^* \rightharpoonup \mathsf{IR}
 Defined only when the covering exists, CDH/LFH/descriptor agreement holds, names jail, and codecs consume their payload intervals exactly. Undefined is classified:
 
 - `Malformed`: in-profile syntax, cover, or agreement failure;
-- `Unsupported`: ZIP64, encryption, methods other than Store/Deflate, spanned, non-ASCII names;
+- `Unsupported`: ZIP64 outside the explicitly selected policy-v3 profile, encryption, methods other than Store/Deflate, spanned, non-ASCII names;
 - `Indeterminate`: bytes never held, I/O, cancellation.
 
 Ideal \(I_\pi\) depends only on \((b,\pi)\). Alpha.6 still folds resource budget into `parse_zip` (`max_files`, `max_metadata_bytes`). That interference is named below.
@@ -128,7 +128,7 @@ A failed rename is `Interpreted + Admitted + Complete + Failed`, not a different
 | Unique covering | At most one admitted partition of \([0,n)\) | Local-prefix partition + CD land + last exact-suffix EOCD |
 | Unique ZIP parse | False for ZIP-the-format | The ambiguous remainder is refused |
 | EOCD | Unique covering certificate | Unique *selected* EOCD under exact-suffix scan |
-| Extras | Every ID semantic or denied | ZIP64 and Unicode Path denied; others ignored occupancy |
+| Extras | Every ID semantic or denied | ZIP32 profiles deny ZIP64; strict ZIP64 interprets only its exact `0x0001` shapes; Unicode Path remains denied |
 | Codec | Exact consumption as part of \(I_\pi\) | Deflate `total_in == payload.len()`; Store copies the slice |
 | Snapshot | Immutable for the job | Path input is copied and hashed once into a private file-backed snapshot; caller bytes remain memory-backed |
 | Execution authority | Effects separated from interpretation | Default path runs in process; explicit x86_64 Linux worker confines payload verification, stage writes, and later non-retained reads while the supervisor retains planning and publication |
@@ -154,7 +154,7 @@ Fix \(\pi\). For every \(b \in \mathbb{B}^n\) there is at most one labeled parti
 
 If `parse_π(S)` succeeds, then for every member, CDH and LFH agree on method, flags, and raw name, and sizes/CRC agree with the data-descriptor rule the profile binds. Directory-ness from a trailing `/` does not contradict external attributes.
 
-**Code.** ZipDiff A1–A5 and descriptor parse. ZIP64 size extras are denied, not interpreted. CRC32 is a declared-field check, not authentication.
+**Code.** ZipDiff A1–A5 and descriptor parse. ZIP32 profiles deny ZIP64 size extras. The separate strict ZIP64 profile interprets exact, uniquely mapped ZIP64 values and re-audits their covering. CRC32 is a declared-field check, not authentication.
 
 ### Path-Projection Injectivity
 
@@ -314,7 +314,7 @@ The current independent identity verifier checks committed covering certificates
 
 **What the math is, unproven:** compilation of untrusted container bytes under a versioned unique-parse grammar, with the covering as witness and the tree as a projection of that witness.
 
-**What is implemented:** a recognizer for a ZIP32 Store/Deflate fragment of that language, one IR, preview roots, and a corpus of known divergence witnesses.
+**What is implemented:** recognizers for ZIP32 Store/Deflate, explicit strict ZIP64 Store/Deflate, raw portable ustar, and strict single-member gzip-wrapped portable ustar fragments of that language, format-native IR and preview roots, and corpora of known divergence witnesses. ZIP64 and gzip-wrapped ustar remain in-process only until later semantic records can bind their evidence.
 
 The work is to make \(L(\pi)\) actually unique-parse, then to check certificates without parsing again.
 

@@ -114,6 +114,7 @@ pub(crate) struct SnapshotDomainId(u16);
 
 impl SnapshotDomainId {
     pub(crate) const ORIGINAL: Self = Self(0);
+    pub(crate) const FIRST_DERIVED: Self = Self(1);
 }
 
 /// One exact range resolved against a named immutable snapshot domain.
@@ -169,25 +170,148 @@ impl<'a> SnapshotSet<'a> {
         self.domains.get(usize::from(id.0))
     }
 
+    /// Create and retain one bounded derived domain and its complete identity
+    /// record as a single operation.
+    ///
+    /// The supplied reader must implement the decoder selected by `profile`.
+    /// This method independently hashes the exact immutable input range and
+    /// bounds the derived output before reserving and appending both objects.
+    /// A returned error therefore leaves both collections unchanged.
     #[allow(dead_code)]
-    pub(crate) fn push_derived(
+    pub(crate) fn append_derived_from_reader(
         &mut self,
+        transforms: &mut TransformGraph,
+        profile: TransformProfile,
+        input: DomainRange,
+        output: impl Read,
+        max_output_bytes: u64,
+    ) -> Result<SnapshotDomainId, Finding> {
+        let (output_domain, input_sha256) = self.prepare_transform(transforms, profile, input)?;
+        let snapshot = SourceSnapshot::private_derived_from_reader(output, max_output_bytes)?;
+        self.append_prepared_transform(
+            transforms,
+            profile,
+            input,
+            input_sha256,
+            output_domain,
+            snapshot,
+        )
+    }
+
+    /// Atomically retain an already bounded and verified private transform
+    /// output. Format adapters use this after a decoder has validated framing,
+    /// checksums, and exact input consumption while constructing the snapshot.
+    #[allow(dead_code)]
+    pub(crate) fn append_derived_snapshot(
+        &mut self,
+        transforms: &mut TransformGraph,
+        profile: TransformProfile,
+        input: DomainRange,
         snapshot: SourceSnapshot<'a>,
     ) -> Result<SnapshotDomainId, Finding> {
+        let (output_domain, input_sha256) = self.prepare_transform(transforms, profile, input)?;
+        self.append_prepared_transform(
+            transforms,
+            profile,
+            input,
+            input_sha256,
+            output_domain,
+            snapshot,
+        )
+    }
+
+    fn prepare_transform(
+        &self,
+        transforms: &TransformGraph,
+        profile: TransformProfile,
+        input: DomainRange,
+    ) -> Result<(SnapshotDomainId, String), Finding> {
+        if !profile.validates() {
+            return Err(Finding::error(
+                FindingCode::CoveringInconsistent,
+                "derived snapshot uses an invalid transformation profile identity",
+            ));
+        }
+        if !transforms.validates(self) {
+            return Err(Finding::error(
+                FindingCode::CoveringInconsistent,
+                "existing transformation graph does not match the retained snapshots",
+            ));
+        }
+
         let id = u16::try_from(self.domains.len()).map_err(|_| {
             Finding::error(
                 FindingCode::QuotaArchive,
                 "snapshot domain count exceeds the u16 identity space",
             )
         })?;
+        let output_domain = SnapshotDomainId(id);
+        if usize::from(input.domain.0) >= usize::from(id) {
+            return Err(Finding::error(
+                FindingCode::CoveringInconsistent,
+                "transformation input must precede its output domain",
+            ));
+        }
+        let input_sha256 = self.range_sha256(input)?;
+        Ok((output_domain, input_sha256))
+    }
+
+    fn append_prepared_transform(
+        &mut self,
+        transforms: &mut TransformGraph,
+        profile: TransformProfile,
+        input: DomainRange,
+        input_sha256: String,
+        output_domain: SnapshotDomainId,
+        snapshot: SourceSnapshot<'a>,
+    ) -> Result<SnapshotDomainId, Finding> {
+        if snapshot.kind() != SnapshotKind::PrivateFile || snapshot.path.is_some() {
+            return Err(Finding::error(
+                FindingCode::CoveringInconsistent,
+                "derived snapshot must be a private pathless file",
+            ));
+        }
+        let output_len = snapshot.len();
+        let output_sha256 = snapshot
+            .digest()
+            .sha256()
+            .ok_or_else(|| {
+                Finding::error(
+                    FindingCode::CoveringInconsistent,
+                    "derived snapshot digest is unavailable",
+                )
+            })?
+            .to_owned();
+
+        // Both reservations happen before either append. Vec::push cannot
+        // allocate after these succeed, so every error path is all-or-nothing.
         self.domains.try_reserve_exact(1).map_err(|error| {
             Finding::error(
                 FindingCode::SourceIo,
                 format!("could not reserve a derived snapshot domain: {error}"),
             )
         })?;
+        transforms.records.try_reserve_exact(1).map_err(|error| {
+            Finding::error(
+                FindingCode::SourceIo,
+                format!("could not reserve a transformation record: {error}"),
+            )
+        })?;
+
+        let record = TransformRecord {
+            profile,
+            profile_id: profile.id(),
+            profile_sha256: profile.digest().to_owned(),
+            decoder_parameters_sha256: profile.decoder_parameters_digest().to_owned(),
+            input,
+            input_sha256,
+            output_domain,
+            output_len,
+            output_sha256,
+        };
         self.domains.push(snapshot);
-        Ok(SnapshotDomainId(id))
+        transforms.records.push(record);
+        Ok(output_domain)
     }
 
     pub(crate) fn reader(
@@ -204,6 +328,21 @@ impl<'a> SnapshotSet<'a> {
         snapshot.reader(source.range.offset, source.range.len)
     }
 
+    fn range_sha256(&self, source: DomainRange) -> Result<String, Finding> {
+        let mut reader = self.reader(source)?;
+        let (len, sha256) = copy_bounded(&mut reader, &mut io::sink(), source.range.len)?;
+        if len != source.range.len {
+            return Err(Finding::error(
+                FindingCode::SourceIo,
+                format!(
+                    "snapshot range read {len} bytes; expected {}",
+                    source.range.len
+                ),
+            ));
+        }
+        Ok(sha256)
+    }
+
     pub(crate) fn into_owned(self) -> SnapshotSet<'static> {
         SnapshotSet {
             domains: self
@@ -215,12 +354,104 @@ impl<'a> SnapshotSet<'a> {
     }
 }
 
+/// Closed registry of deterministic, bounded decoder configurations.
+///
+/// New profiles require a source change, a pinned canonical definition, and a
+/// pinned canonical decoder-parameter encoding. Archive bytes cannot introduce
+/// or select an unregistered transformation definition.
+#[allow(dead_code)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TransformProfile {
+    GzipRfc1952SingleMemberV1,
+    #[cfg(test)]
+    TestIdentityV1,
+    #[cfg(test)]
+    TestReverseV1,
+}
+
+impl TransformProfile {
+    pub(crate) const fn id(self) -> &'static str {
+        match self {
+            Self::GzipRfc1952SingleMemberV1 => "sealr.transform.gzip.rfc1952-single-member.v1",
+            #[cfg(test)]
+            Self::TestIdentityV1 => "sealr.transform.test.identity.v1",
+            #[cfg(test)]
+            Self::TestReverseV1 => "sealr.transform.test.reverse.v1",
+        }
+    }
+
+    pub(crate) const fn definition(self) -> &'static [u8] {
+        match self {
+            Self::GzipRfc1952SingleMemberV1 => b"algorithm=rfc1952-gzip;members=exactly-one;reserved-flags=zero;extra-fields=exact-subfield-framing-si2-nonzero-unique-ids;trailing-data=forbidden;header-crc=verify-when-present;data-crc32=verify;isize=verify;payload=rfc1951-deflate;output=bounded",
+            #[cfg(test)]
+            Self::TestIdentityV1 => b"algorithm=test-identity;version=1",
+            #[cfg(test)]
+            Self::TestReverseV1 => b"algorithm=test-reverse;version=1",
+        }
+    }
+
+    pub(crate) const fn digest(self) -> &'static str {
+        match self {
+            Self::GzipRfc1952SingleMemberV1 => {
+                "795a124c278eacf1fb9b4fc3825a74240d6d0e89c29ffdfe6118ff6db53c0a45"
+            }
+            #[cfg(test)]
+            Self::TestIdentityV1 => {
+                "dcae4d8d85fa913574e0cf81b205fdccb2ccb6ecc6119b0c2b402fb1cb9ed000"
+            }
+            #[cfg(test)]
+            Self::TestReverseV1 => {
+                "a19ea13ab92508a1a557e90b06f0ca6437842a07d880395bc53861d46cdfed5d"
+            }
+        }
+    }
+
+    pub(crate) const fn decoder_parameters(self) -> &'static [u8] {
+        match self {
+            Self::GzipRfc1952SingleMemberV1 => b"rfc1951-window-bits=15;preset-dictionary=none",
+            #[cfg(test)]
+            Self::TestIdentityV1 => b"mode=identity;window=none",
+            #[cfg(test)]
+            Self::TestReverseV1 => b"mode=reverse;window=none",
+        }
+    }
+
+    pub(crate) const fn decoder_parameters_digest(self) -> &'static str {
+        match self {
+            Self::GzipRfc1952SingleMemberV1 => {
+                "c835627b01c4b54041c627319fab4d5af294a203ac26fbe91cadb6d1f17cd5e1"
+            }
+            #[cfg(test)]
+            Self::TestIdentityV1 => {
+                "c0a95e3707203775cc0b39778d398583f2bfa475166799077f7e9c8c3277e3c8"
+            }
+            #[cfg(test)]
+            Self::TestReverseV1 => {
+                "d0c414c4963a57cdde85cb38f0cba572fb7f3ca9a34f9f5632a75b3cab5d3214"
+            }
+        }
+    }
+
+    fn validates(self) -> bool {
+        is_transform_profile_id(self.id())
+            && !self.definition().is_empty()
+            && is_sha256_hex(self.digest())
+            && transform_profile_sha256(self.id(), self.definition()).as_deref()
+                == Some(self.digest())
+            && is_sha256_hex(self.decoder_parameters_digest())
+            && hex_sha256(self.decoder_parameters()) == self.decoder_parameters_digest()
+    }
+}
+
 /// One identity-bound transformation from an existing range to a new domain.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct TransformRecord {
-    pub(crate) profile: &'static str,
+    pub(crate) profile: TransformProfile,
+    pub(crate) profile_id: &'static str,
     pub(crate) profile_sha256: String,
+    pub(crate) decoder_parameters_sha256: String,
     pub(crate) input: DomainRange,
+    pub(crate) input_sha256: String,
     pub(crate) output_domain: SnapshotDomainId,
     pub(crate) output_len: u64,
     pub(crate) output_sha256: String,
@@ -242,44 +473,42 @@ impl TransformGraph {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn push(&mut self, record: TransformRecord) -> Result<(), Finding> {
-        self.records.try_reserve_exact(1).map_err(|error| {
-            Finding::error(
-                FindingCode::SourceIo,
-                format!("could not reserve a transformation record: {error}"),
-            )
-        })?;
-        self.records.push(record);
-        Ok(())
+    pub(crate) fn records(&self) -> &[TransformRecord] {
+        &self.records
+    }
+
+    #[cfg(test)]
+    pub(crate) fn records_mut(&mut self) -> &mut [TransformRecord] {
+        &mut self.records
     }
 
     pub(crate) fn validates(&self, snapshots: &SnapshotSet<'_>) -> bool {
-        if self.records.len().saturating_add(1) != snapshots.len() {
+        if self.records.len().checked_add(1) != Some(snapshots.len()) {
             return false;
         }
         self.records.iter().enumerate().all(|(index, record)| {
-            let Ok(output_number) = u16::try_from(index.saturating_add(1)) else {
+            let Some(output_index) = index.checked_add(1) else {
                 return false;
             };
-            if record.profile.is_empty()
+            let Ok(output_number) = u16::try_from(output_index) else {
+                return false;
+            };
+            if !record.profile.validates()
+                || record.profile_id != record.profile.id()
                 || !is_sha256_hex(&record.profile_sha256)
+                || record.profile_sha256 != record.profile.digest()
+                || !is_sha256_hex(&record.decoder_parameters_sha256)
+                || record.decoder_parameters_sha256 != record.profile.decoder_parameters_digest()
+                || !is_sha256_hex(&record.input_sha256)
                 || record.output_domain != SnapshotDomainId(output_number)
                 || usize::from(record.input.domain.0) >= usize::from(output_number)
             {
                 return false;
             }
-            let Some(input) = snapshots.domain(record.input.domain) else {
+            let Ok(input_sha256) = snapshots.range_sha256(record.input) else {
                 return false;
             };
-            let Some(input_end) = record
-                .input
-                .range
-                .offset
-                .checked_add(record.input.range.len)
-            else {
-                return false;
-            };
-            if input_end > input.len() {
+            if input_sha256 != record.input_sha256 {
                 return false;
             }
             let Some(output) = snapshots.domain(record.output_domain) else {
@@ -290,6 +519,32 @@ impl TransformGraph {
                 && is_sha256_hex(&record.output_sha256)
         })
     }
+}
+
+fn is_transform_profile_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 255
+        && value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || matches!(byte, b'.' | b'-' | b'_')
+        })
+}
+
+fn transform_profile_sha256(id: &str, definition: &[u8]) -> Option<String> {
+    let id_len = u64::try_from(id.len()).ok()?;
+    let definition_len = u64::try_from(definition.len()).ok()?;
+    let mut digest = Sha256::new();
+    digest.update(b"sealr.transform-profile.v1\0");
+    digest.update(id_len.to_be_bytes());
+    digest.update(id.as_bytes());
+    digest.update(definition_len.to_be_bytes());
+    digest.update(definition);
+    Some(
+        digest
+            .finalize()
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect(),
+    )
 }
 
 fn is_sha256_hex(value: &str) -> bool {
@@ -956,7 +1211,11 @@ fn copy_bounded(
                 result => break result,
             }
         }
-        .map_err(|error| Finding::error(FindingCode::SourceIo, format!("read source: {error}")))?;
+        .map_err(|error| {
+            finding_from_io(&error).unwrap_or_else(|| {
+                Finding::error(FindingCode::SourceIo, format!("read source: {error}"))
+            })
+        })?;
         if read == 0 {
             break;
         }
@@ -1105,11 +1364,41 @@ mod tests {
     use super::*;
     use std::io::Cursor;
 
+    const IDENTITY_PROFILE: TransformProfile = TransformProfile::TestIdentityV1;
+    const REVERSE_PROFILE: TransformProfile = TransformProfile::TestReverseV1;
+    const ZERO_SHA256: &str = "0000000000000000000000000000000000000000000000000000000000000000";
+
+    fn one_transform() -> (SnapshotSet<'static>, TransformGraph) {
+        let original = b"xxwrappedyy";
+        let output = b"decoded archive";
+        let mut snapshots = SnapshotSet::from_original(SourceSnapshot::borrowed(None, original));
+        let mut graph = TransformGraph::empty();
+        let domain = snapshots
+            .append_derived_from_reader(
+                &mut graph,
+                IDENTITY_PROFILE,
+                DomainRange::original(ByteRange { offset: 2, len: 7 }),
+                Cursor::new(output),
+                output.len() as u64,
+            )
+            .unwrap();
+        assert_eq!(domain, SnapshotDomainId(1));
+        (snapshots, graph)
+    }
+
     struct InterruptedThenData {
         interrupted: bool,
         inner: Cursor<Vec<u8>>,
         largest_request: usize,
         max_read: usize,
+    }
+
+    struct StructuredFailure(Finding);
+
+    impl Read for StructuredFailure {
+        fn read(&mut self, _buffer: &mut [u8]) -> io::Result<usize> {
+            Err(as_io_error(self.0.clone()))
+        }
     }
 
     impl Read for InterruptedThenData {
@@ -1244,49 +1533,250 @@ mod tests {
     }
 
     #[test]
-    fn derived_snapshot_is_bounded_private_and_transform_bound() {
-        let original_bytes = b"wrapped";
-        let derived_bytes = b"decoded archive";
-        let derived = SourceSnapshot::private_derived_from_reader(
-            Cursor::new(derived_bytes),
-            derived_bytes.len() as u64,
-        )
-        .unwrap();
-        assert_eq!(derived.kind(), SnapshotKind::PrivateFile);
-        assert_eq!(derived.len(), derived_bytes.len() as u64);
+    fn derived_transform_chain_binds_exact_inputs_profiles_parameters_and_outputs() {
+        assert!(IDENTITY_PROFILE.validates());
+        assert!(REVERSE_PROFILE.validates());
+        let gzip_profile = TransformProfile::GzipRfc1952SingleMemberV1;
+        assert!(gzip_profile.validates());
         assert_eq!(
-            derived.digest().sha256(),
-            Some(hex_sha256(derived_bytes).as_str())
+            transform_profile_sha256(gzip_profile.id(), gzip_profile.definition()).as_deref(),
+            Some(gzip_profile.digest())
+        );
+        assert_eq!(
+            hex_sha256(gzip_profile.decoder_parameters()),
+            gzip_profile.decoder_parameters_digest()
         );
 
-        let mut snapshots =
-            SnapshotSet::from_original(SourceSnapshot::borrowed(None, original_bytes));
-        let output_domain = snapshots.push_derived(derived).unwrap();
-        let mut graph = TransformGraph::empty();
-        graph
-            .push(TransformRecord {
-                profile: "sealr.transform.test.v1",
-                profile_sha256: "a".repeat(64),
-                input: DomainRange::original(ByteRange {
-                    offset: 0,
-                    len: original_bytes.len() as u64,
-                }),
-                output_domain,
-                output_len: derived_bytes.len() as u64,
-                output_sha256: hex_sha256(derived_bytes),
-            })
+        let (mut snapshots, mut graph) = one_transform();
+        let second_output = b"inner archive";
+        let second_domain = snapshots
+            .append_derived_from_reader(
+                &mut graph,
+                REVERSE_PROFILE,
+                DomainRange {
+                    domain: SnapshotDomainId(1),
+                    range: ByteRange { offset: 2, len: 7 },
+                },
+                Cursor::new(second_output),
+                second_output.len() as u64,
+            )
+            .unwrap();
+
+        assert_eq!(second_domain, SnapshotDomainId(2));
+        assert_eq!(snapshots.len(), 3);
+        assert_eq!(graph.records.len(), 2);
+        assert!(graph.validates(&snapshots));
+        assert_eq!(
+            snapshots.domain(SnapshotDomainId(1)).unwrap().kind(),
+            SnapshotKind::PrivateFile
+        );
+        assert_eq!(graph.records[0].input_sha256, hex_sha256(b"wrapped"));
+        assert_eq!(graph.records[0].profile_id, IDENTITY_PROFILE.id());
+        assert_eq!(graph.records[0].profile_sha256, IDENTITY_PROFILE.digest());
+        assert_eq!(
+            graph.records[0].decoder_parameters_sha256,
+            IDENTITY_PROFILE.decoder_parameters_digest()
+        );
+        assert_eq!(graph.records[1].input_sha256, hex_sha256(b"coded a"));
+        assert_eq!(graph.records[1].output_sha256, hex_sha256(second_output));
+    }
+
+    #[test]
+    fn transform_graph_rejects_tampered_input_profile_parameters_and_output() {
+        let (mut snapshots, mut graph) = one_transform();
+
+        let input_sha256 = graph.records[0].input_sha256.clone();
+        graph.records[0].input_sha256 = ZERO_SHA256.into();
+        assert!(!graph.validates(&snapshots));
+        graph.records[0].input_sha256 = input_sha256;
+
+        let profile = graph.records[0].profile;
+        graph.records[0].profile = REVERSE_PROFILE;
+        assert!(!graph.validates(&snapshots));
+        graph.records[0].profile = profile;
+
+        let profile_id = graph.records[0].profile_id;
+        graph.records[0].profile_id = "sealr.transform.test.changed.v1";
+        assert!(!graph.validates(&snapshots));
+        graph.records[0].profile_id = profile_id;
+
+        let profile_sha256 = graph.records[0].profile_sha256.clone();
+        graph.records[0].profile_sha256 = ZERO_SHA256.into();
+        assert!(!graph.validates(&snapshots));
+        graph.records[0].profile_sha256 = profile_sha256;
+
+        let parameters_sha256 = graph.records[0].decoder_parameters_sha256.clone();
+        graph.records[0].decoder_parameters_sha256 = ZERO_SHA256.into();
+        assert!(!graph.validates(&snapshots));
+        graph.records[0].decoder_parameters_sha256 = parameters_sha256;
+
+        let output_len = graph.records[0].output_len;
+        graph.records[0].output_len = output_len + 1;
+        assert!(!graph.validates(&snapshots));
+        graph.records[0].output_len = output_len;
+        let output_sha256 = graph.records[0].output_sha256.clone();
+        graph.records[0].output_sha256 = ZERO_SHA256.into();
+        assert!(!graph.validates(&snapshots));
+        graph.records[0].output_sha256 = output_sha256;
+
+        let retained_digest = snapshots.domains[1].digest.clone();
+        snapshots.domains[1].digest = SourceDigest::available(ZERO_SHA256);
+        assert!(!graph.validates(&snapshots));
+        snapshots.domains[1].digest = retained_digest;
+        assert!(graph.validates(&snapshots));
+    }
+
+    #[test]
+    fn transform_graph_rejects_self_forward_and_unavailable_references() {
+        let (mut snapshots, mut graph) = one_transform();
+        let second_output = b"second";
+        snapshots
+            .append_derived_from_reader(
+                &mut graph,
+                REVERSE_PROFILE,
+                DomainRange {
+                    domain: SnapshotDomainId(1),
+                    range: ByteRange { offset: 0, len: 7 },
+                },
+                Cursor::new(second_output),
+                second_output.len() as u64,
+            )
             .unwrap();
         assert!(graph.validates(&snapshots));
 
-        graph.records[0].output_len += 1;
+        graph.records[0].input.domain = SnapshotDomainId(1);
         assert!(!graph.validates(&snapshots));
+        graph.records[0].input.domain = SnapshotDomainId(2);
+        assert!(!graph.validates(&snapshots));
+        graph.records[0].input.domain = SnapshotDomainId(99);
+        assert!(!graph.validates(&snapshots));
+        graph.records[0].input = DomainRange::original(ByteRange { offset: 2, len: 7 });
 
-        let over_cap = SourceSnapshot::private_derived_from_reader(
-            Cursor::new(derived_bytes),
-            derived_bytes.len() as u64 - 1,
-        )
-        .unwrap_err();
-        assert_eq!(over_cap.code, FindingCode::QuotaArchive);
+        graph.records[1].input.domain = SnapshotDomainId(2);
+        assert!(!graph.validates(&snapshots));
+        graph.records[1].input.domain = SnapshotDomainId(99);
+        assert!(!graph.validates(&snapshots));
+        graph.records[1].input.domain = SnapshotDomainId(1);
+
+        graph.records[0].input.range = ByteRange {
+            offset: u64::MAX,
+            len: 1,
+        };
+        assert!(!graph.validates(&snapshots));
+        graph.records[0].input = DomainRange::original(ByteRange { offset: 2, len: 7 });
+        graph.records[0].output_domain = SnapshotDomainId(99);
+        assert!(!graph.validates(&snapshots));
+    }
+
+    #[test]
+    fn derived_transform_cap_failure_is_all_or_nothing_and_reads_cap_plus_one() {
+        let original = b"wrapped";
+        let output = b"four";
+        let mut snapshots = SnapshotSet::from_original(SourceSnapshot::borrowed(None, original));
+        let mut graph = TransformGraph::empty();
+        let mut reader = InterruptedThenData {
+            interrupted: false,
+            inner: Cursor::new(output.to_vec()),
+            largest_request: 0,
+            max_read: output.len(),
+        };
+
+        let error = snapshots
+            .append_derived_from_reader(
+                &mut graph,
+                IDENTITY_PROFILE,
+                DomainRange::original(ByteRange {
+                    offset: 0,
+                    len: original.len() as u64,
+                }),
+                &mut reader,
+                output.len() as u64 - 1,
+            )
+            .unwrap_err();
+
+        assert_eq!(error.code, FindingCode::QuotaArchive);
+        assert_eq!(reader.largest_request, output.len());
+        assert_eq!(snapshots.len(), 1);
+        assert_eq!(graph.records.len(), 0);
+        assert!(graph.validates(&snapshots));
+
+        snapshots
+            .append_derived_from_reader(
+                &mut graph,
+                IDENTITY_PROFILE,
+                DomainRange::original(ByteRange {
+                    offset: 0,
+                    len: original.len() as u64,
+                }),
+                Cursor::new(output),
+                output.len() as u64,
+            )
+            .unwrap();
+        assert!(graph.validates(&snapshots));
+        graph.records[0].decoder_parameters_sha256 = ZERO_SHA256.into();
+        let domain_count = snapshots.len();
+        let record_count = graph.records.len();
+        let invalid = snapshots
+            .append_derived_from_reader(
+                &mut graph,
+                REVERSE_PROFILE,
+                DomainRange {
+                    domain: SnapshotDomainId(1),
+                    range: ByteRange { offset: 0, len: 1 },
+                },
+                Cursor::new(output),
+                output.len() as u64,
+            )
+            .unwrap_err();
+        assert_eq!(invalid.code, FindingCode::CoveringInconsistent);
+        assert_eq!(snapshots.len(), domain_count);
+        assert_eq!(graph.records.len(), record_count);
+    }
+
+    #[test]
+    fn prepared_private_transform_appends_atomically_and_rejects_memory_output() {
+        let original = b"wrapped";
+        let output = b"decoded";
+        let mut snapshots = SnapshotSet::from_original(SourceSnapshot::borrowed(None, original));
+        let mut graph = TransformGraph::empty();
+        let private =
+            SourceSnapshot::private_derived_from_reader(Cursor::new(output), output.len() as u64)
+                .unwrap();
+
+        let domain = snapshots
+            .append_derived_snapshot(
+                &mut graph,
+                IDENTITY_PROFILE,
+                DomainRange::original(ByteRange {
+                    offset: 0,
+                    len: original.len() as u64,
+                }),
+                private,
+            )
+            .unwrap();
+
+        assert_eq!(domain, SnapshotDomainId(1));
+        assert!(graph.validates(&snapshots));
+
+        let memory = SourceSnapshot::owned(None, b"not private".to_vec());
+        let error = snapshots
+            .append_derived_snapshot(
+                &mut graph,
+                REVERSE_PROFILE,
+                DomainRange {
+                    domain,
+                    range: ByteRange {
+                        offset: 0,
+                        len: output.len() as u64,
+                    },
+                },
+                memory,
+            )
+            .unwrap_err();
+        assert_eq!(error.code, FindingCode::CoveringInconsistent);
+        assert_eq!(snapshots.len(), 2);
+        assert_eq!(graph.records().len(), 1);
+        assert!(graph.validates(&snapshots));
     }
 
     #[test]
@@ -1484,5 +1974,19 @@ mod tests {
         let finding = Finding::error(FindingCode::SourceIo, "read failed at offset 41");
         let error = as_io_error(finding.clone());
         assert_eq!(finding_from_io(&error), Some(finding));
+    }
+
+    #[test]
+    fn bounded_private_copy_preserves_a_structured_transform_finding() {
+        let finding = Finding::error(
+            FindingCode::CodecDeflateInvalidStream,
+            "invalid transform stream",
+        );
+
+        let error =
+            SourceSnapshot::private_derived_from_reader(StructuredFailure(finding.clone()), 1024)
+                .unwrap_err();
+
+        assert_eq!(error, finding);
     }
 }

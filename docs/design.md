@@ -1,6 +1,6 @@
 # Design principles
 
-> Published Alpha.9 behavior is defined by the [README](../README.md), [API contract](api.md), and [security policy](../SECURITY.md). Product sequencing is defined only by the [roadmap](../ROADMAP.md).
+> Published Alpha.10 behavior is defined by the [README](../README.md), [API contract](api.md), and [security policy](../SECURITY.md). Product sequencing is defined only by the [roadmap](../ROADMAP.md).
 
 Sealr is trying to become a dependable archive-to-tree admission boundary. It is not trying to be a general unarchiver, codec benchmark, or scheduler.
 

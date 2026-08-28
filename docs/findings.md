@@ -73,6 +73,7 @@ Unknown error codes must be treated as rejection by consumers.
 | Code | Meaning |
 |---|---|
 | `quota.archive` | Compressed input exceeds `max_archive_bytes`. |
+| `quota.derived` | A wrapper's immutable decoded archive would exceed `max_derived_archive_bytes`. |
 | `quota.files` | Entry count exceeds `max_files`. |
 | `quota.member` | Declared or actual member size exceeds its cap. |
 | `quota.total` | Declared or actual running total exceeds its cap. |
@@ -97,16 +98,22 @@ Unknown error codes must be treated as rejection by consumers.
 | `zip.diff.c2_eocd` | Ambiguous or additional EOCD structure. |
 | `zip.diff.c3_count` | Disk, entry-count, CDH, or central-directory structure disagreement. |
 | `zip.diff.c4_offset` | Invalid central, local, payload, or descriptor offset. |
-| `zip.diff.c5_zip64` | ZIP64 marker encountered. ZIP64 is not implemented. |
+| `zip.diff.c5_zip64` | A ZIP64 marker appeared outside the explicitly selected strict ZIP64 profile, or ZIP64 and legacy structure disagreed within that profile. |
 | `zip.overlap` | Referenced local records overlap each other or the central directory. |
 | `covering.inconsistent` | The IR covering is not a labeled partition of the snapshot, or a claimed LFH/CDH/EOCD offset does not hold the recorded signature. The checker does not search for an EOCD or inflate. |
 | `zip.encrypted` | Traditional, strong-encryption, or masked-header flag is present on a member. |
 | `zip.encoding` | Invalid UTF-8 name or unsupported non-ASCII CP437 decoding. |
-| `zip.extra` | Extra-field sequence is malformed or repeats an identifier. Well-formed extras other than ZIP64 and Unicode Path are recorded on the IR as ignored. |
+| `zip.extra` | Extra-field sequence is malformed, repeats an identifier, or violates the selected profile's closed table. ZIP32 v1 may record permitted well-formed extras as ignored occupancy; strict ZIP64 permits only its exact semantic ZIP64 field shapes. |
 | `zip.flags` | Non-encryption CDH and LFH flags disagree. |
 | `codec.deflate.invalid_stream` | The declared DEFLATE payload is not one valid raw DEFLATE stream, or decoder accounting is inconsistent. |
 | `codec.deflate.trailing_input` | One valid DEFLATE stream ended before the declared compressed payload ended. Trailing bytes and concatenated streams are rejected. |
 | `crc.mismatch` | Expanded member CRC32 disagrees with the archive. |
+
+### Gzip wrapper
+
+| Code | Meaning |
+|---|---|
+| `gzip.extra` | The strict gzip wrapper encountered malformed `FEXTRA` subfield framing, a declared subfield length that exceeds `XLEN`, trailing remainder bytes, the reserved SI2 value zero, or a duplicate SI1/SI2 identifier. |
 
 ### TAR structure
 

@@ -2,14 +2,14 @@
 set -euo pipefail
 
 selector="scripts/release_candidate.jq"
-tag="v0.1.0-alpha.9"
-title="sealr 0.1.0-alpha.9: portable ustar and multi-format core"
-notes=$'# sealr 0.1.0-alpha.9\n'
+tag="v0.1.0-alpha.10"
+title="sealr 0.1.0-alpha.10: strict ZIP64 and gzip TAR"
+notes=$'# sealr 0.1.0-alpha.10\n'
 allowed='[
   "SHA256SUMS",
-  "sealr-0.1.0-alpha.9-aarch64-apple-darwin.tar.gz",
-  "sealr-0.1.0-alpha.9-x86_64-pc-windows-msvc.zip",
-  "sealr-0.1.0-alpha.9-x86_64-unknown-linux-gnu.tar.gz"
+  "sealr-0.1.0-alpha.10-aarch64-apple-darwin.tar.gz",
+  "sealr-0.1.0-alpha.10-x86_64-pc-windows-msvc.zip",
+  "sealr-0.1.0-alpha.10-x86_64-unknown-linux-gnu.tar.gz"
 ]'
 
 mapfile -t workspace_versions < <(

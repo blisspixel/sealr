@@ -107,7 +107,7 @@ fn write_octal(field: &mut [u8], value: u64) {
     field[digits] = 0;
 }
 
-fn write_tar_fixture(path: &Path) {
+fn tar_fixture_bytes() -> Vec<u8> {
     let name = b"mission/status.txt";
     let body = b"nominal\n";
     let mut header = [0_u8; 512];
@@ -133,7 +133,48 @@ fn write_tar_fixture(path: &Path) {
     bytes.extend_from_slice(body);
     bytes.resize(bytes.len().next_multiple_of(512), 0);
     bytes.resize(bytes.len() + 1024, 0);
-    fs::write(path, bytes).expect("TAR fixture should be writable");
+    bytes
+}
+
+fn write_tar_fixture(path: &Path) {
+    fs::write(path, tar_fixture_bytes()).expect("TAR fixture should be writable");
+}
+
+fn crc32(bytes: &[u8]) -> u32 {
+    let mut crc = u32::MAX;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xedb8_8320 & (0_u32.wrapping_sub(crc & 1)));
+        }
+    }
+    !crc
+}
+
+fn write_tar_gzip_fixture(path: &Path) {
+    let tar = tar_fixture_bytes();
+    let len = u16::try_from(tar.len()).expect("CLI TAR fixture fits one stored Deflate block");
+    let mut bytes = vec![0x1f, 0x8b, 8, 0, 0, 0, 0, 0, 0, 255, 0x01];
+    bytes.extend_from_slice(&len.to_le_bytes());
+    bytes.extend_from_slice(&(!len).to_le_bytes());
+    bytes.extend_from_slice(&tar);
+    bytes.extend_from_slice(&crc32(&tar).to_le_bytes());
+    bytes.extend_from_slice(&(tar.len() as u32).to_le_bytes());
+    fs::write(path, bytes).expect("gzip-wrapped TAR fixture should be writable");
+}
+
+fn write_zip64_fixture(path: &Path) {
+    let hex = "504b03042d0000000800000021000b5704bbffffffffffffffff010014006101001000100000000000000005000000000000007374440500504b01022d002d0000000800000021000b5704bb050000001000000001000000000000000000000080010000000061504b050600000000010001002f000000380000000000";
+    let (pairs, remainder) = hex.as_bytes().as_chunks::<2>();
+    assert!(remainder.is_empty());
+    let bytes: Vec<u8> = pairs
+        .iter()
+        .map(|pair| {
+            u8::from_str_radix(std::str::from_utf8(pair).expect("hex is ASCII"), 16)
+                .expect("ZIP64 fixture hex is valid")
+        })
+        .collect();
+    fs::write(path, bytes).expect("ZIP64 fixture should be writable");
 }
 
 fn assert_allowed_streams(output: &Output, wrote: bool) -> (Value, Value) {
@@ -196,7 +237,9 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert!(help_text.contains("<ARCHIVE>"));
     assert!(help_text.contains("--dest <DEST>"));
     assert!(help_text.contains("--format <FORMAT>"));
+    assert!(help_text.contains("zip64"));
     assert!(help_text.contains("tar-ustar"));
+    assert!(help_text.contains("tar-gzip-ustar"));
     assert!(help_text.contains("--worker-manifest <ABSOLUTE_PATH>"));
     assert!(help_text.contains("--version"));
 
@@ -216,7 +259,13 @@ fn explicit_tar_format_inspects_and_materializes() {
     write_tar_fixture(&archive);
 
     let inspect = sealr(&[Path::new("--format"), Path::new("tar-ustar"), &archive]);
-    assert_eq!(inspect.status.code(), Some(0));
+    assert_eq!(
+        inspect.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&inspect.stdout),
+        String::from_utf8_lossy(&inspect.stderr)
+    );
     let view = json(&inspect.stdout, "TAR stdout");
     let receipt = json(&inspect.stderr, "TAR stderr");
     assert_eq!(view["source"]["magic"], "tar");
@@ -240,6 +289,101 @@ fn explicit_tar_format_inspects_and_materializes() {
         fs::read(destination.join("mission/status.txt")).unwrap(),
         b"nominal\n"
     );
+}
+
+#[test]
+fn explicit_tar_gzip_format_inspects_and_materializes() {
+    let run = RunDirectory::create("tar-gzip");
+    let archive = run.path.join("mission.tar.gz");
+    write_tar_gzip_fixture(&archive);
+
+    let inspect = sealr(&[Path::new("--format"), Path::new("tar-gzip-ustar"), &archive]);
+    assert_eq!(
+        inspect.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&inspect.stdout),
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    let view = json(&inspect.stdout, "gzip TAR stdout");
+    let receipt = json(&inspect.stderr, "gzip TAR stderr");
+    assert_eq!(view["source"]["magic"], "gz");
+    assert_eq!(view["members"][0]["path"], "mission/status.txt");
+    assert_eq!(
+        receipt["identities"]["interpretation"]["id"],
+        "sealr.profile.tar-gzip.ustar-portable.v1"
+    );
+    assert!(receipt["identities"]["layout"].get("sealrTreeV4").is_some());
+
+    let destination = run.path.join("materialized");
+    let materialize = sealr(&[
+        Path::new("--format"),
+        Path::new("tar-gzip-ustar"),
+        &archive,
+        Path::new("--dest"),
+        &destination,
+    ]);
+    assert_eq!(materialize.status.code(), Some(0));
+    assert_eq!(
+        fs::read(destination.join("mission/status.txt")).unwrap(),
+        b"nominal\n"
+    );
+}
+
+#[test]
+fn explicit_zip64_format_inspects_materializes_and_does_not_alias_zip32() {
+    let run = RunDirectory::create("zip64");
+    let archive = run.path.join("forced-small.zip");
+    write_zip64_fixture(&archive);
+
+    let inspect = sealr(&[Path::new("--format"), Path::new("zip64"), &archive]);
+    assert_eq!(
+        inspect.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&inspect.stdout),
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    let view = json(&inspect.stdout, "ZIP64 stdout");
+    let receipt = json(&inspect.stderr, "ZIP64 stderr");
+    assert_eq!(view["source"]["magic"], "zip");
+    assert_eq!(view["members"][0]["path"], "a");
+    assert_eq!(
+        receipt["identities"]["interpretation"]["id"],
+        "sealr.profile.zip64.strict-ascii.v1"
+    );
+    assert_eq!(
+        receipt["identities"]["interpretation"]["digest"]["sha256"],
+        "167a6d226bbe74e88189ec61c61df10ae5ed35c0294ad0cf3b5194d2f0bc23e2"
+    );
+    assert_eq!(
+        receipt["identities"]["layout"]["sealrTreeV3"],
+        "c074e18efe379d4c1544380e734fbf09a9185805942e20ad96f72cfe6460e95f"
+    );
+    assert_eq!(
+        receipt["identities"]["content"]["sealrTreeV1"],
+        "9b878b8f52b46ababb846c3796dbb4cdd3de990a828d5affd183e91f2639ddbd"
+    );
+
+    let destination = run.path.join("materialized");
+    let materialize = sealr(&[
+        Path::new("--format"),
+        Path::new("zip64"),
+        &archive,
+        Path::new("--dest"),
+        &destination,
+    ]);
+    assert_eq!(materialize.status.code(), Some(0));
+    assert_eq!(fs::read(destination.join("a")).unwrap(), vec![b'A'; 16]);
+
+    let compatibility_default = sealr(&[&archive]);
+    assert_eq!(compatibility_default.status.code(), Some(2));
+    assert!(!compatibility_default.stdout.is_empty());
+
+    let fixtures = walkthrough_fixtures::generate(&run.path.join("zip32-fixtures"))
+        .expect("ZIP32 fixtures should generate");
+    let selected_on_zip32 = sealr(&[Path::new("--format"), Path::new("zip64"), &fixtures.allowed]);
+    assert_eq!(selected_on_zip32.status.code(), Some(2));
 }
 
 #[test]

@@ -6,6 +6,30 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+## [0.1.0-alpha.10] - 2026-08-28
+
+### Added
+
+- Added the explicitly selected `sealr.profile.zip64.strict-ascii.v1` interpretation with policy v3 authorization. It accepts only canonical single-disk ZIP64 archives produced within the published profile, preserves ZIP32 as the compatibility default, emits ZIP64-native covering evidence and `sealrTreeV3`, and fails closed at the authenticated worker boundary.
+- Added the explicitly selected `sealr.profile.tar-gzip.ustar-portable.v1` interpretation with policy v4 authorization. It accepts exactly one bounded RFC 1952 member, verifies optional-field framing, FHCRC when present, CRC32, ISIZE, derived length, and derived SHA-256, then interprets one private immutable portable-ustar snapshot.
+- Added the first exact two-domain archive model. The original gzip bytes remain source domain zero, the verified TAR is domain one, one identity-bound transform connects them, and `sealrTreeV4` binds wrapper evidence, transform identity, inner TAR evidence, and the shared content root.
+- Added independent ZIP64 and gzip-TAR conformance verification without depending on the Sealr crate or invoking a decompressor. The verifier reconstructs profile identities, source-bound covering geometry, TAR header grammar, wrapper evidence, and `sealrTreeV1` through `sealrTreeV4` roots.
+- Added a bounded public gzip-TAR fuzz campaign with 44 digest-pinned reproducible seeds spanning stored, fixed, and dynamic Deflate, every supported gzip option, integrity failures, concatenation, hostile ustar structures, and each resource bound. The campaign runs as a separate scheduled Ubuntu AddressSanitizer job.
+- Added exact cross-platform runtime dependency budgets and a codec-promotion contract. ZIP64 and gzip-TAR add no runtime dependency, and future codecs are independently capped and reviewed instead of entering through an umbrella archive framework.
+
+### Changed
+
+- Added `max_derived_archive_bytes` to policy v4 while preserving every earlier policy's canonical bytes, digest, and behavior. Source bytes, derived bytes, metadata, members, aggregate output, path depth, compression ratio, and runtime are separately bounded.
+- Added public ZIP64 and gzip-TAR inspect, retained and later verified reads, atomic materialization, CLI selections, native packaged-consumer coverage, and exact non-aliasing tests. Selecting either profile with the ZIP-only authenticated worker returns typed isolation unavailable before any fallback or destination effect.
+- Replaced debug-only composite-authority assumptions with a private non-forgeable verified-archive authority token and made concatenated-gzip refusal iterative, bounded, no-copy, and linearly accounted.
+- Kept the direct and transitive runtime dependency closure unchanged.
+
+### Security
+
+- ZIP64 central and local records, ZIP64 extra values, data descriptors, EOCD64, locator, and classic EOCD are bound into one exact source covering. Redundant or inconsistent width encodings, split disks, encryption, links, unsupported methods, comments containing structural signatures, and noncanonical extras are denied.
+- The gzip-TAR path admits no decoded bytes until wrapper grammar, exact single-member consumption, trailer integrity, derived quotas, inner ustar covering, member verification, and the cross-layer audit all agree. No destination stage exists before composite authority is established.
+- Duplicate gzip FEXTRA identifiers, reserved SI2 zero values, incomplete subfields, trailing subfield fragments, reserved flags, trailing bytes, zero padding after a member, and concatenated members are denied. Structural failure remains distinct from policy denial and infrastructure failure.
+
 ## [0.1.0-alpha.9] - 2026-08-27
 
 ### Added
@@ -298,7 +322,8 @@ First public development preview of the ZIP boundary.
 
 This preview is not a production-ready security boundary and has not received an external security audit. See the security limitations in the README and the reporting policy in `SECURITY.md` before evaluating it.
 
-[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.9...HEAD
+[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.10...HEAD
+[0.1.0-alpha.10]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.9...v0.1.0-alpha.10
 [0.1.0-alpha.9]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.8...v0.1.0-alpha.9
 [0.1.0-alpha.8]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.7...v0.1.0-alpha.8
 [0.1.0-alpha.7]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.6...v0.1.0-alpha.7

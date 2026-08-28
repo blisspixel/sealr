@@ -381,6 +381,10 @@ jobs:
           cargo fetch --locked --target aarch64-apple-darwin
           cargo fetch --locked --target x86_64-pc-windows-msvc
 
+      - name: Verify runtime dependency budget
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_dependency_budget.ps1
+
       - name: Verify third-party license bundles
         shell: pwsh
         run: pwsh -NoLogo -NoProfile -File scripts/verify_third_party_licenses.ps1
