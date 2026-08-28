@@ -7,34 +7,94 @@ use flate2::bufread::DeflateDecoder;
 use sha2::{Digest, Sha256};
 
 use crate::findings::{Finding, FindingCode};
-use crate::ir::IrMember;
+use crate::ir::{IrMember, MemberEvidence};
 use crate::policy::{ratio_exceeds, ResourceBudget};
 use crate::quota::{QuotaError, QuotaState};
 use crate::snapshot::finding_from_io;
+use crate::snapshot::{DomainRange, SnapshotSet};
 
-#[derive(Clone, Copy)]
-pub(crate) struct PayloadSpec {
-    method: u16,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct PayloadPlan {
+    source: DomainRange,
+    codec: PayloadCodec,
     compressed_size: u64,
     uncompressed_size: u64,
+    integrity: PayloadIntegrity,
 }
 
-impl PayloadSpec {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PayloadCodec {
+    Raw,
+    Deflate,
+    Unsupported(u16),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum PayloadIntegrity {
+    None,
+    Crc32(u32),
+}
+
+pub(crate) fn planned_payload_reader<'s, 'a>(
+    snapshots: &'s SnapshotSet<'a>,
+    plan: &PayloadPlan,
+    member_name: &str,
+) -> Result<crate::snapshot::SnapshotRangeReader<'s, 'a>, Finding> {
+    snapshots
+        .reader(plan.source)
+        .map_err(|finding| finding.on(member_name))
+}
+
+impl PayloadPlan {
     pub(crate) fn from_ir(member: &IrMember) -> Self {
-        Self {
-            method: member.method,
-            compressed_size: member.declared_comp_size,
-            uncompressed_size: member.declared_uncomp_size,
+        match &member.evidence {
+            MemberEvidence::Zip(zip) => Self {
+                source: DomainRange::original(zip.source_ranges.compressed_payload),
+                codec: payload_codec_from_zip_method(zip.method),
+                compressed_size: zip.declared_comp_size,
+                uncompressed_size: member.declared_uncomp_size,
+                integrity: PayloadIntegrity::Crc32(zip.declared_crc),
+            },
+            MemberEvidence::Tar(tar) => Self {
+                source: DomainRange::original(tar.payload),
+                codec: PayloadCodec::Raw,
+                compressed_size: tar.payload.len,
+                uncompressed_size: member.declared_uncomp_size,
+                integrity: PayloadIntegrity::None,
+            },
         }
     }
 
-    #[cfg(test)]
     pub(crate) fn from_zip(member: &crate::zip::ZipMember) -> Self {
         Self {
-            method: member.method,
+            source: DomainRange::original(member.source_ranges.compressed_payload),
+            codec: payload_codec_from_zip_method(member.method),
             compressed_size: member.comp_size,
             uncompressed_size: member.uncomp_size,
+            integrity: PayloadIntegrity::Crc32(member.crc),
         }
+    }
+
+    pub(crate) fn from_tar(member: &crate::tar::TarMember) -> Self {
+        Self {
+            source: DomainRange::original(member.payload),
+            codec: PayloadCodec::Raw,
+            compressed_size: member.payload.len,
+            uncompressed_size: member.size,
+            integrity: PayloadIntegrity::None,
+        }
+    }
+
+    pub(crate) fn matches_member(self, member: &IrMember) -> bool {
+        self == Self::from_ir(member)
+    }
+}
+
+fn payload_codec_from_zip_method(method: u16) -> PayloadCodec {
+    match method {
+        0 => PayloadCodec::Raw,
+        8 => PayloadCodec::Deflate,
+        method => PayloadCodec::Unsupported(method),
     }
 }
 
@@ -55,7 +115,7 @@ pub(crate) fn verify_payload_calls() -> u64 {
 
 pub(crate) fn verify_payload(
     mut payload: impl BufRead,
-    member: PayloadSpec,
+    member: PayloadPlan,
     budget: ResourceBudget,
     remaining_total: u64,
     writer: &mut impl Write,
@@ -115,8 +175,8 @@ pub(crate) fn verify_payload(
         Ok(())
     };
 
-    match member.method {
-        0 => {
+    match member.codec {
+        PayloadCodec::Raw => {
             let mut buffer = [0_u8; 64 * 1024];
             loop {
                 let read = payload.read(&mut buffer).map_err(|error| {
@@ -133,7 +193,7 @@ pub(crate) fn verify_payload(
                 consume(&buffer[..read])?;
             }
         }
-        8 => {
+        PayloadCodec::Deflate => {
             let mut decoder = DeflateDecoder::new(payload);
             let mut buffer = [0_u8; 64 * 1024];
             loop {
@@ -167,10 +227,10 @@ pub(crate) fn verify_payload(
                 ));
             }
         }
-        _ => {
+        PayloadCodec::Unsupported(method) => {
             return Err(Finding::error(
                 FindingCode::MethodUnsupported,
-                format!("method {}", member.method),
+                format!("method {method}"),
             ));
         }
     }
@@ -184,7 +244,16 @@ pub(crate) fn verify_payload(
             ),
         ));
     }
-    Ok((actual, crc.finalize(), sha.finalize().into()))
+    let crc = crc.finalize();
+    if let PayloadIntegrity::Crc32(expected) = member.integrity {
+        if crc != expected {
+            return Err(Finding::error(
+                FindingCode::CrcMismatch,
+                format!("got {crc:08x} want {expected:08x}"),
+            ));
+        }
+    }
+    Ok((actual, crc, sha.finalize().into()))
 }
 
 pub(crate) fn digest_hex(digest: &[u8; 32]) -> String {

@@ -58,32 +58,22 @@
       "promoted": false
     },
     {
-      "id": "fuzz.protocol-and-semantic.v1",
+      "id": "fuzz.protocol-semantic-and-tar.v2",
       "category": "coverage-guided-fuzzing",
       "scheduled_workflow": ".github/workflows/fuzz.yml",
-      "scheduled_job": "Bounded worker protocol fuzzing and Bounded semantic-record fuzzing",
-      "domain": "Digest-pinned protocol and semantic-record seeds plus arbitrary bytes and input-directed mutations under the workflow's exact bounds.",
-      "nonclaim": "Coverage-guided fuzzing is heuristic exploration, not exhaustive reachability or proof that the decoders are defect-free.",
+      "scheduled_job": "Bounded worker protocol, semantic-record, and raw portable ustar fuzzing",
+      "domain": "Digest-pinned protocol, semantic-record, and raw portable ustar seeds plus arbitrary bytes and input-directed checksum-repaired TAR mutations under the workflow's exact bounds.",
+      "nonclaim": "Coverage-guided fuzzing is heuristic exploration, not exhaustive reachability or proof that the protocol, semantic-record, or TAR interpreters are defect-free.",
       "local_reproduction": [
         "pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1",
         "cargo fuzz run protocol_decoders -- -max_total_time=600 -rss_limit_mb=1024 -max_len=65536",
-        "cargo fuzz run semantic_records -- -max_total_time=600 -rss_limit_mb=1024 -max_len=65536"
+        "cargo fuzz run semantic_records -- -max_total_time=600 -rss_limit_mb=1024 -max_len=65536",
+        "cargo fuzz run tar_ustar_portable_v1 -- -max_total_time=600 -rss_limit_mb=1024 -max_len=65536"
       ],
       "timeout_minutes": 25,
       "required_ci_marker": "cargo fuzz run",
       "promotable": true,
-      "stable_main_runs": [
-        {
-          "sequence": 1,
-          "run_id": 32708222003,
-          "commit": "2bdecc97442e6c5fdc27fb08e7f80db706d74cf6",
-          "branch": "main",
-          "event": "schedule",
-          "conclusion": "success",
-          "url": "https://github.com/blisspixel/sealr/actions/runs/32708222003",
-          "observed_at": "2026-08-24T08:49:04Z"
-        }
-      ],
+      "stable_main_runs": [],
       "eligible": false,
       "promoted": false
     },

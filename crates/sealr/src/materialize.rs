@@ -21,7 +21,7 @@ use std::fs::File as StdFile;
 
 use crate::findings::{Finding, FindingCode};
 use crate::policy::ResourceBudget;
-use crate::verification::{verify_payload, PayloadSpec};
+use crate::verification::{verify_payload, PayloadPlan};
 
 #[cfg(target_os = "macos")]
 mod apple;
@@ -1268,7 +1268,7 @@ fn ensure_stage_name_matches_root(
 
 pub(crate) fn process_member_to_file(
     payload: impl BufRead,
-    member: PayloadSpec,
+    member: PayloadPlan,
     budget: ResourceBudget,
     remaining_total: u64,
     member_sync: bool,
@@ -2597,23 +2597,25 @@ mod tests {
             canonical_path: components.join("/"),
             components: components.iter().map(|part| (*part).to_owned()).collect(),
             kind: crate::ir::MemberKind::File,
-            method: 0,
-            flags: 0,
-            creator_system: 0,
-            external_attributes: 0,
-            declared_crc: 0,
-            declared_comp_size: body.len() as u64,
             declared_uncomp_size: body.len() as u64,
-            source_ranges: crate::ir::MemberSourceRanges {
-                local_header: crate::ir::ByteRange { offset: 0, len: 30 },
-                compressed_payload: crate::ir::ByteRange {
-                    offset: 30,
-                    len: body.len() as u64,
+            evidence: crate::ir::MemberEvidence::Zip(crate::ir::ZipMemberEvidence {
+                method: 0,
+                flags: 0,
+                creator_system: 0,
+                external_attributes: 0,
+                declared_crc: 0,
+                declared_comp_size: body.len() as u64,
+                source_ranges: crate::ir::MemberSourceRanges {
+                    local_header: crate::ir::ByteRange { offset: 0, len: 30 },
+                    compressed_payload: crate::ir::ByteRange {
+                        offset: 30,
+                        len: body.len() as u64,
+                    },
+                    data_descriptor: None,
+                    central_header: crate::ir::ByteRange { offset: 0, len: 46 },
                 },
-                data_descriptor: None,
-                central_header: crate::ir::ByteRange { offset: 0, len: 46 },
-            },
-            extra_fields: Vec::new(),
+                extra_fields: Vec::new(),
+            }),
             actual_uncomp_size: None,
             actual_crc: None,
             content_sha256: None,

@@ -14,6 +14,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::findings::{Finding, FindingCode};
+use crate::ir::ByteRange;
 use crate::materialize::{ensure_file_handle_is_not_reparse, PrivateDirectory};
 use crate::outcome::SourceDigest;
 use crate::policy::hex_sha256;
@@ -105,6 +106,197 @@ pub struct SourceSnapshot<'a> {
     backing: SnapshotBacking<'a>,
     len: u64,
     digest: SourceDigest,
+}
+
+/// Stable identifier for one immutable byte domain in an operation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct SnapshotDomainId(u16);
+
+impl SnapshotDomainId {
+    pub(crate) const ORIGINAL: Self = Self(0);
+}
+
+/// One exact range resolved against a named immutable snapshot domain.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct DomainRange {
+    pub(crate) domain: SnapshotDomainId,
+    pub(crate) range: ByteRange,
+}
+
+impl DomainRange {
+    pub(crate) fn original(range: ByteRange) -> Self {
+        Self {
+            domain: SnapshotDomainId::ORIGINAL,
+            range,
+        }
+    }
+}
+
+/// Immutable snapshot domains retained by one ready or verified authority.
+///
+/// Raw ZIP and TAR currently contain exactly the original domain. Derived
+/// domains are reserved for bounded, identity-bound wrapper transformations.
+pub(crate) struct SnapshotSet<'a> {
+    domains: Vec<SourceSnapshot<'a>>,
+}
+
+impl fmt::Debug for SnapshotSet<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SnapshotSet")
+            .field("domain_count", &self.domains.len())
+            .field("original", &self.original())
+            .finish()
+    }
+}
+
+impl<'a> SnapshotSet<'a> {
+    pub(crate) fn from_original(snapshot: SourceSnapshot<'a>) -> Self {
+        Self {
+            domains: vec![snapshot],
+        }
+    }
+
+    pub(crate) fn original(&self) -> &SourceSnapshot<'a> {
+        &self.domains[0]
+    }
+
+    pub(crate) fn len(&self) -> usize {
+        self.domains.len()
+    }
+
+    pub(crate) fn domain(&self, id: SnapshotDomainId) -> Option<&SourceSnapshot<'a>> {
+        self.domains.get(usize::from(id.0))
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn push_derived(
+        &mut self,
+        snapshot: SourceSnapshot<'a>,
+    ) -> Result<SnapshotDomainId, Finding> {
+        let id = u16::try_from(self.domains.len()).map_err(|_| {
+            Finding::error(
+                FindingCode::QuotaArchive,
+                "snapshot domain count exceeds the u16 identity space",
+            )
+        })?;
+        self.domains.try_reserve_exact(1).map_err(|error| {
+            Finding::error(
+                FindingCode::SourceIo,
+                format!("could not reserve a derived snapshot domain: {error}"),
+            )
+        })?;
+        self.domains.push(snapshot);
+        Ok(SnapshotDomainId(id))
+    }
+
+    pub(crate) fn reader(
+        &self,
+        source: DomainRange,
+    ) -> Result<SnapshotRangeReader<'_, 'a>, Finding> {
+        let index = usize::from(source.domain.0);
+        let snapshot = self.domains.get(index).ok_or_else(|| {
+            Finding::error(
+                FindingCode::CoveringInconsistent,
+                "payload references an unavailable snapshot domain",
+            )
+        })?;
+        snapshot.reader(source.range.offset, source.range.len)
+    }
+
+    pub(crate) fn into_owned(self) -> SnapshotSet<'static> {
+        SnapshotSet {
+            domains: self
+                .domains
+                .into_iter()
+                .map(SourceSnapshot::into_owned)
+                .collect(),
+        }
+    }
+}
+
+/// One identity-bound transformation from an existing range to a new domain.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TransformRecord {
+    pub(crate) profile: &'static str,
+    pub(crate) profile_sha256: String,
+    pub(crate) input: DomainRange,
+    pub(crate) output_domain: SnapshotDomainId,
+    pub(crate) output_len: u64,
+    pub(crate) output_sha256: String,
+}
+
+/// Topologically ordered transformations that produced derived domains.
+#[derive(Debug, Default)]
+pub(crate) struct TransformGraph {
+    records: Vec<TransformRecord>,
+}
+
+impl TransformGraph {
+    pub(crate) fn empty() -> Self {
+        Self::default()
+    }
+
+    pub(crate) fn is_empty(&self) -> bool {
+        self.records.is_empty()
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn push(&mut self, record: TransformRecord) -> Result<(), Finding> {
+        self.records.try_reserve_exact(1).map_err(|error| {
+            Finding::error(
+                FindingCode::SourceIo,
+                format!("could not reserve a transformation record: {error}"),
+            )
+        })?;
+        self.records.push(record);
+        Ok(())
+    }
+
+    pub(crate) fn validates(&self, snapshots: &SnapshotSet<'_>) -> bool {
+        if self.records.len().saturating_add(1) != snapshots.len() {
+            return false;
+        }
+        self.records.iter().enumerate().all(|(index, record)| {
+            let Ok(output_number) = u16::try_from(index.saturating_add(1)) else {
+                return false;
+            };
+            if record.profile.is_empty()
+                || !is_sha256_hex(&record.profile_sha256)
+                || record.output_domain != SnapshotDomainId(output_number)
+                || usize::from(record.input.domain.0) >= usize::from(output_number)
+            {
+                return false;
+            }
+            let Some(input) = snapshots.domain(record.input.domain) else {
+                return false;
+            };
+            let Some(input_end) = record
+                .input
+                .range
+                .offset
+                .checked_add(record.input.range.len)
+            else {
+                return false;
+            };
+            if input_end > input.len() {
+                return false;
+            }
+            let Some(output) = snapshots.domain(record.output_domain) else {
+                return false;
+            };
+            output.len() == record.output_len
+                && output.digest().sha256() == Some(record.output_sha256.as_str())
+                && is_sha256_hex(&record.output_sha256)
+        })
+    }
+}
+
+fn is_sha256_hex(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
 #[cfg(test)]
@@ -361,8 +553,26 @@ impl<'a> SourceSnapshot<'a> {
 
     fn private_file_from_reader(
         path: Option<String>,
-        mut source: impl Read,
+        source: impl Read,
         expected_len: u64,
+        max_archive_bytes: u64,
+    ) -> Result<Self, Finding> {
+        Self::private_file_from_bounded_reader(path, source, Some(expected_len), max_archive_bytes)
+    }
+
+    #[allow(dead_code)]
+    pub(crate) fn private_derived_from_reader(
+        source: impl Read,
+        max_output_bytes: u64,
+    ) -> Result<SourceSnapshot<'static>, Finding> {
+        Self::private_file_from_bounded_reader(None, source, None, max_output_bytes)
+            .map(SourceSnapshot::into_owned)
+    }
+
+    fn private_file_from_bounded_reader(
+        path: Option<String>,
+        mut source: impl Read,
+        expected_len: Option<u64>,
         max_archive_bytes: u64,
     ) -> Result<Self, Finding> {
         let directory =
@@ -399,13 +609,15 @@ impl<'a> SourceSnapshot<'a> {
         })?;
 
         let (len, sha256) = copy_bounded(&mut source, &mut writer, max_archive_bytes)?;
-        if len != expected_len {
-            return Err(Finding::error(
-                FindingCode::SourceIo,
-                format!(
-                    "opened source length changed while copying: expected {expected_len}, read {len}"
-                ),
-            ));
+        if let Some(expected_len) = expected_len {
+            if len != expected_len {
+                return Err(Finding::error(
+                    FindingCode::SourceIo,
+                    format!(
+                        "opened source length changed while copying: expected {expected_len}, read {len}"
+                    ),
+                ));
+            }
         }
         writer.flush().map_err(|error| {
             Finding::error(
@@ -1002,6 +1214,79 @@ mod tests {
         assert_eq!(owned.path(), Some("input.zip"));
         assert_eq!(owned.as_bytes().unwrap(), data);
         assert_eq!(owned.digest(), &digest);
+    }
+
+    #[test]
+    fn snapshot_set_resolves_only_declared_domains_and_owns_borrowed_input() {
+        let data = b"original-domain";
+        let snapshots = SnapshotSet::from_original(SourceSnapshot::borrowed(None, data));
+        assert_eq!(snapshots.len(), 1);
+        assert!(TransformGraph::empty().is_empty());
+
+        let mut reader = snapshots
+            .reader(DomainRange::original(ByteRange { offset: 2, len: 6 }))
+            .unwrap();
+        let mut selected = Vec::new();
+        reader.read_to_end(&mut selected).unwrap();
+        assert_eq!(selected, b"iginal");
+
+        let unavailable = snapshots
+            .reader(DomainRange {
+                domain: SnapshotDomainId(1),
+                range: ByteRange { offset: 0, len: 0 },
+            })
+            .unwrap_err();
+        assert_eq!(unavailable.code, FindingCode::CoveringInconsistent);
+
+        let owned = snapshots.into_owned();
+        assert_eq!(owned.original().kind(), SnapshotKind::MemoryOwned);
+        assert_eq!(owned.original().as_bytes().unwrap(), data);
+    }
+
+    #[test]
+    fn derived_snapshot_is_bounded_private_and_transform_bound() {
+        let original_bytes = b"wrapped";
+        let derived_bytes = b"decoded archive";
+        let derived = SourceSnapshot::private_derived_from_reader(
+            Cursor::new(derived_bytes),
+            derived_bytes.len() as u64,
+        )
+        .unwrap();
+        assert_eq!(derived.kind(), SnapshotKind::PrivateFile);
+        assert_eq!(derived.len(), derived_bytes.len() as u64);
+        assert_eq!(
+            derived.digest().sha256(),
+            Some(hex_sha256(derived_bytes).as_str())
+        );
+
+        let mut snapshots =
+            SnapshotSet::from_original(SourceSnapshot::borrowed(None, original_bytes));
+        let output_domain = snapshots.push_derived(derived).unwrap();
+        let mut graph = TransformGraph::empty();
+        graph
+            .push(TransformRecord {
+                profile: "sealr.transform.test.v1",
+                profile_sha256: "a".repeat(64),
+                input: DomainRange::original(ByteRange {
+                    offset: 0,
+                    len: original_bytes.len() as u64,
+                }),
+                output_domain,
+                output_len: derived_bytes.len() as u64,
+                output_sha256: hex_sha256(derived_bytes),
+            })
+            .unwrap();
+        assert!(graph.validates(&snapshots));
+
+        graph.records[0].output_len += 1;
+        assert!(!graph.validates(&snapshots));
+
+        let over_cap = SourceSnapshot::private_derived_from_reader(
+            Cursor::new(derived_bytes),
+            derived_bytes.len() as u64 - 1,
+        )
+        .unwrap_err();
+        assert_eq!(over_cap.code, FindingCode::QuotaArchive);
     }
 
     #[test]

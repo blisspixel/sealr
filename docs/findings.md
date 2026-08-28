@@ -78,7 +78,7 @@ Unknown error codes must be treated as rejection by consumers.
 | `quota.total` | Declared or actual running total exceeds its cap. |
 | `quota.ratio` | Declared or actual compression ratio exceeds policy. |
 | `quota.overflow` | A checked security counter could not be represented in `u64`. |
-| `quota.metadata` | ZIP structural metadata exceeds its cap. |
+| `quota.metadata` | Structural archive metadata exceeds its cap. |
 | `quota.declared_lie` | Actual expanded size disagrees with the declared size. |
 | `policy.unsupported` | The constructor policy names an unimplemented or reserved control. Compilation fails before source ingestion. |
 
@@ -108,11 +108,24 @@ Unknown error codes must be treated as rejection by consumers.
 | `codec.deflate.trailing_input` | One valid DEFLATE stream ended before the declared compressed payload ended. Trailing bytes and concatenated streams are rejected. |
 | `crc.mismatch` | Expanded member CRC32 disagrees with the archive. |
 
+### TAR structure
+
+| Code | Meaning |
+|---|---|
+| `tar.checksum` | A ustar header checksum field is malformed, overflows, or disagrees with the unsigned header-byte sum. |
+| `tar.dialect` | The selected portable ustar language does not recognize the required magic, version, fixed text fields, or reserved-byte form. |
+| `tar.numeric` | An octal numeric field is malformed or overflows. GNU base-256 numeric fields are reported as unsupported instead. |
+| `tar.padding` | Member padding or trailing record padding contains a nonzero byte. |
+| `tar.terminator` | The archive lacks exactly observable two-block zero termination or contains an incomplete trailing block. |
+| `tar.truncated` | A complete header, payload, padding region, or checked offset is unavailable. |
+| `tar.type` | A record type is invalid for the portable profile, or a regular-file or directory invariant is violated. |
+| `tar.feature_unsupported` | A recognized PAX, GNU, link, special-file, or base-256 extension is outside the selected portable ustar profile. |
+
 ## Reserved registry work
 
 The pinned 5,927-file upstream construction corpus is already enforced. B3 canonicalization and B4 case constructions map to the specific implemented `path.*` codes for the selected ASCII or portable UTF-8 profile. A future CP437 profile must decide whether its additional collision model needs aliases or dedicated `zip.diff.b3_canon` and `zip.diff.b4_case` codes.
 
-TAR link, permission, dictionary, polyglot, signing, and sandbox findings will be added only with their implementations and tests.
+Additional link, permission, wrapper, dictionary, polyglot, signing, and sandbox findings will be added only with their implementations and tests.
 
 ## Stability
 

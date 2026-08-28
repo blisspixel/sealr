@@ -949,7 +949,16 @@ pub(crate) fn planned_payload_reader<'s, 'a>(
     snapshot: &'s SourceSnapshot<'a>,
     member: &IrMember,
 ) -> Result<crate::snapshot::SnapshotRangeReader<'s, 'a>, Finding> {
-    let range = member.source_ranges.compressed_payload;
+    let range = member
+        .zip_evidence()
+        .ok_or_else(|| {
+            Finding::error(
+                FindingCode::CoveringInconsistent,
+                "ZIP payload reader received non-ZIP member evidence",
+            )
+        })?
+        .source_ranges
+        .compressed_payload;
     snapshot
         .reader(range.offset, range.len)
         .map_err(|finding| finding.on(&member.decoded_name))

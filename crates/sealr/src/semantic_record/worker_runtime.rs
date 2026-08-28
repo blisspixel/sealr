@@ -14,7 +14,7 @@ use crate::ir::{ArchiveIR, MemberVerification};
 use crate::materialize::StageWriteRoot;
 use crate::outcome::{AdmissionStatus, InterpretationStatus, VerificationStatus, ViewCompleteness};
 use crate::snapshot::SourceSnapshot;
-use crate::verification::{verify_payload, PayloadSpec};
+use crate::verification::{verify_payload, PayloadPlan};
 use crate::verified::{RetentionBuild, RetentionPlan};
 use crate::zip as zip_ranges;
 
@@ -505,7 +505,7 @@ impl ValidatedMemberRead {
         let payload = BufReader::with_capacity(64 * 1024, payload);
         let (actual, crc, sha256) = verify_payload(
             payload,
-            PayloadSpec::from_ir(planned),
+            PayloadPlan::from_ir(planned),
             self.planning.record.binding.budget,
             self.request.expected_size,
             output,
@@ -663,7 +663,7 @@ mod tests {
             PlanDecision::Ready(ready) => ready,
             PlanDecision::Terminal(terminal) => panic!("unexpected terminal plan: {terminal:?}"),
         };
-        let (snapshot, ir, findings, context) = ready.into_parts();
+        let (snapshot, ir, _payloads, findings, context) = ready.into_parts();
         let retention = RetentionPlan::new(21, 21).with_path("custom.txt").unwrap();
         let operation_id = [0x5a; 16];
         let planning = prepare_ready_plan(
@@ -849,7 +849,7 @@ mod tests {
             PlanDecision::Ready(ready) => ready,
             PlanDecision::Terminal(terminal) => panic!("unexpected terminal plan: {terminal:?}"),
         };
-        let (snapshot, ir, findings, context) = ready.into_parts();
+        let (snapshot, ir, _payloads, findings, context) = ready.into_parts();
         let operation_id = [0x8d; 16];
         let planning = prepare_ready_plan(
             &snapshot,

@@ -2,9 +2,10 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use clap::Parser;
+use clap::{Parser, ValueEnum};
 use sealr::{
     apply_supervised, apply_with_options, ApplyOptions, LinuxWorker, Policy, Request, Source,
+    TarInterpretationProfile,
 };
 use serde::Serialize;
 
@@ -17,6 +18,9 @@ use serde::Serialize;
 struct Cli {
     /// Archive file
     archive: PathBuf,
+    /// Exact container interpretation to apply
+    #[arg(long, value_enum, default_value_t = CliFormat::Zip)]
+    format: CliFormat,
     /// Materialize into a new directory below an existing parent
     #[arg(long)]
     dest: Option<PathBuf>,
@@ -25,10 +29,22 @@ struct Cli {
     worker_manifest: Option<PathBuf>,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CliFormat {
+    Zip,
+    TarUstar,
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let policy = Policy::default_v1();
-    let options = ApplyOptions::new();
+    let (policy, options) = match cli.format {
+        CliFormat::Zip => (Policy::default_v1(), ApplyOptions::new()),
+        CliFormat::TarUstar => (
+            Policy::default_v2(),
+            ApplyOptions::new()
+                .with_tar_interpretation_profile(TarInterpretationProfile::UstarPortableV1),
+        ),
+    };
     let request = Request {
         source: Source::Path(&cli.archive),
         policy: &policy,

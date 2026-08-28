@@ -6,9 +6,35 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
-No unreleased changes.
+## [0.1.0-alpha.9] - 2026-08-27
 
-## [0.1.0-alpha.8] - 2026-08-26
+### Added
+
+- Added the explicitly selected `sealr.profile.tar.ustar-portable.v1` interpretation with pinned digest `3c87c5ec4c1ad5377eb60ebb308e9e394aaf7a4133dddf5587829b4510af1700`. It accepts exact POSIX ustar regular files and directories, validates closed ASCII-octal and fixed-text grammars, header checksums, device-zero encodings, zero member padding, two-block termination, and trailing record padding, and denies PAX, GNU, links, sparse entries, special files, base-256 numbers, concatenation, and recovery behavior.
+- Added format-specific `sealr.archive-ir.tar-ustar.v1` evidence and `sealrTreeV2` TAR layout identity while preserving ZIP `sealr.archive-ir.v1` serialization and every `sealrTreeV1` vector.
+- Added public TAR inspect, retention, later verified reads, and cross-platform atomic materialization through the existing policy and effect core, plus CLI selection with `--format tar-ustar`.
+- Added `sealr.policy.v2` with exact canonical ZIP and portable-ustar authorization subsets while preserving the ZIP-only v1 policy and digest. Format authorization and parser selection now fail before source ingestion.
+- Added an independent TAR covering oracle, portable ustar profile vector, `sealrTreeV2` layout and content vector with field-family mutation tests, and exact sparse fixtures from GNU tar 1.35, bsdtar 3.8.4, and Python 3.12.10.
+- Added extracted-crate and native packaged-CLI TAR coverage, including retained and later reads after source deletion, inspect and materialization on every native release platform, and a Linux worker no-fallback refusal.
+- Added a bounded `tar_ustar_portable_v1` fuzz campaign with 15 deterministic manifest-pinned seeds, raw bytes, checksum-repaired deep-header mutations, quota-frontier replays, source-geometry checks, exact manifest and workflow binding, and reset promotion history for the expanded three-target domain.
+- Added a complete major-format and dependency matrix covering ZIP64, TAR dialects and wrappers, 7z, RAR4, RAR5, cpio, ar/deb, RPM, CAB, and ZIP-derived or TAR-derived consumer profiles.
+
+### Changed
+
+- Extracted the planned payload-range reader and ready-plan executor into format-neutral seams shared by ZIP and TAR, introduced explicit `ArchiveSelection`, and made the authenticated worker boundary accept only a typed ZIP selection.
+- Added a non-cloneable crate-private `ReadyArchive` execution authority. Admission now creates one explicit payload plan per member with its exact source range, codec, declared size, and integrity rule; verification and later in-process reads consume those retained plans instead of inferring executable behavior from public IR fields.
+- Added crate-private snapshot-domain ranges and a topologically ordered transform-graph model. Raw ZIP and TAR are pinned to original domain zero with an empty transform graph, and the ready boundary rejects any unavailable domain or unexpected transform state.
+- Replaced ZIP-shaped public member fields with format-native `MemberEvidence`, `ZipMemberEvidence`, and `TarMemberEvidence`. ZIP method, flags, CRC, compressed size, ranges, extra fields, and creator metadata are available only through ZIP evidence; TAR exposes none of them.
+- Kept the direct runtime dependency list and `Cargo.lock` unchanged for raw ustar support.
+- Converted covering-audit scratch-allocation failure from a panic into a deterministic error finding.
+- Preserved the exact policy v1 canonical bytes, digest, authorization behavior, and ZIP compatibility facade while adding policy v2.
+
+### Security
+
+- TAR selection is explicit. The compatibility `apply()` facade still selects ZIP strict ASCII v1, filenames do not select a parser, selected and observed formats remain separate evidence, and selecting any non-ZIP format with the ZIP-only authenticated Linux worker returns typed `IsolationUnavailable` without fallback.
+- TAR typeflags are classified exactly: NUL and `0` are regular files, `5` is a directory, named extensions are unsupported, and unknown values are malformed. Structural malformation takes precedence over quota findings, and every member-padding and trailing-record-padding byte is scanned for nonzero data without allocating the range.
+
+## [0.1.0-alpha.8] - 2026-08-27
 
 ### Added
 
@@ -272,7 +298,8 @@ First public development preview of the ZIP boundary.
 
 This preview is not a production-ready security boundary and has not received an external security audit. See the security limitations in the README and the reporting policy in `SECURITY.md` before evaluating it.
 
-[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.8...HEAD
+[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.9...HEAD
+[0.1.0-alpha.9]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.8...v0.1.0-alpha.9
 [0.1.0-alpha.8]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.7...v0.1.0-alpha.8
 [0.1.0-alpha.7]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.6...v0.1.0-alpha.7
 [0.1.0-alpha.6]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.5...v0.1.0-alpha.6

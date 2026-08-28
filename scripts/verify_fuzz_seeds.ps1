@@ -9,6 +9,8 @@ $manifestPath = Join-Path $workspace 'fuzz/seed-manifest.json'
 $manifest = Get-Content -Raw -LiteralPath $manifestPath | ConvertFrom-Json
 $semanticManifestPath = Join-Path $workspace 'fuzz/semantic-seed-manifest.json'
 $semanticManifest = Get-Content -Raw -LiteralPath $semanticManifestPath | ConvertFrom-Json
+$tarManifestPath = Join-Path $workspace 'fuzz/tar-seed-manifest.json'
+$tarManifest = Get-Content -Raw -LiteralPath $tarManifestPath | ConvertFrom-Json
 
 if ($manifest.schema -ne 'sealr.fuzz-seeds.v1' -or
     $manifest.target -ne 'protocol_decoders' -or
@@ -23,6 +25,13 @@ if ($semanticManifest.schema -ne 'sealr.semantic-fuzz-seeds.v1' -or
     $semanticManifest.cargoFuzzVersion -ne '0.13.2' -or
     $semanticManifest.libfuzzerSysVersion -ne '0.4.13') {
     throw 'Semantic fuzz manifest identity or pinned tools changed unexpectedly'
+}
+if ($tarManifest.schema -ne 'sealr.tar-fuzz-seeds.v1' -or
+    $tarManifest.target -ne 'tar_ustar_portable_v1' -or
+    $tarManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $tarManifest.cargoFuzzVersion -ne '0.13.2' -or
+    $tarManifest.libfuzzerSysVersion -ne '0.4.13') {
+    throw 'TAR fuzz manifest identity or pinned tools changed unexpectedly'
 }
 
 $expectedBounds = [ordered]@{
@@ -39,6 +48,9 @@ foreach ($name in $expectedBounds.Keys) {
     if ($semanticManifest.bounds.$name -ne $expectedBounds[$name]) {
         throw "Semantic fuzz bound $name changed unexpectedly"
     }
+    if ($tarManifest.bounds.$name -ne $expectedBounds[$name]) {
+        throw "TAR fuzz bound $name changed unexpectedly"
+    }
 }
 if ($manifest.failureArtifact.directoryName -ne 'sealr-fuzz-artifacts' -or
     $manifest.failureArtifact.uploadOn -ne 'failure' -or
@@ -49,6 +61,11 @@ if ($semanticManifest.failureArtifact.directoryName -ne 'sealr-semantic-fuzz-art
     $semanticManifest.failureArtifact.uploadOn -ne 'failure' -or
     $semanticManifest.failureArtifact.retentionDays -ne 7) {
     throw 'Semantic fuzz failure artifact policy changed unexpectedly'
+}
+if ($tarManifest.failureArtifact.directoryName -ne 'sealr-tar-ustar-fuzz-artifacts' -or
+    $tarManifest.failureArtifact.uploadOn -ne 'failure' -or
+    $tarManifest.failureArtifact.retentionDays -ne 7) {
+    throw 'TAR fuzz failure artifact policy changed unexpectedly'
 }
 
 function Assert-ManifestFile {
@@ -100,6 +117,10 @@ Assert-ManifestFile -Entry $semanticManifest.dictionary
 foreach ($seed in $semanticManifest.seeds) {
     Assert-ManifestFile -Entry $seed
 }
+Assert-ManifestFile -Entry $tarManifest.dictionary
+foreach ($seed in $tarManifest.seeds) {
+    Assert-ManifestFile -Entry $seed
+}
 
 $corpusRoot = Join-Path $workspace 'fuzz/corpus/protocol_decoders'
 $actualSeeds = @(
@@ -123,11 +144,83 @@ if ($actualSemanticSeeds.Count -ne $declaredSemanticSeeds.Count -or
     @(Compare-Object $actualSemanticSeeds $declaredSemanticSeeds).Count -ne 0) {
     throw 'Semantic fuzz corpus and seed manifest contain different paths'
 }
+$tarCorpusRoot = Join-Path $workspace 'fuzz/corpus/tar_ustar_portable_v1'
+$actualTarSeeds = @(
+    Get-ChildItem -LiteralPath $tarCorpusRoot -File |
+        ForEach-Object { [IO.Path]::GetRelativePath($workspace, $_.FullName).Replace('\', '/') } |
+        Sort-Object
+)
+$declaredTarSeeds = @($tarManifest.seeds.path | Sort-Object)
+if ($actualTarSeeds.Count -ne $declaredTarSeeds.Count -or
+    @(Compare-Object $actualTarSeeds $declaredTarSeeds).Count -ne 0) {
+    throw 'TAR fuzz corpus and seed manifest contain different paths'
+}
+
+if ([string]$tarManifest.generator -cne 'scripts/generate_tar_fuzz_seeds.ps1') {
+    throw 'TAR fuzz seed generator path changed unexpectedly'
+}
+$generatedTarSeeds = @($tarManifest.seeds | Where-Object { $_.generated -is [bool] -and $_.generated })
+$handwrittenTarSeeds = @($tarManifest.seeds | Where-Object { $_.generated -is [bool] -and -not $_.generated })
+if ($generatedTarSeeds.Count -ne 13 -or
+    $handwrittenTarSeeds.Count -ne 2 -or
+    @($tarManifest.seeds | Where-Object { $_.generated -isnot [bool] }).Count -ne 0) {
+    throw 'TAR fuzz seeds must classify exactly 13 generated and two handwritten entries'
+}
+$tarGenerator = Join-Path $workspace ([string]$tarManifest.generator)
+$tarGenerationRoot = Join-Path (
+    [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar
+    )
+) ("sealr-tar-fuzz-seeds-{0}" -f [Guid]::NewGuid().ToString('N'))
+try {
+    & $tarGenerator -OutputDirectory $tarGenerationRoot
+    $actualGeneratedNames = @(
+        Get-ChildItem -LiteralPath $tarGenerationRoot -File |
+            ForEach-Object Name |
+            Sort-Object
+    )
+    $expectedGeneratedNames = @(
+        $generatedTarSeeds.path |
+            ForEach-Object { [IO.Path]::GetFileName([string]$_) } |
+            Sort-Object
+    )
+    if ($actualGeneratedNames.Count -ne $expectedGeneratedNames.Count -or
+        @(Compare-Object $actualGeneratedNames $expectedGeneratedNames).Count -ne 0) {
+        throw 'TAR fuzz seed generator produced a different exact file set'
+    }
+    foreach ($entry in $generatedTarSeeds) {
+        $generatedPath = Join-Path $tarGenerationRoot ([IO.Path]::GetFileName([string]$entry.path))
+        $generatedFile = Get-Item -LiteralPath $generatedPath
+        $generatedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $generatedPath).Hash.ToLowerInvariant()
+        if ($generatedFile.Length -ne $entry.bytes -or $generatedHash -cne [string]$entry.sha256) {
+            throw "TAR fuzz seed generator did not reproduce $($entry.path)"
+        }
+    }
+} finally {
+    if (Test-Path -LiteralPath $tarGenerationRoot) {
+        $resolvedGenerationRoot = [IO.Path]::GetFullPath($tarGenerationRoot)
+        $generationParent = [IO.Path]::GetDirectoryName($resolvedGenerationRoot)
+        $generationLeaf = [IO.Path]::GetFileName($resolvedGenerationRoot)
+        $expectedTemporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+            [IO.Path]::DirectorySeparatorChar,
+            [IO.Path]::AltDirectorySeparatorChar
+        )
+        if ($generationParent -cne $expectedTemporaryParent -or
+            $generationLeaf -notmatch '^sealr-tar-fuzz-seeds-[0-9a-f]{32}$') {
+            throw "refusing to remove unexpected TAR fuzz generation path: $resolvedGenerationRoot"
+        }
+        Remove-Item -LiteralPath $resolvedGenerationRoot -Recurse -Force
+    }
+}
 
 $fuzzCargo = Get-Content -Raw -LiteralPath (Join-Path $workspace 'fuzz/Cargo.toml')
 $fuzzLock = Get-Content -Raw -LiteralPath (Join-Path $workspace 'fuzz/Cargo.lock')
 $semanticTarget = Get-Content -Raw -LiteralPath (
     Join-Path $workspace 'fuzz/fuzz_targets/semantic_records.rs'
+)
+$tarTarget = Get-Content -Raw -LiteralPath (
+    Join-Path $workspace 'fuzz/fuzz_targets/tar_ustar_portable_v1.rs'
 )
 $workflow = Get-Content -Raw -LiteralPath (Join-Path $workspace '.github/workflows/fuzz.yml')
 $releaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $workspace '.github/workflows/release.yml')
@@ -339,7 +432,7 @@ function Assert-NoCargoConfiguration {
     }
 }
 
-function Assert-SemanticFuzzMetadataBinding {
+function Assert-FuzzMetadataBinding {
     param(
         [Parameter(Mandatory)] [object] $Metadata,
         [Parameter(Mandatory)] [string] $ManifestPath,
@@ -353,9 +446,9 @@ function Assert-SemanticFuzzMetadataBinding {
     $package = $packages[0]
 
     $targetNames = @($package.targets.name | Sort-Object)
-    $expectedTargetNames = @('protocol_decoders', 'semantic_records')
+    $expectedTargetNames = @('protocol_decoders', 'semantic_records', 'tar_ustar_portable_v1')
     if (($targetNames -join "`n") -cne ($expectedTargetNames -join "`n")) {
-        throw 'Cargo metadata must contain exactly the protocol and semantic fuzz targets'
+        throw 'Cargo metadata must contain exactly the protocol, semantic, and TAR fuzz targets'
     }
     $manifestDirectory = Split-Path ([IO.Path]::GetFullPath($ManifestPath)) -Parent
     foreach ($targetContract in @(
@@ -366,6 +459,10 @@ function Assert-SemanticFuzzMetadataBinding {
         @{
             Name = 'semantic_records'
             RelativePath = 'fuzz_targets/semantic_records.rs'
+        }
+        @{
+            Name = 'tar_ustar_portable_v1'
+            RelativePath = 'fuzz_targets/tar_ustar_portable_v1.rs'
         }
     )) {
         $matchingTargets = @(
@@ -411,7 +508,7 @@ function Assert-SemanticFuzzMetadataBinding {
             (Join-Path $workspace 'crates/sealr-protocol')
         )
         if ($sealrDependency.Count -ne 1 -or
-            [string]$sealrDependency[0].req -cne '=0.1.0-alpha.8' -or
+            [string]$sealrDependency[0].req -cne '=0.1.0-alpha.9' -or
             [IO.Path]::GetFullPath((Get-OptionalMetadataText $sealrDependency[0] 'path')) -cne $expectedSealrPath -or
             (@($sealrDependency[0].features) -join "`n") -cne '__internal-fuzzing' -or
             [bool]$sealrDependency[0].optional -or
@@ -424,7 +521,7 @@ function Assert-SemanticFuzzMetadataBinding {
             throw 'Cargo metadata must enable only the exact hidden Sealr fuzz feature dependency'
         }
         if ($protocolDependency.Count -ne 1 -or
-            [string]$protocolDependency[0].req -cne '=0.1.0-alpha.8' -or
+            [string]$protocolDependency[0].req -cne '=0.1.0-alpha.9' -or
             [IO.Path]::GetFullPath((Get-OptionalMetadataText $protocolDependency[0] 'path')) -cne $expectedProtocolPath -or
             @($protocolDependency[0].features).Count -ne 0 -or
             [bool]$protocolDependency[0].optional -or
@@ -518,6 +615,23 @@ function Assert-SemanticFuzzTargetSource {
     }
 }
 
+function Assert-TarFuzzTargetSource {
+    param([Parameter(Mandatory)] [string] $TargetSource)
+
+    $expectedSource = @(
+        '#![no_main]'
+        ''
+        'use libfuzzer_sys::fuzz_target;'
+        ''
+        'fuzz_target!(|input: &[u8]| {'
+        '    sealr::__fuzz_tar_ustar_portable_v1(input);'
+        '});'
+    ) -join "`n"
+    if ((Normalize-WorkflowBlock $TargetSource) -cne $expectedSource) {
+        throw 'TAR fuzz target source must call the exact hidden Sealr ustar driver'
+    }
+}
+
 function Assert-FuzzCargoManifestContract {
     param([Parameter(Mandatory)] [string] $CargoManifest)
 
@@ -534,8 +648,8 @@ function Assert-FuzzCargoManifestContract {
         ''
         '[dependencies]'
         'libfuzzer-sys = "=0.4.13"'
-        'sealr = { path = "../crates/sealr", version = "=0.1.0-alpha.8", features = ["__internal-fuzzing"] }'
-        'sealr-worker-protocol = { path = "../crates/sealr-protocol", version = "=0.1.0-alpha.8" }'
+        'sealr = { path = "../crates/sealr", version = "=0.1.0-alpha.9", features = ["__internal-fuzzing"] }'
+        'sealr-worker-protocol = { path = "../crates/sealr-protocol", version = "=0.1.0-alpha.9" }'
         ''
         '[[bin]]'
         'name = "protocol_decoders"'
@@ -547,6 +661,13 @@ function Assert-FuzzCargoManifestContract {
         '[[bin]]'
         'name = "semantic_records"'
         'path = "fuzz_targets/semantic_records.rs"'
+        'test = false'
+        'doc = false'
+        'bench = false'
+        ''
+        '[[bin]]'
+        'name = "tar_ustar_portable_v1"'
+        'path = "fuzz_targets/tar_ustar_portable_v1.rs"'
         'test = false'
         'doc = false'
         'bench = false'
@@ -573,11 +694,12 @@ foreach ($required in @(
 $fuzzManifestPath = Join-Path $workspace 'fuzz/Cargo.toml'
 Assert-NoCargoConfiguration
 $fuzzMetadata = Get-FuzzCargoMetadata -ManifestPath $fuzzManifestPath -Locked
-Assert-SemanticFuzzMetadataBinding `
+Assert-FuzzMetadataBinding `
     -Metadata $fuzzMetadata `
     -ManifestPath $fuzzManifestPath `
     -RequireDependencies
 Assert-SemanticFuzzTargetSource -TargetSource $semanticTarget
+Assert-TarFuzzTargetSource -TargetSource $tarTarget
 Assert-FuzzCargoManifestContract -CargoManifest $fuzzCargo
 
 $temporaryBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
@@ -630,6 +752,13 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = 'tar_ustar_portable_v1'
+path = 'fuzz_targets/tar_ustar_portable_v1.rs'
+test = false
+doc = false
+bench = false
+
 [workspace]
 '@
     [IO.File]::WriteAllText(
@@ -647,11 +776,16 @@ bench = false
         "fn main() {}`n",
         [Text.UTF8Encoding]::new($false)
     )
+    [IO.File]::WriteAllText(
+        (Join-Path $temporaryFixture 'fuzz_targets/tar_ustar_portable_v1.rs'),
+        "fn main() {}`n",
+        [Text.UTF8Encoding]::new($false)
+    )
     $inertMetadata = Get-FuzzCargoMetadata `
         -ManifestPath (Join-Path $temporaryFixture 'Cargo.toml') `
         -NoDeps
     try {
-        Assert-SemanticFuzzMetadataBinding `
+        Assert-FuzzMetadataBinding `
             -Metadata $inertMetadata `
             -ManifestPath (Join-Path $temporaryFixture 'Cargo.toml')
     } catch {
@@ -686,8 +820,8 @@ publish = false
 
 [dependencies]
 libfuzzer-sys = { path = "fake-libfuzzer", version = "=0.4.13" }
-sealr = { path = "$sealrDependencyPath", version = "=0.1.0-alpha.8", features = ["__internal-fuzzing"] }
-sealr-worker-protocol = { path = "$protocolDependencyPath", version = "=0.1.0-alpha.8" }
+sealr = { path = "$sealrDependencyPath", version = "=0.1.0-alpha.9", features = ["__internal-fuzzing"] }
+sealr-worker-protocol = { path = "$protocolDependencyPath", version = "=0.1.0-alpha.9" }
 
 [[bin]]
 name = "protocol_decoders"
@@ -703,6 +837,13 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "tar_ustar_portable_v1"
+path = "fuzz_targets/tar_ustar_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
 "@
     [IO.File]::WriteAllText(
@@ -714,7 +855,7 @@ bench = false
         -ManifestPath (Join-Path $temporaryFixture 'Cargo.toml') `
         -NoDeps
     try {
-        Assert-SemanticFuzzMetadataBinding `
+        Assert-FuzzMetadataBinding `
             -Metadata $localSubstitutionMetadata `
             -ManifestPath (Join-Path $temporaryFixture 'Cargo.toml') `
             -RequireDependencies
@@ -755,7 +896,7 @@ bench = false
         Join-Path $temporaryFixture 'vendor/libfuzzer-sys'
     ) 'Cargo.toml'
     try {
-        Assert-SemanticFuzzMetadataBinding `
+        Assert-FuzzMetadataBinding `
             -Metadata $vendoredMetadata `
             -ManifestPath $fuzzManifestPath `
             -RequireDependencies
@@ -782,6 +923,7 @@ if (-not $vendoredLibfuzzerRejected) {
 
 $protocolJob = Get-WorkflowJobBlock -Content $workflow -JobName 'protocol'
 $semanticJob = Get-WorkflowJobBlock -Content $workflow -JobName 'semantic'
+$tarJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_ustar'
 Assert-FuzzJobContract `
     -JobBlock $protocolJob `
     -JobManifest $manifest `
@@ -796,12 +938,20 @@ Assert-FuzzJobContract `
     -JobDisplayName 'Bounded semantic records' `
     -FuzzStepName 'Fuzz bounded semantic records' `
     -ReproducerName 'semantic-record-reproducer'
+Assert-FuzzJobContract `
+    -JobBlock $tarJob `
+    -JobManifest $tarManifest `
+    -JobName 'tar_ustar' `
+    -JobDisplayName 'Bounded raw POSIX ustar' `
+    -FuzzStepName 'Fuzz bounded raw POSIX ustar' `
+    -ReproducerName 'tar-ustar-reproducer'
 
 function Assert-FuzzWorkflowContract {
     param(
         [Parameter(Mandatory)] [string] $CandidateWorkflow,
         [Parameter(Mandatory)] [string] $ExpectedProtocolJob,
-        [Parameter(Mandatory)] [string] $ExpectedSemanticJob
+        [Parameter(Mandatory)] [string] $ExpectedSemanticJob,
+        [Parameter(Mandatory)] [string] $ExpectedTarJob
     )
 
     $expectedHeader = @(
@@ -823,7 +973,8 @@ function Assert-FuzzWorkflowContract {
     ) -join "`n"
     $expectedWorkflow = $expectedHeader + "`n" +
         (Normalize-WorkflowBlock $ExpectedProtocolJob) + "`n`n" +
-        (Normalize-WorkflowBlock $ExpectedSemanticJob)
+        (Normalize-WorkflowBlock $ExpectedSemanticJob) + "`n`n" +
+        (Normalize-WorkflowBlock $ExpectedTarJob)
     if ((Normalize-WorkflowBlock $CandidateWorkflow) -cne $expectedWorkflow) {
         throw 'Scheduled fuzz workflow must exactly match its trigger, authority, concurrency, and job contracts'
     }
@@ -832,7 +983,8 @@ function Assert-FuzzWorkflowContract {
 Assert-FuzzWorkflowContract `
     -CandidateWorkflow $workflow `
     -ExpectedProtocolJob $protocolJob `
-    -ExpectedSemanticJob $semanticJob
+    -ExpectedSemanticJob $semanticJob `
+    -ExpectedTarJob $tarJob
 $manualOnlyWorkflow = [regex]::Replace(
     $workflow,
     '(?m)^  schedule:\r?\n    - cron: "31 8 \* \* 1"\r?\n',
@@ -847,7 +999,8 @@ try {
     Assert-FuzzWorkflowContract `
         -CandidateWorkflow $manualOnlyWorkflow `
         -ExpectedProtocolJob $protocolJob `
-        -ExpectedSemanticJob $semanticJob
+        -ExpectedSemanticJob $semanticJob `
+        -ExpectedTarJob $tarJob
 } catch {
     $manualOnlyRejected = $true
 }
@@ -931,11 +1084,80 @@ Assert-SemanticJobMutationRejected `
     -MutatedJob $inertArtifactSemanticJob `
     -Label 'inert artifact evidence with a drifted upload path'
 
+function Assert-TarJobMutationRejected {
+    param(
+        [Parameter(Mandatory)] [string] $MutatedJob,
+        [Parameter(Mandatory)] [string] $Label
+    )
+
+    if ($MutatedJob -ceq $tarJob) {
+        throw "TAR fuzz verifier regression could not construct its $Label fixture"
+    }
+    try {
+        Assert-FuzzJobContract `
+            -JobBlock $MutatedJob `
+            -JobManifest $tarManifest `
+            -JobName 'tar_ustar' `
+            -JobDisplayName 'Bounded raw POSIX ustar' `
+            -FuzzStepName 'Fuzz bounded raw POSIX ustar' `
+            -ReproducerName 'tar-ustar-reproducer'
+    } catch {
+        return
+    }
+    throw "TAR fuzz verifier accepted its $Label fixture"
+}
+
+$expectedTarMaxLen = '-max_len={0} \' -f $tarManifest.bounds.maxInputBytes
+$weakenedTarJob = $tarJob.Replace($expectedTarMaxLen, '-max_len=64 \')
+Assert-TarJobMutationRejected `
+    -MutatedJob $weakenedTarJob `
+    -Label 'weakened TAR job masked by other job tokens'
+
+$duplicateTarJob = $tarJob.Replace(
+    $expectedTarMaxLen,
+    "$expectedTarMaxLen`n            -max_len=64 \"
+)
+Assert-TarJobMutationRejected `
+    -MutatedJob $duplicateTarJob `
+    -Label 'duplicate last-wins TAR bound'
+
+$inactiveTarJob = $tarJob.Replace(
+    '          set -euo pipefail',
+    "          if false; then`n          set -euo pipefail"
+).Replace(
+    '            -print_final_stats=1',
+    "            -print_final_stats=1`n          fi`n          true"
+)
+Assert-TarJobMutationRejected `
+    -MutatedJob $inactiveTarJob `
+    -Label 'inactive TAR command followed by a successful no-op'
+
+$secondCommandTarJob = $tarJob.Replace(
+    '            -print_final_stats=1',
+    "            -print_final_stats=1`n          true"
+)
+Assert-TarJobMutationRejected `
+    -MutatedJob $secondCommandTarJob `
+    -Label 'second TAR fuzz-step command'
+
+$expectedTarArtifactPath = '          path: ${{ runner.temp }}/sealr-tar-ustar-fuzz-artifacts/'
+$inertArtifactTarJob = $tarJob.Replace(
+    $expectedTarArtifactPath,
+    '          path: ${{ runner.temp }}/wrong-artifacts/'
+).Replace(
+    '        with:',
+    "        env:`n          INERT_MANIFEST_EVIDENCE: |`n            $($expectedTarArtifactPath.Trim())`n        with:"
+)
+Assert-TarJobMutationRejected `
+    -MutatedJob $inertArtifactTarJob `
+    -Label 'inert TAR artifact evidence with a drifted upload path'
+
 foreach ($required in @(
     'Require exact protected main fuzz evidence',
     'actions/workflows/fuzz.yml/runs',
     'Bounded worker protocol',
-    'Bounded semantic records'
+    'Bounded semantic records',
+    'Bounded raw POSIX ustar'
 )) {
     if (-not $releaseWorkflow.Contains($required, [StringComparison]::Ordinal)) {
         throw "Release workflow is missing exact fuzz evidence: $required"
@@ -946,6 +1168,7 @@ foreach ($required in @(
     '$ExpectedFuzzJobs = @(',
     "'Bounded worker protocol'",
     "'Bounded semantic records'",
+    "'Bounded raw POSIX ustar'",
     'Get-ExactFuzzState',
     'fuzz_run_id'
 )) {
@@ -954,4 +1177,4 @@ foreach ($required in @(
     }
 }
 
-Write-Host "Fuzz seed verification passed: $($actualSeeds.Count) protocol and $($actualSemanticSeeds.Count) semantic seeds, pinned nightly and tool versions."
+Write-Host "Fuzz seed verification passed: $($actualSeeds.Count) protocol, $($actualSemanticSeeds.Count) semantic, and $($actualTarSeeds.Count) TAR seeds, pinned nightly and tool versions."

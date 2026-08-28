@@ -6,7 +6,8 @@
 
 use crate::findings::{Finding, FindingCode};
 use crate::interval::{CheckedInterval, IntervalError};
-use crate::ir::{ArchiveIR, ByteRange};
+use crate::ir::{ArchiveFormat, ArchiveIR, ByteRange};
+use crate::policy::hex_sha256;
 use crate::snapshot::SourceSnapshot;
 
 const LFH_SIG: [u8; 4] = [0x50, 0x4b, 0x03, 0x04];
@@ -42,15 +43,139 @@ impl<'member> CoveringAuditError<'member> {
                     None => finding,
                 }
             }
-            Self::AllocationFailed => panic!("bounded covering audit allocation failed"),
+            Self::AllocationFailed => Finding::error(
+                FindingCode::CoveringInconsistent,
+                "bounded covering audit could not reserve scratch space",
+            ),
         }
     }
 }
 
-/// Check that `ir.covering` is a labeled partition of `snapshot` with the
+/// Check that the ZIP covering is a labeled partition of `snapshot` with the
 /// claimed member header signatures at the recorded offsets.
 pub(crate) fn audit_covering(snapshot: &SourceSnapshot<'_>, ir: &ArchiveIR) -> Result<(), Finding> {
     audit_covering_fallible(snapshot, ir).map_err(CoveringAuditError::into_finding)
+}
+
+/// Independently check a portable-ustar IR's source partition and recorded
+/// member ranges without interpreting names, numeric fields, or payloads.
+pub(crate) fn audit_tar_covering(
+    snapshot: &SourceSnapshot<'_>,
+    ir: &ArchiveIR,
+) -> Result<(), Finding> {
+    let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
+    if ir.format() != ArchiveFormat::TarUstar {
+        return Err(fail("TAR covering audit received a non-TAR IR"));
+    }
+    if ir.source_digest != *snapshot.digest() {
+        return Err(fail("source digest does not match the snapshot"));
+    }
+    let covering = ir
+        .tar_covering()
+        .ok_or_else(|| fail("TAR IR has no TAR covering"))?;
+    let member_end = checked_range_end(covering.member_records, "member covering overflow")?;
+    let terminator_end = checked_range_end(covering.terminator, "terminator overflow")?;
+    let trailing_end = checked_range_end(covering.trailing_zeros, "trailing range overflow")?;
+    if covering.member_records.offset != 0
+        || covering.terminator.offset != member_end
+        || covering.terminator.len != 1024
+        || covering.trailing_zeros.offset != terminator_end
+        || trailing_end != snapshot.len()
+    {
+        return Err(fail("TAR covering does not exactly partition the snapshot"));
+    }
+
+    let mut expected_header = 0_u64;
+    for member in &ir.members {
+        let evidence = member.tar_evidence().ok_or_else(|| {
+            fail("TAR member lacks format-specific evidence").on(&member.decoded_name)
+        })?;
+        let header_end = checked_range_end(evidence.header, "TAR header overflow")?;
+        let payload_end = checked_range_end(evidence.payload, "TAR payload overflow")?;
+        let padding_end = checked_range_end(evidence.padding, "TAR padding overflow")?;
+        let expected_padding = (512 - (evidence.payload.len % 512)) % 512;
+        if evidence.header.offset != expected_header
+            || evidence.header.len != 512
+            || evidence.payload.offset != header_end
+            || evidence.payload.len != member.declared_uncomp_size
+            || evidence.padding.offset != payload_end
+            || evidence.padding.len != expected_padding
+            || !padding_end.is_multiple_of(512)
+            || padding_end > member_end
+        {
+            return Err(
+                fail("TAR member ranges do not form one aligned record").on(&member.decoded_name)
+            );
+        }
+        let mut header = [0_u8; 512];
+        snapshot
+            .read_exact_at(evidence.header.offset, &mut header)
+            .map_err(|_| {
+                fail("claimed TAR header is outside the snapshot").on(&member.decoded_name)
+            })?;
+        if hex_sha256(&header) != evidence.header_sha256 {
+            return Err(
+                fail("TAR header digest does not match the snapshot").on(&member.decoded_name)
+            );
+        }
+        audit_zero_range(
+            snapshot,
+            evidence.padding,
+            "claimed TAR member padding contains nonzero bytes",
+        )
+        .map_err(|finding| finding.on(&member.decoded_name))?;
+        expected_header = padding_end;
+    }
+    if expected_header != member_end {
+        return Err(fail("TAR member records do not fill their covering"));
+    }
+    let mut terminator = [1_u8; 1024];
+    snapshot
+        .read_exact_at(covering.terminator.offset, &mut terminator)
+        .map_err(|_| fail("claimed TAR terminator is outside the snapshot"))?;
+    if terminator.iter().any(|byte| *byte != 0) {
+        return Err(fail("claimed TAR terminator contains nonzero bytes"));
+    }
+    audit_zero_range(
+        snapshot,
+        covering.trailing_zeros,
+        "claimed TAR trailing record padding contains nonzero bytes",
+    )?;
+    Ok(())
+}
+
+fn audit_zero_range(
+    snapshot: &SourceSnapshot<'_>,
+    range: ByteRange,
+    detail: &'static str,
+) -> Result<(), Finding> {
+    let end = checked_range_end(range, "zero-padding range overflow")?;
+    if end > snapshot.len() {
+        return Err(Finding::error(
+            FindingCode::CoveringInconsistent,
+            "zero-padding range extends beyond the snapshot",
+        ));
+    }
+    let mut offset = range.offset;
+    let mut buffer = [0_u8; 8 * 1024];
+    while offset != end {
+        let remaining = end - offset;
+        let len = usize::try_from(remaining.min(buffer.len() as u64))
+            .expect("bounded covering zero-scan length fits usize");
+        snapshot.read_exact_at(offset, &mut buffer[..len])?;
+        if buffer[..len].iter().any(|byte| *byte != 0) {
+            return Err(Finding::error(FindingCode::CoveringInconsistent, detail));
+        }
+        offset += len as u64;
+    }
+    Ok(())
+}
+
+fn checked_range_end(range: ByteRange, detail: &'static str) -> Result<u64, Finding> {
+    range
+        .offset
+        .checked_add(range.len)
+        .ok_or_else(|| Finding::error(FindingCode::CoveringInconsistent, detail))
 }
 
 pub(crate) fn audit_covering_fallible<'member>(
@@ -62,7 +187,9 @@ pub(crate) fn audit_covering_fallible<'member>(
         return Err(inconsistent("source digest does not match the snapshot"));
     }
 
-    let covering = &ir.covering;
+    let covering = ir
+        .zip_covering()
+        .ok_or_else(|| inconsistent("ZIP covering audit received a non-ZIP IR"))?;
     let local_cover = checked_interval(covering.local_records, "local-record covering overflow")?;
     let central_cover = checked_interval(
         covering.central_directory,
@@ -148,39 +275,39 @@ pub(crate) fn audit_covering_fallible<'member>(
         .try_reserve_exact(ir.members.len())
         .map_err(|_| CoveringAuditError::AllocationFailed)?;
     for member in &ir.members {
-        let local_header =
-            checked_interval(member.source_ranges.local_header, "local header overflow")
-                .map_err(|finding| finding.on(&member.decoded_name))?;
+        let evidence = member.zip_evidence().ok_or_else(|| {
+            inconsistent("ZIP member lacks ZIP evidence").on(&member.decoded_name)
+        })?;
+        let source_ranges = &evidence.source_ranges;
+        let local_header = checked_interval(source_ranges.local_header, "local header overflow")
+            .map_err(|finding| finding.on(&member.decoded_name))?;
         let payload = checked_interval(
-            member.source_ranges.compressed_payload,
+            source_ranges.compressed_payload,
             "compressed payload overflow",
         )
         .map_err(|finding| finding.on(&member.decoded_name))?;
-        let central_header = checked_interval(
-            member.source_ranges.central_header,
-            "central header overflow",
-        )
-        .map_err(|finding| finding.on(&member.decoded_name))?;
-        let descriptor = member
-            .source_ranges
+        let central_header =
+            checked_interval(source_ranges.central_header, "central header overflow")
+                .map_err(|finding| finding.on(&member.decoded_name))?;
+        let descriptor = source_ranges
             .data_descriptor
             .map(|range| checked_interval(range, "data descriptor overflow"))
             .transpose()
             .map_err(|finding| finding.on(&member.decoded_name))?;
 
-        if member.source_ranges.local_header.len < 30 {
+        if source_ranges.local_header.len < 30 {
             return Err(
                 inconsistent("local header is shorter than 30 bytes").on(&member.decoded_name)
             );
         }
-        if member.source_ranges.central_header.len < 46 {
+        if source_ranges.central_header.len < 46 {
             return Err(
                 inconsistent("central header is shorter than 46 bytes").on(&member.decoded_name)
             );
         }
         let mut lfh = [0_u8; 4];
         snapshot
-            .read_exact_at(member.source_ranges.local_header.offset, &mut lfh)
+            .read_exact_at(source_ranges.local_header.offset, &mut lfh)
             .map_err(|_| {
                 inconsistent("claimed LFH range is outside the snapshot").on(&member.decoded_name)
             })?;
@@ -192,7 +319,7 @@ pub(crate) fn audit_covering_fallible<'member>(
         }
         let mut cdh = [0_u8; 4];
         snapshot
-            .read_exact_at(member.source_ranges.central_header.offset, &mut cdh)
+            .read_exact_at(source_ranges.central_header.offset, &mut cdh)
             .map_err(|_| {
                 inconsistent("claimed CDH range is outside the snapshot").on(&member.decoded_name)
             })?;
@@ -344,9 +471,12 @@ fn inconsistent(detail: &'static str) -> CoveringAuditError<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::apply::{apply, Request, Source};
+    use crate::apply::{apply, apply_with_options, ApplyOptions, Request, Source};
     use crate::findings::Finding;
-    use crate::ir::ArchiveIR;
+    use crate::ir::{
+        ArchiveEvidence, ArchiveIR, MemberEvidence, TarInterpretationProfile, TarMemberEvidence,
+        ZipMemberEvidence,
+    };
     use crate::policy::Policy;
     use std::io::{Cursor, Write};
 
@@ -361,6 +491,139 @@ mod tests {
             writer.finish().unwrap();
         }
         cursor.into_inner()
+    }
+
+    fn make_tar() -> Vec<u8> {
+        fn octal(field: &mut [u8], value: u64) {
+            field.fill(b'0');
+            let value = format!("{value:o}");
+            let end = field.len() - 1;
+            field[end - value.len()..end].copy_from_slice(value.as_bytes());
+            field[end] = 0;
+        }
+        let mut header = [0_u8; 512];
+        header[..9].copy_from_slice(b"hello.txt");
+        octal(&mut header[100..108], 0o644);
+        octal(&mut header[108..116], 0);
+        octal(&mut header[116..124], 0);
+        octal(&mut header[124..136], 5);
+        octal(&mut header[136..148], 0);
+        header[148..156].fill(b' ');
+        header[156] = b'0';
+        header[257..263].copy_from_slice(b"ustar\0");
+        header[263..265].copy_from_slice(b"00");
+        octal(&mut header[329..337], 0);
+        octal(&mut header[337..345], 0);
+        let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
+        header[148..154].copy_from_slice(format!("{checksum:06o}").as_bytes());
+        header[154] = 0;
+        header[155] = b' ';
+        let mut bytes = header.to_vec();
+        bytes.extend_from_slice(b"hello");
+        bytes.resize(1024, 0);
+        bytes.resize(2048, 0);
+        bytes
+    }
+
+    fn admitted_tar_ir(bytes: &[u8]) -> ArchiveIR {
+        let policy = Policy::default_v2();
+        let options = ApplyOptions::new()
+            .with_tar_interpretation_profile(TarInterpretationProfile::UstarPortableV1);
+        let outcome = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("cover.tar"),
+                    data: bytes,
+                },
+                policy: &policy,
+                dest: None,
+            },
+            &options,
+        );
+        assert!(!outcome.rejected(), "{:?}", outcome.view.findings);
+        outcome.archive_ir().cloned().unwrap()
+    }
+
+    fn tar_covering_mut(ir: &mut ArchiveIR) -> &mut crate::ir::TarArchiveCovering {
+        match &mut ir.evidence {
+            ArchiveEvidence::Tar(covering) => covering,
+            ArchiveEvidence::Zip(_) => panic!("expected TAR evidence"),
+        }
+    }
+
+    fn zip_covering_mut(ir: &mut ArchiveIR) -> &mut crate::ir::ArchiveCovering {
+        match &mut ir.evidence {
+            ArchiveEvidence::Zip(covering) => covering,
+            ArchiveEvidence::Tar(_) => panic!("expected ZIP evidence"),
+        }
+    }
+
+    fn tar_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut TarMemberEvidence {
+        match &mut ir.members[index].evidence {
+            MemberEvidence::Tar(evidence) => evidence,
+            MemberEvidence::Zip(_) => panic!("expected TAR member evidence"),
+        }
+    }
+
+    fn zip_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut ZipMemberEvidence {
+        match &mut ir.members[index].evidence {
+            MemberEvidence::Zip(evidence) => evidence,
+            MemberEvidence::Tar(_) => panic!("expected ZIP member evidence"),
+        }
+    }
+
+    #[test]
+    fn tar_covering_oracle_rejects_each_evidence_layer_drift() {
+        let bytes = make_tar();
+        let original = admitted_tar_ir(&bytes);
+        let audit = |ir: &ArchiveIR| {
+            let snapshot = crate::snapshot::SourceSnapshot::borrowed(None, &bytes);
+            assert_eq!(
+                audit_tar_covering(&snapshot, ir).unwrap_err().code,
+                FindingCode::CoveringInconsistent
+            );
+        };
+
+        let snapshot = crate::snapshot::SourceSnapshot::borrowed(None, &bytes);
+        audit_tar_covering(&snapshot, &original).unwrap();
+
+        let mut covering = original.clone();
+        tar_covering_mut(&mut covering).trailing_zeros.len = 1;
+        audit(&covering);
+
+        let mut evidence = original.clone();
+        tar_member_mut(&mut evidence, 0).header.offset = 1;
+        audit(&evidence);
+
+        let mut digest = original;
+        tar_member_mut(&mut digest, 0).header_sha256 = "0".repeat(64);
+        audit(&digest);
+
+        let original = admitted_tar_ir(&bytes);
+        let mut nonzero_padding = bytes.clone();
+        nonzero_padding[517] = 1;
+        let padding_snapshot = crate::snapshot::SourceSnapshot::borrowed(None, &nonzero_padding);
+        let mut padding_ir = original.clone();
+        padding_ir.source_digest = padding_snapshot.digest().to_owned();
+        assert_eq!(
+            audit_tar_covering(&padding_snapshot, &padding_ir)
+                .unwrap_err()
+                .code,
+            FindingCode::CoveringInconsistent
+        );
+
+        let mut trailing_bytes = bytes;
+        trailing_bytes.resize(2560, 0);
+        let mut trailing_ir = admitted_tar_ir(&trailing_bytes);
+        trailing_bytes[2048] = 1;
+        let trailing_snapshot = crate::snapshot::SourceSnapshot::borrowed(None, &trailing_bytes);
+        trailing_ir.source_digest = trailing_snapshot.digest().to_owned();
+        assert_eq!(
+            audit_tar_covering(&trailing_snapshot, &trailing_ir)
+                .unwrap_err()
+                .code,
+            FindingCode::CoveringInconsistent
+        );
     }
 
     #[test]
@@ -417,29 +680,34 @@ mod tests {
         let original = admitted_ir(&bytes);
 
         let mut ir = original.clone();
-        ir.covering.comment.len = ir.covering.comment.len.saturating_add(1);
+        let covering = zip_covering_mut(&mut ir);
+        covering.comment.len = covering.comment.len.saturating_add(1);
         assert_eq!(
             covering_error(&bytes, &ir).code,
             FindingCode::CoveringInconsistent
         );
 
         let mut ir = original.clone();
-        ir.covering.eocd.len = 23;
+        zip_covering_mut(&mut ir).eocd.len = 23;
         assert_eq!(
             covering_error(&bytes, &ir).code,
             FindingCode::CoveringInconsistent
         );
 
         let mut ir = original.clone();
-        ir.members[0].source_ranges.local_header.offset =
-            ir.members[0].source_ranges.central_header.offset;
+        let central_offset = zip_member_mut(&mut ir, 0)
+            .source_ranges
+            .central_header
+            .offset;
+        zip_member_mut(&mut ir, 0).source_ranges.local_header.offset = central_offset;
         assert_eq!(
             covering_error(&bytes, &ir).code,
             FindingCode::CoveringInconsistent
         );
 
         let mut ir = original.clone();
-        ir.members[0].source_ranges.compressed_payload.len = ir.members[0]
+        let member = zip_member_mut(&mut ir, 0);
+        member.source_ranges.compressed_payload.len = member
             .source_ranges
             .compressed_payload
             .len
@@ -450,7 +718,7 @@ mod tests {
         );
 
         let mut ir = original.clone();
-        ir.members[0].source_ranges.central_header.len = 45;
+        zip_member_mut(&mut ir, 0).source_ranges.central_header.len = 45;
         assert_eq!(
             covering_error(&bytes, &ir).code,
             FindingCode::CoveringInconsistent
@@ -464,14 +732,14 @@ mod tests {
         );
 
         let mut ir = original.clone();
-        ir.covering.eocd.offset = u64::MAX;
+        zip_covering_mut(&mut ir).eocd.offset = u64::MAX;
         assert_eq!(
             covering_error(&bytes, &ir).code,
             FindingCode::CoveringInconsistent
         );
 
         let mut ir = original;
-        ir.members[0].source_ranges.local_header.offset = u64::MAX;
+        zip_member_mut(&mut ir, 0).source_ranges.local_header.offset = u64::MAX;
         assert_eq!(
             covering_error(&bytes, &ir).code,
             FindingCode::CoveringInconsistent
@@ -490,8 +758,9 @@ mod tests {
         };
         let ir = admitted_ir(&bytes);
         assert!(ir.members.is_empty());
-        assert_eq!(ir.covering.local_records.len, 0);
-        assert_eq!(ir.covering.central_directory.len, 0);
+        let covering = ir.zip_covering().unwrap();
+        assert_eq!(covering.local_records.len, 0);
+        assert_eq!(covering.central_directory.len, 0);
         let snapshot = crate::snapshot::SourceSnapshot::borrowed(None, &bytes);
         audit_covering(&snapshot, &ir).expect("empty covering should certify the snapshot");
     }
@@ -577,8 +846,14 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "bounded covering audit allocation failed")]
-    fn compatibility_error_conversion_does_not_forge_archive_evidence() {
-        let _ = CoveringAuditError::AllocationFailed.into_finding();
+    fn compatibility_error_conversion_fails_closed_without_panicking() {
+        let finding = CoveringAuditError::AllocationFailed.into_finding();
+        assert_eq!(finding.code, FindingCode::CoveringInconsistent);
+        assert_eq!(finding.severity, crate::findings::Severity::Error);
+        assert_eq!(finding.member, None);
+        assert_eq!(
+            finding.detail,
+            "bounded covering audit could not reserve scratch space"
+        );
     }
 }

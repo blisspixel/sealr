@@ -43,7 +43,8 @@ The architecture review produced useful priorities, speculative extensions, and 
 | Independent evidence verifier and standard authenticated envelopes | Identity-conformance subset landed; authenticated evidence remains scheduled | Keep the verifier small and use standard signature and identity systems. |
 | Content-addressed reuse and performance measured by avoided work | Scheduled after tree identity | Reuse needs stable content identity and verification completeness. |
 | Job-oriented `gate`, `verify`, `lock`, `explain`, and policy tooling | Scheduled after semantic types stabilize | User-facing verbs and remediation should expose the separated outcome axes rather than freeze the current combined verdict. |
-| TAR, OCI, JAR, APK, 7z, broad bindings, and generalized mount support | Deliberately deferred | Add each only for a concrete consumer whose semantics are specified. |
+| Raw portable POSIX ustar | Initial container profile implemented in Alpha.9 | Regular files and directories only, with explicit selection, policy authorization, TAR-native evidence, and separate layout identity. |
+| Rich TAR, OCI, JAR, NuGet, APK, 7z, RAR4, RAR5, cpio, ar/deb, RPM, CAB, broad bindings, and generalized mount support | Profile-specific roadmap | Add each structural or consumer layer only with specified semantics, dependency budget, and equivalent assurance evidence. |
 | GPU, QAT, Mojo, and alternate codec acceleration | Deliberately deferred | A measured workload and exact semantic equivalence are prerequisites. |
 | Generic SBOM for every archive | Not adopted | A file manifest is the honest generic artifact; SBOMs require package or component semantics. |
 | Large custom attestation predicate as the first evidence format | Not adopted | Start with narrow records and existing envelopes; introduce a custom predicate only if a validated gap remains. |

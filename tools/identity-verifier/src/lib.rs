@@ -19,6 +19,9 @@ const IR_SCHEMA: &str = "sealr.archive-ir.v1";
 const TREE_ENCODING: &str = "sealrTreeV1";
 const LAYOUT_LABEL: &str = "sealr.tree.layout.v1";
 const CONTENT_LABEL: &str = "sealr.tree.content.v1";
+const TAR_LAYOUT_VECTOR_SCHEMA: &str = "sealr.tar-layout-conformance.v1";
+const TAR_TREE_ENCODING: &str = "sealrTreeV2";
+const TAR_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-ustar.v1";
 
 const FILE: u8 = 1;
 const DIRECTORY: u8 = 2;
@@ -36,6 +39,11 @@ pub struct VerificationSummary {
     pub cases: usize,
     pub layout_roots: usize,
     pub content_roots: usize,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TarVerificationSummary {
+    pub members: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -225,6 +233,62 @@ struct ByteRange {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct TarLayoutVector {
+    schema: String,
+    tree_encoding: String,
+    layout_label: String,
+    content_encoding: String,
+    content_label: String,
+    source: DigestHex,
+    covering: TarCovering,
+    members: Vec<TarVectorMember>,
+    layout_root: TarLayoutRoot,
+    content_root: TarContentRoot,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarCovering {
+    member_records: ByteRange,
+    terminator: ByteRange,
+    trailing_zeros: ByteRange,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarVectorMember {
+    canonical_path: String,
+    kind: MemberKind,
+    raw_name_bytes: Vec<u8>,
+    declared_uncomp_size: u64,
+    header: ByteRange,
+    payload: ByteRange,
+    padding: ByteRange,
+    mode: u32,
+    mtime: u64,
+    header_checksum: u32,
+    header_sha256: String,
+    normalization_actions: Vec<NormalizationAction>,
+    actual_uncomp_size: u64,
+    content_sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarLayoutRoot {
+    #[serde(rename = "sealrTreeV2")]
+    sealr_tree_v2: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarContentRoot {
+    #[serde(rename = "sealrTreeV1")]
+    sealr_tree_v1: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ArchiveCovering {
     local_records: ByteRange,
     central_directory: ByteRange,
@@ -319,6 +383,180 @@ pub fn verify_manifest_json(bytes: &[u8]) -> Result<VerificationSummary, VerifyE
     let manifest: Manifest = serde_json::from_slice(bytes)
         .map_err(|error| VerifyError::new(format!("JSON: {error}")))?;
     verify_manifest(&manifest)
+}
+
+pub fn verify_tar_layout_vector_json(bytes: &[u8]) -> Result<TarVerificationSummary, VerifyError> {
+    if bytes.len() > MAX_MANIFEST_BYTES {
+        return Err(VerifyError::new(format!(
+            "TAR vector exceeds {MAX_MANIFEST_BYTES} bytes"
+        )));
+    }
+    let vector: TarLayoutVector = serde_json::from_slice(bytes)
+        .map_err(|error| VerifyError::new(format!("TAR vector JSON: {error}")))?;
+    verify_tar_layout_vector(&vector)?;
+    Ok(TarVerificationSummary {
+        members: vector.members.len(),
+    })
+}
+
+fn verify_tar_layout_vector(vector: &TarLayoutVector) -> Result<(), VerifyError> {
+    if vector.schema != TAR_LAYOUT_VECTOR_SCHEMA
+        || vector.tree_encoding != TAR_TREE_ENCODING
+        || vector.layout_label != TAR_LAYOUT_LABEL
+        || vector.content_encoding != TREE_ENCODING
+        || vector.content_label != CONTENT_LABEL
+    {
+        return Err(VerifyError::new("unsupported TAR vector contract"));
+    }
+    verify_digest(&vector.source.sha256, "TAR source digest")?;
+    verify_digest(&vector.layout_root.sealr_tree_v2, "TAR layout root")?;
+    verify_digest(&vector.content_root.sealr_tree_v1, "TAR content root")?;
+    if vector.members.len() > MAX_MEMBERS_PER_CASE {
+        return Err(VerifyError::new("TAR vector member limit exceeded"));
+    }
+    validate_tar_covering(vector)?;
+    let actual_layout = sha256_hex(&encode_tar_layout_vector(vector)?);
+    if actual_layout != vector.layout_root.sealr_tree_v2 {
+        return Err(VerifyError::new(format!(
+            "TAR layout root mismatch: expected {}, calculated {actual_layout}",
+            vector.layout_root.sealr_tree_v2
+        )));
+    }
+    let actual_content = sha256_hex(&encode_tar_content_vector(vector)?);
+    if actual_content != vector.content_root.sealr_tree_v1 {
+        return Err(VerifyError::new(format!(
+            "TAR content root mismatch: expected {}, calculated {actual_content}",
+            vector.content_root.sealr_tree_v1
+        )));
+    }
+    Ok(())
+}
+
+fn validate_tar_covering(vector: &TarLayoutVector) -> Result<(), VerifyError> {
+    let covering = &vector.covering;
+    let records_end = range_end(covering.member_records, "TAR member covering")?;
+    let terminator_end = range_end(covering.terminator, "TAR terminator")?;
+    let source_end = range_end(covering.trailing_zeros, "TAR trailing zeros")?;
+    if covering.member_records.offset != 0
+        || covering.terminator.offset != records_end
+        || covering.terminator.len != 1024
+        || covering.trailing_zeros.offset != terminator_end
+        || !source_end.is_multiple_of(512)
+    {
+        return Err(VerifyError::new(
+            "TAR covering does not form one complete 512-byte-block source",
+        ));
+    }
+    let mut paths = HashSet::new();
+    let mut records: Vec<&TarVectorMember> = vector.members.iter().collect();
+    records.sort_by_key(|member| member.header.offset);
+    let mut expected_header = 0_u64;
+    for member in records {
+        if member.canonical_path.is_empty() || !paths.insert(member.canonical_path.as_str()) {
+            return Err(VerifyError::new("TAR member paths are empty or duplicate"));
+        }
+        if member.raw_name_bytes.is_empty() {
+            return Err(VerifyError::new("TAR raw member name is empty"));
+        }
+        verify_digest(&member.header_sha256, "TAR header digest")?;
+        verify_digest(&member.content_sha256, "TAR content digest")?;
+        let header_end = range_end(member.header, "TAR member header")?;
+        let payload_end = range_end(member.payload, "TAR member payload")?;
+        let padding_end = range_end(member.padding, "TAR member padding")?;
+        let expected_padding = (512 - (member.payload.len % 512)) % 512;
+        if member.header.offset != expected_header
+            || member.header.len != 512
+            || member.payload.offset != header_end
+            || member.payload.len != member.declared_uncomp_size
+            || member.padding.offset != payload_end
+            || member.padding.len != expected_padding
+            || !padding_end.is_multiple_of(512)
+            || member.actual_uncomp_size != member.declared_uncomp_size
+        {
+            return Err(VerifyError::new("TAR member record geometry is invalid"));
+        }
+        expected_header = padding_end;
+    }
+    if expected_header != records_end {
+        return Err(VerifyError::new(
+            "TAR member records do not fill their covering",
+        ));
+    }
+    Ok(())
+}
+
+fn encode_tar_layout_vector(vector: &TarLayoutVector) -> Result<Vec<u8>, VerifyError> {
+    let mut body = Vec::new();
+    encode_range(&mut body, vector.covering.member_records);
+    encode_range(&mut body, vector.covering.terminator);
+    encode_range(&mut body, vector.covering.trailing_zeros);
+    let mut members: Vec<&TarVectorMember> = vector.members.iter().collect();
+    members.sort_by(|left, right| left.canonical_path.cmp(&right.canonical_path));
+    push_u32(
+        &mut body,
+        u32::try_from(members.len())
+            .map_err(|_| VerifyError::new("TAR member count exceeds u32"))?,
+    );
+    for member in members {
+        push_bytes(&mut body, member.canonical_path.as_bytes())?;
+        body.push(kind_tag(&member.kind));
+        push_bytes(&mut body, &member.raw_name_bytes)?;
+        push_u64(&mut body, member.declared_uncomp_size);
+        encode_range(&mut body, member.header);
+        encode_range(&mut body, member.payload);
+        encode_range(&mut body, member.padding);
+        push_u32(&mut body, member.mode);
+        push_u64(&mut body, member.mtime);
+        push_u32(&mut body, member.header_checksum);
+        body.extend_from_slice(&decode_digest(&member.header_sha256, "TAR header digest")?);
+        push_u32(
+            &mut body,
+            u32::try_from(member.normalization_actions.len())
+                .map_err(|_| VerifyError::new("TAR normalization count exceeds u32"))?,
+        );
+        encode_normalization_actions(&mut body, &member.normalization_actions);
+    }
+    Ok(preimage(TAR_LAYOUT_LABEL, &body))
+}
+
+fn encode_tar_content_vector(vector: &TarLayoutVector) -> Result<Vec<u8>, VerifyError> {
+    let mut body = Vec::new();
+    let mut members: Vec<&TarVectorMember> = vector.members.iter().collect();
+    members.sort_by(|left, right| left.canonical_path.cmp(&right.canonical_path));
+    push_u32(
+        &mut body,
+        u32::try_from(members.len())
+            .map_err(|_| VerifyError::new("TAR member count exceeds u32"))?,
+    );
+    for member in members {
+        push_bytes(&mut body, member.canonical_path.as_bytes())?;
+        body.push(kind_tag(&member.kind));
+        push_u64(&mut body, member.actual_uncomp_size);
+        body.extend_from_slice(&decode_digest(
+            &member.content_sha256,
+            "TAR content digest",
+        )?);
+    }
+    Ok(preimage(CONTENT_LABEL, &body))
+}
+
+fn encode_normalization_actions(output: &mut Vec<u8>, actions: &[NormalizationAction]) {
+    for action in actions {
+        match action {
+            NormalizationAction::StripDirectoryTrailingSlash => output.push(NORM_STRIP_DIR_SLASH),
+            NormalizationAction::DropDotComponent { component_index } => {
+                output.push(NORM_DROP_DOT);
+                push_u32(output, *component_index);
+            }
+        }
+    }
+}
+
+fn range_end(range: ByteRange, label: &str) -> Result<u64, VerifyError> {
+    range
+        .offset
+        .checked_add(range.len)
+        .ok_or_else(|| VerifyError::new(format!("{label} overflows u64")))
 }
 
 fn verify_manifest(manifest: &Manifest) -> Result<VerificationSummary, VerifyError> {
@@ -1105,8 +1343,90 @@ fn sha256_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn portable_ustar_profile_vector_verifies_without_sealr() {
+        let vector =
+            include_bytes!("../../../crates/sealr/tests/conformance/tar-ustar-portable-v1.json");
+        let canonical = &vector[..vector.len() - 1];
+        assert_eq!(
+            sha256_hex(canonical),
+            "3c87c5ec4c1ad5377eb60ebb308e9e394aaf7a4133dddf5587829b4510af1700"
+        );
+        let value: serde_json::Value = serde_json::from_slice(canonical).unwrap();
+        assert_eq!(value["schema"], "sealr.profile.tar.ustar-portable.v1");
+    }
+
     const VECTORS: &[u8] =
         include_bytes!("../../../crates/sealr/tests/conformance/identity-v1.json");
+    const TAR_LAYOUT_VECTOR: &[u8] =
+        include_bytes!("../../../crates/sealr/tests/conformance/tar-layout-v2.json");
+
+    #[test]
+    fn tar_layout_and_content_roots_verify_independently() {
+        assert_eq!(
+            verify_tar_layout_vector_json(TAR_LAYOUT_VECTOR).unwrap(),
+            TarVerificationSummary { members: 3 }
+        );
+    }
+
+    #[test]
+    fn tar_covering_rejects_partial_trailing_record_padding() {
+        let mut vector: TarLayoutVector = serde_json::from_slice(TAR_LAYOUT_VECTOR).unwrap();
+        vector.covering.trailing_zeros.len = 1;
+        let error = validate_tar_covering(&vector).unwrap_err();
+        assert!(error.to_string().contains("complete 512-byte-block source"));
+    }
+
+    #[test]
+    fn every_tar_layout_field_family_is_bound_or_structurally_checked() {
+        let mutations = [
+            ("/covering/member_records/len", serde_json::json!(2559)),
+            ("/covering/terminator/offset", serde_json::json!(2559)),
+            ("/covering/trailing_zeros/offset", serde_json::json!(3583)),
+            ("/members/0/canonical_path", serde_json::json!("mission-x")),
+            ("/members/0/kind", serde_json::json!("file")),
+            ("/members/0/raw_name_bytes", serde_json::json!([109, 47])),
+            ("/members/1/declared_uncomp_size", serde_json::json!(27)),
+            ("/members/1/header/offset", serde_json::json!(511)),
+            ("/members/1/header/len", serde_json::json!(511)),
+            ("/members/1/payload/offset", serde_json::json!(1023)),
+            ("/members/1/payload/len", serde_json::json!(27)),
+            ("/members/1/padding/offset", serde_json::json!(1051)),
+            ("/members/1/padding/len", serde_json::json!(483)),
+            ("/members/1/mode", serde_json::json!(384)),
+            ("/members/1/mtime", serde_json::json!(1788000001_u64)),
+            ("/members/1/header_checksum", serde_json::json!(6294)),
+            (
+                "/members/1/header_sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/members/1/normalization_actions",
+                serde_json::json!([{ "action": "strip-directory-trailing-slash" }]),
+            ),
+            ("/members/1/actual_uncomp_size", serde_json::json!(27)),
+            (
+                "/members/1/content_sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/layout_root/sealrTreeV2",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/content_root/sealrTreeV1",
+                serde_json::json!("0".repeat(64)),
+            ),
+        ];
+        for (pointer, replacement) in mutations {
+            let mut vector: serde_json::Value = serde_json::from_slice(TAR_LAYOUT_VECTOR).unwrap();
+            *vector.pointer_mut(pointer).expect("known vector pointer") = replacement;
+            assert!(
+                verify_tar_layout_vector_json(&serde_json::to_vec(&vector).unwrap()).is_err(),
+                "mutation {pointer} must fail"
+            );
+        }
+    }
 
     #[test]
     fn committed_vectors_verify_independently() {

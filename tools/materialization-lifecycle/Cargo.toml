@@ -10,5 +10,5 @@ publish = false
 
 [dependencies]
 getrandom.workspace = true
-sealr = { version = "=0.1.0-alpha.8", path = "../../crates/sealr", features = ["__internal-lifecycle-lab"] }
+sealr = { version = "=0.1.0-alpha.9", path = "../../crates/sealr", features = ["__internal-lifecycle-lab"] }
 zip.workspace = true

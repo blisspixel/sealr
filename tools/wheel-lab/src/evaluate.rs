@@ -143,17 +143,21 @@ fn evaluate(
             .members()
             .iter()
             .enumerate()
-            .map(|(member_index, member)| {
-                let facts = member.container_facts();
-                WheelMemberFacts {
+            .map(|(member_index, member)| -> Result<_, EvaluationFailure> {
+                let facts = member.container_facts().ok_or_else(|| {
+                    EvaluationFailure::Infrastructure(
+                        "wheel member lacks ZIP container facts".into(),
+                    )
+                })?;
+                Ok(WheelMemberFacts {
                     member_index,
                     path: member.canonical_path.clone(),
                     creator_system: facts.creator_system,
                     external_attributes: facts.external_attributes,
                     pypa_installer_0_7_executable: facts.pypa_installer_0_7_executable(),
-                }
+                })
             })
-            .collect(),
+            .collect::<Result<Vec<_>, _>>()?,
     };
     artifact
         .record
@@ -564,7 +568,9 @@ fn build_plan(
             continue;
         }
         let (scheme, relative_path) = relocate_member(member, artifact, &root_scheme)?;
-        let facts = member.container_facts();
+        let facts = member.container_facts().ok_or_else(|| {
+            EvaluationFailure::Infrastructure("wheel member lacks ZIP container facts".into())
+        })?;
         let executable = if facts.pypa_installer_0_7_executable() {
             ExecutableDisposition::SourceExecutable
         } else {

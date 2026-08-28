@@ -329,8 +329,9 @@ fn empty_tree_preimages_are_pinned() {
     assert_eq!(ir.profile_digest(), PROFILE_DIGEST);
     assert!(ir.source_digest().is_available());
     assert!(ir.members().is_empty());
-    assert_eq!(ir.covering().eocd.offset, 0);
-    assert_eq!(ir.covering().eocd.len, 22);
+    let covering = ir.covering().expect("ZIP covering evidence");
+    assert_eq!(covering.eocd.offset, 0);
+    assert_eq!(covering.eocd.len, 22);
     pin(
         "empty layout",
         inspect.receipt.identities.layout.hex(),

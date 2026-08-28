@@ -13,16 +13,19 @@ use crate::materialize::{CapabilityMaterializer, MaterializationMeta};
 use crate::outcome::{EffectStatus, SemanticAxes, VerificationStatus};
 use crate::semantic_record::worker_runtime::{self, OperationKind};
 use crate::verified::VerifiedArchive;
-use crate::{LinuxWorker, Policy, SupervisionError, SupervisionErrorKind};
+use crate::{
+    LinuxWorker, Policy, SupervisionError, SupervisionErrorKind, ZipInterpretationProfile,
+};
 
 pub(super) fn run(
     source: Source<'_>,
     destination: &Path,
     policy: &Policy,
     options: &ApplyOptions,
+    profile: ZipInterpretationProfile,
     worker: &LinuxWorker,
 ) -> Result<crate::Outcome, SupervisionError> {
-    let ready = match prepare_operation(&source, policy, options, true) {
+    let ready = match prepare_operation(&source, policy, profile, true) {
         PreparedOperation::Outcome(outcome) => return Ok(*outcome),
         PreparedOperation::Ready(ready) => *ready,
     };

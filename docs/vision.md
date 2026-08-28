@@ -1,6 +1,6 @@
 # Vision: one archive, one tree, evidence
 
-> This document describes the product direction. Current Alpha.8 behavior and limitations are defined by the [README](../README.md) and [API contract](api.md). The target semantic design is specified in [semantic-model.md](semantic-model.md).
+> This document describes the product direction. Published Alpha.9 behavior is defined by the [README](../README.md) and [API contract](api.md). The target semantic design is specified in [semantic-model.md](semantic-model.md).
 
 Sealr is not a general-purpose unarchiver, archive GUI, malware scanner, agent-execution proxy, model verifier, credential broker, or enterprise control plane.
 

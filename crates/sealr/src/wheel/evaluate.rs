@@ -148,17 +148,19 @@ fn evaluate(
             .members()
             .iter()
             .enumerate()
-            .map(|(member_index, member)| {
-                let facts = member.container_facts();
-                WheelMemberFacts {
+            .map(|(member_index, member)| -> Result<_, EvaluationFailure> {
+                let facts = member
+                    .container_facts()
+                    .ok_or_else(|| internal_failure("wheel member lacks ZIP container facts"))?;
+                Ok(WheelMemberFacts {
                     member_index,
                     path: member.canonical_path.clone(),
                     creator_system: facts.creator_system,
                     external_attributes: facts.external_attributes,
                     source_executable: facts.unix_regular_executable(),
-                }
+                })
             })
-            .collect(),
+            .collect::<Result<Vec<_>, _>>()?,
     };
     artifact
         .record
@@ -575,7 +577,9 @@ fn build_plan(
             continue;
         }
         let (scheme, relative_path) = relocate_member(member, artifact, &root_scheme)?;
-        let facts = member.container_facts();
+        let facts = member
+            .container_facts()
+            .ok_or_else(|| internal_failure("wheel member lacks ZIP container facts"))?;
         let executable = if facts.unix_regular_executable() {
             ExecutableDisposition::SourceExecutable
         } else {
@@ -1558,8 +1562,16 @@ mod tests {
         assert!(archive
             .members()
             .iter()
-            .all(|member| member.flags & 0x0008 != 0));
-        assert_eq!(archive.member("demo/caf\u{e9}.py").unwrap().flags, 0x0808);
+            .all(|member| member.zip_evidence().unwrap().flags & 0x0008 != 0));
+        assert_eq!(
+            archive
+                .member("demo/caf\u{e9}.py")
+                .unwrap()
+                .zip_evidence()
+                .unwrap()
+                .flags,
+            0x0808
+        );
         assert!(matches!(
             evaluate_wheel(
                 "demo-1.0-py3-none-any.whl",

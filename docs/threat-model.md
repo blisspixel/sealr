@@ -1,4 +1,4 @@
-# Threat model (as of 22 August 2026)
+# Threat model (as of 27 August 2026)
 
 Archive extraction is a **security boundary**, same class as HTML sanitizers, memory-safe parsers, and supply-chain attestations. Folklore (“just reject `..`”) is not enough. This file is the living adversary model. Invariants: [invariants.md](invariants.md). Differentials: [differentials.md](differentials.md).
 
@@ -97,6 +97,20 @@ CRC32 is **not** authentication (paper: easy to pad while preserving CRC). We st
 | Wheel `RECORD` vs ZIP | PyPI 2025–2026; uv CVE-2025-54368 | Dedicated wheel container and consumer profiles |
 | Parser differential (this file) | USENIX 2025 | Strict single interpretation + findings |
 
+### Portable ustar threats
+
+Raw ustar adds a second explicitly selected parser, not a parser race. `Policy::default_v1()` cannot authorize it; policy v2 plus `ArchiveSelection::TarUstar` must agree before source ingestion. Selection and observed magic are separate evidence, and no filename suffix triggers fallback.
+
+| Attack | Portable ustar control |
+|---|---|
+| Header checksum confusion | Require exact six-octal-digit, NUL, space syntax and the unsigned byte sum with the checksum field treated as spaces. |
+| Octal and GNU base-256 confusion | Accept a closed terminated ASCII-octal grammar with checked arithmetic; classify base-256 as a recognized unsupported feature. |
+| Link or special-file effects | Admit only regular files and zero-size directories; reject links, devices, FIFOs, sparse, PAX, GNU long-name, and unknown types. |
+| Prefix and name disagreement | Compose the fixed ustar prefix and name once, require strict UTF-8, and pass the result through the same portable path and topology contract. |
+| Hidden bytes and concatenation | Require zero member padding, two zero terminator blocks, and only complete zero record-padding blocks through exact source end. |
+| Metadata or count exhaustion | Charge every admitted header and terminator against the metadata cap before growing member state; bind the member-count ceiling to the identity encoding width. |
+| Parser-produced range drift | Run an independent codec-free covering audit before payload execution and independently reconstruct the published layout vector. |
+
 ### Wheel consumer threats
 
 Wheel evaluation adds a second semantic layer above the ZIP container. The controls below are supported Alpha.8 preview behavior in `sealr::wheel`; the Alpha.7 laboratory preserves the external installer proof. Their full contract is in [Python wheel consumer profile v1](profiles/python-wheel-v1.md).
@@ -132,6 +146,6 @@ Default posture: **reject ambiguity**. Future SFX or APK support would require s
 
 ## What we are not
 
-Sealr is not an antivirus or package inventory system. It does not claim CRC is a signature and does not run 50 parsers during an invocation. Alpha.8 is one strict parser with selectable versioned rules that returns a structured finding at the deterministic refusal point. A rejected view may be partial and must not be treated as a complete inventory.
+Sealr is not an antivirus or package inventory system. It does not claim CRC is a signature and does not run competing parsers during an invocation. The current release explicitly selects exactly one strict ZIP or portable ustar parser with versioned rules and returns a structured finding at the deterministic refusal point. A rejected view may be partial and must not be treated as a complete inventory.
 
 Property tests, fuzzing, model checking, native race stress, and release provenance support different claims. None alone establishes unique interpretation, complete filesystem race freedom, or a formally verified extractor. Every assurance result is scoped to its input domain, model, platform, tool version, and stated assumptions.

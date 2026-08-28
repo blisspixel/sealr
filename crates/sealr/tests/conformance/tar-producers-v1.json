@@ -1,0 +1,79 @@
+{
+  "schema": "sealr.tar-producer-fixtures.v1",
+  "fixtures": [
+    {
+      "id": "gnu-tar-1.35",
+      "producer": "GNU tar 1.35",
+      "command": "tar --format=ustar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 --mode=u=rw,go=r -cf gnu.tar -C src gnu.txt",
+      "member_path": "gnu.txt",
+      "member_content_hex": "676e7520706f727461626c652075737461720a",
+      "len": 10240,
+      "source_sha256": "075e5d93ff213f832023b1ecf614a4c39bdf5975edab3aedcb0df7d649073a42",
+      "layout_sha256": "f01a9bc4f6bc2d6a92fad5ed1860d19e4b9d35345b0d31412bdbdadcc0af061a",
+      "content_sha256": "4ae9adac838554433b256510c5a83afc820340d9cdbc720fb37e0ae101b07626",
+      "spans": [
+        { "offset": 0, "hex": "676e752e747874" },
+        { "offset": 100, "hex": "30303030363434" },
+        { "offset": 108, "hex": "30303030303030" },
+        { "offset": 116, "hex": "30303030303030" },
+        { "offset": 124, "hex": "3030303030303030303233" },
+        { "offset": 136, "hex": "3030303030303030303030" },
+        { "offset": 148, "hex": "303037323732" },
+        { "offset": 155, "hex": "2030" },
+        { "offset": 257, "hex": "7573746172" },
+        { "offset": 263, "hex": "3030" },
+        { "offset": 512, "hex": "676e7520706f727461626c652075737461720a" }
+      ]
+    },
+    {
+      "id": "bsdtar-3.8.4",
+      "producer": "bsdtar 3.8.4 with libarchive",
+      "command": "bsdtar --format ustar --uid 0 --gid 0 --uname root --gname root -cf bsdtar.tar -C src bsd.txt",
+      "member_path": "bsd.txt",
+      "member_content_hex": "62736420706f727461626c652075737461720a",
+      "len": 2048,
+      "source_sha256": "80dfd7291378d1874888adf993865b501151dc692e7d21901c28f5709e3d9273",
+      "layout_sha256": "6983a8be3e76df123df50f9a751a41976d716f871e2d03968100282da9351ff2",
+      "content_sha256": "dbd0d1c7bd9c7617db9c06d9d43881f28aaf47249509b9c4bc7df8b083a2186f",
+      "spans": [
+        { "offset": 0, "hex": "6273642e747874" },
+        { "offset": 100, "hex": "30303036363620" },
+        { "offset": 108, "hex": "30303030303020" },
+        { "offset": 116, "hex": "30303030303020" },
+        { "offset": 124, "hex": "303030303030303030323320313336303332353636343520303132333536" },
+        { "offset": 155, "hex": "2030" },
+        { "offset": 257, "hex": "7573746172" },
+        { "offset": 263, "hex": "3030726f6f74" },
+        { "offset": 297, "hex": "726f6f74" },
+        { "offset": 329, "hex": "30303030303020" },
+        { "offset": 337, "hex": "30303030303020" },
+        { "offset": 512, "hex": "62736420706f727461626c652075737461720a" }
+      ]
+    },
+    {
+      "id": "python-tarfile-3.12.10",
+      "producer": "Python 3.12.10 tarfile.USTAR_FORMAT",
+      "command": "tarfile.open(mode=w, format=USTAR_FORMAT) with explicit TarInfo",
+      "member_path": "python.txt",
+      "member_content_hex": "707974686f6e20706f727461626c652075737461720a",
+      "len": 10240,
+      "source_sha256": "06ba736f606de619ace0976cc0c67723ddb244d640ecc0daa0c7a3ce664ea8fa",
+      "layout_sha256": "3234749bd2a5e24196a53a7e4833f6737e2eaedbd5d3b589c4f9532324cf94c5",
+      "content_sha256": "880a7caa28337b9736739fef106e96285072ef6a60401d80f70e66ad181e6490",
+      "spans": [
+        { "offset": 0, "hex": "707974686f6e2e747874" },
+        { "offset": 100, "hex": "30303030363434" },
+        { "offset": 108, "hex": "30303030303030" },
+        { "offset": 116, "hex": "30303030303030" },
+        { "offset": 124, "hex": "3030303030303030303236" },
+        { "offset": 136, "hex": "3030303030303030303030" },
+        { "offset": 148, "hex": "303131363335" },
+        { "offset": 155, "hex": "2030" },
+        { "offset": 257, "hex": "7573746172" },
+        { "offset": 263, "hex": "3030726f6f74" },
+        { "offset": 297, "hex": "726f6f74" },
+        { "offset": 512, "hex": "707974686f6e20706f727461626c652075737461720a" }
+      ]
+    }
+  ]
+}

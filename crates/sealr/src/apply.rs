@@ -5,20 +5,27 @@ use std::path::Path;
 #[cfg(test)]
 use std::fs;
 
-use crate::covering::audit_covering;
+use crate::covering::{audit_covering, audit_tar_covering};
 use crate::findings::{Finding, FindingCode, Severity};
 use crate::identity::OutcomeIdentities;
-use crate::ir::{ArchiveIR, IrMember, MemberKind, NormalizationAction, ZipInterpretationProfile};
+use crate::ir::{
+    ArchiveIR, IrMember, MemberKind, NormalizationAction, TarArchiveCovering,
+    TarInterpretationProfile, ZipInterpretationProfile,
+};
 use crate::jail::{jail_name_for_profile, portable_name_violation, profile_case_fold};
 use crate::materialize::{process_member_to_file, CapabilityMaterializer, MaterializationMeta};
 use crate::outcome::{
     AdmissionStatus, DigestHex, EffectStatus, InterpretationStatus, SemanticAxes, SourceDigest,
     VerificationStatus, ViewCompleteness,
 };
-use crate::policy::{hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget};
+use crate::policy::{
+    hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget, POLICY_FORMAT_TAR_USTAR,
+    POLICY_FORMAT_ZIP,
+};
 use crate::quota::{QuotaError, QuotaState};
-use crate::snapshot::{SnapshotKind, SourceSnapshot};
-use crate::verification::{digest_hex, verify_payload, PayloadSpec};
+use crate::snapshot::{SnapshotKind, SnapshotSet, SourceSnapshot, TransformGraph};
+use crate::tar;
+use crate::verification::{digest_hex, planned_payload_reader, verify_payload, PayloadPlan};
 use crate::verified::{RetentionBuild, RetentionPlan, VerifiedArchive};
 use crate::zip::{self, ZipMember};
 use serde::Serialize;
@@ -50,10 +57,23 @@ pub struct Request<'a> {
 /// interpretation identity, but remains separate from resource-policy
 /// identity. A retention request is independently bounded and reports its
 /// result through the resulting [`VerifiedArchive`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ArchiveSelection {
+    Zip(ZipInterpretationProfile),
+    TarUstar(TarInterpretationProfile),
+}
+
+impl Default for ArchiveSelection {
+    fn default() -> Self {
+        Self::Zip(ZipInterpretationProfile::StrictAsciiV1)
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct ApplyOptions {
     retention: Option<RetentionPlan>,
-    interpretation_profile: ZipInterpretationProfile,
+    selection: ArchiveSelection,
 }
 
 impl ApplyOptions {
@@ -74,7 +94,16 @@ impl ApplyOptions {
     /// language. Select `StrictAsciiV2` for the closed Alpha.4 flag and
     /// extra-field contract.
     pub fn with_interpretation_profile(mut self, profile: ZipInterpretationProfile) -> Self {
-        self.interpretation_profile = profile;
+        self.selection = ArchiveSelection::Zip(profile);
+        self
+    }
+
+    /// Select an exact TAR interpretation for this operation.
+    ///
+    /// Selecting a TAR profile is explicit. Sealr does not guess between ZIP,
+    /// TAR, and future containers from a filename or a recoverable parse.
+    pub fn with_tar_interpretation_profile(mut self, profile: TarInterpretationProfile) -> Self {
+        self.selection = ArchiveSelection::TarUstar(profile);
         self
     }
 
@@ -83,9 +112,43 @@ impl ApplyOptions {
         self.retention.as_ref()
     }
 
-    /// Return the selected ZIP interpretation profile.
+    /// Return the ZIP profile value for compatibility with ZIP-only callers.
+    ///
+    /// Multi-format callers should use [`ApplyOptions::archive_selection`] or
+    /// [`ApplyOptions::zip_interpretation_profile`]. TAR selection returns the
+    /// compatibility default here; it does not select or authorize ZIP.
     pub fn interpretation_profile(&self) -> ZipInterpretationProfile {
-        self.interpretation_profile
+        self.zip_interpretation_profile()
+            .unwrap_or(ZipInterpretationProfile::StrictAsciiV1)
+    }
+
+    /// Return the selected ZIP profile, or `None` when another format is selected.
+    pub fn zip_interpretation_profile(&self) -> Option<ZipInterpretationProfile> {
+        match self.selection {
+            ArchiveSelection::Zip(profile) => Some(profile),
+            ArchiveSelection::TarUstar(_) => None,
+        }
+    }
+
+    /// Return the selected TAR interpretation, when the operation targets TAR.
+    pub fn tar_interpretation_profile(&self) -> Option<TarInterpretationProfile> {
+        match self.selection {
+            ArchiveSelection::Zip(_) => None,
+            ArchiveSelection::TarUstar(profile) => Some(profile),
+        }
+    }
+
+    /// Return the explicit container and interpretation selection.
+    pub fn archive_selection(&self) -> ArchiveSelection {
+        self.selection
+    }
+
+    /// Return the container format selected for this operation.
+    pub fn archive_format(&self) -> crate::ArchiveFormat {
+        match self.selection {
+            ArchiveSelection::Zip(_) => crate::ArchiveFormat::Zip32,
+            ArchiveSelection::TarUstar(_) => crate::ArchiveFormat::TarUstar,
+        }
     }
 }
 
@@ -190,7 +253,7 @@ pub struct Outcome {
     pub verdict: Verdict,
     pub receipt: Receipt,
     pub view: View,
-    /// Effect-independent ZIP interpretation when planning produced a member list.
+    /// Effect-independent archive interpretation when planning produced a member list.
     /// Absent when ingest or structure failed before a tree existed.
     #[serde(skip)]
     archive_ir: Option<ArchiveIR>,
@@ -243,24 +306,29 @@ pub fn apply(req: Request<'_>) -> Outcome {
 /// Apply policy and optionally request independently bounded capabilities.
 ///
 /// Default options have the same semantics as [`apply`]. Selecting another
-/// interpretation profile changes the accepted ZIP language and the recorded
+/// archive selection changes the accepted container language and recorded
 /// interpretation identity; retention alone does not change admission.
 pub fn apply_with_options(req: Request<'_>, options: &ApplyOptions) -> Outcome {
-    let planning_context =
-        match PlanningContext::compile(req.policy, options.interpretation_profile) {
-            Ok(context) => context,
-            Err(finding) => {
-                return reject_only(
-                    (None, SourceDigest::unavailable(), req.policy.clone()),
-                    vec![finding.clone()],
-                    None,
-                    MaterializationMeta::not_started(req.dest.is_some(), req.policy.atomic),
-                    SemanticAxes::policy_compile_failed(&finding),
-                    SnapshotKind::Unavailable,
-                    OutcomeIdentities::without_source_for(options.interpretation_profile),
-                );
-            }
-        };
+    if let ArchiveSelection::TarUstar(profile) = options.selection {
+        return apply_tar_with_options(&req, options, profile);
+    }
+    let ArchiveSelection::Zip(profile) = options.selection else {
+        unreachable!("archive selection is closed over implemented variants")
+    };
+    let planning_context = match PlanningContext::compile(req.policy, profile) {
+        Ok(context) => context,
+        Err(finding) => {
+            return reject_only(
+                (None, SourceDigest::unavailable(), req.policy.clone()),
+                vec![finding.clone()],
+                None,
+                MaterializationMeta::not_started(req.dest.is_some(), req.policy.atomic),
+                SemanticAxes::policy_compile_failed(&finding),
+                SnapshotKind::Unavailable,
+                OutcomeIdentities::without_source_for(profile),
+            );
+        }
+    };
     match apply_inner(&req, planning_context, options) {
         Ok(o) => o,
         Err(failure) => {
@@ -277,9 +345,268 @@ pub fn apply_with_options(req: Request<'_>, options: &ApplyOptions) -> Outcome {
                 MaterializationMeta::not_started(req.dest.is_some(), req.policy.atomic),
                 SemanticAxes::source_failure(&failure.finding, admission),
                 failure.snapshot_kind,
-                OutcomeIdentities::unavailable_for(digest, options.interpretation_profile),
+                OutcomeIdentities::unavailable_for(digest, profile),
             )
         }
+    }
+}
+
+fn apply_tar_with_options(
+    req: &Request<'_>,
+    options: &ApplyOptions,
+    profile: TarInterpretationProfile,
+) -> Outcome {
+    let policy = req.policy;
+    let initial_materialization =
+        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
+    let controls = match policy.compile_for_format(POLICY_FORMAT_TAR_USTAR) {
+        Ok(controls) => controls,
+        Err(finding) => {
+            return reject_only(
+                (None, SourceDigest::unavailable(), policy.clone()),
+                vec![finding.clone()],
+                None,
+                initial_materialization,
+                SemanticAxes::policy_compile_failed(&finding),
+                SnapshotKind::Unavailable,
+                OutcomeIdentities::unavailable_for_tar(SourceDigest::unavailable(), profile),
+            );
+        }
+    };
+    let snapshot = match read_source(&req.source, controls.budget) {
+        Ok(snapshot) => snapshot,
+        Err(failure) => {
+            let admission = if failure.finding.code == FindingCode::QuotaArchive {
+                AdmissionStatus::Denied
+            } else {
+                AdmissionStatus::NotEvaluated
+            };
+            let digest = failure.digest.clone();
+            return reject_only(
+                (failure.path, failure.digest, policy.clone()),
+                vec![failure.finding.clone()],
+                None,
+                initial_materialization,
+                SemanticAxes::source_failure(&failure.finding, admission),
+                failure.snapshot_kind,
+                OutcomeIdentities::unavailable_for_tar(digest, profile),
+            );
+        }
+    };
+    let source_digest = snapshot.digest().clone();
+    let identities_base = OutcomeIdentities::unavailable_for_tar(source_digest.clone(), profile);
+    let recognized_tar = tar::recognizes_ustar(&snapshot);
+    let parsed = match tar::parse_ustar_portable_v1(
+        &snapshot,
+        controls.budget.max_files,
+        controls.budget.max_metadata_bytes,
+    ) {
+        Ok(parsed) => parsed,
+        Err(finding) => {
+            let axes = parse_failure_axes(&finding);
+            return finish(
+                (snapshot.path_owned(), source_digest, snapshot.kind()),
+                if recognized_tar { "tar" } else { "unknown" },
+                policy,
+                vec![finding],
+                Vec::new(),
+                initial_materialization,
+                axes,
+                identities_base,
+            );
+        }
+    };
+
+    let budget = controls.budget;
+    let covering = TarArchiveCovering {
+        member_records: parsed.member_records,
+        terminator: parsed.terminator,
+        trailing_zeros: parsed.trailing_zeros,
+    };
+    let mut findings = Vec::new();
+    let mut planned = Vec::new();
+    let mut dest_seen: BTreeMap<String, bool> = BTreeMap::new();
+    let mut fold_seen: BTreeMap<String, bool> = BTreeMap::new();
+    let mut declared_total = QuotaState::new(budget.max_total_bytes);
+
+    for member in parsed.members {
+        if member.size > budget.max_member_bytes {
+            findings.push(
+                Finding::error(FindingCode::QuotaMember, "declared member too large")
+                    .on(&member.name),
+            );
+            continue;
+        }
+        if let Some(max_ratio) = budget.max_ratio {
+            if ratio_exceeds(member.size, member.size, max_ratio) {
+                findings.push(
+                    Finding::error(
+                        FindingCode::QuotaRatio,
+                        format!(
+                            "declared {}:{} exceeds {max_ratio}:1",
+                            member.size, member.size
+                        ),
+                    )
+                    .on(&member.name),
+                );
+                continue;
+            }
+        }
+        match declared_total.consume(member.size) {
+            Ok(_) => {}
+            Err(QuotaError::Overflow) => {
+                findings.push(Finding::error(
+                    FindingCode::QuotaOverflow,
+                    "declared uncompressed total overflowed u64",
+                ));
+                break;
+            }
+            Err(QuotaError::Exceeded { .. }) => {
+                findings.push(Finding::error(
+                    FindingCode::QuotaTotal,
+                    "declared total too large",
+                ));
+                break;
+            }
+        }
+
+        let mut actions = Vec::new();
+        let jailed_name = if member.is_dir {
+            match member.name.strip_suffix('/') {
+                Some(name) => {
+                    actions.push(NormalizationAction::StripDirectoryTrailingSlash);
+                    name
+                }
+                None => member.name.as_str(),
+            }
+        } else {
+            &member.name
+        };
+        match jail_name_for_profile(
+            jailed_name,
+            budget.max_path_depth,
+            ZipInterpretationProfile::PortableUtf8V1,
+        ) {
+            Ok(jailed) => {
+                if let Some(detail) = portable_name_violation(&jailed) {
+                    findings.push(
+                        Finding::error(FindingCode::PathInvalidChar, detail).on(&member.name),
+                    );
+                    continue;
+                }
+                actions.extend(jailed.actions);
+                let parts = jailed.components;
+                let joined = parts.join("/");
+                let fold = profile_case_fold(&joined, ZipInterpretationProfile::PortableUtf8V1);
+                if dest_seen.contains_key(&joined) {
+                    findings.push(
+                        Finding::error(FindingCode::PathConflict, "duplicate destination path")
+                            .on(&member.name),
+                    );
+                    continue;
+                }
+                if fold_seen.contains_key(&fold) {
+                    findings.push(
+                        Finding::error(FindingCode::PathCaseFold, "case-fold collision")
+                            .on(&member.name),
+                    );
+                    continue;
+                }
+                if let Some(conflict) = path_conflict(&dest_seen, &joined, member.is_dir) {
+                    findings.push(
+                        Finding::error(
+                            FindingCode::PathConflict,
+                            format!("file/directory conflict with {conflict}"),
+                        )
+                        .on(&member.name),
+                    );
+                    continue;
+                }
+                if let Some(conflict) = path_conflict(&fold_seen, &fold, member.is_dir) {
+                    findings.push(
+                        Finding::error(
+                            FindingCode::PathCaseFold,
+                            format!("case-fold topology conflict with {conflict}"),
+                        )
+                        .on(&member.name),
+                    );
+                    continue;
+                }
+                dest_seen.insert(joined, member.is_dir);
+                fold_seen.insert(fold, member.is_dir);
+                planned.push((member, parts, actions));
+            }
+            Err(finding) => findings.push(finding),
+        }
+    }
+
+    if findings
+        .iter()
+        .any(|finding| finding.severity == Severity::Error)
+    {
+        let cause = first_error(&findings);
+        return finish(
+            (snapshot.path_owned(), source_digest, snapshot.kind()),
+            "tar",
+            policy,
+            findings,
+            Vec::new(),
+            initial_materialization,
+            SemanticAxes::denied_at_admission(&cause),
+            identities_base,
+        );
+    }
+
+    let payloads = planned
+        .iter()
+        .map(|(member, _, _)| PayloadPlan::from_tar(member))
+        .collect();
+    let ir = ArchiveIR::with_tar(
+        profile,
+        source_digest.clone(),
+        covering,
+        planned
+            .into_iter()
+            .map(|(member, components, actions)| {
+                IrMember::from_tar_planned(member, components, actions)
+            })
+            .collect(),
+    );
+    if let Err(finding) = audit_tar_covering(&snapshot, &ir) {
+        findings.push(finding);
+        let cause = first_error(&findings);
+        let axes = SemanticAxes::structure_stop(
+            InterpretationStatus::Malformed,
+            AdmissionStatus::Denied,
+            &cause,
+        );
+        let outcome = finish(
+            (snapshot.path_owned(), source_digest, snapshot.kind()),
+            "tar",
+            policy,
+            findings,
+            Vec::new(),
+            initial_materialization,
+            axes,
+            identities_base,
+        );
+        return with_ir(outcome, ir);
+    }
+    let ready = ReadyArchive {
+        snapshots: SnapshotSet::from_original(snapshot),
+        transforms: TransformGraph::empty(),
+        ir,
+        payloads,
+        findings,
+        budget,
+        member_sync: controls.effect.member_sync,
+        source_digest,
+        identities_base,
+        magic: "tar",
+    };
+    match execute_ready_archive(req, options, ready, initial_materialization) {
+        Ok(outcome) => outcome,
+        Err(_) => unreachable!("ready TAR execution does not reacquire the source"),
     }
 }
 
@@ -342,7 +669,7 @@ impl PlanningContext {
         policy: &Policy,
         profile: ZipInterpretationProfile,
     ) -> Result<Self, Finding> {
-        let controls = policy.compile()?;
+        let controls = policy.compile_for_format(POLICY_FORMAT_ZIP)?;
         Ok(Self {
             policy_id: policy.id.clone(),
             policy_sha256: policy.digest_hex(),
@@ -376,6 +703,7 @@ impl PlanningContext {
 pub(crate) struct ReadyPlan<'a> {
     snapshot: SourceSnapshot<'a>,
     ir: ArchiveIR,
+    payloads: Vec<PayloadPlan>,
     findings: Vec<Finding>,
     context: PlanningContext,
 }
@@ -383,8 +711,20 @@ pub(crate) struct ReadyPlan<'a> {
 impl<'a> ReadyPlan<'a> {
     pub(crate) fn into_parts(
         self,
-    ) -> (SourceSnapshot<'a>, ArchiveIR, Vec<Finding>, PlanningContext) {
-        (self.snapshot, self.ir, self.findings, self.context)
+    ) -> (
+        SourceSnapshot<'a>,
+        ArchiveIR,
+        Vec<PayloadPlan>,
+        Vec<Finding>,
+        PlanningContext,
+    ) {
+        (
+            self.snapshot,
+            self.ir,
+            self.payloads,
+            self.findings,
+            self.context,
+        )
     }
 }
 
@@ -705,6 +1045,10 @@ fn plan_snapshot<'a>(snapshot: SourceSnapshot<'a>, context: PlanningContext) -> 
         return terminal_plan(snapshot, context, "zip", findings, None, axes);
     }
 
+    let payloads = planned
+        .iter()
+        .map(|(member, _, _)| PayloadPlan::from_zip(member))
+        .collect();
     let ir = ArchiveIR::with_covering(
         interpretation_profile,
         snapshot.digest().clone(),
@@ -728,6 +1072,7 @@ fn plan_snapshot<'a>(snapshot: SourceSnapshot<'a>, context: PlanningContext) -> 
     PlanDecision::Ready(ReadyPlan {
         snapshot,
         ir,
+        payloads,
         findings,
         context,
     })
@@ -766,7 +1111,7 @@ fn apply_inner(
             });
         }
     };
-    let (snapshot, mut ir, mut findings, context) = ready.into_parts();
+    let (snapshot, ir, payloads, findings, context) = ready.into_parts();
     debug_assert!(context.matches_policy(policy));
     let controls = context.controls();
     let budget = controls.budget;
@@ -774,6 +1119,89 @@ fn apply_inner(
     let source_digest = snapshot.digest().clone();
     let identities_base =
         OutcomeIdentities::unavailable_for(source_digest.clone(), context.profile());
+
+    let ready = ReadyArchive {
+        snapshots: SnapshotSet::from_original(snapshot),
+        transforms: TransformGraph::empty(),
+        ir,
+        payloads,
+        findings,
+        budget,
+        member_sync,
+        source_digest,
+        identities_base,
+        magic: "zip",
+    };
+    execute_ready_archive(req, options, ready, initial_materialization)
+}
+
+#[derive(Debug)]
+struct ReadyArchive<'a> {
+    snapshots: SnapshotSet<'a>,
+    transforms: TransformGraph,
+    ir: ArchiveIR,
+    payloads: Vec<PayloadPlan>,
+    findings: Vec<Finding>,
+    budget: ResourceBudget,
+    member_sync: bool,
+    source_digest: SourceDigest,
+    identities_base: OutcomeIdentities,
+    magic: &'static str,
+}
+
+fn execute_ready_archive(
+    req: &Request<'_>,
+    options: &ApplyOptions,
+    ready: ReadyArchive<'_>,
+    initial_materialization: MaterializationMeta,
+) -> Result<Outcome, SourceFailure> {
+    let ReadyArchive {
+        snapshots,
+        transforms,
+        mut ir,
+        payloads,
+        mut findings,
+        budget,
+        member_sync,
+        source_digest,
+        identities_base,
+        magic,
+    } = ready;
+    let snapshot = snapshots.original();
+    let policy = req.policy;
+
+    if !transforms.validates(&snapshots)
+        || snapshots.len() != 1
+        || !transforms.is_empty()
+        || payloads.len() != ir.members.len()
+        || payloads
+            .iter()
+            .zip(&ir.members)
+            .any(|(payload, member)| !payload.matches_member(member))
+    {
+        let finding = Finding::error(
+            FindingCode::CoveringInconsistent,
+            "ready payload plan disagrees with archive evidence",
+        );
+        findings.push(finding.clone());
+        return Ok(with_ir(
+            finish(
+                (snapshot.path_owned(), source_digest, snapshot.kind()),
+                magic,
+                policy,
+                findings,
+                Vec::new(),
+                initial_materialization,
+                SemanticAxes::structure_stop(
+                    InterpretationStatus::Malformed,
+                    AdmissionStatus::Denied,
+                    &finding,
+                ),
+                identities_base,
+            ),
+            ir,
+        ));
+    }
 
     #[cfg(test)]
     crate::snapshot::arm_test_read_failure();
@@ -798,7 +1226,7 @@ fn apply_inner(
                 return Ok(with_ir(
                     finish(
                         (snapshot.path_owned(), source_digest, snapshot.kind()),
-                        "zip",
+                        magic,
                         policy,
                         findings,
                         members_view,
@@ -813,7 +1241,7 @@ fn apply_inner(
     };
     let write = stage.is_some();
 
-    for index in 0..ir.members.len() {
+    for (index, payload_spec) in payloads.iter().copied().enumerate() {
         if matches!(ir.members[index].kind, MemberKind::Directory) {
             if let Some(materializer) = stage.as_ref() {
                 if let Err(finding) = materializer.create_directory(
@@ -828,7 +1256,7 @@ fn apply_inner(
                     return Ok(with_ir(
                         finish(
                             (snapshot.path_owned(), source_digest, snapshot.kind()),
-                            "zip",
+                            magic,
                             policy,
                             findings,
                             members_view,
@@ -852,8 +1280,11 @@ fn apply_inner(
 
         let canonical_path = ir.members[index].canonical_path.clone();
         let mut capture = retention.begin_capture(&canonical_path);
-        let payload_spec = PayloadSpec::from_ir(&ir.members[index]);
-        let payload = match zip::planned_payload_reader(&snapshot, &ir.members[index]) {
+        let payload = match planned_payload_reader(
+            &snapshots,
+            &payload_spec,
+            &ir.members[index].decoded_name,
+        ) {
             Ok(payload) => payload,
             Err(finding) => {
                 ir.members[index].mark_failed(finding.code.as_str());
@@ -864,7 +1295,7 @@ fn apply_inner(
                 return Ok(with_ir(
                     finish(
                         (snapshot.path_owned(), source_digest, snapshot.kind()),
-                        "zip",
+                        magic,
                         policy,
                         findings,
                         members_view,
@@ -918,7 +1349,7 @@ fn apply_inner(
                 return Ok(with_ir(
                     finish(
                         (snapshot.path_owned(), source_digest, snapshot.kind()),
-                        "zip",
+                        magic,
                         policy,
                         findings,
                         members_view,
@@ -935,36 +1366,6 @@ fn apply_inner(
                 ));
             }
         };
-        if crc != ir.members[index].declared_crc {
-            let finding = Finding::error(
-                FindingCode::CrcMismatch,
-                format!("got {crc:08x} want {:08x}", ir.members[index].declared_crc),
-            )
-            .on(&ir.members[index].decoded_name);
-            ir.members[index].mark_failed(finding.code.as_str());
-            findings.push(finding);
-            materialization = abort_and_report(&mut stage, &mut findings, materialization);
-            let cause = first_error(&findings);
-            let verified = members_view.len() as u64;
-            return Ok(with_ir(
-                finish(
-                    (snapshot.path_owned(), source_digest, snapshot.kind()),
-                    "zip",
-                    policy,
-                    findings,
-                    members_view,
-                    materialization,
-                    SemanticAxes::admitted_verification_stop(
-                        verified,
-                        planned_count.saturating_sub(verified),
-                        &cause,
-                        write,
-                    ),
-                    identities_base.clone(),
-                ),
-                ir,
-            ));
-        }
         if let Err(error) = actual_total.consume(actual) {
             let finding = match error {
                 QuotaError::Overflow => Finding::error(
@@ -985,7 +1386,7 @@ fn apply_inner(
             return Ok(with_ir(
                 finish(
                     (snapshot.path_owned(), source_digest, snapshot.kind()),
-                    "zip",
+                    magic,
                     policy,
                     findings,
                     members_view,
@@ -1013,11 +1414,11 @@ fn apply_inner(
             materialization = abort_and_report(&mut stage, &mut findings, materialization);
             let cause = first_error(&findings);
             let source_meta = (snapshot.path_owned(), source_digest, snapshot.kind());
-            let archive = VerifiedArchive::new(snapshot, ir, budget, retention);
+            let archive = VerifiedArchive::new(snapshots, ir, payloads.clone(), budget, retention);
             return Ok(with_verified_archive(
                 finish(
                     source_meta,
-                    "zip",
+                    magic,
                     policy,
                     findings,
                     members_view,
@@ -1033,11 +1434,11 @@ fn apply_inner(
             materialization = abort_and_report(&mut stage, &mut findings, materialization);
             let cause = first_error(&findings);
             let source_meta = (snapshot.path_owned(), source_digest, snapshot.kind());
-            let archive = VerifiedArchive::new(snapshot, ir, budget, retention);
+            let archive = VerifiedArchive::new(snapshots, ir, payloads.clone(), budget, retention);
             return Ok(with_verified_archive(
                 finish(
                     source_meta,
-                    "zip",
+                    magic,
                     policy,
                     findings,
                     members_view,
@@ -1051,11 +1452,11 @@ fn apply_inner(
         materialization = materializer.report();
     }
     let source_meta = (snapshot.path_owned(), source_digest, snapshot.kind());
-    let archive = VerifiedArchive::new(snapshot, ir, budget, retention);
+    let archive = VerifiedArchive::new(snapshots, ir, payloads, budget, retention);
     Ok(with_verified_archive(
         finish(
             source_meta,
-            "zip",
+            magic,
             policy,
             findings,
             members_view,
@@ -1251,10 +1652,13 @@ pub(crate) fn with_verified_archive(mut outcome: Outcome, archive: VerifiedArchi
 }
 
 pub(crate) fn member_view(member: &IrMember) -> MemberView {
-    let method = if member.method == 0 {
-        "store"
-    } else {
-        "deflate"
+    let (method, declared_comp_size, declared_crc) = match &member.evidence {
+        crate::ir::MemberEvidence::Zip(zip) => (
+            if zip.method == 0 { "store" } else { "deflate" },
+            zip.declared_comp_size,
+            zip.declared_crc,
+        ),
+        crate::ir::MemberEvidence::Tar(tar) => ("raw", tar.payload.len, 0),
     };
     MemberView {
         path: member.canonical_path.clone(),
@@ -1265,7 +1669,7 @@ pub(crate) fn member_view(member: &IrMember) -> MemberView {
         comp_bytes: if matches!(member.kind, MemberKind::Directory) {
             0
         } else {
-            member.declared_comp_size
+            declared_comp_size
         },
         uncomp_bytes: member.actual_uncomp_size.unwrap_or(0),
         method: if matches!(member.kind, MemberKind::Directory) {
@@ -1273,7 +1677,7 @@ pub(crate) fn member_view(member: &IrMember) -> MemberView {
         } else {
             method
         },
-        crc32: format!("{:08x}", member.actual_crc.unwrap_or(member.declared_crc)),
+        crc32: format!("{:08x}", member.actual_crc.unwrap_or(declared_crc)),
         sha256: member.content_sha256.clone().unwrap_or_default(),
     }
 }
@@ -1338,9 +1742,10 @@ pub(crate) fn first_error(findings: &[Finding]) -> Finding {
 fn parse_failure_axes(finding: &Finding) -> SemanticAxes {
     let interpretation = match finding.code {
         FindingCode::SourceIo => InterpretationStatus::Indeterminate,
-        FindingCode::FormatUnsupported | FindingCode::ZipDiffC5Zip64 | FindingCode::ZipEncoding => {
-            InterpretationStatus::Unsupported
-        }
+        FindingCode::FormatUnsupported
+        | FindingCode::ZipDiffC5Zip64
+        | FindingCode::ZipEncoding
+        | FindingCode::TarFeatureUnsupported => InterpretationStatus::Unsupported,
         FindingCode::QuotaFiles | FindingCode::QuotaMetadata | FindingCode::QuotaOverflow => {
             InterpretationStatus::Interpreted
         }
@@ -1640,13 +2045,14 @@ mod tests {
         assert_eq!(out.cli_exit_code(), 0);
         assert_eq!(out.view.admission, AdmissionStatus::Admitted);
         assert_eq!(out.view.effect, EffectStatus::NotRequested);
-        assert_eq!(ir.covering.local_records.offset, 0);
+        let covering = ir.covering().expect("ZIP covering");
+        assert_eq!(covering.local_records.offset, 0);
         assert_eq!(
-            ir.covering.local_records.len,
-            ir.covering.central_directory.offset
+            covering.local_records.len,
+            covering.central_directory.offset
         );
-        assert_eq!(ir.covering.central_directory.end(), ir.covering.eocd.offset);
-        assert_eq!(ir.covering.eocd.len, 22);
+        assert_eq!(covering.central_directory.end(), covering.eocd.offset);
+        assert_eq!(covering.eocd.len, 22);
         assert_eq!(ir.members.len(), 1);
         assert_eq!(ir.members[0].canonical_path, "nested/hello.txt");
         assert_eq!(ir.members[0].raw_name_bytes, b"nested/hello.txt");
@@ -1828,7 +2234,7 @@ mod tests {
         let budget = Policy::default_v1().compile().unwrap().budget;
         let finding = verify_payload(
             &[0xff][..],
-            PayloadSpec::from_zip(&member),
+            PayloadPlan::from_zip(&member),
             budget,
             u64::MAX,
             &mut sink,
@@ -1860,7 +2266,7 @@ mod tests {
             flags: 0,
             creator_system: 0,
             external_attributes: 0,
-            crc: 0,
+            crc: crc32fast::hash(&payload),
             comp_size: compressed.len() as u64,
             uncomp_size: payload.len() as u64,
             lfh_offset: 0,
@@ -1892,7 +2298,7 @@ mod tests {
 
         let finding = verify_payload(
             reader,
-            PayloadSpec::from_zip(&member),
+            PayloadPlan::from_zip(&member),
             budget,
             u64::MAX,
             &mut sink,
@@ -1913,7 +2319,7 @@ mod tests {
             flags: 0,
             creator_system: 0,
             external_attributes: 0,
-            crc: 0,
+            crc: crc32fast::hash(&payload),
             comp_size: payload.len() as u64,
             uncomp_size: payload.len() as u64,
             lfh_offset: 0,
@@ -1941,7 +2347,7 @@ mod tests {
 
         let (actual, _, _) = verify_payload(
             reader,
-            PayloadSpec::from_zip(&member),
+            PayloadPlan::from_zip(&member),
             budget,
             u64::MAX,
             &mut output,
@@ -1974,7 +2380,7 @@ mod tests {
             flags: 0,
             creator_system: 0,
             external_attributes: 0,
-            crc: 0,
+            crc: crc32fast::hash(&payload),
             comp_size: compressed.len() as u64,
             uncomp_size: payload.len() as u64,
             lfh_offset: 0,
@@ -2002,7 +2408,7 @@ mod tests {
 
         let (actual, _, _) = verify_payload(
             reader,
-            PayloadSpec::from_zip(&member),
+            PayloadPlan::from_zip(&member),
             budget,
             u64::MAX,
             &mut output,
@@ -2087,7 +2493,12 @@ mod tests {
                     &member.canonical_path,
                     &member.raw_name_bytes,
                     &member.content_sha256,
-                    member.source_ranges.compressed_payload.offset,
+                    member
+                        .zip_evidence()
+                        .expect("ZIP member evidence")
+                        .source_ranges
+                        .compressed_payload
+                        .offset,
                 )
             })
             .collect();
@@ -2099,7 +2510,12 @@ mod tests {
                     &member.canonical_path,
                     &member.raw_name_bytes,
                     &member.content_sha256,
-                    member.source_ranges.compressed_payload.offset,
+                    member
+                        .zip_evidence()
+                        .expect("ZIP member evidence")
+                        .source_ranges
+                        .compressed_payload
+                        .offset,
                 )
             })
             .collect();
@@ -2704,7 +3120,13 @@ mod tests {
             strict.receipt.identities.interpretation.id,
             crate::ir::ZIP_STRICT_ASCII_V2
         );
-        assert_eq!(strict.archive_ir().unwrap().members[0].flags, 0x0008);
+        assert_eq!(
+            strict.archive_ir().unwrap().members[0]
+                .zip_evidence()
+                .unwrap()
+                .flags,
+            0x0008
+        );
     }
 
     #[test]
@@ -2771,7 +3193,7 @@ mod tests {
         assert!(!out.rejected(), "{:?}", out.view.findings);
         let ir = out.archive_ir().expect("admitted archive IR");
         assert_eq!(ir.members[0].canonical_path, "caf\u{e9}.txt");
-        assert_eq!(ir.members[0].flags & 0x0800, 0x0800);
+        assert_eq!(ir.members[0].zip_evidence().unwrap().flags & 0x0800, 0x0800);
         assert_eq!(
             out.receipt.identities.interpretation.id,
             crate::ir::ZIP_WHEEL_UTF8_V1
@@ -2789,7 +3211,7 @@ mod tests {
         assert!(!out.rejected(), "{:?}", out.view.findings);
         let ir = out.archive_ir().expect("admitted archive IR");
         assert_eq!(ir.members[0].canonical_path, "caf\u{e9}.txt");
-        assert_eq!(ir.members[0].flags & 0x0800, 0x0800);
+        assert_eq!(ir.members[0].zip_evidence().unwrap().flags & 0x0800, 0x0800);
         assert_eq!(
             out.receipt.identities.interpretation.id,
             crate::ir::ZIP_PORTABLE_UTF8_V1
@@ -2979,15 +3401,14 @@ mod tests {
         });
         assert!(!out.rejected(), "{:?}", out.view.findings);
         let ir = out.archive_ir().expect("admitted IR");
-        assert!(ir.members[0].extra_fields.iter().any(|extra| {
+        let extras = &ir.members[0].zip_evidence().unwrap().extra_fields;
+        assert!(extras.iter().any(|extra| {
             extra.id == 0x7855 && extra.disposition == crate::ir::ExtraDisposition::Ignored
         }));
-        assert!(ir.members[0]
-            .extra_fields
+        assert!(extras
             .iter()
             .any(|extra| extra.site == crate::ir::ExtraSite::Local));
-        assert!(ir.members[0]
-            .extra_fields
+        assert!(extras
             .iter()
             .any(|extra| extra.site == crate::ir::ExtraSite::Central));
     }

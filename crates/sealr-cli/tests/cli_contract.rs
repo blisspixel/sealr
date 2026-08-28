@@ -99,6 +99,43 @@ fn fixture_set(label: &str) -> (RunDirectory, walkthrough_fixtures::FixturePaths
     (run, fixtures)
 }
 
+fn write_octal(field: &mut [u8], value: u64) {
+    field.fill(b'0');
+    let octal = format!("{value:o}");
+    let digits = field.len() - 1;
+    field[digits - octal.len()..digits].copy_from_slice(octal.as_bytes());
+    field[digits] = 0;
+}
+
+fn write_tar_fixture(path: &Path) {
+    let name = b"mission/status.txt";
+    let body = b"nominal\n";
+    let mut header = [0_u8; 512];
+    header[..name.len()].copy_from_slice(name);
+    write_octal(&mut header[100..108], 0o644);
+    write_octal(&mut header[108..116], 0);
+    write_octal(&mut header[116..124], 0);
+    write_octal(&mut header[124..136], body.len() as u64);
+    write_octal(&mut header[136..148], 0);
+    header[148..156].fill(b' ');
+    header[156] = b'0';
+    header[257..263].copy_from_slice(b"ustar\0");
+    header[263..265].copy_from_slice(b"00");
+    write_octal(&mut header[329..337], 0);
+    write_octal(&mut header[337..345], 0);
+    let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
+    let encoded = format!("{checksum:06o}");
+    header[148..154].copy_from_slice(encoded.as_bytes());
+    header[154] = 0;
+    header[155] = b' ';
+
+    let mut bytes = header.to_vec();
+    bytes.extend_from_slice(body);
+    bytes.resize(bytes.len().next_multiple_of(512), 0);
+    bytes.resize(bytes.len() + 1024, 0);
+    fs::write(path, bytes).expect("TAR fixture should be writable");
+}
+
 fn assert_allowed_streams(output: &Output, wrote: bool) -> (Value, Value) {
     assert_eq!(output.status.code(), Some(0));
     let view = json(&output.stdout, "stdout");
@@ -158,6 +195,8 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert!(help_text.contains("Usage: sealr"));
     assert!(help_text.contains("<ARCHIVE>"));
     assert!(help_text.contains("--dest <DEST>"));
+    assert!(help_text.contains("--format <FORMAT>"));
+    assert!(help_text.contains("tar-ustar"));
     assert!(help_text.contains("--worker-manifest <ABSOLUTE_PATH>"));
     assert!(help_text.contains("--version"));
 
@@ -167,6 +206,39 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert_eq!(
         String::from_utf8(version.stdout).expect("version should be UTF-8"),
         format!("sealr {}\n", env!("CARGO_PKG_VERSION"))
+    );
+}
+
+#[test]
+fn explicit_tar_format_inspects_and_materializes() {
+    let run = RunDirectory::create("tar");
+    let archive = run.path.join("mission.tar");
+    write_tar_fixture(&archive);
+
+    let inspect = sealr(&[Path::new("--format"), Path::new("tar-ustar"), &archive]);
+    assert_eq!(inspect.status.code(), Some(0));
+    let view = json(&inspect.stdout, "TAR stdout");
+    let receipt = json(&inspect.stderr, "TAR stderr");
+    assert_eq!(view["source"]["magic"], "tar");
+    assert_eq!(view["members"][0]["path"], "mission/status.txt");
+    assert_eq!(
+        receipt["identities"]["interpretation"]["id"],
+        "sealr.profile.tar.ustar-portable.v1"
+    );
+    assert!(receipt["identities"]["layout"].get("sealrTreeV2").is_some());
+
+    let destination = run.path.join("materialized");
+    let materialize = sealr(&[
+        Path::new("--format"),
+        Path::new("tar-ustar"),
+        &archive,
+        Path::new("--dest"),
+        &destination,
+    ]);
+    assert_eq!(materialize.status.code(), Some(0));
+    assert_eq!(
+        fs::read(destination.join("mission/status.txt")).unwrap(),
+        b"nominal\n"
     );
 }
 

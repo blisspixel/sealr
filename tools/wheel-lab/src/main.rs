@@ -653,6 +653,12 @@ fn analyze_artifact(
     let mut dist_info = BTreeSet::new();
     let mut top_level_dist_info = BTreeSet::new();
     for member in ir.members() {
+        let zip = member.zip_evidence().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "wheel report member lacks ZIP evidence",
+            )
+        })?;
         match member.kind {
             MemberKind::File => artifact.file_count += 1,
             MemberKind::Directory => artifact.directory_count += 1,
@@ -660,7 +666,7 @@ fn analyze_artifact(
         }
         artifact.declared_compressed_bytes = artifact
             .declared_compressed_bytes
-            .checked_add(member.declared_comp_size)
+            .checked_add(zip.declared_comp_size)
             .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "compressed sum overflow"))?;
         artifact.declared_uncompressed_bytes = artifact
             .declared_uncompressed_bytes
@@ -670,9 +676,9 @@ fn analyze_artifact(
             .max_path_bytes
             .max(member.canonical_path.len() as u64);
         artifact.max_path_depth = artifact.max_path_depth.max(member.components.len() as u64);
-        increment(&mut artifact.methods, method_key(member.method));
-        increment(&mut artifact.flags, format!("0x{:04x}", member.flags));
-        for extra in &member.extra_fields {
+        increment(&mut artifact.methods, method_key(zip.method));
+        increment(&mut artifact.flags, format!("0x{:04x}", zip.flags));
+        for extra in &zip.extra_fields {
             increment(
                 &mut artifact.extra_fields,
                 extra_key(extra.site, extra.id, extra.disposition),

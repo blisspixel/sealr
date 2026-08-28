@@ -1,0 +1,73 @@
+{
+  "schema": "sealr.tar-layout-conformance.v1",
+  "tree_encoding": "sealrTreeV2",
+  "layout_label": "sealr.tree.layout.tar-ustar.v1",
+  "content_encoding": "sealrTreeV1",
+  "content_label": "sealr.tree.content.v1",
+  "source": {
+    "sha256": "b148fa5258ac850f4dfe50276104aaa7112b2f0fbb6017488d24335bf33a7c49"
+  },
+  "covering": {
+    "member_records": { "offset": 0, "len": 2560 },
+    "terminator": { "offset": 2560, "len": 1024 },
+    "trailing_zeros": { "offset": 3584, "len": 0 }
+  },
+  "members": [
+    {
+      "canonical_path": "mission",
+      "kind": "directory",
+      "raw_name_bytes": [109, 105, 115, 115, 105, 111, 110, 47],
+      "declared_uncomp_size": 0,
+      "header": { "offset": 0, "len": 512 },
+      "payload": { "offset": 512, "len": 0 },
+      "padding": { "offset": 512, "len": 0 },
+      "mode": 420,
+      "mtime": 1788000000,
+      "header_checksum": 5466,
+      "header_sha256": "e564bfee648468907483650ad2488d08b591c24ffbe7a232971d763c8432537d",
+      "normalization_actions": [
+        { "action": "strip-directory-trailing-slash" }
+      ],
+      "actual_uncomp_size": 0,
+      "content_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "canonical_path": "mission/plan.txt",
+      "kind": "file",
+      "raw_name_bytes": [109, 105, 115, 115, 105, 111, 110, 47, 112, 108, 97, 110, 46, 116, 120, 116],
+      "declared_uncomp_size": 28,
+      "header": { "offset": 512, "len": 512 },
+      "payload": { "offset": 1024, "len": 28 },
+      "padding": { "offset": 1052, "len": 484 },
+      "mode": 420,
+      "mtime": 1788000000,
+      "header_checksum": 6293,
+      "header_sha256": "398c8178e0e493a4df83a334f64b9591862260a65a2e2260f1481ee25bca6e43",
+      "normalization_actions": [],
+      "actual_uncomp_size": 28,
+      "content_sha256": "396c7ba15a940cc452f8281766643455efa524c8b3bf1d9b75e609732d8bc0b9"
+    },
+    {
+      "canonical_path": "mission/telemetry.bin",
+      "kind": "file",
+      "raw_name_bytes": [109, 105, 115, 115, 105, 111, 110, 47, 116, 101, 108, 101, 109, 101, 116, 114, 121, 46, 98, 105, 110],
+      "declared_uncomp_size": 4,
+      "header": { "offset": 1536, "len": 512 },
+      "payload": { "offset": 2048, "len": 4 },
+      "padding": { "offset": 2052, "len": 508 },
+      "mode": 420,
+      "mtime": 1788000000,
+      "header_checksum": 6811,
+      "header_sha256": "ad3d345538f36a946f27c71a3bf1f91686bbe6e41c6be143a2fa81333ccbcb5f",
+      "normalization_actions": [],
+      "actual_uncomp_size": 4,
+      "content_sha256": "03ac674216f3e15c761ee1a5e255f067953623c8b388b4459e13f978d7c846f4"
+    }
+  ],
+  "layout_root": {
+    "sealrTreeV2": "9802357e809cbd54eb0424d716ee1f16830e4b4d75ec6c45fbed3c17758eb70d"
+  },
+  "content_root": {
+    "sealrTreeV1": "49cce4ddb7c115bb182269a766dbe8942686303a39a57b4208120eb91104857c"
+  }
+}

@@ -21,7 +21,7 @@ Do not include malware or sensitive third-party data. A synthetic proof is prefe
 
 ## Current status
 
-There is no production-ready or stable supported version. The current limitations are listed in [README.md](README.md). The complete pinned ZipDiff construction corpus is enforced in CI. Portable UTF-8 paths are supported preview behavior, while production containment, legacy CP437, signed receipts, ZIP64, and non-ZIP formats are not complete.
+There is no production-ready or stable supported version. The current limitations are listed in [README.md](README.md). The complete pinned ZipDiff construction corpus is enforced in CI. Portable UTF-8 ZIP paths and the explicitly selected raw portable ustar profile are supported preview behavior. Production containment, legacy CP437, signed receipts, ZIP64, compressed TAR, rich TAR dialects, and the remaining non-ZIP families are not complete.
 
 Materialization is supported on Linux, macOS, and Windows. Other platforms reject materialization with `materialize.unsupported` rather than falling back to a weaker publication primitive.
 

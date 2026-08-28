@@ -10,7 +10,7 @@ use std::path::Path;
 #[cfg(target_os = "linux")]
 use serde::Deserialize;
 
-use crate::{ApplyOptions, Outcome, Policy, Request, Source};
+use crate::{ApplyOptions, ArchiveSelection, Outcome, Policy, Request, Source};
 
 #[cfg(target_os = "linux")]
 mod linux;
@@ -135,18 +135,50 @@ pub fn apply_supervised(
     options: &ApplyOptions,
     worker: &LinuxWorker,
 ) -> Result<Outcome, SupervisionError> {
+    let profile = supervised_zip_profile(options)?;
     #[cfg(target_os = "linux")]
     {
-        linux::apply(request, options, worker)
+        linux::apply(request, options, profile, worker)
     }
 
     #[cfg(not(target_os = "linux"))]
     {
-        let _ = (request, options, worker);
+        let _ = (request, options, profile, worker);
         Err(SupervisionError::new(
             SupervisionErrorKind::IsolationUnavailable,
             "supervised archive execution requires Linux",
         ))
+    }
+}
+
+fn supervised_zip_profile(
+    options: &ApplyOptions,
+) -> Result<crate::ZipInterpretationProfile, SupervisionError> {
+    match options.archive_selection() {
+        ArchiveSelection::Zip(profile) => Ok(profile),
+        _ => Err(SupervisionError::new(
+            SupervisionErrorKind::IsolationUnavailable,
+            "the authenticated worker contract currently supports ZIP profiles only",
+        )),
+    }
+}
+
+#[cfg(test)]
+mod selection_tests {
+    use super::*;
+    use crate::TarInterpretationProfile;
+
+    #[test]
+    fn worker_boundary_accepts_only_an_explicit_zip_selection() {
+        assert_eq!(
+            supervised_zip_profile(&ApplyOptions::new()).unwrap(),
+            crate::ZipInterpretationProfile::StrictAsciiV1
+        );
+        let tar = ApplyOptions::new()
+            .with_tar_interpretation_profile(TarInterpretationProfile::UstarPortableV1);
+        let error = supervised_zip_profile(&tar).unwrap_err();
+        assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
+        assert!(error.to_string().contains("ZIP profiles only"));
     }
 }
 

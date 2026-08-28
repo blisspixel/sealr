@@ -1,6 +1,6 @@
 # Near-term execution plan
 
-> Status: active plan through the Alpha.8 portable-name and supported-consumer increment. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
+> Status: active plan after the Alpha.9 portable-ustar and multi-format-core increment. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
 
 The next work should produce thin, independently reviewable trust increments. Each increment must finish with a useful artifact, explicit evidence, and a bounded claim. Work that merely makes the codebase larger does not count as progress.
 
@@ -22,9 +22,21 @@ Wheel         research proof [done]   -> supported evaluator [done] -> targeted 
 
 The assurance and wheel lanes may add test, corpus, and research tooling. They do not add a fallback parser or silently widen the shipped profile. The exact Kani, mutation, coverage, and promotion contracts are recorded in [assurance discovery and promotion](assurance-promotion.md).
 
-## Immediate post-Alpha.8 sequence
+## Immediate post-Alpha.9 sequence
 
-Alpha.6 shipped the public fail-closed Linux supervisor and capability boundary. Alpha.7 closed the repository-only wheel research proof. Alpha.8 adds the supported portable UTF-8 profile, public capability-only wheel evaluator, exact public consumer identity golden, and v3 replay over the pinned 20-wheel corpus. The next consumer gate is targeted benign coverage for Unicode, `.data`, and data descriptors, followed by stable identity and API review. Assurance history, authenticated recovery, and durability continue in parallel.
+Alpha.6 shipped the public fail-closed Linux supervisor and capability boundary. Alpha.7 closed the repository-only wheel research proof. Alpha.8 added the supported portable UTF-8 profile, public capability-only wheel evaluator, exact public consumer identity golden, and v3 replay over the pinned 20-wheel corpus. Alpha.9 adds a strict portable POSIX ustar profile with zero new runtime dependencies and separately versioned TAR layout evidence while preserving every ZIP profile and root. Format-native evidence, explicit retained payload plans, one crate-private non-cloneable `ReadyArchive` execution authority, and domain-zero raw snapshots with an empty transform graph are now landed. The immediate next gate is a bounded private derived-snapshot constructor and transformation identity binding. ZIP64 then tests the neutral original-snapshot path before gzip/TAR uses the existing `flate2` through a bounded derived snapshot. The next consumer gate remains targeted benign wheel coverage followed by stable identity and API review. Assurance history, authenticated recovery, and durability continue in parallel.
+
+### Alpha.9 portable ustar gates
+
+1. Keep `apply()` byte-for-byte compatible and require explicit TAR profile selection.
+2. Accept only exact POSIX ustar regular files and directories. Deny PAX, GNU, links, sparse, devices, base-256, concatenation, and hidden padding.
+3. Add no runtime dependency and no `Cargo.lock` change.
+4. Reuse one snapshot, quota, portable path, Store verification, retention, later-read, and atomic materialization core.
+5. Preserve ZIP `ArchiveIR` and `sealrTreeV1`; publish separately identified TAR evidence and layout encoding.
+6. Prove inspect, retained read, non-retained read, traversal denial, external producer interoperability, and native materialization through public APIs.
+7. Keep supervised TAR typed as unavailable without in-process fallback until the semantic worker record is generalized.
+8. Add independent profile, covering, layout, content, extracted-package, native CLI, and checksum-aware fuzz gates.
+9. Publish the complete major-format and dependency matrix before claiming broad format support.
 
 1. **Extend semantic assurance.** **Allocation, ownership, bounded shadow parity, shared planning, and near-limit completion measurement landed:** input-sized validation is fallible or allocation-free; invalid completion decode materializes no IR; accepted decode materializes one fallibly reconstructed IR; findings move instead of cloning; and a deterministic failpoint walk covers every reconstruction reservation. A required isolated-child probe pins a 67,041,104-byte plan and enforces that completion reconstruction adds less than 1 MiB transient requested heap above its one logical output. The frozen 12-case v1 artifact and 12 additive v2 cases pin exact bounded evidence from the production-compiled owning planner, the plan-native completion boundary, and the explicitly labeled supervisor-reproduction oracle. Their apply oracle intentionally runs a separate complete public operation for differential comparison. Clean exact-main on-demand and first scheduled-event fuzz evidence are in the [assurance ledger](assurance.md#current-evidence). Parity beyond these named fixtures and accumulated scheduled history remain open.
 2. **Close the pre-parser Linux authority gate.** **No-descendant, permission-mutation, raw ancillary, authority-epoch deadline, repeated-stress, sealed-blob, isolated inspect, and private writer controls landed:** the x86_64 bootstrap installs an architecture-checked `TSYNC` seccomp-BPF deny set after Landlock and before source transfer, directly probes representative denial, and exposes filter readiness for supervisor observation. Its raw `recvmsg` path validates every returned control header, accepts exactly one `SCM_RIGHTS` record, rejects kernel-generated unknown ancillary, malformed layouts, and multiple rights records, and owns installed descriptors before reporting any framing error. The nonblocking supervisor shares one absolute monotonic deadline across each send-and-response round, polls the control socket and pidfd, and proves pidfd kill and reap before cleanup for eleven stalls across four authority epochs. Canonical semantic plan and completion records cross through bounded kernel-sealed memfds with required seals, exact length, independent SHA-256 verification, binding, descriptor, and malformed-plan evidence. The restricted worker validates the plan against its exact file-backed source and executes planned Store and Deflate ranges without structural reparse. One required 500-iteration Linux campaign cycles the 44-case non-stall matrix at least 11 times per case. A separate 500-iteration writer campaign alternates publication, audit mutation, destination race, cleanup failure, pre-result crash, and post-result crash. Both check no surviving child, descriptor-count growth, source or outside-sentinel change, or cleanup before reap.
@@ -44,6 +56,7 @@ Together, these completed increments freeze what the worker may mean, how read o
 | Alpha.6 | Reduced-authority Linux execution | Enforced worker, minimum Landlock rights, descriptor audit, supervisor re-audit, native race evidence |
 | Post-Alpha.6 research | Wheel consumer proof | Exact UTF-8 profile, bounded evaluator, hostile fixtures, identity separation, external non-reopening bridge |
 | Alpha.8 | Portable names and supported consumer | Closed Unicode profile, public four-way evaluator, source-deletion proof, exact identities, public-surface corpus replay |
+| Alpha.9 | Portable ustar and multi-format core | Explicit selection and policy authorization, zero-dependency raw ustar, TAR-native evidence, independent roots, producer corpus, package and fuzz gates |
 
 Version labels are delivery targets, not permission to cut a release with a red gate. If an increment changes identity or interpretation, it receives a new profile or schema identifier and preserves prior identifiers as immutable historical contracts.
 
@@ -235,14 +248,14 @@ Evidence types remain distinct:
 
 The existing `CI` workflow remains the only required promotion authority. Scheduled assurance discovers failures. A check moves into required CI only when its runtime is bounded, failures reproduce locally, and ten consecutive scheduled runs on distinct `main` commits establish stability. Any failed scheduled run resets that category's sequence. Manual runs never count. Mutation and coverage remain discovery-only and cannot be promoted as scores. The exact machine-checked rules and current separate histories are in [assurance discovery and promotion](assurance-promotion.md).
 
-## After Alpha.8
+## After portable ustar
 
 Two implementation lanes can proceed in parallel without inventing another meaning:
 
 - **Semantic and consumer lane:** targeted benign Unicode, `.data`, and descriptor-bearing wheel evidence; stable identity and API review; and a separately versioned legacy CP437 profile only where compatibility evidence justifies it.
-- **Systems lane:** authenticated abandoned-stage recovery, explicit durability levels, and platform-specific worker research.
+- **Systems and format lane:** remove the remaining ZIP-shaped internal compatibility projection; introduce transform-chain and derived-snapshot authority; add ZIP64; then add gzip-wrapped TAR through existing `flate2`. Authenticated abandoned-stage recovery, explicit durability levels, and platform-specific worker research continue in parallel.
 
-Both lanes consume the same snapshot, `ArchiveIR`, identities, findings discipline, and conformance bundles. Common codecs and TAR remain behind the Phase 0.1 trust gate.
+Both lanes consume the same identities, findings discipline, conformance bundles, and format-neutral verification and materialization boundary. Rich TAR dialects and each additional codec remain separately gated; raw portable ustar is implemented and does not silently authorize them.
 
 Stable crate and native-binary distribution remain gated even though their mechanics are now executable. The `sealr` source package has an exact README, Apache-2.0 license, MSRV, registry, file-list, and extracted-consumer contract. Native archives name and test explicit OS, architecture, kernel or deployment, and ABI floors on fixed runner labels. The [distribution contract](distribution-contract.md) keeps those promises separate. Stable 1.0 still waits for the trust gate, supported usefulness, API and schema freeze, assurance history, and independent review.
 
