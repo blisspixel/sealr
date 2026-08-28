@@ -30,6 +30,7 @@ $ExpectedFuzzJobs = @(
     'Bounded gzip-wrapped GNU long-name TAR'
     'Bounded zstd-wrapped portable ustar TAR'
     'Bounded xz-wrapped portable ustar TAR'
+    'Bounded bzip2-wrapped portable ustar TAR'
 )
 $ExpectedCiJobs = @(
     'Format, lint, test, and docs'

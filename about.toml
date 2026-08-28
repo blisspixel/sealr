@@ -1,6 +1,9 @@
 accepted = [
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
+    # The BSD-style bzip2 license, added deliberately for libbz2-rs-sys in the
+    # executed bzip2 Gate B promotion.
+    "bzip2-1.0.6",
     "MIT",
     "Unicode-3.0",
     "Zlib",

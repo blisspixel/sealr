@@ -6,6 +6,7 @@
   "forbidden_packages": [
     "autotools",
     "bindgen",
+    "bzip2-sys",
     "cc",
     "clang-sys",
     "cmake",
@@ -18,9 +19,10 @@
   "targets": [
     {
       "target": "aarch64-apple-darwin",
-      "package_count": 52,
-      "graph_sha256": "bc14b7962b81ddf4c57adbd49f036a8117533dbb65b7f161a1d68125ed6dbc48",
+      "package_count": 54,
+      "graph_sha256": "2dff7756827aff64d7d25b24eedfcffc97caf3686f1b56489a184e664bed0cae",
       "direct_dependencies": [
+        "bzip2",
         "cap_fs_ext",
         "cap_std",
         "caseless",
@@ -63,9 +65,10 @@
     },
     {
       "target": "x86_64-pc-windows-msvc",
-      "package_count": 58,
-      "graph_sha256": "56b6252758887f0c93ad8daa05560835110cee24ee09402937ea19926e0e393a",
+      "package_count": 60,
+      "graph_sha256": "4c7efa8f929460265fc44b66fdf14103fc701f849885483f7c465f4f1b9059d2",
       "direct_dependencies": [
+        "bzip2",
         "cap_fs_ext",
         "cap_std",
         "caseless",
@@ -106,9 +109,10 @@
     },
     {
       "target": "x86_64-unknown-linux-gnu",
-      "package_count": 54,
-      "graph_sha256": "7096ac9201fa6d6d31b88d0784f44d104a013474762837e06da073094e8eea5a",
+      "package_count": 56,
+      "graph_sha256": "62f15efe65f390bee405af5930e71540c061b12d391d11456bbce1d1539351a3",
       "direct_dependencies": [
+        "bzip2",
         "cap_fs_ext",
         "cap_std",
         "caseless",

@@ -233,6 +233,7 @@ jobs:
             "Bounded gzip-wrapped GNU long-name TAR"
             "Bounded zstd-wrapped portable ustar TAR"
             "Bounded xz-wrapped portable ustar TAR"
+            "Bounded bzip2-wrapped portable ustar TAR"
           )
           for required in "${required_fuzz_jobs[@]}"; do
             count="$(jq --arg name "${required}" '[.jobs[] | select(.name == $name)] | length' <<<"${jobs_json}")"

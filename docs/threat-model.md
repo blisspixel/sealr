@@ -180,6 +180,21 @@ The xz-wrapped ustar profile is the second codec promotion. `Policy::default_v9(
 | Stream padding and concatenation | Exactly one stream must consume the complete source; the format's legal stream padding and concatenated streams are rejected rather than silently skipped. |
 | Decoder implementation faults | `lzma-rust2` 0.20.0 is pinned with `default-features = false` so the crate compiles under `forbid(unsafe_code)`, the sans-I/O core is driven incrementally with reader conveniences avoided, and a dedicated fuzz campaign exercises the wrapper. |
 
+### Bzip2 wrapper threats
+
+The bzip2-wrapped ustar profile is the third codec promotion. `Policy::default_v10()` must authorize `tar-bzip2-ustar`, and selection is explicit. Its profile digest is `f6711c0c98cff6e3a2c6b266d159413ef891c202b4898b4e1665081dce0f29ee`.
+
+| Attack | Bzip2 wrapper control |
+|---|---|
+| Memory-driven allocation abuse | Nothing attacker-declared exists: the header's level digit fixes decoder allocation at `100k + 4 × blockSize` (~3.7 MB at level 9) before decoding, comfortably inside the promotion precedent ceilings. |
+| Output-expansion abuse | The format declares no output size anywhere — no ISIZE, frame-content-size, or index analog — so `max_derived_archive_bytes` and `max_ratio` carry the whole bound against RLE1's ~51:1 in-block expansion, and the profile documentation says so explicitly. |
+| Bit-aligned structure smuggling | Blocks are not byte-aligned, so Sealr replays the container at the bit level: fixed-offset prefix checks before decoding, a unique-match eight-shift footer recovery with zero padding bits required, and a full-stream block-magic scan whose per-block CRC chain fold must reproduce the footer's combined CRC exactly. |
+| Scan false positives | A benign payload can contain the 48-bit block magic by chance with probability ~`n·2⁻⁴⁸`; that case fails the fold and is rejected — a documented benign mis-rejection bound — while hostile embedding only breaks the attacker's own admission. |
+| Integrity disclaimers or lies | The decoder verifies every block CRC and the combined CRC while streaming; Sealr independently extracts every stored CRC, replays the chain fold, and re-hashes single-block derived snapshots end to end with its own bzip2-variant CRC32. Interior multi-block re-hashing is decoder-owned, and the profile states the asymmetry. |
+| Deprecated-feature revival | The bzip1 `"BZ0"` container and the deprecated `randomised` flag fail closed — the flag is checked both at the fixed first-block offset before decoding and for every scanned block. |
+| Concatenation and trailing bytes | Exactly one stream must consume the complete source; pbzip2-shaped concatenated streams are unsupported concatenation and everything else is malformed. The concatenation-tolerant `MultiBzDecoder` reader is never used. |
+| Decoder implementation faults | `libbz2-rs-sys` 0.2.5 is the Trifecta Tech c2rust translation audited by Radically Open Security and run under Miri; the C `bzip2-sys` path is structurally excluded through the forbidden-package contract, and a dedicated fuzz campaign exercises the wrapper. |
+
 ### Wheel consumer threats
 
 Wheel evaluation adds a second semantic layer above the ZIP container. The controls below are supported Alpha.8 preview behavior in `sealr::wheel`; the Alpha.7 laboratory preserves the external installer proof. Their full contract is in [Python wheel consumer profile v1](profiles/python-wheel-v1.md).

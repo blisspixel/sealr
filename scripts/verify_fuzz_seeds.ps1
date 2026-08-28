@@ -27,6 +27,8 @@ $tarZstdManifestPath = Join-Path $workspace 'fuzz/tar-zstd-seed-manifest.json'
 $tarZstdManifest = Get-Content -Raw -LiteralPath $tarZstdManifestPath | ConvertFrom-Json
 $tarXzManifestPath = Join-Path $workspace 'fuzz/tar-xz-seed-manifest.json'
 $tarXzManifest = Get-Content -Raw -LiteralPath $tarXzManifestPath | ConvertFrom-Json
+$tarBzip2ManifestPath = Join-Path $workspace 'fuzz/tar-bzip2-seed-manifest.json'
+$tarBzip2Manifest = Get-Content -Raw -LiteralPath $tarBzip2ManifestPath | ConvertFrom-Json
 $zip64ManifestPath = Join-Path $workspace 'fuzz/zip64-seed-manifest.json'
 $zip64Manifest = Get-Content -Raw -LiteralPath $zip64ManifestPath | ConvertFrom-Json
 
@@ -113,6 +115,14 @@ if ($tarXzManifest.schema -ne 'sealr.tar-xz-fuzz-seeds.v1' -or
     $tarXzManifest.sanitizer -ne 'address') {
     throw 'TAR/xz fuzz manifest identity or pinned tools changed unexpectedly'
 }
+if ($tarBzip2Manifest.schema -ne 'sealr.tar-bzip2-fuzz-seeds.v1' -or
+    $tarBzip2Manifest.target -ne 'tar_bzip2_ustar_portable_v1' -or
+    $tarBzip2Manifest.toolchain -ne 'nightly-2026-08-01' -or
+    $tarBzip2Manifest.cargoFuzzVersion -ne '0.13.2' -or
+    $tarBzip2Manifest.libfuzzerSysVersion -ne '0.4.13' -or
+    $tarBzip2Manifest.sanitizer -ne 'address') {
+    throw 'TAR/bzip2 fuzz manifest identity or pinned tools changed unexpectedly'
+}
 if ($zip64Manifest.schema -ne 'sealr.zip64-fuzz-seeds.v1' -or
     $zip64Manifest.target -ne 'zip64_strict_ascii_v1' -or
     $zip64Manifest.toolchain -ne 'nightly-2026-08-01' -or
@@ -189,6 +199,9 @@ foreach ($name in $expectedTarGzipBounds.Keys) {
     if ($tarXzManifest.bounds.$name -ne $expectedTarGzipBounds[$name]) {
         throw "TAR/xz fuzz bound $name changed unexpectedly"
     }
+    if ($tarBzip2Manifest.bounds.$name -ne $expectedTarGzipBounds[$name]) {
+        throw "TAR/bzip2 fuzz bound $name changed unexpectedly"
+    }
 }
 $expectedZip64Bounds = [ordered]@{
     maxInputBytes = 1048576
@@ -256,6 +269,11 @@ if ($tarXzManifest.failureArtifact.directoryName -ne 'sealr-tar-xz-fuzz-artifact
     $tarXzManifest.failureArtifact.uploadOn -ne 'failure' -or
     $tarXzManifest.failureArtifact.retentionDays -ne 7) {
     throw 'TAR/xz fuzz failure artifact policy changed unexpectedly'
+}
+if ($tarBzip2Manifest.failureArtifact.directoryName -ne 'sealr-tar-bzip2-fuzz-artifacts' -or
+    $tarBzip2Manifest.failureArtifact.uploadOn -ne 'failure' -or
+    $tarBzip2Manifest.failureArtifact.retentionDays -ne 7) {
+    throw 'TAR/bzip2 fuzz failure artifact policy changed unexpectedly'
 }
 if ($zip64Manifest.failureArtifact.directoryName -ne 'sealr-zip64-fuzz-artifacts' -or
     $zip64Manifest.failureArtifact.uploadOn -ne 'failure' -or
@@ -820,6 +838,80 @@ function Assert-TarXzManifestContract {
 
 Assert-TarXzManifestContract -Candidate $tarXzManifest
 
+function Assert-TarBzip2ManifestContract {
+    param([Parameter(Mandatory)] [object] $Candidate)
+
+    $rootProperties = @($Candidate.PSObject.Properties.Name | Sort-Object)
+    $expectedRootProperties = @(
+        'bounds', 'cargoFuzzVersion', 'dictionary', 'failureArtifact', 'generator', 'generatorSource',
+        'libfuzzerSysVersion', 'sanitizer', 'schema', 'seeds', 'target', 'targetSource',
+        'toolchain'
+    ) | Sort-Object
+    if (($rootProperties -join "`n") -cne ($expectedRootProperties -join "`n") -or
+        $Candidate.schema -cne 'sealr.tar-bzip2-fuzz-seeds.v1' -or
+        $Candidate.target -cne 'tar_bzip2_ustar_portable_v1' -or
+        $Candidate.toolchain -cne 'nightly-2026-08-01' -or
+        $Candidate.cargoFuzzVersion -cne '0.13.2' -or
+        $Candidate.libfuzzerSysVersion -cne '0.4.13' -or
+        $Candidate.sanitizer -cne 'address' -or
+        $Candidate.generator -cne 'fuzz/generate_tar_bzip2_fuzz_seeds.ps1') {
+        throw 'TAR/bzip2 fuzz manifest root contract changed'
+    }
+    $boundProperties = @($Candidate.bounds.PSObject.Properties.Name | Sort-Object)
+    if (($boundProperties -join "`n") -cne ((@($expectedTarGzipBounds.Keys) | Sort-Object) -join "`n")) {
+        throw 'TAR/bzip2 fuzz manifest bound set changed'
+    }
+    foreach ($name in $expectedTarGzipBounds.Keys) {
+        if ($Candidate.bounds.$name -ne $expectedTarGzipBounds[$name]) {
+            throw "TAR/bzip2 fuzz manifest weakened bound: $name"
+        }
+    }
+    if ((@($Candidate.failureArtifact.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('directoryName', 'retentionDays', 'uploadOn') | Sort-Object) -join "`n") -or
+        $Candidate.failureArtifact.directoryName -cne 'sealr-tar-bzip2-fuzz-artifacts' -or
+        $Candidate.failureArtifact.uploadOn -cne 'failure' -or
+        $Candidate.failureArtifact.retentionDays -ne 7) {
+        throw 'TAR/bzip2 fuzz manifest artifact contract changed'
+    }
+    if ((@($Candidate.dictionary.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.dictionary.path -cne 'fuzz/dictionaries/tar_bzip2_ustar_portable_v1_dictionary' -or
+        $Candidate.dictionary.bytes -ne 425 -or
+        $Candidate.dictionary.sha256 -cne '370eff71769ecb3fd10a93e71ffe81f6ebbc9686dd6d626816e4d25d6bd7283a') {
+        throw 'TAR/bzip2 fuzz manifest dictionary contract changed'
+    }
+    if ((@($Candidate.targetSource.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.targetSource.path -cne 'fuzz/fuzz_targets/tar_bzip2_ustar_portable_v1.rs' -or
+        $Candidate.targetSource.bytes -ne 2762 -or
+        $Candidate.targetSource.sha256 -cne 'abc133cd0667c2ad25129aca31de020346e5a8eb09b382df6c88535de81e041f') {
+        throw 'TAR/bzip2 fuzz manifest target binding changed'
+    }
+    if ((@($Candidate.generatorSource.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.generatorSource.path -cne 'fuzz/generate_tar_bzip2_fuzz_seeds.ps1' -or
+        $Candidate.generatorSource.bytes -ne 6882 -or
+        $Candidate.generatorSource.sha256 -cne 'bafed11cd7559e6ef134fcd6ce56cd4cee22c61e62faaa4883b5fa64fd05aced') {
+        throw 'TAR/bzip2 fuzz manifest generator binding changed'
+    }
+    $seeds = @($Candidate.seeds)
+    $seedPaths = @($seeds.path)
+    if ($seeds.Count -ne 14 -or
+        @($seedPaths | Select-Object -Unique).Count -ne 14 -or
+        ($seedPaths -join "`n") -cne (($seedPaths | Sort-Object) -join "`n")) {
+        throw 'TAR/bzip2 fuzz manifest seed set is not exact, unique, and sorted'
+    }
+    foreach ($seed in $seeds) {
+        if ((@($seed.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+                ((@('bytes', 'generated', 'path', 'sha256') | Sort-Object) -join "`n") -or
+            $seed.generated -isnot [bool] -or -not $seed.generated) {
+            throw 'TAR/bzip2 fuzz manifest seed entry contract changed'
+        }
+    }
+}
+
+Assert-TarBzip2ManifestContract -Candidate $tarBzip2Manifest
+
 Assert-ManifestFile -Entry $manifest.dictionary
 foreach ($seed in $manifest.seeds) {
     Assert-ManifestFile -Entry $seed
@@ -876,6 +968,12 @@ Assert-ManifestFile -Entry $tarXzManifest.dictionary
 Assert-ManifestFile -Entry $tarXzManifest.targetSource
 Assert-ManifestFile -Entry $tarXzManifest.generatorSource
 foreach ($seed in $tarXzManifest.seeds) {
+    Assert-ManifestFile -Entry $seed
+}
+Assert-ManifestFile -Entry $tarBzip2Manifest.dictionary
+Assert-ManifestFile -Entry $tarBzip2Manifest.targetSource
+Assert-ManifestFile -Entry $tarBzip2Manifest.generatorSource
+foreach ($seed in $tarBzip2Manifest.seeds) {
     Assert-ManifestFile -Entry $seed
 }
 Assert-ManifestFile -Entry $zip64Manifest.dictionary
@@ -1003,6 +1101,17 @@ $declaredTarXzSeeds = @($tarXzManifest.seeds.path | Sort-Object)
 if ($actualTarXzSeeds.Count -ne $declaredTarXzSeeds.Count -or
     @(Compare-Object $actualTarXzSeeds $declaredTarXzSeeds).Count -ne 0) {
     throw 'TAR/xz fuzz corpus and seed manifest contain different paths'
+}
+$tarBzip2CorpusRoot = Join-Path $workspace 'fuzz/corpus/tar_bzip2_ustar_portable_v1'
+$actualTarBzip2Seeds = @(
+    Get-ChildItem -LiteralPath $tarBzip2CorpusRoot -File |
+        ForEach-Object { [IO.Path]::GetRelativePath($workspace, $_.FullName).Replace('\', '/') } |
+        Sort-Object
+)
+$declaredTarBzip2Seeds = @($tarBzip2Manifest.seeds.path | Sort-Object)
+if ($actualTarBzip2Seeds.Count -ne $declaredTarBzip2Seeds.Count -or
+    @(Compare-Object $actualTarBzip2Seeds $declaredTarBzip2Seeds).Count -ne 0) {
+    throw 'TAR/bzip2 fuzz corpus and seed manifest contain different paths'
 }
 $zip64CorpusRoot = Join-Path $workspace 'fuzz/corpus/zip64_strict_ascii_v1'
 $actualZip64Seeds = @(
@@ -1501,6 +1610,90 @@ try {
         Remove-Item -LiteralPath $resolvedTarXzGenerationRoot -Recurse -Force
     }
 }
+
+if ([string]$tarBzip2Manifest.generator -cne 'fuzz/generate_tar_bzip2_fuzz_seeds.ps1') {
+    throw 'TAR/bzip2 fuzz seed generator path changed unexpectedly'
+}
+$generatedTarBzip2Seeds = @(
+    $tarBzip2Manifest.seeds | Where-Object { $_.generated -is [bool] -and $_.generated }
+)
+if ($generatedTarBzip2Seeds.Count -ne 14 -or
+    @($tarBzip2Manifest.seeds | Where-Object { $_.generated -isnot [bool] }).Count -ne 0 -or
+    @($tarBzip2Manifest.seeds | Where-Object { $_.generated -is [bool] -and -not $_.generated }).Count -ne 0) {
+    throw 'TAR/bzip2 fuzz seeds must classify exactly 14 generated entries'
+}
+$requiredTarBzip2Seeds = @(
+    'invalid-block-crc'
+    'invalid-footer-corruption'
+    'invalid-magic'
+    'invalid-payload-corruption'
+    'invalid-trailing-byte'
+    'invalid-truncated'
+    'resource-derived-over-cap'
+    'unsupported-bzip1-version'
+    'unsupported-concatenated-streams'
+    'unsupported-empty-stream'
+    'unsupported-level-zero'
+    'unsupported-randomized-block'
+    'valid-cli-level1-single-block'
+    'valid-cli-level9-single-block'
+)
+$actualTarBzip2SeedNames = @(
+    $tarBzip2Manifest.seeds.path |
+        ForEach-Object { [IO.Path]::GetFileName([string]$_) }
+)
+foreach ($requiredSeed in $requiredTarBzip2Seeds) {
+    if (@($actualTarBzip2SeedNames | Where-Object { $_ -ceq $requiredSeed }).Count -ne 1) {
+        throw "TAR/bzip2 corpus must contain exactly one required seed: $requiredSeed"
+    }
+}
+$tarBzip2Generator = Join-Path $workspace ([string]$tarBzip2Manifest.generator)
+$tarBzip2GenerationRoot = Join-Path (
+    [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar
+    )
+) ("sealr-tar-bzip2-fuzz-seeds-{0}" -f [Guid]::NewGuid().ToString('N'))
+try {
+    & $tarBzip2Generator -OutputDirectory $tarBzip2GenerationRoot
+    $actualGeneratedTarBzip2Names = @(
+        Get-ChildItem -LiteralPath $tarBzip2GenerationRoot -File |
+            ForEach-Object Name |
+            Sort-Object
+    )
+    $expectedGeneratedTarBzip2Names = @(
+        $generatedTarBzip2Seeds.path |
+            ForEach-Object { [IO.Path]::GetFileName([string]$_) } |
+            Sort-Object
+    )
+    if ($actualGeneratedTarBzip2Names.Count -ne $expectedGeneratedTarBzip2Names.Count -or
+        @(Compare-Object $actualGeneratedTarBzip2Names $expectedGeneratedTarBzip2Names).Count -ne 0) {
+        throw 'TAR/bzip2 fuzz seed generator produced a different exact file set'
+    }
+    foreach ($entry in $generatedTarBzip2Seeds) {
+        $generatedPath = Join-Path $tarBzip2GenerationRoot ([IO.Path]::GetFileName([string]$entry.path))
+        $generatedFile = Get-Item -LiteralPath $generatedPath
+        $generatedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $generatedPath).Hash.ToLowerInvariant()
+        if ($generatedFile.Length -ne $entry.bytes -or $generatedHash -cne [string]$entry.sha256) {
+            throw "TAR/bzip2 fuzz seed generator did not reproduce $($entry.path)"
+        }
+    }
+} finally {
+    if (Test-Path -LiteralPath $tarBzip2GenerationRoot) {
+        $resolvedTarBzip2GenerationRoot = [IO.Path]::GetFullPath($tarBzip2GenerationRoot)
+        $generationParent = [IO.Path]::GetDirectoryName($resolvedTarBzip2GenerationRoot)
+        $generationLeaf = [IO.Path]::GetFileName($resolvedTarBzip2GenerationRoot)
+        $expectedTemporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+            [IO.Path]::DirectorySeparatorChar,
+            [IO.Path]::AltDirectorySeparatorChar
+        )
+        if ($generationParent -cne $expectedTemporaryParent -or
+            $generationLeaf -notmatch '^sealr-tar-bzip2-fuzz-seeds-[0-9a-f]{32}$') {
+            throw "refusing to remove unexpected TAR/bzip2 fuzz generation path: $resolvedTarBzip2GenerationRoot"
+        }
+        Remove-Item -LiteralPath $resolvedTarBzip2GenerationRoot -Recurse -Force
+    }
+}
 if ([string]$zip64Manifest.generator -cne 'fuzz/generate_zip64_fuzz_seeds.ps1') {
     throw 'ZIP64 fuzz seed generator path changed unexpectedly'
 }
@@ -1825,6 +2018,9 @@ $tarZstdTarget = Get-Content -Raw -LiteralPath (
 $tarXzTarget = Get-Content -Raw -LiteralPath (
     Join-Path $workspace 'fuzz/fuzz_targets/tar_xz_ustar_portable_v1.rs'
 )
+$tarBzip2Target = Get-Content -Raw -LiteralPath (
+    Join-Path $workspace 'fuzz/fuzz_targets/tar_bzip2_ustar_portable_v1.rs'
+)
 $zip64Target = Get-Content -Raw -LiteralPath (
     Join-Path $workspace 'fuzz/fuzz_targets/zip64_strict_ascii_v1.rs'
 )
@@ -2060,6 +2256,7 @@ function Assert-FuzzMetadataBinding {
         'gzip_rfc1952_single_member_v1'
         'protocol_decoders'
         'semantic_records'
+        'tar_bzip2_ustar_portable_v1'
         'tar_gnu_longname_portable_v1'
         'tar_gzip_gnu_longname_portable_v1'
         'tar_gzip_pax_portable_v1'
@@ -2071,7 +2268,7 @@ function Assert-FuzzMetadataBinding {
         'zip64_strict_ascii_v1'
     )
     if (($targetNames -join "`n") -cne ($expectedTargetNames -join "`n")) {
-        throw 'Cargo metadata must contain exactly the gzip, protocol, semantic, TAR, PAX, GNU long-name TAR, TAR/gzip, TAR/gzip PAX, TAR/gzip GNU long-name, TAR/zstd, TAR/xz, and ZIP64 fuzz targets'
+        throw 'Cargo metadata must contain exactly the gzip, protocol, semantic, TAR, PAX, GNU long-name TAR, TAR/gzip, TAR/gzip PAX, TAR/gzip GNU long-name, TAR/zstd, TAR/xz, TAR/bzip2, and ZIP64 fuzz targets'
     }
     $manifestDirectory = Split-Path ([IO.Path]::GetFullPath($ManifestPath)) -Parent
     foreach ($targetContract in @(
@@ -2118,6 +2315,10 @@ function Assert-FuzzMetadataBinding {
         @{
             Name = 'tar_xz_ustar_portable_v1'
             RelativePath = 'fuzz_targets/tar_xz_ustar_portable_v1.rs'
+        }
+        @{
+            Name = 'tar_bzip2_ustar_portable_v1'
+            RelativePath = 'fuzz_targets/tar_bzip2_ustar_portable_v1.rs'
         }
         @{
             Name = 'zip64_strict_ascii_v1'
@@ -2583,6 +2784,52 @@ function Assert-TarXzFuzzTargetSource {
     }
 }
 
+
+function Assert-TarBzip2FuzzTargetSource {
+    param([Parameter(Mandatory)] [string] $TargetSource)
+
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($TargetSource)
+    $digest = [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData($bytes)
+    ).ToLowerInvariant()
+    if ($bytes.Length -ne $tarBzip2Manifest.targetSource.bytes -or
+        $digest -cne [string]$tarBzip2Manifest.targetSource.sha256) {
+        throw 'TAR/bzip2 fuzz target source differs from its digest-pinned contract'
+    }
+    foreach ($contract in @(
+        @{ Token = 'fuzz_target!(|input: &[u8]| {'; Count = 1 }
+        @{ Token = 'apply_with_options('; Count = 1 }
+        @{ Token = 'Policy::default_v10()'; Count = 1 }
+        @{ Token = 'policy.max_archive_bytes = MAX_INPUT_BYTES as u64;'; Count = 1 }
+        @{ Token = 'policy.max_derived_archive_bytes = Some(131_072);'; Count = 1 }
+        @{ Token = 'policy.max_metadata_bytes = 32_768;'; Count = 1 }
+        @{ Token = 'policy.max_files = 64;'; Count = 1 }
+        @{ Token = 'policy.max_member_bytes = 32_768;'; Count = 1 }
+        @{ Token = 'policy.max_total_bytes = 65_536;'; Count = 1 }
+        @{ Token = 'policy.max_path_depth = 16;'; Count = 1 }
+        @{ Token = 'policy.max_ratio = Some(32);'; Count = 1 }
+        @{ Token = '.with_tar_bzip2_interpretation_profile(TarBzip2InterpretationProfile::UstarPortableV1)'; Count = 1 }
+        @{ Token = 'dest: None,'; Count = 1 }
+        @{ Token = 'let first = inspect();'; Count = 1 }
+        @{ Token = 'let second = inspect();'; Count = 1 }
+        @{ Token = 'format!("{:?}", first.archive_ir())'; Count = 1 }
+        @{ Token = 'assert_eq!(ir.format(), ArchiveFormat::TarBzip2Ustar);'; Count = 1 }
+    )) {
+        $count = [regex]::Matches(
+            $TargetSource,
+            [regex]::Escape([string]$contract.Token)
+        ).Count
+        if ($count -ne [int]$contract.Count) {
+            throw "TAR/bzip2 fuzz target must contain exactly $($contract.Count) live contract token(s): $($contract.Token)"
+        }
+    }
+    foreach ($forbidden in @('dest: Some(', '__fuzz_tar_', 'unsafe {')) {
+        if ($TargetSource.Contains($forbidden, [StringComparison]::Ordinal)) {
+            throw "TAR/bzip2 public fuzz target contains forbidden source: $forbidden"
+        }
+    }
+}
+
 function Assert-Zip64FuzzTargetSource {
     param([Parameter(Mandatory)] [string] $TargetSource)
 
@@ -2722,6 +2969,13 @@ function Assert-FuzzCargoManifestContract {
         'doc = false'
         'bench = false'
         ''
+        '[[bin]]'
+        'name = "tar_bzip2_ustar_portable_v1"'
+        'path = "fuzz_targets/tar_bzip2_ustar_portable_v1.rs"'
+        'test = false'
+        'doc = false'
+        'bench = false'
+        ''
         '[workspace]'
     ) -join "`n"
     if ((Normalize-WorkflowBlock $CargoManifest) -cne $expectedManifest) {
@@ -2758,6 +3012,7 @@ Assert-TarGzipPaxFuzzTargetSource -TargetSource $tarGzipPaxTarget
 Assert-TarGzipGnuLongNameFuzzTargetSource -TargetSource $tarGzipGnuLongNameTarget
 Assert-TarZstdFuzzTargetSource -TargetSource $tarZstdTarget
 Assert-TarXzFuzzTargetSource -TargetSource $tarXzTarget
+Assert-TarBzip2FuzzTargetSource -TargetSource $tarBzip2Target
 Assert-Zip64FuzzTargetSource -TargetSource $zip64Target
 Assert-FuzzCargoManifestContract -CargoManifest $fuzzCargo
 
@@ -2999,6 +3254,13 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = 'tar_bzip2_ustar_portable_v1'
+path = 'fuzz_targets/tar_bzip2_ustar_portable_v1.rs'
+test = false
+doc = false
+bench = false
+
 [workspace]
 '@
     [IO.File]::WriteAllText(
@@ -3063,6 +3325,11 @@ bench = false
     )
     [IO.File]::WriteAllText(
         (Join-Path $temporaryFixture 'fuzz_targets/tar_xz_ustar_portable_v1.rs'),
+        "fn main() {}`n",
+        [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+        (Join-Path $temporaryFixture 'fuzz_targets/tar_bzip2_ustar_portable_v1.rs'),
         "fn main() {}`n",
         [Text.UTF8Encoding]::new($false)
     )
@@ -3192,6 +3459,13 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "tar_bzip2_ustar_portable_v1"
+path = "fuzz_targets/tar_bzip2_ustar_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
 "@
     [IO.File]::WriteAllText(
@@ -3281,6 +3555,7 @@ $tarGzipPaxJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_gzip_pax'
 $tarGzipGnuLongNameJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_gzip_gnu_longname'
 $tarZstdJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_zstd_ustar'
 $tarXzJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_xz_ustar'
+$tarBzip2Job = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_bzip2_ustar'
 Assert-FuzzJobContract `
     -JobBlock $protocolJob `
     -JobManifest $manifest `
@@ -3365,6 +3640,13 @@ Assert-FuzzJobContract `
     -JobDisplayName 'Bounded xz-wrapped portable ustar TAR' `
     -FuzzStepName 'Fuzz bounded xz-wrapped portable ustar TAR' `
     -ReproducerName 'tar-xz-ustar-reproducer'
+Assert-FuzzJobContract `
+    -JobBlock $tarBzip2Job `
+    -JobManifest $tarBzip2Manifest `
+    -JobName 'tar_bzip2_ustar' `
+    -JobDisplayName 'Bounded bzip2-wrapped portable ustar TAR' `
+    -FuzzStepName 'Fuzz bounded bzip2-wrapped portable ustar TAR' `
+    -ReproducerName 'tar-bzip2-ustar-reproducer'
 
 function Assert-FuzzWorkflowContract {
     param(
@@ -3380,7 +3662,8 @@ function Assert-FuzzWorkflowContract {
         [Parameter(Mandatory)] [string] $ExpectedTarGzipPaxJob,
         [Parameter(Mandatory)] [string] $ExpectedTarGzipGnuLongNameJob,
         [Parameter(Mandatory)] [string] $ExpectedTarZstdJob,
-        [Parameter(Mandatory)] [string] $ExpectedTarXzJob
+        [Parameter(Mandatory)] [string] $ExpectedTarXzJob,
+        [Parameter(Mandatory)] [string] $ExpectedTarBzip2Job
     )
 
     $expectedHeader = @(
@@ -3412,7 +3695,8 @@ function Assert-FuzzWorkflowContract {
         (Normalize-WorkflowBlock $ExpectedTarGzipPaxJob) + "`n`n" +
         (Normalize-WorkflowBlock $ExpectedTarGzipGnuLongNameJob) + "`n`n" +
         (Normalize-WorkflowBlock $ExpectedTarZstdJob) + "`n`n" +
-        (Normalize-WorkflowBlock $ExpectedTarXzJob)
+        (Normalize-WorkflowBlock $ExpectedTarXzJob) + "`n`n" +
+        (Normalize-WorkflowBlock $ExpectedTarBzip2Job)
     if ((Normalize-WorkflowBlock $CandidateWorkflow) -cne $expectedWorkflow) {
         throw 'Scheduled fuzz workflow must exactly match its trigger, authority, concurrency, and job contracts'
     }
@@ -3431,7 +3715,8 @@ Assert-FuzzWorkflowContract `
     -ExpectedTarGzipPaxJob $tarGzipPaxJob `
     -ExpectedTarGzipGnuLongNameJob $tarGzipGnuLongNameJob `
     -ExpectedTarZstdJob $tarZstdJob `
-    -ExpectedTarXzJob $tarXzJob
+    -ExpectedTarXzJob $tarXzJob `
+    -ExpectedTarBzip2Job $tarBzip2Job
 $manualOnlyWorkflow = [regex]::Replace(
     $workflow,
     '(?m)^  schedule:\r?\n    - cron: "31 8 \* \* 1"\r?\n',
@@ -3456,7 +3741,8 @@ try {
         -ExpectedTarGzipPaxJob $tarGzipPaxJob `
         -ExpectedTarGzipGnuLongNameJob $tarGzipGnuLongNameJob `
         -ExpectedTarZstdJob $tarZstdJob `
-        -ExpectedTarXzJob $tarXzJob
+        -ExpectedTarXzJob $tarXzJob `
+        -ExpectedTarBzip2Job $tarBzip2Job
 } catch {
     $manualOnlyRejected = $true
 }
@@ -4297,6 +4583,86 @@ Assert-TarXzJobMutationRejected `
     -MutatedJob $inertArtifactTarXzJob `
     -Label 'inert artifact evidence with a drifted upload path'
 
+
+function Assert-TarBzip2JobMutationRejected {
+    param(
+        [Parameter(Mandatory)] [string] $MutatedJob,
+        [Parameter(Mandatory)] [string] $Label
+    )
+
+    if ($MutatedJob -ceq $tarBzip2Job) {
+        throw "TAR/bzip2 fuzz verifier regression could not construct its $Label fixture"
+    }
+    try {
+        Assert-FuzzJobContract `
+            -JobBlock $MutatedJob `
+            -JobManifest $tarBzip2Manifest `
+            -JobName 'tar_bzip2_ustar' `
+            -JobDisplayName 'Bounded bzip2-wrapped portable ustar TAR' `
+            -FuzzStepName 'Fuzz bounded bzip2-wrapped portable ustar TAR' `
+            -ReproducerName 'tar-bzip2-ustar-reproducer'
+    } catch {
+        return
+    }
+    throw "TAR/bzip2 fuzz verifier accepted its $Label fixture"
+}
+
+$expectedTarBzip2MaxLen = '-max_len={0} \' -f $tarBzip2Manifest.bounds.maxInputBytes
+$weakenedTarBzip2Job = $tarBzip2Job.Replace(
+    $expectedTarBzip2MaxLen,
+    '-max_len=524288 \'
+)
+Assert-TarBzip2JobMutationRejected `
+    -MutatedJob $weakenedTarBzip2Job `
+    -Label 'weakened input bound masked by other job tokens'
+
+$duplicateTarBzip2Job = $tarBzip2Job.Replace(
+    $expectedTarBzip2MaxLen,
+    "$expectedTarBzip2MaxLen`n            -max_len=524288 \"
+)
+Assert-TarBzip2JobMutationRejected `
+    -MutatedJob $duplicateTarBzip2Job `
+    -Label 'duplicate last-wins input bound'
+
+$inactiveTarBzip2Job = $tarBzip2Job.Replace(
+    '          set -euo pipefail',
+    "          if false; then`n          set -euo pipefail"
+).Replace(
+    '            -print_final_stats=1',
+    "            -print_final_stats=1`n          fi`n          true"
+)
+Assert-TarBzip2JobMutationRejected `
+    -MutatedJob $inactiveTarBzip2Job `
+    -Label 'inactive command followed by a successful no-op'
+
+$secondCommandTarBzip2Job = $tarBzip2Job.Replace(
+    '            -print_final_stats=1',
+    "            -print_final_stats=1`n          true"
+)
+Assert-TarBzip2JobMutationRejected `
+    -MutatedJob $secondCommandTarBzip2Job `
+    -Label 'second fuzz-step command'
+
+$weakenedTarBzip2Sanitizer = $tarBzip2Job.Replace(
+    '            --sanitizer address \',
+    '            --sanitizer none \'
+)
+Assert-TarBzip2JobMutationRejected `
+    -MutatedJob $weakenedTarBzip2Sanitizer `
+    -Label 'weakened sanitizer'
+
+$expectedTarBzip2ArtifactPath = '          path: ${{ runner.temp }}/sealr-tar-bzip2-fuzz-artifacts/'
+$inertArtifactTarBzip2Job = $tarBzip2Job.Replace(
+    $expectedTarBzip2ArtifactPath,
+    '          path: ${{ runner.temp }}/wrong-artifacts/'
+).Replace(
+    '        with:',
+    "        env:`n          INERT_MANIFEST_EVIDENCE: |`n            $($expectedTarBzip2ArtifactPath.Trim())`n        with:"
+)
+Assert-TarBzip2JobMutationRejected `
+    -MutatedJob $inertArtifactTarBzip2Job `
+    -Label 'inert artifact evidence with a drifted upload path'
+
 foreach ($required in @(
     'Require exact protected main fuzz evidence',
     'actions/workflows/fuzz.yml/runs',
@@ -4311,7 +4677,8 @@ foreach ($required in @(
     'Bounded gzip-wrapped restricted PAX TAR',
     'Bounded gzip-wrapped GNU long-name TAR',
     'Bounded zstd-wrapped portable ustar TAR',
-    'Bounded xz-wrapped portable ustar TAR'
+    'Bounded xz-wrapped portable ustar TAR',
+    'Bounded bzip2-wrapped portable ustar TAR'
 )) {
     if (-not $releaseWorkflow.Contains($required, [StringComparison]::Ordinal)) {
         throw "Release workflow is missing exact fuzz evidence: $required"
@@ -4332,6 +4699,7 @@ foreach ($required in @(
     "'Bounded gzip-wrapped GNU long-name TAR'",
     "'Bounded zstd-wrapped portable ustar TAR'",
     "'Bounded xz-wrapped portable ustar TAR'",
+    "'Bounded bzip2-wrapped portable ustar TAR'",
     'Get-ExactFuzzState',
     'fuzz_run_id'
 )) {
@@ -4340,4 +4708,4 @@ foreach ($required in @(
     }
 }
 
-Write-Host "Fuzz seed verification passed: $($actualSeeds.Count) protocol, $($actualSemanticSeeds.Count) semantic, $($actualTarSeeds.Count) TAR, $($actualTarPaxSeeds.Count) TAR PAX, $($actualTarGnuLongNameSeeds.Count) TAR GNU long-name, $($actualGzipSeeds.Count) gzip, $($actualTarGzipSeeds.Count) TAR/gzip, $($actualTarGzipPaxSeeds.Count) TAR/gzip PAX, $($actualTarGzipGnuLongNameSeeds.Count) TAR/gzip GNU long-name, $($actualTarZstdSeeds.Count) TAR/zstd, $($actualTarXzSeeds.Count) TAR/xz, and $($actualZip64Seeds.Count) ZIP64 seeds, pinned nightly and tool versions."
+Write-Host "Fuzz seed verification passed: $($actualSeeds.Count) protocol, $($actualSemanticSeeds.Count) semantic, $($actualTarSeeds.Count) TAR, $($actualTarPaxSeeds.Count) TAR PAX, $($actualTarGnuLongNameSeeds.Count) TAR GNU long-name, $($actualGzipSeeds.Count) gzip, $($actualTarGzipSeeds.Count) TAR/gzip, $($actualTarGzipPaxSeeds.Count) TAR/gzip PAX, $($actualTarGzipGnuLongNameSeeds.Count) TAR/gzip GNU long-name, $($actualTarZstdSeeds.Count) TAR/zstd, $($actualTarXzSeeds.Count) TAR/xz, $($actualTarBzip2Seeds.Count) TAR/bzip2, and $($actualZip64Seeds.Count) ZIP64 seeds, pinned nightly and tool versions."
