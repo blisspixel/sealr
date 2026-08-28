@@ -75,6 +75,8 @@ pub enum FindingCode {
     CodecDeflateTrailingInput,
     CodecZstdInvalidFrame,
     CodecZstdTrailingInput,
+    CodecXzInvalidStream,
+    CodecXzTrailingInput,
     CrcMismatch,
     MethodUnsupported,
 }
@@ -153,6 +155,8 @@ impl FindingCode {
             Self::CodecDeflateTrailingInput => "codec.deflate.trailing_input",
             Self::CodecZstdInvalidFrame => "codec.zstd.invalid_frame",
             Self::CodecZstdTrailingInput => "codec.zstd.trailing_input",
+            Self::CodecXzInvalidStream => "codec.xz.invalid_stream",
+            Self::CodecXzTrailingInput => "codec.xz.trailing_input",
             Self::CrcMismatch => "crc.mismatch",
             Self::MethodUnsupported => "method.unsupported",
         }

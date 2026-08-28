@@ -109,6 +109,8 @@ Unknown error codes must be treated as rejection by consumers.
 | `codec.deflate.trailing_input` | One valid DEFLATE stream ended before the declared compressed payload ended. Trailing bytes and concatenated streams are rejected. |
 | `codec.zstd.invalid_frame` | The declared Zstandard payload is not one valid RFC 8878 frame within the restricted language, the frame is truncated, or decoder accounting is inconsistent. |
 | `codec.zstd.trailing_input` | One valid Zstandard frame ended before the source ended. Concatenated frames, skippable frames, and every other trailing byte are rejected. |
+| `codec.xz.invalid_stream` | The declared XZ payload is not one valid stream within the restricted language, a structural CRC32 or index relation fails, the stream is truncated, or decoder accounting is inconsistent. |
+| `codec.xz.trailing_input` | One valid XZ stream ended before the source ended. Concatenated streams, stream padding, and every other trailing byte are rejected. |
 | `crc.mismatch` | Expanded member CRC32 disagrees with the archive. |
 
 ### Gzip wrapper

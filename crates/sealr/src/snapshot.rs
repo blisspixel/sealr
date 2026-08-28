@@ -364,6 +364,7 @@ impl<'a> SnapshotSet<'a> {
 pub(crate) enum TransformProfile {
     GzipRfc1952SingleMemberV1,
     ZstdRfc8878SingleFrameV1,
+    XzSingleStreamV1,
     #[cfg(test)]
     TestIdentityV1,
     #[cfg(test)]
@@ -375,6 +376,7 @@ impl TransformProfile {
         match self {
             Self::GzipRfc1952SingleMemberV1 => "sealr.transform.gzip.rfc1952-single-member.v1",
             Self::ZstdRfc8878SingleFrameV1 => "sealr.transform.zstd.rfc8878-single-frame.v1",
+            Self::XzSingleStreamV1 => "sealr.transform.xz.xzfmt-single-stream.v1",
             #[cfg(test)]
             Self::TestIdentityV1 => "sealr.transform.test.identity.v1",
             #[cfg(test)]
@@ -386,6 +388,7 @@ impl TransformProfile {
         match self {
             Self::GzipRfc1952SingleMemberV1 => b"algorithm=rfc1952-gzip;members=exactly-one;reserved-flags=zero;extra-fields=exact-subfield-framing-si2-nonzero-unique-ids;trailing-data=forbidden;header-crc=verify-when-present;data-crc32=verify;isize=verify;payload=rfc1951-deflate;output=bounded",
             Self::ZstdRfc8878SingleFrameV1 => b"algorithm=rfc8878-zstd;frames=exactly-one;skippable-frames=forbidden;reserved-descriptor-bit=zero;unused-descriptor-bit=zero;dictionary=forbidden;window-size-max-bytes=8388608;frame-content-size=verify-when-present;content-checksum-xxh64=verify-when-present;trailing-data=forbidden;payload=rfc8878-blocks;output=bounded",
+            Self::XzSingleStreamV1 => b"algorithm=xz-file-format-1.2.1;streams=exactly-one;blocks=one-to-4096;filter-chain=exactly-lzma2;dictionary-max-bytes=8388608;checks=crc32-crc64-sha256-verified-twice;check-none=forbidden;declared-block-sizes=both-or-neither-verified;backward-size=verify;reserved-bits=zero;stream-padding=forbidden;trailing-data=forbidden;output=bounded",
             #[cfg(test)]
             Self::TestIdentityV1 => b"algorithm=test-identity;version=1",
             #[cfg(test)]
@@ -400,6 +403,9 @@ impl TransformProfile {
             }
             Self::ZstdRfc8878SingleFrameV1 => {
                 "86745123584dc79e454f8f1bbf5a1bd1b75d1334902fd629e8eee8f251aa9d19"
+            }
+            Self::XzSingleStreamV1 => {
+                "b3c323849a366141edc28e0c5ab0028253430d0f6a5bda2ebec728c3a6543667"
             }
             #[cfg(test)]
             Self::TestIdentityV1 => {
@@ -418,6 +424,9 @@ impl TransformProfile {
             Self::ZstdRfc8878SingleFrameV1 => {
                 b"rfc8878-max-window-bytes=8388608;dictionary=none;block-decoding=bounded-incremental"
             }
+            Self::XzSingleStreamV1 => {
+                b"lzma2-dictionary-max-bytes=8388608;decoder-memory-limit-kib=8256;multiple-streams=denied;stream-decoding=bounded-incremental"
+            }
             #[cfg(test)]
             Self::TestIdentityV1 => b"mode=identity;window=none",
             #[cfg(test)]
@@ -432,6 +441,9 @@ impl TransformProfile {
             }
             Self::ZstdRfc8878SingleFrameV1 => {
                 "a4a46d31cf8acbbfe043745ba1df4f43b7a955efc28ee8913804a99bae79d503"
+            }
+            Self::XzSingleStreamV1 => {
+                "ebdf4f3d9624cad6b245054d78f84ca50f8cea18a368e0025d2812dae8799032"
             }
             #[cfg(test)]
             Self::TestIdentityV1 => {
@@ -1560,6 +1572,16 @@ mod tests {
         );
         let zstd_profile = TransformProfile::ZstdRfc8878SingleFrameV1;
         assert!(zstd_profile.validates());
+        let xz_profile = TransformProfile::XzSingleStreamV1;
+        assert!(xz_profile.validates());
+        assert_eq!(
+            transform_profile_sha256(xz_profile.id(), xz_profile.definition()).as_deref(),
+            Some(xz_profile.digest())
+        );
+        assert_eq!(
+            hex_sha256(xz_profile.decoder_parameters()),
+            xz_profile.decoder_parameters_digest()
+        );
         assert_eq!(
             transform_profile_sha256(zstd_profile.id(), zstd_profile.definition()).as_deref(),
             Some(zstd_profile.digest()),

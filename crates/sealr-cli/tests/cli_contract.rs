@@ -310,6 +310,27 @@ fn write_tar_zstd_fixture(path: &Path) {
     fs::write(path, bytes).expect("zstd-wrapped TAR fixture should be writable");
 }
 
+/// XZ Utils v5.8.1 `xz -6 -T1` output for the same conformance derived TAR
+/// holding `mission/plan.txt` with `verify twice, decode once`.
+const TAR_XZ_FIXTURE_HEX: &str = "fd377a585a000004e6d6b4460200210116000000742fe5a3e007ff00705d\
+00369a4adff3ff4173689225555d5c3da569f20e0f1e46ed67823a5dcf0c5c5749d5f12bb878efa1897bcfa2a38633f7\
+d28fc607eaad183da7c2063caa76c99a73e3434b174e4fa5f5dd59582a4d6308d2ffca92620af736cdb6f7b1240ae876\
+99d3cfb3eb7748f4ff4a5b315efe8cd37d00ec921496b86e87ef00018c0180100000853c3866b1c467fb020000000004\
+595a";
+
+fn write_tar_xz_fixture(path: &Path) {
+    let (pairs, remainder) = TAR_XZ_FIXTURE_HEX.as_bytes().as_chunks::<2>();
+    assert!(remainder.is_empty());
+    let bytes: Vec<u8> = pairs
+        .iter()
+        .map(|pair| {
+            u8::from_str_radix(std::str::from_utf8(pair).expect("hex is ASCII"), 16)
+                .expect("xz-wrapped TAR fixture hex is valid")
+        })
+        .collect();
+    fs::write(path, bytes).expect("xz-wrapped TAR fixture should be writable");
+}
+
 fn write_zip64_fixture(path: &Path) {
     let hex = "504b03042d0000000800000021000b5704bbffffffffffffffff010014006101001000100000000000000005000000000000007374440500504b01022d002d0000000800000021000b5704bb050000001000000001000000000000000000000080010000000061504b050600000000010001002f000000380000000000";
     let (pairs, remainder) = hex.as_bytes().as_chunks::<2>();
@@ -392,6 +413,7 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert!(help_text.contains("tar-gzip-pax"));
     assert!(help_text.contains("tar-gzip-gnu-longname"));
     assert!(help_text.contains("tar-zstd-ustar"));
+    assert!(help_text.contains("tar-xz-ustar"));
     assert!(help_text.contains("--worker-manifest <ABSOLUTE_PATH>"));
     assert!(help_text.contains("--version"));
 
@@ -548,6 +570,7 @@ fn explicit_tar_pax_format_inspects_materializes_and_is_not_autodetected() {
         Some("tar-gzip-pax"),
         Some("tar-gzip-gnu-longname"),
         Some("tar-zstd-ustar"),
+        Some("tar-xz-ustar"),
         Some("zip64"),
     ] {
         let output = match format {
@@ -625,6 +648,7 @@ fn explicit_tar_gnu_longname_inspects_materializes_and_is_not_autodetected() {
         Some("tar-gzip-pax"),
         Some("tar-gzip-gnu-longname"),
         Some("tar-zstd-ustar"),
+        Some("tar-xz-ustar"),
         Some("zip64"),
     ] {
         let output = match format {
@@ -715,6 +739,7 @@ fn explicit_tar_gzip_pax_format_inspects_and_materializes() {
         Some("tar-gnu-longname"),
         Some("tar-gzip-gnu-longname"),
         Some("tar-zstd-ustar"),
+        Some("tar-xz-ustar"),
     ] {
         let output = match format {
             Some(format) => sealr(&[Path::new("--format"), Path::new(format), &archive]),
@@ -808,6 +833,7 @@ fn explicit_tar_gzip_gnu_longname_format_inspects_and_materializes() {
         Some("tar-gnu-longname"),
         Some("tar-gzip-pax"),
         Some("tar-zstd-ustar"),
+        Some("tar-xz-ustar"),
     ] {
         let output = match format {
             Some(format) => sealr(&[Path::new("--format"), Path::new(format), &archive]),
@@ -903,6 +929,7 @@ fn explicit_tar_zstd_ustar_format_inspects_and_materializes() {
         Some("tar-gnu-longname"),
         Some("tar-gzip-pax"),
         Some("tar-gzip-gnu-longname"),
+        Some("tar-xz-ustar"),
     ] {
         let output = match format {
             Some(format) => sealr(&[Path::new("--format"), Path::new(format), &archive]),
@@ -912,6 +939,102 @@ fn explicit_tar_zstd_ustar_format_inspects_and_materializes() {
             output.status.code(),
             Some(2),
             "zstd-wrapped ustar fixture should not be admitted under format selection {format:?}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+#[test]
+fn explicit_tar_xz_ustar_format_inspects_and_materializes() {
+    let run = RunDirectory::create("tar-xz");
+    let archive = run.path.join("mission.tar.xz");
+    write_tar_xz_fixture(&archive);
+
+    let inspect = sealr(&[Path::new("--format"), Path::new("tar-xz-ustar"), &archive]);
+    assert_eq!(
+        inspect.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&inspect.stdout),
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    let view = json(&inspect.stdout, "xz TAR stdout");
+    let receipt = json(&inspect.stderr, "xz TAR stderr");
+    assert_eq!(view["verdict"], "allowed");
+    assert_eq!(view["source"]["magic"], "xz");
+    assert_eq!(view["members"].as_array().map(Vec::len), Some(1));
+    assert_eq!(view["members"][0]["path"], "mission/plan.txt");
+    assert_eq!(view["members"][0]["method"], "raw");
+    assert_eq!(view["members"][0]["uncomp_bytes"], 25);
+    assert_eq!(view["policy"]["id"], "sealr:policy/default/v9");
+    assert_eq!(
+        view["policy"]["digest"]["sha256"],
+        "c512895c09453f16c07ebeae94712099191b197ba9edaae384dba0fe7bb8b39e"
+    );
+    assert_eq!(
+        receipt["source"]["sha256"],
+        "54f88a8a4b418364e2c3f7747d9a40aecee3624d0d0880727e674a9cbc60a8ca"
+    );
+    assert_eq!(
+        receipt["identities"]["interpretation"]["id"],
+        "sealr.profile.tar-xz.ustar-portable.v1"
+    );
+    assert_eq!(
+        receipt["identities"]["interpretation"]["digest"]["sha256"],
+        "16ec815ab3b2c3c5f877ec04e592d1dd1a6ec41f2c7d843dd7aa2bc6b50cfd05"
+    );
+    assert_eq!(
+        receipt["identities"]["layout"]["sealrTreeV10"],
+        "558d5f8e75966e1ab4b1892e71fcf871f9670f07b3e6ef47ae6e57b6a4e05f8d"
+    );
+    assert!(receipt["identities"]["layout"].get("sealrTreeV9").is_none());
+    assert_eq!(
+        receipt["identities"]["content"]["sealrTreeV1"],
+        "bc8f6d6f7870aeab647cff08db25471a729bd2a41e095d49d6254c49afc34278"
+    );
+    assert_eq!(receipt["policy"], view["policy"]);
+
+    let destination = run.path.join("materialized");
+    let materialize = sealr(&[
+        Path::new("--format"),
+        Path::new("tar-xz-ustar"),
+        &archive,
+        Path::new("--dest"),
+        &destination,
+    ]);
+    assert_eq!(
+        materialize.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&materialize.stdout),
+        String::from_utf8_lossy(&materialize.stderr)
+    );
+    assert_eq!(
+        fs::read(destination.join("mission/plan.txt")).unwrap(),
+        b"verify twice, decode once"
+    );
+
+    for format in [
+        None,
+        Some("zip"),
+        Some("zip64"),
+        Some("tar-ustar"),
+        Some("tar-gzip-ustar"),
+        Some("tar-pax"),
+        Some("tar-gnu-longname"),
+        Some("tar-gzip-pax"),
+        Some("tar-gzip-gnu-longname"),
+        Some("tar-zstd-ustar"),
+    ] {
+        let output = match format {
+            Some(format) => sealr(&[Path::new("--format"), Path::new(format), &archive]),
+            None => sealr(&[&archive]),
+        };
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "xz-wrapped ustar fixture should not be admitted under format selection {format:?}: stdout={} stderr={}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );

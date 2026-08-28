@@ -18,8 +18,8 @@
   "targets": [
     {
       "target": "aarch64-apple-darwin",
-      "package_count": 51,
-      "graph_sha256": "dbfeb7ca3b794d8aa67fea97aee8c0ebac06ed60aa5b3aadf058a50e8fe209cc",
+      "package_count": 52,
+      "graph_sha256": "bc14b7962b81ddf4c57adbd49f036a8117533dbb65b7f161a1d68125ed6dbc48",
       "direct_dependencies": [
         "cap_fs_ext",
         "cap_std",
@@ -28,6 +28,7 @@
         "flate2",
         "getrandom",
         "libc",
+        "lzma_rust2",
         "pep440_rs",
         "rustix",
         "ruzstd",
@@ -62,8 +63,8 @@
     },
     {
       "target": "x86_64-pc-windows-msvc",
-      "package_count": 57,
-      "graph_sha256": "ae5639d97482b92a4d0b3a5d9535146e7209f378f6b63700bbdd189443defb14",
+      "package_count": 58,
+      "graph_sha256": "56b6252758887f0c93ad8daa05560835110cee24ee09402937ea19926e0e393a",
       "direct_dependencies": [
         "cap_fs_ext",
         "cap_std",
@@ -71,6 +72,7 @@
         "crc32fast",
         "flate2",
         "getrandom",
+        "lzma_rust2",
         "pep440_rs",
         "ruzstd",
         "serde",
@@ -104,8 +106,8 @@
     },
     {
       "target": "x86_64-unknown-linux-gnu",
-      "package_count": 53,
-      "graph_sha256": "6fe800055e86743861b102f53dcb93ecd56093bd90127b1cfad2625a3d93eb97",
+      "package_count": 54,
+      "graph_sha256": "7096ac9201fa6d6d31b88d0784f44d104a013474762837e06da073094e8eea5a",
       "direct_dependencies": [
         "cap_fs_ext",
         "cap_std",
@@ -114,6 +116,7 @@
         "flate2",
         "getrandom",
         "libc",
+        "lzma_rust2",
         "pep440_rs",
         "rustix",
         "ruzstd",
