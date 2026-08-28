@@ -28,6 +28,7 @@ Start with the [README](../README.md) for the published Alpha.9 boundary and a s
 | [Strict ASCII ZIP32 profile v2](profiles/zip-strict-ascii-v2.md) | Executable exhaustive flag and extra-field interpretation contract |
 | [Portable UTF-8 ZIP32 profile v1](profiles/zip-portable-utf8-v1.md) | Supported Unicode flag, extra-field, NFC, component, and collision contract |
 | [Portable POSIX ustar profile v1](profiles/tar-ustar-portable-v1.md) | Explicit zero-dependency TAR language, evidence, identity, producer, and fuzz contract |
+| [Strict ASCII ZIP64 profile v1](profiles/zip64-strict-ascii-v1.md) | Explicit policy-v3 in-process ZIP64 language, identity, and worker limitation |
 | [Python wheel consumer v1](profiles/python-wheel-v1.md) | Supported bounded wheel artifact and scheme-relative plan evaluator |
 | [Differentials](differentials.md) | Single-interpretation rules and the ZipDiff corpus |
 | [Reduced-authority execution](sandbox.md) | Supervisor and worker design |

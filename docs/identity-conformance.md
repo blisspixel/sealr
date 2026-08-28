@@ -1,13 +1,13 @@
 # Identity conformance and independent verification
 
-> Status: introduced in Alpha.4, extended through Alpha.8 with the repository-only wheel and supported portable UTF-8 profiles, and extended in Alpha.9 with a portable ustar profile plus independent TAR layout and content reconstruction. The vectors and verifier protect preview identities. They do not make any profile stable or turn unsigned evidence into an attestation.
+> Status: introduced in Alpha.4, extended through Alpha.8 with the repository-only wheel and supported portable UTF-8 profiles, extended in Alpha.9 with portable ustar, and extended on current main with strict ZIP64 profile and `sealrTreeV3` vectors. The vectors and verifier protect preview identities. They do not make any profile stable or turn unsigned evidence into an attestation.
 
 Sealr now publishes a small, versioned identity-conformance bundle and checks it two ways:
 
 - the production integration tests apply the embedded ZIP source bytes and separately reconstructed exact TAR producer bytes, requiring their semantic axes, findings, `ArchiveIR`, and roots to equal the committed evidence;
 - the separate `sealr-identity-verifier` workspace tool consumes those recorded facts without depending on the `sealr` crate. It checks the exact ZIP sources and covering, validates TAR covering geometry and evidence digests, and independently reconstructs each profile, layout, and content preimage.
 
-The canonical artifacts are the [ZIP v1 conformance manifest](../crates/sealr/tests/conformance/identity-v1.json), the [portable ustar profile vector](../crates/sealr/tests/conformance/tar-ustar-portable-v1.json), the [TAR layout v2 vector](../crates/sealr/tests/conformance/tar-layout-v2.json), the [independent verifier](../tools/identity-verifier), and the production [ZIP](../crates/sealr/tests/golden_identity.rs) and [TAR](../crates/sealr/tests/tar_public_api.rs) tests.
+The canonical artifacts are the [ZIP32 v1 conformance manifest](../crates/sealr/tests/conformance/identity-v1.json), the [ZIP64 v1 conformance manifest](../crates/sealr/tests/conformance/zip64-identity-v1.json), the [portable ustar profile vector](../crates/sealr/tests/conformance/tar-ustar-portable-v1.json), the [TAR layout v2 vector](../crates/sealr/tests/conformance/tar-layout-v2.json), the [independent verifier](../tools/identity-verifier), and the production [ZIP32](../crates/sealr/tests/golden_identity.rs), [ZIP64](../crates/sealr/tests/zip64_public_api.rs), and [TAR](../crates/sealr/tests/tar_public_api.rs) tests.
 
 ## Verification boundary
 
@@ -43,7 +43,7 @@ The verifier does not independently interpret ZIP flags, names, extras, or metho
 | `cases[].archive_ir` | Full serializable IR evidence, or `null` when no IR exists |
 | `layout_root`, `content_root` | `sealrTreeV1` root or explicit unavailability |
 
-The ZIP bundle has four profile vectors and four source cases. The strict ASCII v1, strict ASCII v2, wheel UTF-8 v1, and portable UTF-8 v1 canonical profile bytes are compared directly with production serialization before the standalone verifier independently hashes them. Source cases exercise strict ASCII v1 tree evidence; separate cross-platform production goldens pin strict ASCII v2 empty-tree identities and the supported wheel consumer source, archive-tree, artifact, and install-plan identities. The separate TAR vectors bind portable ustar canonical bytes, one complete declared source covering, three TAR-native member records, a `sealrTreeV2` layout root, and a format-neutral content root. They are evidence-encoding vectors, not embedded-source parser vectors.
+The ZIP32 bundle has four profile vectors and four source cases. The strict ASCII v1, strict ASCII v2, wheel UTF-8 v1, and portable UTF-8 v1 canonical profile bytes are compared directly with production serialization before the standalone verifier independently hashes them. Source cases exercise strict ASCII v1 tree evidence; separate cross-platform production goldens pin strict ASCII v2 empty-tree identities and the supported wheel consumer source, archive-tree, artifact, and install-plan identities. The separate ZIP64 manifest binds the strict profile bytes, ZIP64-native member and covering evidence, and `sealrTreeV3` layout cases through production public-API tests. The standalone verifier does not yet consume that ZIP64 manifest; independent-verifier parity is a current assurance gate. The TAR vectors bind portable ustar canonical bytes, one complete declared source covering, three TAR-native member records, a `sealrTreeV2` layout root, and a format-neutral content root. They are evidence-encoding vectors, not embedded-source parser vectors.
 
 The source cases are:
 

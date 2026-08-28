@@ -19,6 +19,14 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-ustar
 
 ZIP remains the compatibility default. `--format zip` and `--format tar-ustar` each invoke exactly one parser and use a policy that authorizes that selection.
 
+Strict ZIP64 is a separate current-main in-process preview under policy v3:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.zip --format zip64
+```
+
+`--format zip` never detects, retries, or aliases to ZIP64.
+
 ## Materialize
 
 ```text
@@ -29,6 +37,12 @@ For portable ustar:
 
 ```text
 cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-ustar --dest ./new-output
+```
+
+For strict ZIP64 in process:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.zip --format zip64 --dest ./new-output
 ```
 
 The destination must not exist, and its parent must already exist. On Linux and macOS, the parent must have a trusted owner and either deny group and other writes or use trusted sticky-directory semantics. macOS extended ACLs fail closed. Windows requires a non-remote, writable NTFS parent with persistent ACLs and creates the stage with a protected effective-TokenUser-only DACL. sealr creates a random hidden stage beside the destination, retains it as a directory capability, and resolves every validated member component through no-follow directory handles. It publishes with the platform's native no-replace operation only after every member passes policy, expansion limits, CRC32 verification, and SHA-256 calculation.
@@ -52,7 +66,7 @@ establish the complete supervised boundary or the command exits unsuccessfully
 without invoking the in-process payload path. macOS and Windows return
 isolation unavailable if this option is selected.
 
-The authenticated worker currently carries ZIP plans only. Combining `--format tar-ustar` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it never falls back to in-process verification.
+The authenticated worker currently carries semantic-record v2 ZIP32 plans only. Combining `--format tar-ustar` or `--format zip64` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it never falls back to in-process verification. ZIP64 worker support waits for semantic-record v3.
 
 ## Output contract
 
@@ -103,7 +117,7 @@ Arguments:
   <ARCHIVE>  Archive file
 
 Options:
-      --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, tar-ustar]
+      --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar]
       --dest <DEST>                      Materialize into a new directory below an existing parent
       --worker-manifest <ABSOLUTE_PATH>  Use the exact packaged Linux worker bound by this manifest
   -h, --help                             Print help

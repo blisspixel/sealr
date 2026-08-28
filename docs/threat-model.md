@@ -77,9 +77,9 @@ CRC32 is **not** authentication (paper: easy to pad while preserving CRC). We st
 |---|---|---|---|
 | C1 | Streaming vs CD-first `#` (many constructions) | LFH without CDH; LFH after EOCD; LFH in comment; descriptor hunt; holes/overlaps | **CD-first only.** Ignore unreferenced LFHs. Deny overlapping compressed ranges (also Fifield bombs). Deny LFH data that doesn’t match CD offsets. No streaming extract API in v0. Finding `zip.diff.c1_stream`. |
 | C2 | EOCDR selection `#` | Multiple EOCD signatures; comment-length skip; libzip “consistency score” | Scan backward; **one** EOCD whose comment length **exactly** matches remaining bytes. Extra EOCD signatures in the comment → finding, default **deny**. Finding `zip.diff.c2_eocd`. |
-| C3 | CDH count confusion `#` | Total vs this-disk count; 16-bit wrap; size vs count | ZIP32 counts must agree with each other and the actual CDH count. ZIP64 sentinels and records fail closed. Finding `zip.diff.c3_count`. |
+| C3 | CDH count confusion `#` | Total vs this-disk count; 16-bit wrap; size vs count | ZIP32 counts must agree with each other and the actual CDH count, and every ZIP32 profile rejects ZIP64 sentinels. The explicit ZIP64 profile resolves sentinel values once and requires legacy, ZIP64, and actual counts to agree. Finding `zip.diff.c3_count`. |
 | C4 | CD & LFH offset confusion | Gap before EOCD; prepended SFX; parsers add δ to offsets | Default **deny** prepended junk (SFX later, explicit). CD offset + CD size MUST land exactly on EOCD. LFH offsets MUST land inside the file and not overlap. Finding `zip.diff.c4_offset`. |
-| C5 | ZIP64 EOCD processing `#` (new type) | Locator vs signature search; mix ZIP64 and classic fields | Alpha.6 rejects every ZIP64 locator, EOCD record, sentinel, and semantic extra. A future ZIP64 profile must bind the locator and record and must never mix classic and ZIP64 interpretations. Finding `zip.diff.c5_zip64`. |
+| C5 | ZIP64 EOCD processing `#` (new type) | Locator vs signature search; mix ZIP64 and classic fields | ZIP32 profiles reject every ZIP64 locator, EOCD record, sentinel, and semantic extra. The explicit current-main strict ZIP64 profile binds fixed end-record and adjacent locator geometry when present, resolves each sentinel once, requires exact redundant-field agreement, and emits separate ZIP64-native evidence. It is authorized only by policy v3 and is not a ZIP32 fallback. Finding `zip.diff.c5_zip64`. |
 
 ---
 
@@ -137,7 +137,7 @@ You et al. §7.2, seven strategies:
 | **Normalize** (extract + repack to an unambiguous ZIP) | Phase 3. Powerful; must not become a second parser. Normalize **with this engine**, then the output is the artifact. |
 | Identify ambiguous patterns | **Current strict default.** Known ambiguous or malformed structure is denied. A future compatibility profile must be separately versioned rather than acting as an insecure fallback. |
 | Incorporate multiple parsers | Research/CI only (ZipDiff corpus). Not in the hot path. |
-| Fix unique/outlier behaviors | A versioned interpretation specification and executable behavior must agree. Current main has four preview profile identities, including one supported portable UTF-8 profile and one immutable wheel research profile, but none is yet stable. |
+| Fix unique/outlier behaviors | A versioned interpretation specification and executable behavior must agree. Current main has six preview profile identities: four ZIP32 profiles, one explicit strict ZIP64 profile, and portable ustar. None is yet stable. |
 | Better format design | Later (next-gen container). |
 
 Default posture: **reject ambiguity**. Future SFX or APK support would require separate named interpretation and consumer profiles recorded in evidence, never an `--insecure` fallback.
@@ -146,6 +146,6 @@ Default posture: **reject ambiguity**. Future SFX or APK support would require s
 
 ## What we are not
 
-Sealr is not an antivirus or package inventory system. It does not claim CRC is a signature and does not run competing parsers during an invocation. The current release explicitly selects exactly one strict ZIP or portable ustar parser with versioned rules and returns a structured finding at the deterministic refusal point. A rejected view may be partial and must not be treated as a complete inventory.
+Sealr is not an antivirus or package inventory system. It does not claim CRC is a signature and does not run competing parsers during an invocation. Current main explicitly selects exactly one ZIP32, strict ZIP64, or portable ustar parser with versioned rules and returns a structured finding at the deterministic refusal point. ZIP64 is in-process only under policy v3; supervised selection fails closed until semantic-record v3. A rejected view may be partial and must not be treated as a complete inventory.
 
 Property tests, fuzzing, model checking, native race stress, and release provenance support different claims. None alone establishes unique interpretation, complete filesystem race freedom, or a formally verified extractor. Every assurance result is scoped to its input domain, model, platform, tool version, and stated assumptions.

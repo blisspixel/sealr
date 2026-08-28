@@ -1,6 +1,6 @@
 # Format strategy
 
-> Current implementation: classic ZIP32 with Store and Deflate plus an explicitly selected raw portable POSIX ustar profile for regular files and directories. Rich TAR dialects, compressed wrappers, ZIP64, and the other tracked families remain profile-specific work. Format sequencing is governed by the [roadmap](../ROADMAP.md) and the detailed [format support architecture](format-support.md).
+> Current implementation: classic ZIP32 with Store and Deflate, an explicit in-process strict ZIP64 preview under policy v3, and an explicitly selected raw portable POSIX ustar profile for regular files and directories. gzip exists only as internal bounded transform and fuzz infrastructure. Rich TAR dialects, public compressed wrappers, and the other tracked families remain profile-specific work. Format sequencing is governed by the [roadmap](../ROADMAP.md) and the detailed [format support architecture](format-support.md).
 
 ## Current ZIP profiles
 
@@ -13,6 +13,8 @@ Sealr exposes four separately identified ZIP32 interpretations. The compatibilit
 - exactly one raw DEFLATE stream consuming every declared compressed byte;
 - profile-specific ASCII or strict UTF-8 NFC path rules, with no CP437 fallback;
 - no links, devices, nested extraction, or archive mode restoration.
+
+The separately identified [strict ZIP64 profile](profiles/zip64-strict-ascii-v1.md) is selected explicitly and authorized by policy v3. It reuses Store and Deflate but has its own sentinel, extra-field, end-record, locator, descriptor, IR, covering, and `sealrTreeV3` rules. ZIP32 selection never retries or aliases to it, and authenticated worker execution fails closed until semantic-record v3.
 
 The separately identified [portable ustar profile](profiles/tar-ustar-portable-v1.md) validates exact ustar magic, version, checksums, bounded octal fields, record geometry, padding, and termination. It accepts regular files and directories only, uses TAR-native IR evidence and `sealrTreeV2` layout identity, and shares the portable path, quota, verification, retention, read, and atomic materialization core.
 
@@ -57,8 +59,8 @@ The first layer constructs one archive tree. The second assigns Python packaging
 | Supervised Linux ZIP worker | Alpha.6 released | Explicit x86_64 Linux activation, authenticated packaged helper, Landlock ABI 3 plus seccomp, source replay, and supervisor audit and publication |
 | Portable UTF-8 ZIP path and tree profile | Alpha.8 supported preview | Strict UTF-8 NFC, explicit flagging, no extras, component ceilings, target collision model, and independent vector |
 | Raw portable POSIX ustar | Alpha.9 supported preview | Explicit selection, policy v2 authorization, no new runtime dependency, TAR-native evidence, independent roots, external producer corpus, native package and fuzz gates |
-| ZIP64 | Next structural increment | Exact saturated legacy and redundant ZIP64 field agreement with no new runtime dependency |
-| gzip-wrapped TAR | After transform-chain architecture | Bounded derived snapshot, exact RFC 1952 consumption and checksum, existing `flate2`, outer plus inner identities |
+| Strict ZIP64 | Current-main in-process preview | Explicit policy v3 selection, exact saturated legacy and redundant ZIP64 field agreement, `sealrTreeV3`, and worker refusal pending semantic-record v3 |
+| gzip-wrapped TAR | Internal transform and fuzz infrastructure; public profile next | Bounded derived snapshot, exact RFC 1952 consumption and checksum, existing `flate2`, outer plus inner identities |
 | PAX and GNU TAR dialects | Separate later profiles | Bounded keyword precedence, long-name behavior, link and sparse decisions, and no implicit widening of portable ustar |
 | zstd, xz/LZMA, bzip2, and LZ4 frame wrappers | Independently promoted in that order | One measured decoder at a time with exact input, memory, work, checksum, and dependency evidence |
 | ZIP Zstd, XZ/LZMA, BZip2, Deflate64 adapters | After each codec promotion | Same exact-consumption, bounded-window, and dependency rules as Deflate; no second parser |

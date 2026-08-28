@@ -44,6 +44,7 @@ The architecture review produced useful priorities, speculative extensions, and 
 | Content-addressed reuse and performance measured by avoided work | Scheduled after tree identity | Reuse needs stable content identity and verification completeness. |
 | Job-oriented `gate`, `verify`, `lock`, `explain`, and policy tooling | Scheduled after semantic types stabilize | User-facing verbs and remediation should expose the separated outcome axes rather than freeze the current combined verdict. |
 | Raw portable POSIX ustar | Initial container profile implemented in Alpha.9 | Regular files and directories only, with explicit selection, policy authorization, TAR-native evidence, and separate layout identity. |
+| Strict ZIP64 | Explicit current-main in-process preview | Policy v3 authorizes a separate strict profile with ZIP64-native IR, covering, and `sealrTreeV3`; ZIP32 does not alias, and the worker refuses it until semantic-record v3. |
 | Rich TAR, OCI, JAR, NuGet, APK, 7z, RAR4, RAR5, cpio, ar/deb, RPM, CAB, broad bindings, and generalized mount support | Profile-specific roadmap | Add each structural or consumer layer only with specified semantics, dependency budget, and equivalent assurance evidence. |
 | GPU, QAT, Mojo, and alternate codec acceleration | Deliberately deferred | A measured workload and exact semantic equivalence are prerequisites. |
 | Generic SBOM for every archive | Not adopted | A file manifest is the honest generic artifact; SBOMs require package or component semantics. |

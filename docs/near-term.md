@@ -24,7 +24,7 @@ The assurance and wheel lanes may add test, corpus, and research tooling. They d
 
 ## Immediate post-Alpha.9 sequence
 
-Alpha.6 shipped the public fail-closed Linux supervisor and capability boundary. Alpha.7 closed the repository-only wheel research proof. Alpha.8 added the supported portable UTF-8 profile, public capability-only wheel evaluator, exact public consumer identity golden, and v3 replay over the pinned 20-wheel corpus. Alpha.9 released a strict portable POSIX ustar profile with zero new runtime dependencies and separately versioned TAR layout evidence while preserving every ZIP profile and root. Format-native evidence, explicit retained payload plans, one crate-private non-cloneable `ReadyArchive` execution authority, domain-zero raw snapshots, and the bounded private derived-snapshot constructor are landed. The immediate gate is typed and atomic transformation identity. ZIP64 tests the neutral original-snapshot path before gzip/TAR uses the existing `flate2` through one validated derived snapshot. The next consumer gate remains targeted benign wheel coverage followed by stable identity and API review. Assurance history, authenticated recovery, and durability continue in parallel.
+Alpha.6 shipped the public fail-closed Linux supervisor and capability boundary. Alpha.7 closed the repository-only wheel research proof. Alpha.8 added the supported portable UTF-8 profile, public capability-only wheel evaluator, exact public consumer identity golden, and v3 replay over the pinned 20-wheel corpus. Alpha.9 released a strict portable POSIX ustar profile with zero new runtime dependencies and separately versioned TAR layout evidence while preserving every ZIP32 profile and root. Current main now exposes strict ZIP64 as an explicit in-process preview under policy v3 with ZIP64-native IR, covering, and `sealrTreeV3` evidence. ZIP32 does not alias to it, and the authenticated worker refuses it until semantic-record v3. The next format gate promotes gzip-wrapped ustar from existing bounded internal transform and fuzz infrastructure; gzip is not yet a public format. PAX and selected GNU TAR follow, then other compressed TAR wrappers and the separately gated 7z, cpio, ar/deb, CAB, RPM, and RAR5 programs. ISO 9660, UDF, and filesystem images are a separate program. The next consumer gate remains targeted benign wheel coverage followed by stable identity and API review. Assurance history, authenticated recovery, and durability continue in parallel.
 
 ### Alpha.9 portable ustar gates
 
@@ -57,6 +57,7 @@ Together, these completed increments freeze what the worker may mean, how read o
 | Post-Alpha.6 research | Wheel consumer proof | Exact UTF-8 profile, bounded evaluator, hostile fixtures, identity separation, external non-reopening bridge |
 | Alpha.8 | Portable names and supported consumer | Closed Unicode profile, public four-way evaluator, source-deletion proof, exact identities, public-surface corpus replay |
 | Alpha.9 | Portable ustar and multi-format core | Explicit selection and policy authorization, zero-dependency raw ustar, TAR-native evidence, independent roots, producer corpus, package and fuzz gates |
+| Current main | Strict ZIP64 in-process preview | Explicit policy v3 selection, non-aliasing ZIP32 default, ZIP64-native evidence, fail-closed worker refusal pending semantic-record v3 |
 
 Version labels are delivery targets, not permission to cut a release with a red gate. If an increment changes identity or interpretation, it receives a new profile or schema identifier and preserves prior identifiers as immutable historical contracts.
 
@@ -253,7 +254,7 @@ The existing `CI` workflow remains the only required promotion authority. Schedu
 Two implementation lanes can proceed in parallel without inventing another meaning:
 
 - **Semantic and consumer lane:** targeted benign Unicode, `.data`, and descriptor-bearing wheel evidence; stable identity and API review; and a separately versioned legacy CP437 profile only where compatibility evidence justifies it.
-- **Systems and format lane:** remove the remaining ZIP-shaped internal compatibility projection; introduce transform-chain and derived-snapshot authority; add ZIP64; then add gzip-wrapped TAR through existing `flate2`. Authenticated abandoned-stage recovery, explicit durability levels, and platform-specific worker research continue in parallel.
+- **Systems and format lane:** finish strict ZIP64 assurance and semantic-record v3 worker parity; promote gzip-wrapped TAR from the internal bounded transform through existing `flate2`; then add PAX and selected GNU TAR, compressed TAR codecs, 7z, cpio, ar/deb, CAB, RPM, and RAR5 through separate gates. ISO 9660, UDF, and filesystem images remain a separate program. Authenticated abandoned-stage recovery, explicit durability levels, and platform-specific worker research continue in parallel.
 
 Both lanes consume the same identities, findings discipline, conformance bundles, and format-neutral verification and materialization boundary. Rich TAR dialects and each additional codec remain separately gated; raw portable ustar is implemented and does not silently authorize them.
 

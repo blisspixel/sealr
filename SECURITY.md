@@ -21,7 +21,7 @@ Do not include malware or sensitive third-party data. A synthetic proof is prefe
 
 ## Current status
 
-There is no production-ready or stable supported version. The current limitations are listed in [README.md](README.md). The complete pinned ZipDiff construction corpus is enforced in CI. Portable UTF-8 ZIP paths and the explicitly selected raw portable ustar profile are supported preview behavior. Production containment, legacy CP437, signed receipts, ZIP64, compressed TAR, rich TAR dialects, and the remaining non-ZIP families are not complete.
+There is no production-ready or stable supported version. The latest published release is Alpha.9, and current main remains an alpha preview. The current limitations are listed in [README.md](README.md). The complete pinned ZipDiff construction corpus is enforced in CI. Portable UTF-8 ZIP paths and raw portable ustar are supported preview behavior. Current main also exposes strict ZIP64 only through the explicit `Zip64StrictAsciiV1` selection authorized by policy v3; the ZIP32 default does not detect, retry, or alias to it. Authenticated worker execution rejects ZIP64 without fallback until semantic-record v3 can represent its evidence. gzip is internal bounded transform and fuzz infrastructure, not a public format selection. Production containment, legacy CP437, signed receipts, compressed TAR, rich TAR dialects, and the remaining major-format families are not complete.
 
 Materialization is supported on Linux, macOS, and Windows. Other platforms reject materialization with `materialize.unsupported` rather than falling back to a weaker publication primitive.
 
@@ -52,6 +52,7 @@ A high-value report demonstrates that, under the default policy, sealr:
 - publishes a member outside the requested destination;
 - follows a hostile symlink or reparse point;
 - accepts two inconsistent interpretations of one archive;
+- treats a ZIP32 selection as permission to interpret ZIP64, or reports ZIP64 worker isolation without semantic-record v3;
 - exceeds a declared policy cap without rejection;
 - publishes a destination after a rejected member;
 - lets inspect and materialize produce different member trees;
