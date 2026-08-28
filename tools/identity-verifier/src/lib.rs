@@ -27,6 +27,18 @@ const ZIP64_IR_SCHEMA: &str = "sealr.archive-ir.zip64.v1";
 const ZIP64_PROFILE_SCHEMA: &str = "sealr.profile.zip64.strict-ascii.v1";
 const ZIP64_TREE_ENCODING: &str = "sealrTreeV3";
 const ZIP64_LAYOUT_LABEL: &str = "sealr.tree.layout.zip64.v1";
+const TAR_GZIP_MANIFEST_SCHEMA: &str = "sealr.tar-gzip-identity-conformance.v1";
+const TAR_GZIP_PROFILE_SCHEMA: &str = "sealr.profile.tar-gzip.ustar-portable.v1";
+const TAR_GZIP_IR_SCHEMA: &str = "sealr.archive-ir.tar-gzip-ustar.v1";
+const TAR_GZIP_TREE_ENCODING: &str = "sealrTreeV4";
+const TAR_GZIP_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gzip-ustar.v1";
+const TAR_PORTABLE_PROFILE_SCHEMA: &str = "sealr.profile.tar.ustar-portable.v1";
+const TAR_PORTABLE_PROFILE_DIGEST: &str =
+    "3c87c5ec4c1ad5377eb60ebb308e9e394aaf7a4133dddf5587829b4510af1700";
+const GZIP_TRANSFORM_ID: &str = "sealr.transform.gzip.rfc1952-single-member.v1";
+const GZIP_TRANSFORM_DEFINITION: &[u8] = b"algorithm=rfc1952-gzip;members=exactly-one;reserved-flags=zero;extra-fields=exact-subfield-framing-si2-nonzero-unique-ids;trailing-data=forbidden;header-crc=verify-when-present;data-crc32=verify;isize=verify;payload=rfc1951-deflate;output=bounded";
+const GZIP_DECODER_PARAMETERS: &[u8] = b"rfc1951-window-bits=15;preset-dictionary=none";
+const MAX_DERIVED_TAR_BYTES: u64 = 64 * 1024 * 1024;
 
 const FILE: u8 = 1;
 const DIRECTORY: u8 = 2;
@@ -205,6 +217,120 @@ struct Zip64LayoutRoot {
 struct Zip64ContentRoot {
     #[serde(rename = "sealrTreeV1")]
     sealr_tree_v1: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipManifest {
+    schema: String,
+    archive_ir_schema: String,
+    profile: TarGzipProfileVector,
+    transform: TarGzipTransformVector,
+    inner_profile: TarGzipProfileVector,
+    layout_encoding: String,
+    layout_label: String,
+    content_encoding: String,
+    content_label: String,
+    derived_tar: TarGzipDerivedTar,
+    cases: Vec<TarGzipCase>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipProfileVector {
+    id: String,
+    digest: DigestHex,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipTransformVector {
+    id: String,
+    definition_hex: String,
+    digest: DigestHex,
+    decoder_parameters_hex: String,
+    decoder_parameters_digest: DigestHex,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipDerivedTar {
+    bytes_hex: String,
+    source: DigestHex,
+    covering: TarCovering,
+    members: Vec<TarGzipMember>,
+    raw_layout_preimage_hex: String,
+    raw_layout_root: TarLayoutRoot,
+    content_root: TarContentRoot,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipMember {
+    raw_name_bytes: Vec<u8>,
+    decoded_name: String,
+    canonical_path: String,
+    components: Vec<String>,
+    kind: MemberKind,
+    declared_uncomp_size: u64,
+    tar: TarGzipMemberEvidence,
+    actual_uncomp_size: u64,
+    actual_crc: u32,
+    content_sha256: String,
+    verification: MemberVerification,
+    normalization_actions: Vec<NormalizationAction>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipMemberEvidence {
+    header: ByteRange,
+    payload: ByteRange,
+    padding: ByteRange,
+    mode: u32,
+    mtime: u64,
+    header_checksum: u32,
+    header_sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipCase {
+    id: String,
+    source_bytes_hex: String,
+    source: DigestHex,
+    gzip: GzipWrapperVector,
+    layout_preimage_hex: String,
+    layout_root: TarGzipLayoutRoot,
+    content_root: TarContentRoot,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct GzipWrapperVector {
+    flags: u8,
+    modification_time: u32,
+    extra_flags: u8,
+    operating_system: u8,
+    header: ByteRange,
+    extra: Option<ByteRange>,
+    extra_subfield_count: u32,
+    original_name: Option<ByteRange>,
+    comment: Option<ByteRange>,
+    header_crc16: Option<ByteRange>,
+    compressed_payload: ByteRange,
+    trailer: ByteRange,
+    declared_crc32: u32,
+    declared_isize: u32,
+    derived_output_len: u64,
+    derived_output_sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGzipLayoutRoot {
+    #[serde(rename = "sealrTreeV4")]
+    sealr_tree_v4: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -531,6 +657,23 @@ struct Zip64ProfileDefinition {
     redundant_metadata: &'static str,
 }
 
+#[derive(Serialize)]
+struct TarGzipProfileDefinition {
+    schema: &'static str,
+    status: &'static str,
+    format: &'static str,
+    wrapper_profile: &'static str,
+    wrapper_profile_sha256: String,
+    decoder_parameters_sha256: String,
+    gzip_members: &'static str,
+    gzip_optional_fields: &'static str,
+    gzip_integrity: &'static str,
+    gzip_trailing_input: &'static str,
+    derived_output: &'static str,
+    inner_profile: &'static str,
+    inner_profile_sha256: String,
+}
+
 pub fn verify_manifest_json(bytes: &[u8]) -> Result<VerificationSummary, VerifyError> {
     if bytes.len() > MAX_MANIFEST_BYTES {
         return Err(VerifyError::new(format!(
@@ -546,8 +689,22 @@ pub fn verify_manifest_json(bytes: &[u8]) -> Result<VerificationSummary, VerifyE
             verify_manifest(&manifest)
         }
         ZIP64_MANIFEST_SCHEMA => verify_zip64_identity_vector_json(bytes),
+        TAR_GZIP_MANIFEST_SCHEMA => verify_tar_gzip_identity_vector_json(bytes),
         schema => Err(VerifyError::new(format!("unsupported schema {schema:?}"))),
     }
+}
+
+pub fn verify_tar_gzip_identity_vector_json(
+    bytes: &[u8],
+) -> Result<VerificationSummary, VerifyError> {
+    if bytes.len() > MAX_MANIFEST_BYTES {
+        return Err(VerifyError::new(format!(
+            "TAR/gzip manifest exceeds {MAX_MANIFEST_BYTES} bytes"
+        )));
+    }
+    let manifest: TarGzipManifest = serde_json::from_slice(bytes)
+        .map_err(|error| VerifyError::new(format!("TAR/gzip JSON: {error}")))?;
+    verify_tar_gzip_manifest(&manifest)
 }
 
 pub fn verify_zip64_identity_vector_json(bytes: &[u8]) -> Result<VerificationSummary, VerifyError> {
@@ -965,6 +1122,834 @@ fn validate_zip64_ir(ir: &Zip64ArchiveIr) -> Result<(), VerifyError> {
         }
     }
     Ok(())
+}
+
+fn verify_tar_gzip_manifest(
+    manifest: &TarGzipManifest,
+) -> Result<VerificationSummary, VerifyError> {
+    if manifest.schema != TAR_GZIP_MANIFEST_SCHEMA
+        || manifest.archive_ir_schema != TAR_GZIP_IR_SCHEMA
+        || manifest.layout_encoding != TAR_GZIP_TREE_ENCODING
+        || manifest.layout_label != TAR_GZIP_LAYOUT_LABEL
+        || manifest.content_encoding != TREE_ENCODING
+        || manifest.content_label != CONTENT_LABEL
+    {
+        return Err(VerifyError::new("unsupported TAR/gzip manifest contract"));
+    }
+    const EXPECTED_CASE_IDS: [&str; 2] = ["optional-default", "minimal-stored-deflate"];
+    if manifest.cases.len() != EXPECTED_CASE_IDS.len()
+        || manifest
+            .cases
+            .iter()
+            .map(|case| case.id.as_str())
+            .ne(EXPECTED_CASE_IDS)
+    {
+        return Err(VerifyError::new(
+            "TAR/gzip v1 manifest must contain exactly the two canonical ordered cases",
+        ));
+    }
+    verify_tar_gzip_transform(&manifest.transform)?;
+    verify_tar_gzip_profile(
+        &manifest.profile,
+        &manifest.inner_profile,
+        &manifest.transform,
+    )?;
+    let derived = verify_tar_gzip_derived_tar(&manifest.derived_tar)?;
+    let raw_layout = encode_tar_gzip_inner_layout(&manifest.derived_tar)?;
+    let committed_raw_preimage = decode_hex(
+        &manifest.derived_tar.raw_layout_preimage_hex,
+        "raw TAR layout preimage",
+    )?;
+    if raw_layout != committed_raw_preimage {
+        return Err(VerifyError::new(
+            "raw TAR layout preimage does not match derived evidence",
+        ));
+    }
+    verify_digest(
+        &manifest.derived_tar.raw_layout_root.sealr_tree_v2,
+        "raw TAR layout root",
+    )?;
+    if sha256_hex(&raw_layout) != manifest.derived_tar.raw_layout_root.sealr_tree_v2 {
+        return Err(VerifyError::new("raw TAR layout root mismatch"));
+    }
+    let content_preimage = encode_tar_gzip_content(&manifest.derived_tar)?;
+    verify_digest(
+        &manifest.derived_tar.content_root.sealr_tree_v1,
+        "derived TAR content root",
+    )?;
+    if sha256_hex(&content_preimage) != manifest.derived_tar.content_root.sealr_tree_v1 {
+        return Err(VerifyError::new("derived TAR content root mismatch"));
+    }
+
+    let mut source_digests = HashSet::new();
+    let mut layout_roots = HashSet::new();
+    let mut compressed_payload_digests = HashSet::new();
+    for case in &manifest.cases {
+        verify_tar_gzip_case(case, manifest, &derived)
+            .map_err(|error| error.context(&format!("TAR/gzip case {}", case.id)))?;
+        source_digests.insert(case.source.sha256.as_str());
+        layout_roots.insert(case.layout_root.sealr_tree_v4.as_str());
+        let source = decode_hex(&case.source_bytes_hex, "gzip source bytes")?;
+        compressed_payload_digests.insert(sha256_hex(range_bytes(
+            &source,
+            case.gzip.compressed_payload,
+            "gzip compressed payload",
+        )?));
+    }
+    if source_digests.len() < 2 || layout_roots.len() < 2 || compressed_payload_digests.len() < 2 {
+        return Err(VerifyError::new(
+            "TAR/gzip cases do not prove distinct encodings and source/layout separation",
+        ));
+    }
+    if manifest.derived_tar.raw_layout_root.sealr_tree_v2
+        == manifest.cases[0].layout_root.sealr_tree_v4
+    {
+        return Err(VerifyError::new(
+            "raw TAR and wrapped TAR layouts are not separated",
+        ));
+    }
+
+    Ok(VerificationSummary {
+        profiles: 1,
+        cases: manifest.cases.len(),
+        layout_roots: manifest.cases.len() + 1,
+        content_roots: manifest.cases.len() + 1,
+    })
+}
+
+fn verify_tar_gzip_transform(transform: &TarGzipTransformVector) -> Result<(), VerifyError> {
+    if transform.id != GZIP_TRANSFORM_ID {
+        return Err(VerifyError::new("unsupported gzip transform id"));
+    }
+    let definition = decode_hex(&transform.definition_hex, "gzip transform definition")?;
+    let decoder_parameters =
+        decode_hex(&transform.decoder_parameters_hex, "gzip decoder parameters")?;
+    if definition != GZIP_TRANSFORM_DEFINITION || decoder_parameters != GZIP_DECODER_PARAMETERS {
+        return Err(VerifyError::new(
+            "gzip transform constants differ from the closed verifier registry",
+        ));
+    }
+    verify_digest(&transform.digest.sha256, "gzip transform digest")?;
+    verify_digest(
+        &transform.decoder_parameters_digest.sha256,
+        "gzip decoder-parameter digest",
+    )?;
+    let id_len = u64::try_from(transform.id.len())
+        .map_err(|_| VerifyError::new("gzip transform id length exceeds u64"))?;
+    let definition_len = u64::try_from(definition.len())
+        .map_err(|_| VerifyError::new("gzip transform definition length exceeds u64"))?;
+    let mut profile_preimage = Vec::new();
+    profile_preimage.extend_from_slice(b"sealr.transform-profile.v1\0");
+    profile_preimage.extend_from_slice(&id_len.to_be_bytes());
+    profile_preimage.extend_from_slice(transform.id.as_bytes());
+    profile_preimage.extend_from_slice(&definition_len.to_be_bytes());
+    profile_preimage.extend_from_slice(&definition);
+    if sha256_hex(&profile_preimage) != transform.digest.sha256
+        || sha256_hex(&decoder_parameters) != transform.decoder_parameters_digest.sha256
+    {
+        return Err(VerifyError::new(
+            "gzip transform or decoder parameters do not match their digest",
+        ));
+    }
+    Ok(())
+}
+
+fn verify_tar_gzip_profile(
+    profile: &TarGzipProfileVector,
+    inner: &TarGzipProfileVector,
+    transform: &TarGzipTransformVector,
+) -> Result<(), VerifyError> {
+    if profile.id != TAR_GZIP_PROFILE_SCHEMA
+        || inner.id != TAR_PORTABLE_PROFILE_SCHEMA
+        || inner.digest.sha256 != TAR_PORTABLE_PROFILE_DIGEST
+    {
+        return Err(VerifyError::new(
+            "unsupported TAR/gzip or inner TAR profile identity",
+        ));
+    }
+    verify_digest(&profile.digest.sha256, "TAR/gzip profile digest")?;
+    verify_digest(&inner.digest.sha256, "inner TAR profile digest")?;
+    let canonical = tar_gzip_profile_canonical_bytes(inner, transform)?;
+    if sha256_hex(&canonical) != profile.digest.sha256 {
+        return Err(VerifyError::new(
+            "TAR/gzip profile digest does not match reconstructed canonical bytes",
+        ));
+    }
+    Ok(())
+}
+
+fn tar_gzip_profile_canonical_bytes(
+    inner: &TarGzipProfileVector,
+    transform: &TarGzipTransformVector,
+) -> Result<Vec<u8>, VerifyError> {
+    let definition = TarGzipProfileDefinition {
+        schema: TAR_GZIP_PROFILE_SCHEMA,
+        status: "supported-preview",
+        format: "tar-gzip-ustar",
+        wrapper_profile: GZIP_TRANSFORM_ID,
+        wrapper_profile_sha256: transform.digest.sha256.clone(),
+        decoder_parameters_sha256: transform.decoder_parameters_digest.sha256.clone(),
+        gzip_members: "exactly-one",
+        gzip_optional_fields: "bounded-exact-rfc1952-framing-si2-nonzero-unique-ids",
+        gzip_integrity: "fhcrc-when-present-and-crc32-and-isize",
+        gzip_trailing_input: "denied-including-zero-padding-and-concatenation",
+        derived_output: "private-immutable-bounded-and-sha256-bound",
+        inner_profile: TAR_PORTABLE_PROFILE_SCHEMA,
+        inner_profile_sha256: inner.digest.sha256.clone(),
+    };
+    serde_json::to_vec(&definition)
+        .map_err(|error| VerifyError::new(format!("TAR/gzip profile serialization: {error}")))
+}
+
+fn verify_tar_gzip_derived_tar(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, VerifyError> {
+    let bytes = decode_hex(&derived.bytes_hex, "derived TAR bytes")?;
+    let len = u64::try_from(bytes.len())
+        .map_err(|_| VerifyError::new("derived TAR length exceeds u64"))?;
+    if len > MAX_DERIVED_TAR_BYTES {
+        return Err(VerifyError::new(format!(
+            "derived TAR exceeds the {MAX_DERIVED_TAR_BYTES}-byte verifier cap"
+        )));
+    }
+    verify_digest(&derived.source.sha256, "derived TAR digest")?;
+    if sha256_hex(&bytes) != derived.source.sha256 {
+        return Err(VerifyError::new(
+            "committed derived TAR bytes do not match their digest",
+        ));
+    }
+    if derived.members.len() > MAX_MEMBERS_PER_CASE {
+        return Err(VerifyError::new("derived TAR member limit exceeded"));
+    }
+    let records_end = checked_range_end(derived.covering.member_records, "TAR member records")?;
+    let terminator_end = checked_range_end(derived.covering.terminator, "TAR terminator")?;
+    let trailing_end = checked_range_end(derived.covering.trailing_zeros, "TAR trailing zeros")?;
+    if derived.covering.member_records.offset != 0
+        || derived.covering.terminator.offset != records_end
+        || derived.covering.terminator.len != 1024
+        || derived.covering.trailing_zeros.offset != terminator_end
+        || trailing_end != len
+        || !trailing_end.is_multiple_of(512)
+    {
+        return Err(VerifyError::new(
+            "derived TAR covering does not exactly partition complete blocks",
+        ));
+    }
+
+    let mut members: Vec<_> = derived.members.iter().collect();
+    members.sort_by_key(|member| member.tar.header.offset);
+    let mut expected_header = 0_u64;
+    let mut paths = HashSet::new();
+    for member in members {
+        if member.canonical_path.is_empty()
+            || !paths.insert(member.canonical_path.as_str())
+            || member.components.join("/") != member.canonical_path
+            || member.raw_name_bytes.is_empty()
+            || member.decoded_name.as_bytes() != member.raw_name_bytes
+        {
+            return Err(VerifyError::new(
+                "derived TAR member name evidence is invalid",
+            ));
+        }
+        let evidence = &member.tar;
+        let header_end = checked_range_end(evidence.header, "TAR member header")?;
+        let payload_end = checked_range_end(evidence.payload, "TAR member payload")?;
+        let padding_end = checked_range_end(evidence.padding, "TAR member padding")?;
+        let expected_padding = (512 - (evidence.payload.len % 512)) % 512;
+        if evidence.header.offset != expected_header
+            || evidence.header.len != 512
+            || evidence.payload.offset != header_end
+            || evidence.payload.len != member.declared_uncomp_size
+            || evidence.padding.offset != payload_end
+            || evidence.padding.len != expected_padding
+            || !padding_end.is_multiple_of(512)
+            || padding_end > records_end
+            || member.actual_uncomp_size != member.declared_uncomp_size
+            || !matches!(member.verification, MemberVerification::Verified)
+        {
+            return Err(VerifyError::new("derived TAR member geometry is invalid"));
+        }
+        let header = range_bytes(&bytes, evidence.header, "derived TAR header")?;
+        verify_tar_gzip_header(member, header)?;
+        verify_digest(&evidence.header_sha256, "derived TAR header digest")?;
+        if sha256_hex(header) != evidence.header_sha256 {
+            return Err(VerifyError::new(
+                "derived TAR header digest disagrees with committed bytes",
+            ));
+        }
+        let payload = range_bytes(&bytes, evidence.payload, "derived TAR payload")?;
+        verify_digest(&member.content_sha256, "derived TAR member content digest")?;
+        if sha256_hex(payload) != member.content_sha256
+            || crc32_ieee_bytes(payload) != member.actual_crc
+        {
+            return Err(VerifyError::new(
+                "derived TAR payload digest or CRC disagrees with evidence",
+            ));
+        }
+        if range_bytes(&bytes, evidence.padding, "derived TAR padding")?
+            .iter()
+            .any(|byte| *byte != 0)
+        {
+            return Err(VerifyError::new("derived TAR member padding is nonzero"));
+        }
+        expected_header = padding_end;
+    }
+    if expected_header != records_end {
+        return Err(VerifyError::new(
+            "derived TAR members do not fill their covering",
+        ));
+    }
+    for (range, label) in [
+        (derived.covering.terminator, "derived TAR terminator"),
+        (
+            derived.covering.trailing_zeros,
+            "derived TAR trailing zeros",
+        ),
+    ] {
+        if range_bytes(&bytes, range, label)?
+            .iter()
+            .any(|byte| *byte != 0)
+        {
+            return Err(VerifyError::new(format!("{label} contains nonzero bytes")));
+        }
+    }
+    Ok(bytes)
+}
+
+fn verify_tar_gzip_header(member: &TarGzipMember, header: &[u8]) -> Result<(), VerifyError> {
+    if header.len() != 512 || header[257..263] != *b"ustar\0" || header[263..265] != *b"00" {
+        return Err(VerifyError::new("derived TAR header is not portable ustar"));
+    }
+    if header[500..512].iter().any(|byte| *byte != 0) {
+        return Err(VerifyError::new(
+            "derived TAR reserved ustar header bytes are nonzero",
+        ));
+    }
+    if header[157..257].iter().any(|byte| *byte != 0) {
+        return Err(VerifyError::new(
+            "derived TAR linkname is not empty for the portable subset",
+        ));
+    }
+    if header[148..154]
+        .iter()
+        .any(|byte| !(b'0'..=b'7').contains(byte))
+        || header[154] != 0
+        || header[155] != b' '
+    {
+        return Err(VerifyError::new(
+            "derived TAR checksum field is not six octal digits, NUL, space",
+        ));
+    }
+    let declared_checksum = parse_tar_octal(&header[148..156], "TAR checksum")?;
+    let mut checksum_header = header.to_vec();
+    checksum_header[148..156].fill(b' ');
+    let actual_checksum = checksum_header.iter().try_fold(0_u32, |sum, byte| {
+        sum.checked_add(u32::from(*byte))
+            .ok_or_else(|| VerifyError::new("TAR checksum overflows u32"))
+    })?;
+    if declared_checksum != u64::from(actual_checksum)
+        || member.tar.header_checksum != actual_checksum
+    {
+        return Err(VerifyError::new(
+            "derived TAR checksum evidence disagrees with header bytes",
+        ));
+    }
+    let mode = parse_tar_octal(&header[100..108], "TAR mode")?;
+    let _uid = parse_tar_octal(&header[108..116], "TAR uid")?;
+    let _gid = parse_tar_octal(&header[116..124], "TAR gid")?;
+    let size = parse_tar_octal(&header[124..136], "TAR size")?;
+    let mtime = parse_tar_octal(&header[136..148], "TAR mtime")?;
+    let device_major = parse_tar_device_number(&header[329..337], "TAR devmajor")?;
+    let device_minor = parse_tar_device_number(&header[337..345], "TAR devminor")?;
+    if mode > 0o7777
+        || u32::try_from(mode).ok() != Some(member.tar.mode)
+        || size != member.declared_uncomp_size
+        || mtime != member.tar.mtime
+    {
+        return Err(VerifyError::new(
+            "derived TAR numeric evidence disagrees with header bytes",
+        ));
+    }
+    if device_major != 0 || device_minor != 0 {
+        return Err(VerifyError::new(
+            "derived TAR device numbers must be zero in the portable subset",
+        ));
+    }
+    verify_tar_owner_text(&header[265..297], "TAR uname")?;
+    verify_tar_owner_text(&header[297..329], "TAR gname")?;
+    let name = tar_text_field(&header[..100], "TAR name", false)?;
+    let prefix = tar_text_field(&header[345..500], "TAR prefix", true)?;
+    let mut raw_path = Vec::new();
+    if !prefix.is_empty() {
+        raw_path.extend_from_slice(prefix);
+        raw_path.push(b'/');
+    }
+    raw_path.extend_from_slice(name);
+    if raw_path != member.raw_name_bytes {
+        return Err(VerifyError::new(
+            "derived TAR path evidence disagrees with header bytes",
+        ));
+    }
+    let typeflag = header[156];
+    let source_is_directory = typeflag == b'5';
+    if !matches!(typeflag, 0 | b'0' | b'5')
+        || source_is_directory != matches!(member.kind, MemberKind::Directory)
+        || (source_is_directory && member.declared_uncomp_size != 0)
+    {
+        return Err(VerifyError::new(
+            "derived TAR member kind disagrees with typeflag",
+        ));
+    }
+    Ok(())
+}
+
+fn parse_tar_octal(field: &[u8], label: &str) -> Result<u64, VerifyError> {
+    if field.first().is_some_and(|byte| byte & 0x80 != 0) {
+        return Err(VerifyError::new(format!(
+            "{label} uses denied base-256 encoding"
+        )));
+    }
+    let digit_end = field
+        .iter()
+        .position(|byte| matches!(*byte, 0 | b' '))
+        .unwrap_or(field.len());
+    if digit_end == 0
+        || digit_end == field.len()
+        || field[..digit_end]
+            .iter()
+            .any(|byte| !(b'0'..=b'7').contains(byte))
+        || field[digit_end..]
+            .iter()
+            .any(|byte| !matches!(*byte, 0 | b' '))
+    {
+        return Err(VerifyError::new(format!(
+            "{label} is not canonical ASCII octal"
+        )));
+    }
+    field[..digit_end].iter().try_fold(0_u64, |value, byte| {
+        value
+            .checked_mul(8)
+            .and_then(|value| value.checked_add(u64::from(*byte - b'0')))
+            .ok_or_else(|| VerifyError::new(format!("{label} overflows u64")))
+    })
+}
+
+fn parse_tar_device_number(field: &[u8], label: &str) -> Result<u64, VerifyError> {
+    if field.iter().all(|byte| *byte == 0) {
+        Ok(0)
+    } else {
+        parse_tar_octal(field, label)
+    }
+}
+
+fn tar_text_field<'a>(
+    field: &'a [u8],
+    label: &str,
+    empty_allowed: bool,
+) -> Result<&'a [u8], VerifyError> {
+    let end = field
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(field.len());
+    if field[end..].iter().any(|byte| *byte != 0) {
+        return Err(VerifyError::new(format!(
+            "{label} has nonzero bytes after its first NUL"
+        )));
+    }
+    if !empty_allowed && end == 0 {
+        return Err(VerifyError::new(format!("{label} is empty")));
+    }
+    Ok(&field[..end])
+}
+
+fn verify_tar_owner_text(field: &[u8], label: &str) -> Result<(), VerifyError> {
+    let Some(end) = field.iter().position(|byte| *byte == 0) else {
+        return Err(VerifyError::new(format!("{label} is not NUL-terminated")));
+    };
+    if field[end..].iter().any(|byte| *byte != 0) {
+        return Err(VerifyError::new(format!(
+            "{label} has nonzero bytes after its first NUL"
+        )));
+    }
+    if field[..end]
+        .iter()
+        .any(|byte| !matches!(*byte, b' '..=b'~'))
+    {
+        return Err(VerifyError::new(format!("{label} is not printable ASCII")));
+    }
+    Ok(())
+}
+
+fn verify_tar_gzip_case(
+    case: &TarGzipCase,
+    manifest: &TarGzipManifest,
+    derived: &[u8],
+) -> Result<(), VerifyError> {
+    let source = decode_hex(&case.source_bytes_hex, "gzip source bytes")?;
+    let source_len = u64::try_from(source.len())
+        .map_err(|_| VerifyError::new("gzip source length exceeds u64"))?;
+    if source_len > MAX_DERIVED_TAR_BYTES {
+        return Err(VerifyError::new(format!(
+            "gzip source exceeds the {MAX_DERIVED_TAR_BYTES}-byte verifier cap"
+        )));
+    }
+    verify_digest(&case.source.sha256, "gzip source digest")?;
+    if sha256_hex(&source) != case.source.sha256 {
+        return Err(VerifyError::new(
+            "gzip source bytes do not match their digest",
+        ));
+    }
+    verify_gzip_wrapper(&source, &case.gzip, derived, &manifest.derived_tar)?;
+
+    let actual_preimage = encode_tar_gzip_layout(case, manifest)?;
+    let committed_preimage = decode_hex(&case.layout_preimage_hex, "TAR/gzip layout preimage")?;
+    if actual_preimage != committed_preimage {
+        return Err(VerifyError::new(
+            "TAR/gzip layout preimage does not match reconstructed evidence",
+        ));
+    }
+    verify_digest(&case.layout_root.sealr_tree_v4, "TAR/gzip layout root")?;
+    if sha256_hex(&actual_preimage) != case.layout_root.sealr_tree_v4 {
+        return Err(VerifyError::new("TAR/gzip layout root mismatch"));
+    }
+    verify_digest(&case.content_root.sealr_tree_v1, "TAR/gzip content root")?;
+    if case.content_root.sealr_tree_v1 != manifest.derived_tar.content_root.sealr_tree_v1 {
+        return Err(VerifyError::new("wrapped and raw TAR content roots differ"));
+    }
+    Ok(())
+}
+
+fn verify_gzip_wrapper(
+    source: &[u8],
+    evidence: &GzipWrapperVector,
+    derived: &[u8],
+    derived_vector: &TarGzipDerivedTar,
+) -> Result<(), VerifyError> {
+    const FLAG_HEADER_CRC: u8 = 1 << 1;
+    const FLAG_EXTRA: u8 = 1 << 2;
+    const FLAG_NAME: u8 = 1 << 3;
+    const FLAG_COMMENT: u8 = 1 << 4;
+    const FLAG_RESERVED: u8 = 0b1110_0000;
+
+    let source_len =
+        u64::try_from(source.len()).map_err(|_| VerifyError::new("gzip source exceeds u64"))?;
+    let header_end = checked_range_end(evidence.header, "gzip header")?;
+    let payload_end = checked_range_end(evidence.compressed_payload, "gzip compressed payload")?;
+    let trailer_end = checked_range_end(evidence.trailer, "gzip trailer")?;
+    if evidence.header.offset != 0
+        || evidence.header.len < 10
+        || evidence.compressed_payload.offset != header_end
+        || evidence.trailer.offset != payload_end
+        || evidence.trailer.len != 8
+        || trailer_end != source_len
+    {
+        return Err(VerifyError::new(
+            "gzip ranges do not exactly partition one source member",
+        ));
+    }
+    let fixed = source
+        .get(..10)
+        .ok_or_else(|| VerifyError::new("gzip fixed header is truncated"))?;
+    if fixed[..3] != [0x1f, 0x8b, 8]
+        || fixed[3] & FLAG_RESERVED != 0
+        || fixed[3] != evidence.flags
+        || le_u32(fixed, 4) != evidence.modification_time
+        || fixed[8] != evidence.extra_flags
+        || fixed[9] != evidence.operating_system
+    {
+        return Err(VerifyError::new(
+            "gzip fixed structural signature or fields disagree with evidence",
+        ));
+    }
+
+    let mut cursor = 10_u64;
+    if evidence.flags & FLAG_EXTRA != 0 {
+        let extra = evidence
+            .extra
+            .ok_or_else(|| VerifyError::new("gzip FEXTRA flag has no range"))?;
+        if extra.offset != cursor || extra.len < 2 {
+            return Err(VerifyError::new("gzip FEXTRA range is not canonical"));
+        }
+        let extra_bytes = range_bytes(source, extra, "gzip FEXTRA")?;
+        if u64::from(le_u16(extra_bytes, 0)) + 2 != extra.len {
+            return Err(VerifyError::new("gzip XLEN disagrees with FEXTRA range"));
+        }
+        let mut position = 2_usize;
+        let mut count = 0_u32;
+        let mut ids = HashSet::new();
+        while position < extra_bytes.len() {
+            let header_end = position
+                .checked_add(4)
+                .ok_or_else(|| VerifyError::new("gzip FEXTRA position overflows"))?;
+            let subfield = extra_bytes
+                .get(position..header_end)
+                .ok_or_else(|| VerifyError::new("gzip FEXTRA has an incomplete subfield header"))?;
+            if subfield[1] == 0 {
+                return Err(VerifyError::new(
+                    "gzip FEXTRA subfield uses reserved SI2 zero",
+                ));
+            }
+            let id = le_u16(subfield, 0);
+            if !ids.insert(id) {
+                return Err(VerifyError::new("gzip FEXTRA repeats a subfield id"));
+            }
+            let end = header_end
+                .checked_add(usize::from(le_u16(subfield, 2)))
+                .ok_or_else(|| VerifyError::new("gzip FEXTRA subfield overflows"))?;
+            if end > extra_bytes.len() {
+                return Err(VerifyError::new("gzip FEXTRA subfield exceeds XLEN"));
+            }
+            count = count
+                .checked_add(1)
+                .ok_or_else(|| VerifyError::new("gzip FEXTRA count overflows"))?;
+            position = end;
+        }
+        if count != evidence.extra_subfield_count {
+            return Err(VerifyError::new(
+                "gzip FEXTRA subfield count disagrees with evidence",
+            ));
+        }
+        cursor = checked_range_end(extra, "gzip FEXTRA")?;
+    } else if evidence.extra.is_some() || evidence.extra_subfield_count != 0 {
+        return Err(VerifyError::new(
+            "gzip FEXTRA evidence is present without its flag",
+        ));
+    }
+
+    cursor = verify_gzip_c_string(
+        source,
+        cursor,
+        header_end,
+        evidence.flags & FLAG_NAME != 0,
+        evidence.original_name,
+        "gzip FNAME",
+    )?;
+    cursor = verify_gzip_c_string(
+        source,
+        cursor,
+        header_end,
+        evidence.flags & FLAG_COMMENT != 0,
+        evidence.comment,
+        "gzip FCOMMENT",
+    )?;
+    if evidence.flags & FLAG_HEADER_CRC != 0 {
+        let range = evidence
+            .header_crc16
+            .ok_or_else(|| VerifyError::new("gzip FHCRC flag has no range"))?;
+        if range.offset != cursor || range.len != 2 {
+            return Err(VerifyError::new("gzip FHCRC range is not canonical"));
+        }
+        let prefix = source
+            .get(
+                ..usize::try_from(cursor)
+                    .map_err(|_| VerifyError::new("gzip FHCRC prefix length exceeds usize"))?,
+            )
+            .ok_or_else(|| VerifyError::new("gzip FHCRC prefix is outside source"))?;
+        let declared = range_bytes(source, range, "gzip FHCRC")?;
+        if le_u16(declared, 0) != crc32_ieee_bytes(prefix) as u16 {
+            return Err(VerifyError::new("gzip FHCRC disagrees with header bytes"));
+        }
+        cursor = checked_range_end(range, "gzip FHCRC")?;
+    } else if evidence.header_crc16.is_some() {
+        return Err(VerifyError::new(
+            "gzip FHCRC evidence is present without its flag",
+        ));
+    }
+    if cursor != header_end {
+        return Err(VerifyError::new(
+            "gzip optional fields do not exactly fill the header",
+        ));
+    }
+
+    let trailer = range_bytes(source, evidence.trailer, "gzip trailer")?;
+    let derived_len = u64::try_from(derived.len())
+        .map_err(|_| VerifyError::new("derived TAR length exceeds u64"))?;
+    let derived_isize = u32::try_from(derived_len % (u64::from(u32::MAX) + 1))
+        .map_err(|_| VerifyError::new("gzip ISIZE modulo does not fit u32"))?;
+    let derived_crc = crc32_ieee_bytes(derived);
+    let derived_sha = sha256_hex(derived);
+    if le_u32(trailer, 0) != evidence.declared_crc32
+        || le_u32(trailer, 4) != evidence.declared_isize
+        || evidence.declared_crc32 != derived_crc
+        || evidence.declared_isize != derived_isize
+        || evidence.derived_output_len != derived_len
+        || evidence.derived_output_sha256 != derived_sha
+        || evidence.derived_output_sha256 != derived_vector.source.sha256
+    {
+        return Err(VerifyError::new(
+            "gzip trailer and derived TAR CRC32, ISIZE, length, or SHA-256 disagree",
+        ));
+    }
+    Ok(())
+}
+
+fn verify_gzip_c_string(
+    source: &[u8],
+    cursor: u64,
+    header_end: u64,
+    flagged: bool,
+    range: Option<ByteRange>,
+    label: &str,
+) -> Result<u64, VerifyError> {
+    if !flagged {
+        return if range.is_none() {
+            Ok(cursor)
+        } else {
+            Err(VerifyError::new(format!(
+                "{label} evidence is present without its flag"
+            )))
+        };
+    }
+    let range = range.ok_or_else(|| VerifyError::new(format!("{label} flag has no range")))?;
+    let end = checked_range_end(range, label)?;
+    if range.offset != cursor || range.len == 0 || end > header_end {
+        return Err(VerifyError::new(format!("{label} range is not canonical")));
+    }
+    let bytes = range_bytes(source, range, label)?;
+    if bytes.last() != Some(&0) || bytes[..bytes.len() - 1].contains(&0) {
+        return Err(VerifyError::new(format!(
+            "{label} is not exactly one NUL-terminated byte string"
+        )));
+    }
+    Ok(end)
+}
+
+fn encode_tar_gzip_layout(
+    case: &TarGzipCase,
+    manifest: &TarGzipManifest,
+) -> Result<Vec<u8>, VerifyError> {
+    let gzip = &case.gzip;
+    let mut body = Vec::new();
+    push_bytes(&mut body, manifest.transform.id.as_bytes())?;
+    body.extend_from_slice(&decode_digest(
+        &manifest.transform.digest.sha256,
+        "gzip transform digest",
+    )?);
+    body.extend_from_slice(&decode_digest(
+        &manifest.transform.decoder_parameters_digest.sha256,
+        "gzip decoder-parameter digest",
+    )?);
+    push_u16(&mut body, 0);
+    encode_range(
+        &mut body,
+        ByteRange {
+            offset: 0,
+            len: checked_range_end(gzip.trailer, "gzip source range")?,
+        },
+    );
+    body.extend_from_slice(&decode_digest(&case.source.sha256, "gzip source digest")?);
+    push_u16(&mut body, 1);
+    push_u64(&mut body, gzip.derived_output_len);
+    body.extend_from_slice(&decode_digest(
+        &gzip.derived_output_sha256,
+        "gzip derived output digest",
+    )?);
+    body.push(gzip.flags);
+    push_u32(&mut body, gzip.modification_time);
+    body.push(gzip.extra_flags);
+    body.push(gzip.operating_system);
+    encode_range(&mut body, gzip.header);
+    encode_optional_range(&mut body, gzip.extra);
+    push_u32(&mut body, gzip.extra_subfield_count);
+    encode_optional_range(&mut body, gzip.original_name);
+    encode_optional_range(&mut body, gzip.comment);
+    encode_optional_range(&mut body, gzip.header_crc16);
+    encode_range(&mut body, gzip.compressed_payload);
+    encode_range(&mut body, gzip.trailer);
+    push_u32(&mut body, gzip.declared_crc32);
+    push_u32(&mut body, gzip.declared_isize);
+    push_u64(&mut body, gzip.derived_output_len);
+    body.extend_from_slice(&decode_digest(
+        &gzip.derived_output_sha256,
+        "gzip derived output digest",
+    )?);
+    push_bytes(
+        &mut body,
+        &tar_gzip_inner_layout_body(&manifest.derived_tar)?,
+    )?;
+    Ok(preimage(TAR_GZIP_LAYOUT_LABEL, &body))
+}
+
+fn encode_tar_gzip_inner_layout(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, VerifyError> {
+    Ok(preimage(
+        TAR_LAYOUT_LABEL,
+        &tar_gzip_inner_layout_body(derived)?,
+    ))
+}
+
+fn tar_gzip_inner_layout_body(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, VerifyError> {
+    let mut body = Vec::new();
+    encode_range(&mut body, derived.covering.member_records);
+    encode_range(&mut body, derived.covering.terminator);
+    encode_range(&mut body, derived.covering.trailing_zeros);
+    let mut members: Vec<_> = derived.members.iter().collect();
+    members.sort_by(|left, right| {
+        left.canonical_path
+            .as_bytes()
+            .cmp(right.canonical_path.as_bytes())
+    });
+    push_u32(
+        &mut body,
+        u32::try_from(members.len())
+            .map_err(|_| VerifyError::new("derived TAR member count exceeds u32"))?,
+    );
+    for member in members {
+        push_bytes(&mut body, member.canonical_path.as_bytes())?;
+        body.push(kind_tag(&member.kind));
+        push_bytes(&mut body, &member.raw_name_bytes)?;
+        push_u64(&mut body, member.declared_uncomp_size);
+        encode_range(&mut body, member.tar.header);
+        encode_range(&mut body, member.tar.payload);
+        encode_range(&mut body, member.tar.padding);
+        push_u32(&mut body, member.tar.mode);
+        push_u64(&mut body, member.tar.mtime);
+        push_u32(&mut body, member.tar.header_checksum);
+        body.extend_from_slice(&decode_digest(
+            &member.tar.header_sha256,
+            "derived TAR header digest",
+        )?);
+        push_u32(
+            &mut body,
+            u32::try_from(member.normalization_actions.len())
+                .map_err(|_| VerifyError::new("TAR normalization count exceeds u32"))?,
+        );
+        encode_normalization_actions(&mut body, &member.normalization_actions);
+    }
+    Ok(body)
+}
+
+fn encode_tar_gzip_content(derived: &TarGzipDerivedTar) -> Result<Vec<u8>, VerifyError> {
+    let mut body = Vec::new();
+    let mut members: Vec<_> = derived.members.iter().collect();
+    members.sort_by(|left, right| {
+        left.canonical_path
+            .as_bytes()
+            .cmp(right.canonical_path.as_bytes())
+    });
+    push_u32(
+        &mut body,
+        u32::try_from(members.len())
+            .map_err(|_| VerifyError::new("derived TAR member count exceeds u32"))?,
+    );
+    for member in members {
+        push_bytes(&mut body, member.canonical_path.as_bytes())?;
+        body.push(kind_tag(&member.kind));
+        push_u64(&mut body, member.actual_uncomp_size);
+        body.extend_from_slice(&decode_digest(
+            &member.content_sha256,
+            "derived TAR member content digest",
+        )?);
+    }
+    Ok(preimage(CONTENT_LABEL, &body))
+}
+
+fn crc32_ieee_bytes(bytes: &[u8]) -> u32 {
+    let mut crc = u32::MAX;
+    for byte in bytes {
+        crc ^= u32::from(*byte);
+        for _ in 0..8 {
+            crc = (crc >> 1) ^ (0xedb8_8320 & 0_u32.wrapping_sub(crc & 1));
+        }
+    }
+    !crc
 }
 
 fn verify_zip64_covering(source: &[u8], ir: &Zip64ArchiveIr) -> Result<(), VerifyError> {
@@ -2652,6 +3637,110 @@ fn sha256_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    fn hex_bytes(bytes: &[u8]) -> String {
+        let mut output = String::with_capacity(bytes.len() * 2);
+        for byte in bytes {
+            use fmt::Write as _;
+            write!(&mut output, "{byte:02x}").expect("writing to a string cannot fail");
+        }
+        output
+    }
+
+    fn tar_gzip_vector_with_header_mutation(mutate: impl FnOnce(&mut [u8])) -> serde_json::Value {
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut derived = decode_hex(
+            vector["derived_tar"]["bytes_hex"].as_str().unwrap(),
+            "test derived TAR",
+        )
+        .unwrap();
+        mutate(&mut derived[..512]);
+        derived[148..156].fill(b' ');
+        let checksum = derived[..512]
+            .iter()
+            .fold(0_u32, |sum, byte| sum + u32::from(*byte));
+        let checksum_text = format!("{checksum:06o}");
+        assert_eq!(checksum_text.len(), 6);
+        derived[148..154].copy_from_slice(checksum_text.as_bytes());
+        derived[154] = 0;
+        derived[155] = b' ';
+
+        let header_sha = sha256_hex(&derived[..512]);
+        let derived_sha = sha256_hex(&derived);
+        let derived_crc = crc32_ieee_bytes(&derived);
+        vector["derived_tar"]["bytes_hex"] = serde_json::json!(hex_bytes(&derived));
+        vector["derived_tar"]["source"]["sha256"] = serde_json::json!(derived_sha.clone());
+        vector["derived_tar"]["members"][0]["tar"]["header_checksum"] = serde_json::json!(checksum);
+        vector["derived_tar"]["members"][0]["tar"]["header_sha256"] = serde_json::json!(header_sha);
+
+        for case_index in 0..2 {
+            let mut source = decode_hex(
+                vector["cases"][case_index]["source_bytes_hex"]
+                    .as_str()
+                    .unwrap(),
+                "test gzip source",
+            )
+            .unwrap();
+            let trailer_offset = vector["cases"][case_index]["gzip"]["trailer"]["offset"]
+                .as_u64()
+                .and_then(|offset| usize::try_from(offset).ok())
+                .unwrap();
+            source[trailer_offset..trailer_offset + 4].copy_from_slice(&derived_crc.to_le_bytes());
+            vector["cases"][case_index]["source_bytes_hex"] = serde_json::json!(hex_bytes(&source));
+            vector["cases"][case_index]["source"]["sha256"] =
+                serde_json::json!(sha256_hex(&source));
+            vector["cases"][case_index]["gzip"]["declared_crc32"] = serde_json::json!(derived_crc);
+            vector["cases"][case_index]["gzip"]["derived_output_sha256"] =
+                serde_json::json!(derived_sha.clone());
+        }
+
+        let manifest: TarGzipManifest = serde_json::from_value(vector.clone()).unwrap();
+        let raw_preimage = encode_tar_gzip_inner_layout(&manifest.derived_tar).unwrap();
+        vector["derived_tar"]["raw_layout_preimage_hex"] =
+            serde_json::json!(hex_bytes(&raw_preimage));
+        vector["derived_tar"]["raw_layout_root"]["sealrTreeV2"] =
+            serde_json::json!(sha256_hex(&raw_preimage));
+        for case_index in 0..2 {
+            let preimage = encode_tar_gzip_layout(&manifest.cases[case_index], &manifest).unwrap();
+            vector["cases"][case_index]["layout_preimage_hex"] =
+                serde_json::json!(hex_bytes(&preimage));
+            vector["cases"][case_index]["layout_root"]["sealrTreeV4"] =
+                serde_json::json!(sha256_hex(&preimage));
+        }
+        vector
+    }
+
+    fn tar_gzip_case_with_extra_payload(
+        payload: &[u8],
+        subfield_count: u32,
+    ) -> (Vec<u8>, TarGzipManifest) {
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut source = decode_hex(
+            vector["cases"][0]["source_bytes_hex"].as_str().unwrap(),
+            "test gzip source",
+        )
+        .unwrap();
+        let payload_len = u16::try_from(payload.len()).unwrap();
+        let mut replacement = payload_len.to_le_bytes().to_vec();
+        replacement.extend_from_slice(payload);
+        source.splice(10..19, replacement.iter().copied());
+        let extra_len = u64::try_from(replacement.len()).unwrap();
+        let header_len = 28 + extra_len;
+        let payload_offset = header_len;
+        let trailer_offset = payload_offset + 116;
+        vector["cases"][0]["source_bytes_hex"] = serde_json::json!(hex_bytes(&source));
+        vector["cases"][0]["source"]["sha256"] = serde_json::json!(sha256_hex(&source));
+        vector["cases"][0]["gzip"]["header"]["len"] = serde_json::json!(header_len);
+        vector["cases"][0]["gzip"]["extra"]["len"] = serde_json::json!(extra_len);
+        vector["cases"][0]["gzip"]["extra_subfield_count"] = serde_json::json!(subfield_count);
+        vector["cases"][0]["gzip"]["original_name"]["offset"] = serde_json::json!(10 + extra_len);
+        vector["cases"][0]["gzip"]["comment"]["offset"] = serde_json::json!(22 + extra_len);
+        vector["cases"][0]["gzip"]["compressed_payload"]["offset"] =
+            serde_json::json!(payload_offset);
+        vector["cases"][0]["gzip"]["trailer"]["offset"] = serde_json::json!(trailer_offset);
+        let manifest: TarGzipManifest = serde_json::from_value(vector).unwrap();
+        (source, manifest)
+    }
+
     #[test]
     fn portable_ustar_profile_vector_verifies_without_sealr() {
         let vector =
@@ -2669,6 +3758,8 @@ mod tests {
         include_bytes!("../../../crates/sealr/tests/conformance/identity-v1.json");
     const ZIP64_VECTORS: &[u8] =
         include_bytes!("../../../crates/sealr/tests/conformance/zip64-identity-v1.json");
+    const TAR_GZIP_VECTORS: &[u8] =
+        include_bytes!("../../../crates/sealr/tests/conformance/tar-gzip-identity-v1.json");
     const TAR_LAYOUT_VECTOR: &[u8] =
         include_bytes!("../../../crates/sealr/tests/conformance/tar-layout-v2.json");
 
@@ -2693,6 +3784,493 @@ mod tests {
             expected
         );
         assert_eq!(verify_manifest_json(ZIP64_VECTORS).unwrap(), expected);
+    }
+
+    #[test]
+    fn committed_tar_gzip_vectors_verify_both_domains_independently() {
+        let expected = VerificationSummary {
+            profiles: 1,
+            cases: 2,
+            layout_roots: 3,
+            content_roots: 3,
+        };
+        assert_eq!(
+            verify_tar_gzip_identity_vector_json(TAR_GZIP_VECTORS).unwrap(),
+            expected
+        );
+        assert_eq!(verify_manifest_json(TAR_GZIP_VECTORS).unwrap(), expected);
+
+        let manifest: TarGzipManifest = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        assert_ne!(
+            manifest.cases[0].source.sha256,
+            manifest.cases[1].source.sha256
+        );
+        assert_ne!(
+            manifest.cases[0].layout_root.sealr_tree_v4,
+            manifest.cases[1].layout_root.sealr_tree_v4
+        );
+        assert_eq!(
+            manifest.cases[0].content_root.sealr_tree_v1,
+            manifest.cases[1].content_root.sealr_tree_v1
+        );
+        assert_eq!(
+            manifest.cases[0].content_root.sealr_tree_v1,
+            manifest.derived_tar.content_root.sealr_tree_v1
+        );
+    }
+
+    #[test]
+    fn tar_gzip_profile_and_transform_constants_are_reconstructed() {
+        let manifest: TarGzipManifest = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        verify_tar_gzip_transform(&manifest.transform).unwrap();
+        verify_tar_gzip_profile(
+            &manifest.profile,
+            &manifest.inner_profile,
+            &manifest.transform,
+        )
+        .unwrap();
+        assert_eq!(
+            sha256_hex(
+                &tar_gzip_profile_canonical_bytes(&manifest.inner_profile, &manifest.transform)
+                    .unwrap()
+            ),
+            "914acdc0eab541483309a6838716fe837488ca80a1b7758383f28e47470925e1"
+        );
+    }
+
+    #[test]
+    fn tar_gzip_structural_magic_trailing_member_and_inner_records_are_denied() {
+        let mut manifest: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut source = decode_hex(
+            manifest["cases"][0]["source_bytes_hex"].as_str().unwrap(),
+            "test gzip source",
+        )
+        .unwrap();
+        source[0..4].copy_from_slice(&[0x50, 0x4b, 0x03, 0x04]);
+        manifest["cases"][0]["source_bytes_hex"] = serde_json::json!(hex_bytes(&source));
+        manifest["cases"][0]["source"]["sha256"] = serde_json::json!(sha256_hex(&source));
+        let error = verify_manifest_json(&serde_json::to_vec(&manifest).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("fixed structural signature"));
+
+        let mut manifest: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut source = decode_hex(
+            manifest["cases"][0]["source_bytes_hex"].as_str().unwrap(),
+            "test gzip source",
+        )
+        .unwrap();
+        source.extend_from_slice(&[0x1f, 0x8b, 0x08, 0x00]);
+        manifest["cases"][0]["source_bytes_hex"] = serde_json::json!(hex_bytes(&source));
+        manifest["cases"][0]["source"]["sha256"] = serde_json::json!(sha256_hex(&source));
+        let error = verify_manifest_json(&serde_json::to_vec(&manifest).unwrap()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("exactly partition one source member"));
+
+        let mut manifest: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut derived = decode_hex(
+            manifest["derived_tar"]["bytes_hex"].as_str().unwrap(),
+            "test derived TAR",
+        )
+        .unwrap();
+        derived[1024..1029].copy_from_slice(b"ustar");
+        manifest["derived_tar"]["bytes_hex"] = serde_json::json!(hex_bytes(&derived));
+        manifest["derived_tar"]["source"]["sha256"] = serde_json::json!(sha256_hex(&derived));
+        let error = verify_manifest_json(&serde_json::to_vec(&manifest).unwrap()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("terminator contains nonzero bytes"));
+    }
+
+    #[test]
+    fn tar_gzip_valid_and_corrupt_fhcrc_are_distinguished_without_decompression() {
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut source = decode_hex(
+            vector["cases"][0]["source_bytes_hex"].as_str().unwrap(),
+            "test gzip source",
+        )
+        .unwrap();
+        source[3] |= 0x02;
+        let fhcrc = (crc32_ieee_bytes(&source[..37]) as u16).to_le_bytes();
+        source.splice(37..37, fhcrc);
+        vector["cases"][0]["source_bytes_hex"] = serde_json::json!(hex_bytes(&source));
+        vector["cases"][0]["source"]["sha256"] = serde_json::json!(sha256_hex(&source));
+        vector["cases"][0]["gzip"]["flags"] = serde_json::json!(30);
+        vector["cases"][0]["gzip"]["header"]["len"] = serde_json::json!(39);
+        vector["cases"][0]["gzip"]["header_crc16"] = serde_json::json!({ "offset": 37, "len": 2 });
+        vector["cases"][0]["gzip"]["compressed_payload"]["offset"] = serde_json::json!(39);
+        vector["cases"][0]["gzip"]["trailer"]["offset"] = serde_json::json!(155);
+        let manifest: TarGzipManifest = serde_json::from_value(vector.clone()).unwrap();
+        let derived = decode_hex(&manifest.derived_tar.bytes_hex, "test derived TAR").unwrap();
+        verify_gzip_wrapper(
+            &source,
+            &manifest.cases[0].gzip,
+            &derived,
+            &manifest.derived_tar,
+        )
+        .expect("valid FHCRC");
+
+        source[37] ^= 1;
+        let manifest: TarGzipManifest = serde_json::from_value(vector).unwrap();
+        let error = verify_gzip_wrapper(
+            &source,
+            &manifest.cases[0].gzip,
+            &derived,
+            &manifest.derived_tar,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("FHCRC disagrees"));
+    }
+
+    #[test]
+    fn tar_gzip_inner_ustar_rejects_targeted_self_consistent_mutations() {
+        type HeaderMutation = (&'static str, fn(&mut [u8]), &'static str);
+        let mutations: [HeaderMutation; 9] = [
+            (
+                "linkname",
+                (|header: &mut [u8]| header[157] = b'x') as fn(&mut [u8]),
+                "linkname",
+            ),
+            (
+                "reserved byte",
+                |header: &mut [u8]| header[500] = 1,
+                "reserved ustar header bytes",
+            ),
+            (
+                "uid grammar",
+                |header: &mut [u8]| header[108] = b' ',
+                "TAR uid is not canonical ASCII octal",
+            ),
+            (
+                "gid base-256",
+                |header: &mut [u8]| header[116] = 0x80,
+                "TAR gid uses denied base-256 encoding",
+            ),
+            (
+                "device number",
+                |header: &mut [u8]| header[329..337].copy_from_slice(b"0000001\0"),
+                "device numbers must be zero",
+            ),
+            (
+                "uname printable ASCII",
+                |header: &mut [u8]| header[265] = 1,
+                "TAR uname is not printable ASCII",
+            ),
+            (
+                "gname zero remainder",
+                |header: &mut [u8]| {
+                    header[297] = b'g';
+                    header[298] = 0;
+                    header[299] = b'x';
+                },
+                "TAR gname has nonzero bytes after its first NUL",
+            ),
+            (
+                "empty name with prefix",
+                |header: &mut [u8]| {
+                    header[..100].fill(0);
+                    header[345..500].fill(0);
+                    header[345..353].copy_from_slice(b"mission\0");
+                },
+                "TAR name is empty",
+            ),
+            (
+                "unterminated octal",
+                |header: &mut [u8]| header[136..148].fill(b'0'),
+                "TAR mtime is not canonical ASCII octal",
+            ),
+        ];
+        for (label, mutate, expected) in mutations {
+            let vector = tar_gzip_vector_with_header_mutation(mutate);
+            let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+            assert!(
+                error.to_string().contains(expected),
+                "{label} reached unexpected rejection: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn tar_gzip_fextra_subfield_grammar_is_closed_and_multi_field_capable() {
+        let manifest: TarGzipManifest = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let derived = decode_hex(&manifest.derived_tar.bytes_hex, "test derived TAR").unwrap();
+
+        let (source, manifest) = tar_gzip_case_with_extra_payload(&[0], 0);
+        let error = verify_gzip_wrapper(
+            &source,
+            &manifest.cases[0].gzip,
+            &derived,
+            &manifest.derived_tar,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("incomplete subfield header"));
+
+        let manifest: TarGzipManifest = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut source =
+            decode_hex(&manifest.cases[0].source_bytes_hex, "test gzip source").unwrap();
+        source[13] = 0;
+        let error = verify_gzip_wrapper(
+            &source,
+            &manifest.cases[0].gzip,
+            &derived,
+            &manifest.derived_tar,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("reserved SI2 zero"));
+
+        let duplicate = [b'A', b'B', 0, 0, b'A', b'B', 0, 0];
+        let (source, manifest) = tar_gzip_case_with_extra_payload(&duplicate, 2);
+        let error = verify_gzip_wrapper(
+            &source,
+            &manifest.cases[0].gzip,
+            &derived,
+            &manifest.derived_tar,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("repeats a subfield id"));
+
+        let manifest: TarGzipManifest = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let mut source =
+            decode_hex(&manifest.cases[0].source_bytes_hex, "test gzip source").unwrap();
+        source[14..16].copy_from_slice(&4_u16.to_le_bytes());
+        let error = verify_gzip_wrapper(
+            &source,
+            &manifest.cases[0].gzip,
+            &derived,
+            &manifest.derived_tar,
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("subfield exceeds XLEN"));
+
+        let valid = [b'A', b'B', 0, 0, b'C', b'D', 0, 0];
+        let (source, manifest) = tar_gzip_case_with_extra_payload(&valid, 2);
+        verify_gzip_wrapper(
+            &source,
+            &manifest.cases[0].gzip,
+            &derived,
+            &manifest.derived_tar,
+        )
+        .expect("two unique canonical FEXTRA subfields must verify");
+    }
+
+    #[test]
+    fn tar_gzip_v1_case_set_is_exact_ordered_and_checked_early() {
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        let cloned_case = vector["cases"][0].clone();
+        vector["cases"].as_array_mut().unwrap().push(cloned_case);
+        vector["transform"]["definition_hex"] = serde_json::json!("00");
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("exactly the two canonical ordered cases"));
+
+        let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+        vector["cases"].as_array_mut().unwrap().swap(0, 1);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("exactly the two canonical ordered cases"));
+    }
+
+    #[test]
+    fn tar_gzip_mutations_across_wrapper_derived_inner_and_roots_are_rejected() {
+        let mutations = [
+            ("/schema", serde_json::json!("sealr.unknown")),
+            (
+                "/archive_ir_schema",
+                serde_json::json!("sealr.archive-ir.v1"),
+            ),
+            ("/profile/id", serde_json::json!("sealr.profile.unknown")),
+            ("/profile/digest/sha256", serde_json::json!("0".repeat(64))),
+            (
+                "/transform/id",
+                serde_json::json!("sealr.transform.unknown"),
+            ),
+            ("/transform/definition_hex", serde_json::json!("00")),
+            (
+                "/transform/digest/sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            ("/transform/decoder_parameters_hex", serde_json::json!("00")),
+            (
+                "/transform/decoder_parameters_digest/sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/inner_profile/id",
+                serde_json::json!("sealr.profile.tar.unknown"),
+            ),
+            (
+                "/inner_profile/digest/sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            ("/layout_encoding", serde_json::json!("sealrTreeV2")),
+            (
+                "/layout_label",
+                serde_json::json!("sealr.tree.layout.tar-ustar.v1"),
+            ),
+            ("/content_encoding", serde_json::json!("sealrTreeV4")),
+            ("/content_label", serde_json::json!("sealr.tree.content.v2")),
+            ("/derived_tar/bytes_hex", serde_json::json!("00")),
+            (
+                "/derived_tar/source/sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/derived_tar/covering/member_records/len",
+                serde_json::json!(1023),
+            ),
+            (
+                "/derived_tar/covering/terminator/offset",
+                serde_json::json!(1023),
+            ),
+            (
+                "/derived_tar/covering/trailing_zeros/len",
+                serde_json::json!(1),
+            ),
+            (
+                "/derived_tar/members/0/raw_name_bytes",
+                serde_json::json!([120]),
+            ),
+            (
+                "/derived_tar/members/0/decoded_name",
+                serde_json::json!("x"),
+            ),
+            (
+                "/derived_tar/members/0/canonical_path",
+                serde_json::json!("x"),
+            ),
+            (
+                "/derived_tar/members/0/components",
+                serde_json::json!(["x"]),
+            ),
+            (
+                "/derived_tar/members/0/kind",
+                serde_json::json!("directory"),
+            ),
+            (
+                "/derived_tar/members/0/declared_uncomp_size",
+                serde_json::json!(24),
+            ),
+            (
+                "/derived_tar/members/0/tar/header/offset",
+                serde_json::json!(1),
+            ),
+            (
+                "/derived_tar/members/0/tar/header/len",
+                serde_json::json!(511),
+            ),
+            (
+                "/derived_tar/members/0/tar/payload/offset",
+                serde_json::json!(511),
+            ),
+            (
+                "/derived_tar/members/0/tar/payload/len",
+                serde_json::json!(24),
+            ),
+            (
+                "/derived_tar/members/0/tar/padding/offset",
+                serde_json::json!(536),
+            ),
+            (
+                "/derived_tar/members/0/tar/padding/len",
+                serde_json::json!(486),
+            ),
+            ("/derived_tar/members/0/tar/mode", serde_json::json!(384)),
+            (
+                "/derived_tar/members/0/tar/mtime",
+                serde_json::json!(1788000001_u64),
+            ),
+            (
+                "/derived_tar/members/0/tar/header_checksum",
+                serde_json::json!(0),
+            ),
+            (
+                "/derived_tar/members/0/tar/header_sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/derived_tar/members/0/actual_uncomp_size",
+                serde_json::json!(24),
+            ),
+            ("/derived_tar/members/0/actual_crc", serde_json::json!(0)),
+            (
+                "/derived_tar/members/0/content_sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/derived_tar/members/0/verification/status",
+                serde_json::json!("pending"),
+            ),
+            (
+                "/derived_tar/members/0/normalization_actions",
+                serde_json::json!([{ "action": "strip-directory-trailing-slash" }]),
+            ),
+            (
+                "/derived_tar/raw_layout_preimage_hex",
+                serde_json::json!("00"),
+            ),
+            (
+                "/derived_tar/raw_layout_root/sealrTreeV2",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/derived_tar/content_root/sealrTreeV1",
+                serde_json::json!("0".repeat(64)),
+            ),
+            ("/cases/1/id", serde_json::json!("optional-default")),
+            ("/cases/0/source_bytes_hex", serde_json::json!("00")),
+            ("/cases/0/source/sha256", serde_json::json!("0".repeat(64))),
+            ("/cases/0/gzip/flags", serde_json::json!(0)),
+            ("/cases/0/gzip/modification_time", serde_json::json!(1)),
+            ("/cases/0/gzip/extra_flags", serde_json::json!(1)),
+            ("/cases/0/gzip/operating_system", serde_json::json!(3)),
+            ("/cases/0/gzip/header/len", serde_json::json!(36)),
+            ("/cases/0/gzip/extra/offset", serde_json::json!(11)),
+            ("/cases/0/gzip/extra/len", serde_json::json!(8)),
+            ("/cases/0/gzip/extra_subfield_count", serde_json::json!(2)),
+            ("/cases/0/gzip/original_name/offset", serde_json::json!(20)),
+            ("/cases/0/gzip/comment/len", serde_json::json!(5)),
+            (
+                "/cases/0/gzip/header_crc16",
+                serde_json::json!({ "offset": 37, "len": 2 }),
+            ),
+            (
+                "/cases/0/gzip/compressed_payload/offset",
+                serde_json::json!(36),
+            ),
+            (
+                "/cases/0/gzip/compressed_payload/len",
+                serde_json::json!(115),
+            ),
+            ("/cases/0/gzip/trailer/offset", serde_json::json!(152)),
+            ("/cases/0/gzip/trailer/len", serde_json::json!(7)),
+            ("/cases/0/gzip/declared_crc32", serde_json::json!(0)),
+            ("/cases/0/gzip/declared_isize", serde_json::json!(2047)),
+            ("/cases/0/gzip/derived_output_len", serde_json::json!(2047)),
+            (
+                "/cases/0/gzip/derived_output_sha256",
+                serde_json::json!("0".repeat(64)),
+            ),
+            ("/cases/0/layout_preimage_hex", serde_json::json!("00")),
+            (
+                "/cases/0/layout_root/sealrTreeV4",
+                serde_json::json!("0".repeat(64)),
+            ),
+            (
+                "/cases/0/content_root/sealrTreeV1",
+                serde_json::json!("0".repeat(64)),
+            ),
+        ];
+        for (pointer, replacement) in mutations {
+            let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
+            *vector
+                .pointer_mut(pointer)
+                .expect("known TAR/gzip vector pointer") = replacement;
+            assert!(
+                verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).is_err(),
+                "TAR/gzip mutation {pointer} must fail"
+            );
+        }
     }
 
     #[test]
