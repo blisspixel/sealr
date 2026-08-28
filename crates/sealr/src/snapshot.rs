@@ -381,7 +381,7 @@ impl TransformProfile {
 
     pub(crate) const fn definition(self) -> &'static [u8] {
         match self {
-            Self::GzipRfc1952SingleMemberV1 => b"algorithm=rfc1952-gzip;members=exactly-one;reserved-flags=zero;trailing-data=forbidden;header-crc=verify-when-present;data-crc32=verify;isize=verify;payload=rfc1951-deflate;output=bounded",
+            Self::GzipRfc1952SingleMemberV1 => b"algorithm=rfc1952-gzip;members=exactly-one;reserved-flags=zero;extra-fields=exact-subfield-framing-si2-nonzero;trailing-data=forbidden;header-crc=verify-when-present;data-crc32=verify;isize=verify;payload=rfc1951-deflate;output=bounded",
             #[cfg(test)]
             Self::TestIdentityV1 => b"algorithm=test-identity;version=1",
             #[cfg(test)]
@@ -392,7 +392,7 @@ impl TransformProfile {
     pub(crate) const fn digest(self) -> &'static str {
         match self {
             Self::GzipRfc1952SingleMemberV1 => {
-                "eba643163a33654bf6d675cc84db4d9de7d8c5c1ccc436d8bf98d988b1ec635e"
+                "f01a542c9009aed6d669843234b81dcf0e80b176e507913f8aeaf968ce59577d"
             }
             #[cfg(test)]
             Self::TestIdentityV1 => {
