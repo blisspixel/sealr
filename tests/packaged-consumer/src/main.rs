@@ -5,8 +5,9 @@ use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelLimits, CONSUMER_PROFIL
 use sealr::{
     apply_supervised, apply_with_options, ApplyOptions, ArchiveFormat, LinuxWorker,
     MemberReadErrorKind, Policy, Request, RetentionPlan, RetentionStatus, Source,
-    TarInterpretationProfile, TreeRoot, VerifiedArchive, ZipInterpretationProfile,
-    TAR_USTAR_PORTABLE_V1, ZIP_STRICT_ASCII_V2,
+    TarInterpretationProfile, TarPaxInterpretationProfile, TreeRoot, VerifiedArchive,
+    ZipInterpretationProfile, TAR_PAX_PORTABLE_V1, TAR_USTAR_PORTABLE_V1,
+    ZIP_STRICT_ASCII_V2,
 };
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
@@ -197,6 +198,53 @@ fn main() {
         Some(b"retained".as_slice())
     );
     assert_eq!(tar_archive.read_member("later.txt", 5).unwrap(), b"later");
+
+    let pax_policy = Policy::default_v5();
+    let pax_options = ApplyOptions::new()
+        .with_tar_pax_interpretation_profile(TarPaxInterpretationProfile::PortableV1)
+        .with_retention(
+            RetentionPlan::new(4, 4)
+                .with_path("mars/retained.txt")
+                .expect("canonical PAX retention path"),
+        );
+    let pax_outcome = {
+        let pax_bytes = portable_pax();
+        apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("portable-pax.tar"),
+                    data: &pax_bytes,
+                },
+                policy: &pax_policy,
+                dest: None,
+            },
+            &pax_options,
+        )
+    };
+    assert!(!pax_outcome.rejected(), "{:?}", pax_outcome.view.findings);
+    let pax_ir = pax_outcome.archive_ir().expect("portable PAX IR");
+    assert_eq!(pax_ir.format(), ArchiveFormat::TarPax);
+    assert_eq!(pax_ir.profile(), TAR_PAX_PORTABLE_V1);
+    assert_eq!(pax_ir.pax_extensions().expect("PAX extension evidence").len(), 1);
+    assert!(matches!(
+        pax_outcome.receipt.identities.layout,
+        TreeRoot::SealrTreeV5 { .. }
+    ));
+    let pax_archive = pax_outcome
+        .into_verified_archive()
+        .expect("portable PAX must expose verified authority");
+    assert_eq!(
+        pax_archive.retention_status("mars/retained.txt"),
+        RetentionStatus::Retained
+    );
+    assert_eq!(
+        pax_archive.retained_member("mars/retained.txt"),
+        Some(b"mars".as_slice())
+    );
+    assert_eq!(
+        pax_archive.read_member("mars/retained.txt", 4).unwrap(),
+        b"mars"
+    );
 }
 
 fn portable_tar() -> Vec<u8> {
@@ -213,7 +261,37 @@ fn portable_tar() -> Vec<u8> {
     bytes
 }
 
+fn portable_pax() -> Vec<u8> {
+    let payload = [pax_record("path", "mars/retained.txt"), pax_record("size", "4")].concat();
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(&ustar_header_with_type("PaxHeaders/entry", payload.len(), b'x'));
+    bytes.extend_from_slice(&payload);
+    bytes.resize(bytes.len().next_multiple_of(512), 0);
+    bytes.extend_from_slice(&ustar_header_with_type("placeholder", 99, b'0'));
+    bytes.extend_from_slice(b"mars");
+    bytes.resize(bytes.len().next_multiple_of(512), 0);
+    bytes.resize(bytes.len() + 1024, 0);
+    bytes
+}
+
+fn pax_record(key: &str, value: &str) -> Vec<u8> {
+    let body = format!(" {key}={value}\n");
+    let mut digits = 1_usize;
+    loop {
+        let length = digits + body.len();
+        let next_digits = length.to_string().len();
+        if digits == next_digits {
+            return format!("{length}{body}").into_bytes();
+        }
+        digits = next_digits;
+    }
+}
+
 fn ustar_header(name: &str, body_len: usize) -> [u8; 512] {
+    ustar_header_with_type(name, body_len, b'0')
+}
+
+fn ustar_header_with_type(name: &str, body_len: usize, typeflag: u8) -> [u8; 512] {
     let mut header = [0_u8; 512];
     header[..name.len()].copy_from_slice(name.as_bytes());
     write_ustar_octal(&mut header[100..108], 0o644);
@@ -222,7 +300,7 @@ fn ustar_header(name: &str, body_len: usize) -> [u8; 512] {
     write_ustar_octal(&mut header[124..136], body_len as u64);
     write_ustar_octal(&mut header[136..148], 0);
     header[148..156].fill(b' ');
-    header[156] = b'0';
+    header[156] = typeflag;
     header[257..263].copy_from_slice(b"ustar\0");
     header[263..265].copy_from_slice(b"00");
     let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();

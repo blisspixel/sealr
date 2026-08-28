@@ -1,6 +1,6 @@
 # Near-term execution plan
 
-> Status: active plan after the Alpha.10 strict-ZIP64 and gzip-TAR increment. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
+> Status: active plan after the Alpha.11 restricted raw POSIX PAX increment. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
 
 The next work should produce thin, independently reviewable trust increments. Each increment must finish with a useful artifact, explicit evidence, and a bounded claim. Work that merely makes the codebase larger does not count as progress.
 
@@ -22,22 +22,32 @@ Wheel         research proof [done]   -> supported evaluator [done] -> targeted 
 
 The assurance and wheel lanes may add test, corpus, and research tooling. They do not add a fallback parser or silently widen the shipped profile. The exact Kani, mutation, coverage, and promotion contracts are recorded in [assurance discovery and promotion](assurance-promotion.md).
 
-## Immediate post-Alpha.10 sequence
+## Immediate post-Alpha.11 sequence
 
-Alpha.6 shipped the public fail-closed Linux supervisor and capability boundary. Alpha.7 closed the repository-only wheel research proof. Alpha.8 added the supported portable UTF-8 profile and public capability-only wheel evaluator. Alpha.9 released strict portable POSIX ustar with zero new runtime dependencies. Alpha.10 released strict ZIP64 under policy v3 and strict single-member gzip-wrapped portable ustar under policy v4, with ZIP64-native and two-domain transform evidence, independently reconstructed roots, public package paths, and separate bounded fuzz campaigns. ZIP32 does not alias to either, and the authenticated worker refuses both without fallback until later semantic records can represent their evidence.
+Alpha.6 shipped the public fail-closed Linux supervisor and capability boundary. Alpha.7 closed the repository-only wheel research proof. Alpha.8 added the supported portable UTF-8 profile and public capability-only wheel evaluator. Alpha.9 released strict portable POSIX ustar with zero new runtime dependencies. Alpha.10 released strict ZIP64 under policy v3 and strict single-member gzip-wrapped portable ustar under policy v4. Alpha.11 released `sealr.profile.tar.pax-portable.v1` under policy v5 with a fixed two-key extension language, exact global and local precedence, provenance, independent source-covering replay, `sealr.archive-ir.tar-pax.v1`, and `sealrTreeV5`, again with zero new runtime dependencies. ZIP32 and raw ustar do not alias to these profiles, and the authenticated worker refuses every unsupported selection without fallback.
 
-Raw PAX is next because it expands the most common TAR naming and metadata dialect without adding a decoder dependency or changing the established snapshot, materialization, and content-verification core. A narrow GNU long-name-only profile follows as a separate language so precedence cannot vary by producer. Only after both raw dialects have independent identities and covering evidence will they be composed with the existing gzip transform. Zstd, XZ, and bzip2 then enter one at a time under the codec dependency gate. The 7z, cpio, ar/deb, CAB, RPM, and RAR5 programs remain separately gated. ISO 9660, UDF, and filesystem images are a separate program. Targeted benign wheel coverage, stable identity and API review, assurance history, authenticated recovery, and durability continue in parallel.
+A narrow GNU long-name-only raw profile is next because GNU `L` carrier state is common but semantically different from PAX. Keeping it separate prevents producer-specific precedence, long-link, sparse, and base-256 behavior from leaking into the Alpha.11 language. Only after GNU raw conformance is frozen will PAX and GNU be composed separately with the existing exact gzip transform. Zstd, XZ/LZMA2, and bzip2 then enter one at a time under the codec dependency gate. A local 7z interpreter starts with Copy before reusing the reviewed LZMA layer. The cpio, ar/deb, CAB, RPM, and RAR5 programs remain separately gated. ISO 9660, UDF, and filesystem images are a separate program. Targeted benign wheel coverage, stable identity and API review, assurance history, worker-record parity, authenticated recovery, and durability continue in parallel.
 
-### Alpha.11 PAX and GNU TAR gates
+### Alpha.11 restricted PAX gates: complete
 
-1. Publish separate raw profiles for POSIX PAX and GNU long-name TAR. Neither may widen, detect, retry, or alias the portable-ustar selection.
-2. Parse PAX records with exact decimal record lengths and complete byte consumption. Bound record count, individual record length, cumulative extension metadata, keyword length, and value length before allocation.
-3. Model per-file `x` and global `g` state with explicit provenance and deterministic precedence. Start from a closed keyword allowlist needed for portable paths and sizes; deny unknown or security-sensitive keywords until individually specified.
-4. Keep links, sparse mappings, devices, FIFOs, base-256 numbers, mixed PAX and GNU extension state, concatenation, and recovery behavior outside the first profiles.
-5. Limit the first GNU profile to exact GNU magic plus `L` long-name records. Deny `K` long-link records, `S` sparse records, GNU base-256 numbers, and any long-name record not consumed exactly by its one following member.
-6. Preserve zero new runtime dependencies. Reuse the raw-TAR snapshot, path, quota, verification, read, materialization, and content-root core while assigning new interpretation and layout identities.
-7. Add independent covering and identity reconstruction, exact GNU tar and bsdtar producer fixtures, field-family mutations, public package coverage, worker no-fallback refusal, and separate bounded fuzz targets before promotion.
-8. Compose each promoted raw dialect with the existing exact gzip transform only after raw conformance is frozen. The composed profiles must publish distinct transform-bound layout identities while preserving the same verified content root.
+1. `sealr.profile.tar.pax-portable.v1` is separate from portable ustar and selected only as `tar-pax` under policy v5.
+2. PAX records use exact decimal lengths and complete payload consumption. Each extension is bounded to 65,536 bytes, two records, and a 16-byte keyword scan; each archive is bounded to 1,024 extensions.
+3. The only keywords are exact `path` and `size`. A fixed four-field state resolves local, then global, then underlying ustar values and preserves source extension and record provenance.
+4. Links, sparse mappings, devices, FIFOs, GNU records, base-256 numbers, mixed dialects, concatenation, recovery, unknown keywords, empty values, and timestamp or ownership records remain outside the profile.
+5. `sealr.archive-ir.tar-pax.v1`, an independent covering and state-replay audit, and `sealrTreeV5` with label `sealr.tree.layout.tar-pax.v1` bind physical and effective meaning.
+6. The PAX profile digest is `db951f620acf54e67845144e138f9f16994439847a97601e20a424dfea7f4445`; the policy v5 digest is `d1268c72f284f8f1b7ce5e06ada17ef7cbbbc5768a876ee93d103ad21e77d019`.
+7. The path, quota, verification, retention, later-read, materialization, and content-root core is reused with zero new runtime dependencies.
+8. Worker selection refuses before source access and without fallback until a later semantic record binds PAX evidence.
+9. A separate scheduled Linux AddressSanitizer target starts from nine digest-pinned deterministic seeds under exact input, time, memory, and job bounds. It is discovery evidence, not a coverage proof.
+
+### Next GNU and gzip-composition gates
+
+1. Publish one separate raw GNU long-name-only profile. It must not widen, detect, retry, or alias portable ustar or PAX.
+2. Require exact GNU magic plus one `L` long-name carrier consumed by exactly one following ordinary member.
+3. Deny `K` long-link records, sparse records, GNU base-256 numbers, PAX records, mixed state, orphan carriers, links, devices, concatenation, and recovery behavior.
+4. Add a distinct interpretation, IR, covering audit, layout identity, producer corpus, field-family mutations, public package coverage, fail-closed worker refusal, and bounded fuzz surface before promotion.
+5. Preserve zero new runtime dependencies and reuse the existing raw-payload execution core.
+6. Compose each frozen raw dialect with the exact gzip transform only after its raw conformance is immutable. Each composition receives a distinct transform-bound layout identity while preserving the format-neutral verified content root.
 
 ### Alpha.9 portable ustar gates
 
@@ -71,7 +81,8 @@ Together, these completed increments freeze what the worker may mean, how read o
 | Alpha.8 | Portable names and supported consumer | Closed Unicode profile, public four-way evaluator, source-deletion proof, exact identities, public-surface corpus replay |
 | Alpha.9 | Portable ustar and multi-format core | Explicit selection and policy authorization, zero-dependency raw ustar, TAR-native evidence, independent roots, producer corpus, package and fuzz gates |
 | Alpha.10 | Strict ZIP64 and gzip TAR | Policy v3 and v4 selections, zero new dependencies, ZIP64-native and two-domain evidence, independently reconstructed roots, package paths, bounded fuzz, and fail-closed worker refusal |
-| Alpha.11 target | PAX and GNU TAR | Separate raw dialect profiles, exact extension state and provenance, zero new dependencies, independent roots and producer fixtures, then gzip composition |
+| Alpha.11 | Restricted raw POSIX PAX | Explicit policy v5 selection, two-key closed grammar, exact precedence provenance, independent audit and `sealrTreeV5`, zero new dependencies, fail-closed worker refusal |
+| Next | GNU long-name TAR and gzip composition | Separate GNU `L`-only raw language, then distinct gzip compositions for the frozen PAX and GNU profiles |
 
 Version labels are delivery targets, not permission to cut a release with a red gate. If an increment changes identity or interpretation, it receives a new profile or schema identifier and preserves prior identifiers as immutable historical contracts.
 
@@ -268,9 +279,9 @@ The existing `CI` workflow remains the only required promotion authority. Schedu
 Two implementation lanes can proceed in parallel without inventing another meaning:
 
 - **Semantic and consumer lane:** targeted benign Unicode, `.data`, and descriptor-bearing wheel evidence; stable identity and API review; and a separately versioned legacy CP437 profile only where compatibility evidence justifies it.
-- **Systems and format lane:** finish strict ZIP64 and gzip-TAR assurance plus worker-record parity; add raw PAX and GNU long-name-only TAR, then compose both with gzip; promote zstd, XZ, and bzip2 separately before 7z; and add cpio, ar/deb, CAB, RPM, and RAR5 through their own gates. ISO 9660, UDF, and filesystem images remain a separate program. Authenticated abandoned-stage recovery, explicit durability levels, and platform-specific worker research continue in parallel.
+- **Systems and format lane:** add GNU long-name-only raw TAR, then compose the frozen PAX and GNU profiles with gzip; promote zstd, XZ/LZMA2, and bzip2 separately; build local 7z structure with Copy before LZMA; and add cpio, ar/deb, CAB, RPM, and RAR5 through their own gates. ZIP64 and TAR worker-record parity, authenticated abandoned-stage recovery, explicit durability levels, and platform-specific worker research continue in parallel. ISO 9660, UDF, and filesystem images remain a separate program.
 
-Both lanes consume the same identities, findings discipline, conformance bundles, and format-neutral verification and materialization boundary. Rich TAR dialects and each additional codec remain separately gated; raw portable ustar is implemented and does not silently authorize them.
+Both lanes consume the same identities, findings discipline, conformance bundles, and format-neutral verification and materialization boundary. Each TAR dialect and additional codec remains separately gated; raw portable ustar and restricted raw PAX do not silently authorize GNU or compressed variants.
 
 Stable crate and native-binary distribution remain gated even though their mechanics are now executable. The `sealr` source package has an exact README, Apache-2.0 license, MSRV, registry, file-list, and extracted-consumer contract. Native archives name and test explicit OS, architecture, kernel or deployment, and ABI floors on fixed runner labels. The [distribution contract](distribution-contract.md) keeps those promises separate. Stable 1.0 still waits for the trust gate, supported usefulness, API and schema freeze, assurance history, and independent review.
 

@@ -1271,6 +1271,8 @@ fn finding_code_tag(code: FindingCode) -> u16 {
         FindingCode::TarFeatureUnsupported => 64,
         FindingCode::GzipExtra => 65,
         FindingCode::QuotaDerived => 66,
+        FindingCode::TarPaxRecord => 67,
+        FindingCode::TarPaxState => 68,
     }
 }
 
@@ -1343,6 +1345,8 @@ fn finding_code_from_tag(tag: u16, offset: usize) -> Result<FindingCode, RecordE
         64 => FindingCode::TarFeatureUnsupported,
         65 => FindingCode::GzipExtra,
         66 => FindingCode::QuotaDerived,
+        67 => FindingCode::TarPaxRecord,
+        68 => FindingCode::TarPaxState,
         _ => {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidEnum,
@@ -4736,7 +4740,10 @@ mod tests {
     fn test_zip_covering_mut(ir: &mut ArchiveIR) -> &mut ArchiveCovering {
         match &mut ir.evidence {
             ArchiveEvidence::Zip(covering) => covering,
-            ArchiveEvidence::Zip64(_) | ArchiveEvidence::Tar(_) | ArchiveEvidence::TarGzip(_) => {
+            ArchiveEvidence::Zip64(_)
+            | ArchiveEvidence::Tar(_)
+            | ArchiveEvidence::TarGzip(_)
+            | ArchiveEvidence::TarPax(_) => {
                 panic!("semantic-record test archive must carry ZIP evidence")
             }
         }

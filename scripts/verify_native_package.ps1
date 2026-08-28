@@ -118,6 +118,99 @@ function Invoke-Captured {
     }
 }
 
+function Set-UstarOctal {
+    param(
+        [Parameter(Mandatory)][byte[]]$Header,
+        [Parameter(Mandatory)][int]$Offset,
+        [Parameter(Mandatory)][int]$Length,
+        [Parameter(Mandatory)][uint64]$Value
+    )
+
+    $digits = [System.Convert]::ToString([int64]$Value, 8)
+    if ($digits.Length -gt $Length - 1) {
+        throw "ustar octal value does not fit its $Length-byte field"
+    }
+    $encoded = [System.Text.Encoding]::ASCII.GetBytes(
+        $digits.PadLeft($Length - 1, '0') + [char]0
+    )
+    [System.Array]::Copy($encoded, 0, $Header, $Offset, $Length)
+}
+
+function New-UstarHeader {
+    param(
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][uint64]$Size,
+        [Parameter(Mandatory)][char]$TypeFlag
+    )
+
+    $nameBytes = [System.Text.Encoding]::ASCII.GetBytes($Name)
+    if ($nameBytes.Length -eq 0 -or $nameBytes.Length -gt 100) {
+        throw 'native-package PAX fixture name is outside the ustar field'
+    }
+    $header = [byte[]]::new(512)
+    [System.Array]::Copy($nameBytes, 0, $header, 0, $nameBytes.Length)
+    Set-UstarOctal -Header $header -Offset 100 -Length 8 -Value 420
+    Set-UstarOctal -Header $header -Offset 108 -Length 8 -Value 0
+    Set-UstarOctal -Header $header -Offset 116 -Length 8 -Value 0
+    Set-UstarOctal -Header $header -Offset 124 -Length 12 -Value $Size
+    Set-UstarOctal -Header $header -Offset 136 -Length 12 -Value 0
+    for ($index = 148; $index -lt 156; $index++) {
+        $header[$index] = 0x20
+    }
+    $header[156] = [byte]$TypeFlag
+    $magic = [System.Text.Encoding]::ASCII.GetBytes("ustar$([char]0)00")
+    [System.Array]::Copy($magic, 0, $header, 257, $magic.Length)
+    Set-UstarOctal -Header $header -Offset 329 -Length 8 -Value 0
+    Set-UstarOctal -Header $header -Offset 337 -Length 8 -Value 0
+    $checksum = [uint32]0
+    foreach ($byte in $header) {
+        $checksum += $byte
+    }
+    $checksumText = [System.Convert]::ToString([int64]$checksum, 8).PadLeft(6, '0')
+    if ($checksumText.Length -ne 6) {
+        throw 'native-package PAX fixture checksum exceeded the canonical field'
+    }
+    $checksumBytes = [System.Text.Encoding]::ASCII.GetBytes($checksumText)
+    [System.Array]::Copy($checksumBytes, 0, $header, 148, 6)
+    $header[154] = 0
+    $header[155] = 0x20
+    return $header
+}
+
+function New-PaxRecord {
+    param(
+        [Parameter(Mandatory)][string]$Keyword,
+        [Parameter(Mandatory)][string]$Value
+    )
+
+    $body = " $Keyword=$Value`n"
+    $digits = 1
+    while ($true) {
+        $length = $digits + [System.Text.Encoding]::UTF8.GetByteCount($body)
+        $nextDigits = ([string]$length).Length
+        if ($nextDigits -eq $digits) {
+            return [System.Text.Encoding]::UTF8.GetBytes("$length$body")
+        }
+        $digits = $nextDigits
+    }
+}
+
+function Add-PaddedTarRecord {
+    param(
+        [Parameter(Mandatory)][System.IO.MemoryStream]$Stream,
+        [Parameter(Mandatory)][byte[]]$Header,
+        [Parameter(Mandatory)][AllowEmptyCollection()][byte[]]$Payload
+    )
+
+    $Stream.Write($Header, 0, $Header.Length)
+    $Stream.Write($Payload, 0, $Payload.Length)
+    $padding = [int]((512 - ($Stream.Position % 512)) % 512)
+    if ($padding -ne 0) {
+        $zeros = [byte[]]::new($padding)
+        $Stream.Write($zeros, 0, $zeros.Length)
+    }
+}
+
 if ($TargetTriple -notin $supportedTargets) {
     throw "unsupported native release target: $TargetTriple"
 }
@@ -348,6 +441,119 @@ try {
         throw 'packaged portable ustar materialization did not preserve the exact admitted tree'
     }
 
+    $paxPathRecord = New-PaxRecord -Keyword 'path' -Value 'mars/retained.txt'
+    $paxSizeRecord = New-PaxRecord -Keyword 'size' -Value '4'
+    $paxPayloadStream = [System.IO.MemoryStream]::new()
+    try {
+        $paxPayloadStream.Write($paxPathRecord, 0, $paxPathRecord.Length)
+        $paxPayloadStream.Write($paxSizeRecord, 0, $paxSizeRecord.Length)
+        $paxPayload = $paxPayloadStream.ToArray()
+    } finally {
+        $paxPayloadStream.Dispose()
+    }
+    $paxStream = [System.IO.MemoryStream]::new()
+    try {
+        Add-PaddedTarRecord `
+            -Stream $paxStream `
+            -Header (New-UstarHeader -Name 'PaxHeaders/entry' -Size $paxPayload.Length -TypeFlag 'x') `
+            -Payload $paxPayload
+        $paxContent = [System.Text.Encoding]::ASCII.GetBytes('mars')
+        Add-PaddedTarRecord `
+            -Stream $paxStream `
+            -Header (New-UstarHeader -Name 'placeholder' -Size 99 -TypeFlag '0') `
+            -Payload $paxContent
+        $terminator = [byte[]]::new(1024)
+        $paxStream.Write($terminator, 0, $terminator.Length)
+        $paxBytes = $paxStream.ToArray()
+    } finally {
+        $paxStream.Dispose()
+    }
+    if ($paxBytes.Length -ne 3072) {
+        throw "native-package PAX fixture length changed: $($paxBytes.Length)"
+    }
+    $paxArchivePath = Join-Path $temporaryRoot 'portable-pax.tar'
+    [System.IO.File]::WriteAllBytes($paxArchivePath, $paxBytes)
+    $paxSourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $paxArchivePath).Hash.ToLowerInvariant()
+    if ($paxSourceHash -cne '1cf6a8e4db2d214ea6f5565a623942587a70da203ca00bf3b13358a46611b2b6') {
+        throw "native-package PAX fixture identity changed: $paxSourceHash"
+    }
+
+    $paxInspect = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-pax', $paxArchivePath) `
+        -Role 'packaged restricted PAX inspect'
+    if ($paxInspect.ExitCode -ne 0) {
+        throw "packaged restricted PAX inspect failed: $($paxInspect.Stderr)"
+    }
+    $paxView = $paxInspect.Stdout | ConvertFrom-Json
+    $paxReceipt = $paxInspect.Stderr | ConvertFrom-Json
+    if ($paxView.schema -cne 'sealr.view.v1' -or
+        $paxReceipt.schema -cne 'sealr.receipt.v2' -or
+        $paxView.source.magic -cne 'tar' -or
+        $paxView.interpretation.status -cne 'interpreted' -or
+        $paxView.admission.status -cne 'admitted' -or
+        $paxView.verification.status -cne 'complete' -or
+        $paxView.effect.status -cne 'not-requested' -or
+        @($paxView.members).Count -ne 1 -or
+        $paxView.members[0].path -cne 'mars/retained.txt' -or
+        $paxView.members[0].method -cne 'raw' -or
+        $paxView.members[0].uncomp_bytes -ne 4 -or
+        $paxReceipt.policy.id -cne 'sealr:policy/default/v5' -or
+        $paxReceipt.policy.digest.sha256 -cne 'd1268c72f284f8f1b7ce5e06ada17ef7cbbbc5768a876ee93d103ad21e77d019' -or
+        $paxReceipt.identities.interpretation.id -cne 'sealr.profile.tar.pax-portable.v1' -or
+        $paxReceipt.identities.interpretation.digest.sha256 -cne 'db951f620acf54e67845144e138f9f16994439847a97601e20a424dfea7f4445' -or
+        $paxReceipt.identities.layout.sealrTreeV5 -cne '221afc64c85dbd220f75b925587f4fc8e07774df1ca1bd762b8b5bc4747a6fb7' -or
+        $paxReceipt.identities.content.sealrTreeV1 -cne 'c668daa1f966425150367b8aafe176477b9960a421f9d35502256845b0a7a1a1') {
+        throw 'packaged restricted PAX inspect returned unexpected semantic evidence'
+    }
+
+    $paxDefault = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @($paxArchivePath) `
+        -Role 'packaged PAX compatibility-default refusal'
+    $paxDefaultView = $paxDefault.Stdout | ConvertFrom-Json
+    $paxDefaultReceipt = $paxDefault.Stderr | ConvertFrom-Json
+    if ($paxDefault.ExitCode -ne 2 -or
+        $paxDefaultView.verdict -cne 'rejected' -or
+        $paxDefaultView.source.magic -cne 'unknown' -or
+        $paxDefaultView.policy.id -cne 'sealr:policy/default/v1' -or
+        $paxDefaultView.interpretation.status -cne 'unsupported' -or
+        $paxDefaultView.admission.status -cne 'not-evaluated' -or
+        @($paxDefaultView.members).Count -ne 0 -or
+        $paxDefaultReceipt.identities.interpretation.id -cne 'sealr.profile.zip.strict-ascii.v1' -or
+        $paxDefaultReceipt.identities.layout.status -cne 'unavailable' -or
+        $paxDefaultReceipt.identities.content.status -cne 'unavailable') {
+        throw 'packaged compatibility default unexpectedly recognized restricted PAX'
+    }
+
+    $paxDestination = Join-Path $temporaryRoot 'restricted-pax-output'
+    $paxMaterialize = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-pax', $paxArchivePath, '--dest', $paxDestination) `
+        -Role 'packaged restricted PAX materialization'
+    if ($paxMaterialize.ExitCode -ne 0) {
+        throw "packaged restricted PAX materialization failed: $($paxMaterialize.Stderr)"
+    }
+    $paxMaterializedView = $paxMaterialize.Stdout | ConvertFrom-Json
+    $paxMaterializedReceipt = $paxMaterialize.Stderr | ConvertFrom-Json
+    $paxFiles = @(Get-ChildItem -LiteralPath $paxDestination -Recurse -Force -File | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($paxDestination, $_.FullName).Replace('\', '/')
+        })
+    $paxDirectories = @(Get-ChildItem -LiteralPath $paxDestination -Recurse -Force -Directory | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($paxDestination, $_.FullName).Replace('\', '/')
+        })
+    $leakedStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+    if (-not $paxMaterializedView.wrote -or
+        $paxMaterializedView.effect.status -cne 'committed' -or
+        $paxMaterializedReceipt.identities.layout.sealrTreeV5 -cne $paxReceipt.identities.layout.sealrTreeV5 -or
+        $paxMaterializedReceipt.identities.content.sealrTreeV1 -cne $paxReceipt.identities.content.sealrTreeV1 -or
+        $paxFiles.Count -ne 1 -or $paxFiles[0] -cne 'mars/retained.txt' -or
+        $paxDirectories.Count -ne 1 -or $paxDirectories[0] -cne 'mars' -or
+        [System.IO.File]::ReadAllText((Join-Path $paxDestination 'mars/retained.txt')) -cne 'mars' -or
+        $leakedStages.Count -ne 0) {
+        throw 'packaged restricted PAX materialization did not preserve the effective admitted tree'
+    }
+
     if ($TargetTriple -ne $windowsTarget) {
         foreach ($relative in $expectedFiles) {
             $expectedMode = if ($relative -in @($binaryName, 'libexec/sealr/sealr-worker')) { '755' } else { '644' }
@@ -406,6 +612,25 @@ try {
             (Test-Path -LiteralPath $tarWorkerDestination) -or
             $workerStages.Count -ne 0) {
             throw 'packaged portable ustar worker selection did not fail closed without fallback'
+        }
+        $paxWorkerDestination = Join-Path $temporaryRoot 'restricted-pax-worker-output'
+        $paxWorker = Invoke-Captured `
+            -FilePath $packagedCli `
+            -Arguments @(
+                '--format', 'tar-pax',
+                '--worker-manifest', $manifestPath,
+                $paxArchivePath,
+                '--dest', $paxWorkerDestination
+            ) `
+            -Role 'packaged restricted PAX worker refusal'
+        $workerStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+        if ($paxWorker.ExitCode -ne 1 -or
+            -not [string]::IsNullOrEmpty($paxWorker.Stdout) -or
+            $paxWorker.Stderr -notmatch 'isolation unavailable' -or
+            $paxWorker.Stderr -notmatch 'PAX TAR' -or
+            (Test-Path -LiteralPath $paxWorkerDestination) -or
+            $workerStages.Count -ne 0) {
+            throw 'packaged restricted PAX worker selection did not fail closed without fallback'
         }
         $elfHeader = readelf --file-header $helper | Out-String
         if ($LASTEXITCODE -ne 0 -or

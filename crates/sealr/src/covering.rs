@@ -10,7 +10,8 @@ use crate::findings::{Finding, FindingCode};
 use crate::interval::{CheckedInterval, IntervalError};
 use crate::ir::{
     ArchiveFormat, ArchiveIR, ByteRange, ExtraDisposition, ExtraSite, GzipWrapperEvidence,
-    MemberKind, Zip64DataDescriptorWidth, Zip64LocalValueShape,
+    MemberKind, PaxExtensionEvidence, PaxExtensionKind, PaxKeyword, PaxValueSource,
+    Zip64DataDescriptorWidth, Zip64LocalValueShape,
 };
 use crate::policy::hex_sha256;
 use crate::snapshot::SourceSnapshot;
@@ -26,6 +27,12 @@ const GZIP_FLAG_EXTRA: u8 = 1 << 2;
 const GZIP_FLAG_NAME: u8 = 1 << 3;
 const GZIP_FLAG_COMMENT: u8 = 1 << 4;
 const GZIP_FLAG_RESERVED: u8 = 0b1110_0000;
+const TAR_BLOCK_LEN: u64 = 512;
+const PAX_MAX_EXTENSION_BYTES: u64 = 64 * 1024;
+const PAX_MAX_EXTENSIONS: usize = 1024;
+const PAX_MAX_RECORD_LENGTH_DIGITS: usize = 20;
+const PAX_MAX_KEYWORD_BYTES: usize = 16;
+const PAX_MAX_EFFECTIVE_PATH_BYTES: usize = 8191;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CoveringAuditError<'member> {
@@ -842,6 +849,673 @@ pub(crate) fn audit_tar_covering(
     Ok(())
 }
 
+/// Independently check the exact physical partition and PAX override replay
+/// for the closed portable PAX profile.
+pub(crate) fn audit_tar_pax_covering(
+    snapshot: &SourceSnapshot<'_>,
+    ir: &ArchiveIR,
+) -> Result<(), Finding> {
+    let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
+    if ir.format() != ArchiveFormat::TarPax {
+        return Err(fail("PAX covering audit received a non-PAX IR"));
+    }
+    if ir.source_digest != *snapshot.digest() {
+        return Err(fail("source digest does not match the PAX snapshot"));
+    }
+    let archive = ir
+        .tar_pax_evidence()
+        .ok_or_else(|| fail("PAX IR has no PAX archive evidence"))?;
+    if archive.extensions.len() > PAX_MAX_EXTENSIONS
+        || u32::try_from(archive.extensions.len()).is_err()
+    {
+        return Err(fail(
+            "PAX extension evidence exceeds the closed profile cap",
+        ));
+    }
+
+    let member_end = checked_range_end(
+        archive.tar.member_records,
+        "PAX member-record covering overflow",
+    )?;
+    let terminator_end = checked_range_end(archive.tar.terminator, "PAX terminator overflow")?;
+    let trailing_end = checked_range_end(
+        archive.tar.trailing_zeros,
+        "PAX trailing-zero range overflow",
+    )?;
+    if archive.tar.member_records.offset != 0
+        || archive.tar.terminator.offset != member_end
+        || archive.tar.terminator.len != TAR_BLOCK_LEN * 2
+        || archive.tar.trailing_zeros.offset != terminator_end
+        || trailing_end != snapshot.len()
+        || !snapshot.len().is_multiple_of(TAR_BLOCK_LEN)
+    {
+        return Err(fail(
+            "PAX top-level ranges do not exactly partition the snapshot",
+        ));
+    }
+
+    let mut cursor = 0_u64;
+    let mut extension_index = 0_usize;
+    let mut member_index = 0_usize;
+    let mut globals = PaxAuditOverrides::default();
+    let mut pending_local: Option<PaxAuditOverrides> = None;
+    while cursor < member_end {
+        let next_extension = archive.extensions.get(extension_index);
+        let next_member = ir.members.get(member_index);
+        let extension_here = next_extension.is_some_and(|value| value.header.offset == cursor);
+        let member_here = next_member.is_some_and(|value| {
+            value
+                .tar_pax_evidence()
+                .is_some_and(|evidence| evidence.tar.header.offset == cursor)
+        });
+        match (extension_here, member_here) {
+            (true, false) => {
+                if pending_local.is_some() {
+                    return Err(fail(
+                        "local PAX extension is not followed immediately by a member",
+                    ));
+                }
+                let extension = next_extension.expect("extension presence was checked");
+                cursor = audit_one_pax_extension(snapshot, extension, cursor, member_end)?;
+                let update = PaxAuditOverrides::from_extension(extension, extension_index)?;
+                match extension.kind {
+                    PaxExtensionKind::Global => globals.update_from(update),
+                    PaxExtensionKind::Local => pending_local = Some(update),
+                }
+                extension_index = extension_index
+                    .checked_add(1)
+                    .ok_or_else(|| fail("PAX extension index overflowed usize"))?;
+            }
+            (false, true) => {
+                let member = next_member.expect("member presence was checked");
+                cursor = audit_one_pax_member(
+                    snapshot,
+                    member,
+                    &archive.extensions,
+                    &globals,
+                    pending_local.as_ref(),
+                    cursor,
+                    member_end,
+                )?;
+                pending_local = None;
+                member_index = member_index
+                    .checked_add(1)
+                    .ok_or_else(|| fail("PAX member index overflowed usize"))?;
+            }
+            (true, true) => {
+                return Err(fail(
+                    "PAX extension and member evidence claim the same header block",
+                ));
+            }
+            (false, false) => {
+                return Err(fail(
+                    "PAX extension and member records do not form a source-ordered partition",
+                ));
+            }
+        }
+    }
+    if cursor != member_end
+        || extension_index != archive.extensions.len()
+        || member_index != ir.members.len()
+    {
+        return Err(fail(
+            "PAX extension and member records do not fill their covering",
+        ));
+    }
+    if pending_local.is_some() {
+        return Err(fail("local PAX extension has no following member"));
+    }
+
+    audit_zero_range(
+        snapshot,
+        archive.tar.terminator,
+        "claimed PAX terminator contains nonzero bytes",
+    )?;
+    audit_zero_range(
+        snapshot,
+        archive.tar.trailing_zeros,
+        "claimed PAX trailing record padding contains nonzero bytes",
+    )?;
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct PaxAuditOverrides {
+    path: Option<PaxValueSource>,
+    size: Option<PaxValueSource>,
+}
+
+impl PaxAuditOverrides {
+    fn from_extension(
+        extension: &PaxExtensionEvidence,
+        extension_index: usize,
+    ) -> Result<Self, Finding> {
+        let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
+        let extension_index = u32::try_from(extension_index)
+            .map_err(|_| fail("PAX extension index does not fit u32"))?;
+        let mut state = Self::default();
+        for (record_index, record) in extension.records.iter().enumerate() {
+            let record_index = u32::try_from(record_index)
+                .map_err(|_| fail("PAX record index does not fit u32"))?;
+            let source = match extension.kind {
+                PaxExtensionKind::Global => PaxValueSource::Global {
+                    extension_index,
+                    record_index,
+                },
+                PaxExtensionKind::Local => PaxValueSource::Local {
+                    extension_index,
+                    record_index,
+                },
+            };
+            match record.keyword {
+                PaxKeyword::Path => state.path = Some(source),
+                PaxKeyword::Size => state.size = Some(source),
+            }
+        }
+        Ok(state)
+    }
+
+    fn update_from(&mut self, update: Self) {
+        if update.path.is_some() {
+            self.path = update.path;
+        }
+        if update.size.is_some() {
+            self.size = update.size;
+        }
+    }
+}
+
+fn audit_one_pax_extension(
+    snapshot: &SourceSnapshot<'_>,
+    extension: &PaxExtensionEvidence,
+    expected_header: u64,
+    covering_end: u64,
+) -> Result<u64, Finding> {
+    let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
+    let header_end = checked_range_end(extension.header, "PAX extension header overflow")?;
+    let payload_end = checked_range_end(extension.payload, "PAX extension payload overflow")?;
+    let padding_end = checked_range_end(extension.padding, "PAX extension padding overflow")?;
+    let expected_padding =
+        (TAR_BLOCK_LEN - (extension.payload.len % TAR_BLOCK_LEN)) % TAR_BLOCK_LEN;
+    if extension.header.offset != expected_header
+        || extension.header.len != TAR_BLOCK_LEN
+        || extension.payload.offset != header_end
+        || extension.payload.len > PAX_MAX_EXTENSION_BYTES
+        || extension.padding.offset != payload_end
+        || extension.padding.len != expected_padding
+        || !padding_end.is_multiple_of(TAR_BLOCK_LEN)
+        || padding_end > covering_end
+    {
+        return Err(fail("PAX extension ranges do not form one aligned record"));
+    }
+
+    let mut header = [0_u8; TAR_BLOCK_LEN as usize];
+    snapshot
+        .read_exact_at(extension.header.offset, &mut header)
+        .map_err(|_| fail("claimed PAX extension header is outside the snapshot"))?;
+    let facts = audit_pax_header(&header)?;
+    let expected_typeflag = match extension.kind {
+        PaxExtensionKind::Global => b'g',
+        PaxExtensionKind::Local => b'x',
+    };
+    if facts.typeflag != expected_typeflag
+        || facts.size != extension.payload.len
+        || facts.mode != extension.mode
+        || facts.mtime != extension.mtime
+        || facts.checksum != extension.header_checksum
+        || !pax_header_name_matches(&header, &extension.raw_name_bytes)
+        || hex_sha256(&header) != extension.header_sha256
+    {
+        return Err(fail(
+            "PAX extension header evidence disagrees with the snapshot",
+        ));
+    }
+
+    let payload = snapshot
+        .read_vec(extension.payload.offset, extension.payload.len)
+        .map_err(|_| fail("claimed PAX extension payload is outside the snapshot"))?;
+    if hex_sha256(&payload) != extension.payload_sha256 {
+        return Err(fail(
+            "PAX extension payload digest disagrees with the snapshot",
+        ));
+    }
+    audit_pax_records(&payload, extension.payload.offset, &extension.records)?;
+    audit_zero_range(
+        snapshot,
+        extension.padding,
+        "claimed PAX extension padding contains nonzero bytes",
+    )?;
+    Ok(padding_end)
+}
+
+fn audit_one_pax_member(
+    snapshot: &SourceSnapshot<'_>,
+    member: &crate::ir::IrMember,
+    extensions: &[PaxExtensionEvidence],
+    globals: &PaxAuditOverrides,
+    local: Option<&PaxAuditOverrides>,
+    expected_header: u64,
+    covering_end: u64,
+) -> Result<u64, Finding> {
+    let fail = |detail: &'static str| {
+        Finding::error(FindingCode::CoveringInconsistent, detail).on(&member.decoded_name)
+    };
+    if member.format() != ArchiveFormat::TarPax {
+        return Err(fail(
+            "PAX member evidence variant does not match the archive format",
+        ));
+    }
+    let evidence = member
+        .tar_pax_evidence()
+        .ok_or_else(|| fail("PAX member lacks PAX-specific evidence"))?;
+    let tar = &evidence.tar;
+    let header_end = checked_range_end(tar.header, "PAX member header overflow")?;
+    let payload_end = checked_range_end(tar.payload, "PAX member payload overflow")?;
+    let padding_end = checked_range_end(tar.padding, "PAX member padding overflow")?;
+    let expected_padding = (TAR_BLOCK_LEN - (tar.payload.len % TAR_BLOCK_LEN)) % TAR_BLOCK_LEN;
+    if tar.header.offset != expected_header
+        || tar.header.len != TAR_BLOCK_LEN
+        || tar.payload.offset != header_end
+        || tar.payload.len != member.declared_uncomp_size
+        || tar.padding.offset != payload_end
+        || tar.padding.len != expected_padding
+        || !padding_end.is_multiple_of(TAR_BLOCK_LEN)
+        || padding_end > covering_end
+    {
+        return Err(fail("PAX member ranges do not form one aligned record"));
+    }
+
+    let mut header = [0_u8; TAR_BLOCK_LEN as usize];
+    snapshot
+        .read_exact_at(tar.header.offset, &mut header)
+        .map_err(|_| fail("claimed PAX member header is outside the snapshot"))?;
+    let facts = audit_pax_header(&header).map_err(|finding| finding.on(&member.decoded_name))?;
+    let source_is_directory = facts.typeflag == b'5';
+    if !matches!(facts.typeflag, 0 | b'0' | b'5')
+        || source_is_directory != matches!(member.kind, MemberKind::Directory)
+        || (source_is_directory && member.declared_uncomp_size != 0)
+        || facts.size != evidence.base_size
+        || facts.mode != tar.mode
+        || facts.mtime != tar.mtime
+        || facts.checksum != tar.header_checksum
+        || !pax_header_name_matches(&header, &evidence.base_name_bytes)
+        || hex_sha256(&header) != tar.header_sha256
+    {
+        return Err(fail(
+            "PAX member header evidence disagrees with the snapshot",
+        ));
+    }
+
+    let expected_path_source = local
+        .and_then(|state| state.path)
+        .or(globals.path)
+        .unwrap_or(PaxValueSource::Ustar);
+    let expected_size_source = local
+        .and_then(|state| state.size)
+        .or(globals.size)
+        .unwrap_or(PaxValueSource::Ustar);
+    if evidence.path_source != expected_path_source || evidence.size_source != expected_size_source
+    {
+        return Err(fail(
+            "PAX member override source evidence disagrees with replayed state",
+        ));
+    }
+
+    let effective_name = match expected_path_source {
+        PaxValueSource::Ustar => evidence.base_name_bytes.as_slice(),
+        source => pax_source_record(extensions, source, PaxKeyword::Path)
+            .ok_or_else(|| fail("PAX path source does not reference its replayed record"))?
+            .raw_value_bytes
+            .as_slice(),
+    };
+    let effective_size = match expected_size_source {
+        PaxValueSource::Ustar => evidence.base_size,
+        source => pax_source_record(extensions, source, PaxKeyword::Size)
+            .and_then(|record| record.parsed_size)
+            .ok_or_else(|| fail("PAX size source does not reference its replayed record"))?,
+    };
+    if effective_name.is_empty()
+        || effective_name.len() > PAX_MAX_EFFECTIVE_PATH_BYTES
+        || effective_name.contains(&0)
+        || std::str::from_utf8(effective_name).is_err()
+        || member.raw_name_bytes != effective_name
+        || member.decoded_name.as_bytes() != effective_name
+        || member.declared_uncomp_size != effective_size
+    {
+        return Err(fail(
+            "PAX member effective name or size disagrees with replayed state",
+        ));
+    }
+
+    audit_zero_range(
+        snapshot,
+        tar.padding,
+        "claimed PAX member padding contains nonzero bytes",
+    )
+    .map_err(|finding| finding.on(&member.decoded_name))?;
+    Ok(padding_end)
+}
+
+fn pax_source_record(
+    extensions: &[PaxExtensionEvidence],
+    source: PaxValueSource,
+    keyword: PaxKeyword,
+) -> Option<&crate::ir::PaxRecordEvidence> {
+    let (extension_index, record_index, expected_kind) = match source {
+        PaxValueSource::Ustar => return None,
+        PaxValueSource::Global {
+            extension_index,
+            record_index,
+        } => (extension_index, record_index, PaxExtensionKind::Global),
+        PaxValueSource::Local {
+            extension_index,
+            record_index,
+        } => (extension_index, record_index, PaxExtensionKind::Local),
+    };
+    let extension = extensions.get(usize::try_from(extension_index).ok()?)?;
+    if extension.kind != expected_kind {
+        return None;
+    }
+    let record = extension.records.get(usize::try_from(record_index).ok()?)?;
+    (record.keyword == keyword).then_some(record)
+}
+
+fn audit_pax_records(
+    payload: &[u8],
+    payload_offset: u64,
+    records: &[crate::ir::PaxRecordEvidence],
+) -> Result<(), Finding> {
+    let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
+    if records.is_empty() || records.len() > 2 {
+        return Err(fail(
+            "PAX extension does not contain exactly one or two records",
+        ));
+    }
+    let mut cursor = 0_usize;
+    let mut record_index = 0_usize;
+    let mut saw_path = false;
+    let mut saw_size = false;
+    while cursor < payload.len() {
+        let evidence = records
+            .get(record_index)
+            .ok_or_else(|| fail("PAX payload contains more records than its evidence"))?;
+        let record_start = cursor;
+        while cursor < payload.len() && payload[cursor].is_ascii_digit() {
+            cursor = cursor
+                .checked_add(1)
+                .ok_or_else(|| fail("PAX record length scan overflowed usize"))?;
+            if cursor - record_start > PAX_MAX_RECORD_LENGTH_DIGITS {
+                return Err(fail("PAX record length exceeds the closed digit cap"));
+            }
+        }
+        if cursor == record_start || cursor == payload.len() || payload[cursor] != b' ' {
+            return Err(fail("PAX record lacks its canonical length delimiter"));
+        }
+        let length_digits = &payload[record_start..cursor];
+        if length_digits.len() > 1 && length_digits[0] == b'0' {
+            return Err(fail("PAX record length has a leading zero"));
+        }
+        let record_len_u64 = parse_pax_decimal(length_digits)
+            .ok_or_else(|| fail("PAX record length overflowed u64"))?;
+        let record_len = usize::try_from(record_len_u64)
+            .map_err(|_| fail("PAX record length does not fit usize"))?;
+        let record_end = record_start
+            .checked_add(record_len)
+            .ok_or_else(|| fail("PAX record end overflowed usize"))?;
+        if record_len == 0 || record_end > payload.len() || payload[record_end - 1] != b'\n' {
+            return Err(fail("PAX record length or terminator is inconsistent"));
+        }
+
+        cursor = cursor
+            .checked_add(1)
+            .ok_or_else(|| fail("PAX record body offset overflowed usize"))?;
+        if cursor >= record_end - 1 {
+            return Err(fail("PAX record has an empty key/value body"));
+        }
+        let body = &payload[cursor..record_end - 1];
+        let equals = body
+            .iter()
+            .position(|byte| *byte == b'=')
+            .ok_or_else(|| fail("PAX record lacks its keyword delimiter"))?;
+        if equals == 0 || equals > PAX_MAX_KEYWORD_BYTES {
+            return Err(fail("PAX record keyword is outside the closed profile"));
+        }
+        let keyword_bytes = &body[..equals];
+        let value = &body[equals + 1..];
+        let value_start = cursor
+            .checked_add(equals + 1)
+            .ok_or_else(|| fail("PAX value offset overflowed usize"))?;
+        let keyword = match keyword_bytes {
+            b"path" if !saw_path => {
+                saw_path = true;
+                if value.is_empty()
+                    || value.len() > PAX_MAX_EFFECTIVE_PATH_BYTES
+                    || value.contains(&0)
+                    || std::str::from_utf8(value).is_err()
+                {
+                    return Err(fail("PAX path value is outside the closed profile"));
+                }
+                if evidence.parsed_size.is_some() {
+                    return Err(fail("PAX path record carries parsed size evidence"));
+                }
+                PaxKeyword::Path
+            }
+            b"size" if !saw_size => {
+                saw_size = true;
+                if value.is_empty()
+                    || value.len() > PAX_MAX_RECORD_LENGTH_DIGITS
+                    || !value.iter().all(u8::is_ascii_digit)
+                    || (value.len() > 1 && value[0] == b'0')
+                {
+                    return Err(fail("PAX size value is not canonical unsigned decimal"));
+                }
+                let parsed = parse_pax_decimal(value)
+                    .ok_or_else(|| fail("PAX size value overflowed u64"))?;
+                if evidence.parsed_size != Some(parsed) {
+                    return Err(fail(
+                        "PAX parsed size evidence disagrees with its raw value",
+                    ));
+                }
+                PaxKeyword::Size
+            }
+            b"path" | b"size" => return Err(fail("PAX extension repeats a keyword")),
+            _ => return Err(fail("PAX record keyword is outside the closed profile")),
+        };
+
+        let absolute_record = payload_offset
+            .checked_add(
+                u64::try_from(record_start)
+                    .map_err(|_| fail("PAX relative record offset does not fit u64"))?,
+            )
+            .ok_or_else(|| fail("PAX absolute record offset overflowed u64"))?;
+        let absolute_value = payload_offset
+            .checked_add(
+                u64::try_from(value_start)
+                    .map_err(|_| fail("PAX relative value offset does not fit u64"))?,
+            )
+            .ok_or_else(|| fail("PAX absolute value offset overflowed u64"))?;
+        if evidence.record
+            != (ByteRange {
+                offset: absolute_record,
+                len: record_len_u64,
+            })
+            || evidence.value
+                != (ByteRange {
+                    offset: absolute_value,
+                    len: u64::try_from(value.len())
+                        .map_err(|_| fail("PAX value length does not fit u64"))?,
+                })
+            || evidence.keyword != keyword
+            || evidence.raw_value_bytes != value
+        {
+            return Err(fail(
+                "PAX record evidence disagrees with exact source bytes",
+            ));
+        }
+        cursor = record_end;
+        record_index = record_index
+            .checked_add(1)
+            .ok_or_else(|| fail("PAX record index overflowed usize"))?;
+    }
+    if record_index != records.len() {
+        return Err(fail(
+            "PAX record evidence does not exactly consume the payload",
+        ));
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy, Debug)]
+struct PaxHeaderFacts {
+    typeflag: u8,
+    size: u64,
+    mode: u32,
+    mtime: u64,
+    checksum: u32,
+}
+
+fn audit_pax_header(header: &[u8; TAR_BLOCK_LEN as usize]) -> Result<PaxHeaderFacts, Finding> {
+    let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
+    if &header[257..263] != b"ustar\0"
+        || &header[263..265] != b"00"
+        || header[500..].iter().any(|byte| *byte != 0)
+        || header[157..257].iter().any(|byte| *byte != 0)
+        || !pax_owner_field_is_canonical(&header[265..297])
+        || !pax_owner_field_is_canonical(&header[297..329])
+    {
+        return Err(fail("PAX header is outside exact POSIX ustar framing"));
+    }
+    let checksum_field = &header[148..156];
+    if !checksum_field[..6]
+        .iter()
+        .all(|byte| matches!(byte, b'0'..=b'7'))
+        || checksum_field[6] != 0
+        || checksum_field[7] != b' '
+    {
+        return Err(fail("PAX header checksum field is not canonical"));
+    }
+    let checksum = parse_pax_octal_digits(&checksum_field[..6])
+        .and_then(|value| u32::try_from(value).ok())
+        .ok_or_else(|| fail("PAX header checksum overflows u32"))?;
+    let actual_checksum = header
+        .iter()
+        .enumerate()
+        .map(|(index, byte)| {
+            if (148..156).contains(&index) {
+                u32::from(b' ')
+            } else {
+                u32::from(*byte)
+            }
+        })
+        .sum::<u32>();
+    if checksum != actual_checksum {
+        return Err(fail("PAX header checksum disagrees with its bytes"));
+    }
+
+    let mode_u64 = parse_pax_octal(&header[100..108])
+        .ok_or_else(|| fail("PAX header mode is not canonical octal"))?;
+    if mode_u64 > 0o7777
+        || parse_pax_octal(&header[108..116]).is_none()
+        || parse_pax_octal(&header[116..124]).is_none()
+    {
+        return Err(fail(
+            "PAX header identity fields are outside the closed profile",
+        ));
+    }
+    let size = parse_pax_octal(&header[124..136])
+        .ok_or_else(|| fail("PAX header size is not canonical octal"))?;
+    if header[156] == b'5' && size != 0 {
+        return Err(fail("PAX directory has a nonzero underlying size"));
+    }
+    let mtime = parse_pax_octal(&header[136..148])
+        .ok_or_else(|| fail("PAX header mtime is not canonical octal"))?;
+    if !pax_device_field_is_zero(&header[329..337]) || !pax_device_field_is_zero(&header[337..345])
+    {
+        return Err(fail("PAX header device fields are not canonical zero"));
+    }
+    Ok(PaxHeaderFacts {
+        typeflag: header[156],
+        size,
+        mode: u32::try_from(mode_u64).expect("portable PAX mode fits u32"),
+        mtime,
+        checksum,
+    })
+}
+
+fn pax_header_name_matches(header: &[u8; TAR_BLOCK_LEN as usize], expected: &[u8]) -> bool {
+    let Some(name) = pax_text_field(&header[0..100], false) else {
+        return false;
+    };
+    let Some(prefix) = pax_text_field(&header[345..500], true) else {
+        return false;
+    };
+    let expected_len = prefix
+        .len()
+        .checked_add(usize::from(!prefix.is_empty()))
+        .and_then(|value| value.checked_add(name.len()));
+    if expected_len != Some(expected.len()) {
+        return false;
+    }
+    if prefix.is_empty() {
+        expected == name
+    } else {
+        expected.starts_with(prefix)
+            && expected.get(prefix.len()) == Some(&b'/')
+            && expected.get(prefix.len() + 1..) == Some(name)
+    }
+}
+
+fn pax_text_field(field: &[u8], empty_allowed: bool) -> Option<&[u8]> {
+    let end = field
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(field.len());
+    if field[end..].iter().any(|byte| *byte != 0) || (!empty_allowed && end == 0) {
+        None
+    } else {
+        Some(&field[..end])
+    }
+}
+
+fn pax_owner_field_is_canonical(field: &[u8]) -> bool {
+    let Some(end) = field.iter().position(|byte| *byte == 0) else {
+        return false;
+    };
+    field[end..].iter().all(|byte| *byte == 0)
+        && field[..end].iter().all(|byte| matches!(byte, b' '..=b'~'))
+}
+
+fn pax_device_field_is_zero(field: &[u8]) -> bool {
+    field.iter().all(|byte| *byte == 0) || parse_pax_octal(field) == Some(0)
+}
+
+fn parse_pax_octal(field: &[u8]) -> Option<u64> {
+    if field.first().is_some_and(|byte| byte & 0x80 != 0) {
+        return None;
+    }
+    let end = field.iter().position(|byte| !matches!(byte, b'0'..=b'7'))?;
+    if end == 0 || field[end..].iter().any(|byte| !matches!(byte, 0 | b' ')) {
+        return None;
+    }
+    parse_pax_octal_digits(&field[..end])
+}
+
+fn parse_pax_octal_digits(digits: &[u8]) -> Option<u64> {
+    digits.iter().try_fold(0_u64, |value, byte| {
+        value
+            .checked_mul(8)
+            .and_then(|value| value.checked_add(u64::from(byte.checked_sub(b'0')?)))
+    })
+}
+
+fn parse_pax_decimal(digits: &[u8]) -> Option<u64> {
+    digits.iter().try_fold(0_u64, |value, byte| {
+        value
+            .checked_mul(10)
+            .and_then(|value| value.checked_add(u64::from(byte.checked_sub(b'0')?)))
+    })
+}
+
 fn audit_zip64_extras(
     snapshot: &SourceSnapshot<'_>,
     member: &crate::ir::IrMember,
@@ -1452,8 +2126,9 @@ mod tests {
     use crate::apply::{apply, apply_with_options, ApplyOptions, Request, Source};
     use crate::findings::Finding;
     use crate::ir::{
-        ArchiveEvidence, ArchiveIR, MemberEvidence, TarInterpretationProfile, TarMemberEvidence,
-        Zip64MemberEvidence, ZipInterpretationProfile, ZipMemberEvidence,
+        ArchiveEvidence, ArchiveIR, MemberEvidence, PaxValueSource, TarInterpretationProfile,
+        TarMemberEvidence, TarPaxInterpretationProfile, Zip64MemberEvidence,
+        ZipInterpretationProfile, ZipMemberEvidence,
     };
     use crate::policy::Policy;
     use std::io::{Cursor, Write};
@@ -1500,6 +2175,77 @@ mod tests {
         bytes.extend_from_slice(b"hello");
         bytes.resize(1024, 0);
         bytes.resize(2048, 0);
+        bytes
+    }
+
+    fn make_pax_tar() -> Vec<u8> {
+        fn octal(field: &mut [u8], value: u64) {
+            field.fill(b'0');
+            let value = format!("{value:o}");
+            let end = field.len() - 1;
+            field[end - value.len()..end].copy_from_slice(value.as_bytes());
+            field[end] = 0;
+        }
+
+        fn header(name: &[u8], size: u64, typeflag: u8) -> [u8; 512] {
+            let mut header = [0_u8; 512];
+            header[..name.len()].copy_from_slice(name);
+            octal(&mut header[100..108], 0o644);
+            octal(&mut header[108..116], 0);
+            octal(&mut header[116..124], 0);
+            octal(&mut header[124..136], size);
+            octal(&mut header[136..148], 0);
+            header[148..156].fill(b' ');
+            header[156] = typeflag;
+            header[257..263].copy_from_slice(b"ustar\0");
+            header[263..265].copy_from_slice(b"00");
+            octal(&mut header[329..337], 0);
+            octal(&mut header[337..345], 0);
+            let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
+            header[148..154].copy_from_slice(format!("{checksum:06o}").as_bytes());
+            header[154] = 0;
+            header[155] = b' ';
+            header
+        }
+
+        fn record(keyword: &str, value: &str) -> Vec<u8> {
+            let suffix = format!(" {keyword}={value}\n");
+            let mut length = suffix.len() + 1;
+            loop {
+                let exact = suffix.len() + length.to_string().len();
+                if exact == length {
+                    return format!("{length}{suffix}").into_bytes();
+                }
+                length = exact;
+            }
+        }
+
+        fn append_record(bytes: &mut Vec<u8>, header_bytes: [u8; 512], payload: &[u8]) {
+            bytes.extend_from_slice(&header_bytes);
+            bytes.extend_from_slice(payload);
+            let padded = payload.len().next_multiple_of(512);
+            bytes.resize(bytes.len() + padded - payload.len(), 0);
+        }
+
+        let mut bytes = Vec::new();
+        let mut global = record("path", "global.txt");
+        global.extend_from_slice(&record("size", "4"));
+        append_record(
+            &mut bytes,
+            header(b"GlobalHead", global.len() as u64, b'g'),
+            &global,
+        );
+        append_record(&mut bytes, header(b"base-one", 1, b'0'), b"ABCD");
+
+        let mut local = record("path", "local.txt");
+        local.extend_from_slice(&record("size", "3"));
+        append_record(
+            &mut bytes,
+            header(b"LocalHead", local.len() as u64, b'x'),
+            &local,
+        );
+        append_record(&mut bytes, header(b"base-two", 2, b'0'), b"XYZ");
+        bytes.resize(bytes.len() + 1024, 0);
         bytes
     }
 
@@ -1578,9 +2324,29 @@ mod tests {
         outcome.archive_ir().cloned().unwrap()
     }
 
+    fn admitted_pax_ir(bytes: &[u8]) -> ArchiveIR {
+        let policy = Policy::default_v5();
+        let options = ApplyOptions::new()
+            .with_tar_pax_interpretation_profile(TarPaxInterpretationProfile::PortableV1);
+        let outcome = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("cover-pax.tar"),
+                    data: bytes,
+                },
+                policy: &policy,
+                dest: None,
+            },
+            &options,
+        );
+        assert!(!outcome.rejected(), "{:?}", outcome.view.findings);
+        outcome.archive_ir().cloned().expect("admitted PAX IR")
+    }
+
     fn tar_covering_mut(ir: &mut ArchiveIR) -> &mut crate::ir::TarArchiveCovering {
         match &mut ir.evidence {
             ArchiveEvidence::Tar(covering) => covering,
+            ArchiveEvidence::TarPax(evidence) => &mut evidence.tar,
             ArchiveEvidence::Zip(_) | ArchiveEvidence::Zip64(_) | ArchiveEvidence::TarGzip(_) => {
                 panic!("expected TAR evidence")
             }
@@ -1590,7 +2356,10 @@ mod tests {
     fn zip_covering_mut(ir: &mut ArchiveIR) -> &mut crate::ir::ArchiveCovering {
         match &mut ir.evidence {
             ArchiveEvidence::Zip(covering) => covering,
-            ArchiveEvidence::Zip64(_) | ArchiveEvidence::Tar(_) | ArchiveEvidence::TarGzip(_) => {
+            ArchiveEvidence::Zip64(_)
+            | ArchiveEvidence::Tar(_)
+            | ArchiveEvidence::TarGzip(_)
+            | ArchiveEvidence::TarPax(_) => {
                 panic!("expected ZIP evidence")
             }
         }
@@ -1599,7 +2368,10 @@ mod tests {
     fn zip64_covering_mut(ir: &mut ArchiveIR) -> &mut crate::ir::Zip64ArchiveCovering {
         match &mut ir.evidence {
             ArchiveEvidence::Zip64(covering) => covering,
-            ArchiveEvidence::Zip(_) | ArchiveEvidence::Tar(_) | ArchiveEvidence::TarGzip(_) => {
+            ArchiveEvidence::Zip(_)
+            | ArchiveEvidence::Tar(_)
+            | ArchiveEvidence::TarGzip(_)
+            | ArchiveEvidence::TarPax(_) => {
                 panic!("expected ZIP64 evidence")
             }
         }
@@ -1608,16 +2380,40 @@ mod tests {
     fn tar_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut TarMemberEvidence {
         match &mut ir.members[index].evidence {
             MemberEvidence::Tar(evidence) => evidence,
+            MemberEvidence::TarPax(evidence) => &mut evidence.tar,
             MemberEvidence::Zip(_) | MemberEvidence::Zip64(_) | MemberEvidence::TarGzip(_) => {
                 panic!("expected TAR member evidence")
             }
         }
     }
 
+    fn pax_archive_mut(ir: &mut ArchiveIR) -> &mut crate::ir::TarPaxArchiveEvidence {
+        match &mut ir.evidence {
+            ArchiveEvidence::TarPax(evidence) => evidence,
+            ArchiveEvidence::Zip(_)
+            | ArchiveEvidence::Zip64(_)
+            | ArchiveEvidence::Tar(_)
+            | ArchiveEvidence::TarGzip(_) => panic!("expected PAX archive evidence"),
+        }
+    }
+
+    fn pax_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut crate::ir::TarPaxMemberEvidence {
+        match &mut ir.members[index].evidence {
+            MemberEvidence::TarPax(evidence) => evidence,
+            MemberEvidence::Zip(_)
+            | MemberEvidence::Zip64(_)
+            | MemberEvidence::Tar(_)
+            | MemberEvidence::TarGzip(_) => panic!("expected PAX member evidence"),
+        }
+    }
+
     fn zip_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut ZipMemberEvidence {
         match &mut ir.members[index].evidence {
             MemberEvidence::Zip(evidence) => evidence,
-            MemberEvidence::Zip64(_) | MemberEvidence::Tar(_) | MemberEvidence::TarGzip(_) => {
+            MemberEvidence::Zip64(_)
+            | MemberEvidence::Tar(_)
+            | MemberEvidence::TarGzip(_)
+            | MemberEvidence::TarPax(_) => {
                 panic!("expected ZIP member evidence")
             }
         }
@@ -1626,7 +2422,10 @@ mod tests {
     fn zip64_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut Zip64MemberEvidence {
         match &mut ir.members[index].evidence {
             MemberEvidence::Zip64(evidence) => evidence,
-            MemberEvidence::Zip(_) | MemberEvidence::Tar(_) | MemberEvidence::TarGzip(_) => {
+            MemberEvidence::Zip(_)
+            | MemberEvidence::Tar(_)
+            | MemberEvidence::TarGzip(_)
+            | MemberEvidence::TarPax(_) => {
                 panic!("expected ZIP64 member evidence")
             }
         }
@@ -1794,6 +2593,117 @@ mod tests {
                 .code,
             FindingCode::CoveringInconsistent
         );
+    }
+
+    #[test]
+    fn pax_covering_oracle_replays_state_and_rejects_each_evidence_layer_drift() {
+        let bytes = make_pax_tar();
+        let original = admitted_pax_ir(&bytes);
+        let snapshot = crate::snapshot::SourceSnapshot::borrowed(None, &bytes);
+        audit_tar_pax_covering(&snapshot, &original).expect("source-derived PAX evidence audits");
+        assert_eq!(original.pax_extensions().unwrap().len(), 2);
+        assert_eq!(original.members.len(), 2);
+
+        let audit = |ir: &ArchiveIR| {
+            let snapshot = crate::snapshot::SourceSnapshot::borrowed(None, &bytes);
+            assert_eq!(
+                audit_tar_pax_covering(&snapshot, ir).unwrap_err().code,
+                FindingCode::CoveringInconsistent
+            );
+        };
+
+        let mut ir = original.clone();
+        pax_archive_mut(&mut ir).tar.terminator.len = 512;
+        audit(&ir);
+
+        let mut ir = original.clone();
+        pax_archive_mut(&mut ir).extensions.swap(0, 1);
+        audit(&ir);
+
+        let mut ir = original.clone();
+        pax_archive_mut(&mut ir).extensions[0].header_sha256 = "0".repeat(64);
+        audit(&ir);
+
+        let mut ir = original.clone();
+        pax_archive_mut(&mut ir).extensions[0].payload_sha256 = "0".repeat(64);
+        audit(&ir);
+
+        let mut ir = original.clone();
+        pax_archive_mut(&mut ir).extensions[0].records[0]
+            .record
+            .offset += 1;
+        audit(&ir);
+
+        let mut ir = original.clone();
+        pax_archive_mut(&mut ir).extensions[0].records[0].raw_value_bytes[0] ^= 1;
+        audit(&ir);
+
+        let mut ir = original.clone();
+        pax_archive_mut(&mut ir).extensions[0].records[1].parsed_size = Some(5);
+        audit(&ir);
+
+        let mut ir = original.clone();
+        pax_member_mut(&mut ir, 0).path_source = PaxValueSource::Ustar;
+        audit(&ir);
+
+        let mut ir = original.clone();
+        pax_member_mut(&mut ir, 1).size_source = PaxValueSource::Global {
+            extension_index: 0,
+            record_index: 1,
+        };
+        audit(&ir);
+
+        let mut ir = original.clone();
+        pax_member_mut(&mut ir, 0).base_name_bytes[0] ^= 1;
+        audit(&ir);
+
+        let mut ir = original.clone();
+        ir.members[0].raw_name_bytes[0] ^= 1;
+        audit(&ir);
+
+        let mut ir = original;
+        pax_member_mut(&mut ir, 1).tar.padding.len += 1;
+        audit(&ir);
+    }
+
+    #[test]
+    fn pax_covering_header_enforces_underlying_directory_size() {
+        fn header(size: u64, typeflag: u8) -> [u8; 512] {
+            fn octal(field: &mut [u8], value: u64) {
+                field.fill(b'0');
+                let value = format!("{value:o}");
+                let end = field.len() - 1;
+                field[end - value.len()..end].copy_from_slice(value.as_bytes());
+                field[end] = 0;
+            }
+
+            let mut header = [0_u8; 512];
+            header[..3].copy_from_slice(b"dir");
+            octal(&mut header[100..108], 0o755);
+            octal(&mut header[108..116], 0);
+            octal(&mut header[116..124], 0);
+            octal(&mut header[124..136], size);
+            octal(&mut header[136..148], 0);
+            header[148..156].fill(b' ');
+            header[156] = typeflag;
+            header[257..263].copy_from_slice(b"ustar\0");
+            header[263..265].copy_from_slice(b"00");
+            octal(&mut header[329..337], 0);
+            octal(&mut header[337..345], 0);
+            let checksum: u32 = header.iter().map(|byte| u32::from(*byte)).sum();
+            header[148..154].copy_from_slice(format!("{checksum:06o}").as_bytes());
+            header[154] = 0;
+            header[155] = b' ';
+            header
+        }
+
+        let error = audit_pax_header(&header(1, b'5')).unwrap_err();
+        assert_eq!(error.code, FindingCode::CoveringInconsistent);
+        assert!(error
+            .detail
+            .contains("PAX directory has a nonzero underlying size"));
+        audit_pax_header(&header(0, b'5')).expect("zero-size directory remains canonical");
+        audit_pax_header(&header(1, b'0')).expect("nonzero regular file remains canonical");
     }
 
     #[test]

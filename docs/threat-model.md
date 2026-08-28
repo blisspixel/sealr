@@ -91,7 +91,7 @@ CRC32 is **not** authentication (paper: easy to pad while preserving CRC). We st
 | Overlapping-entry bombs (Fifield / Bamsoftware) | Not ZipDiff; still the quadratic bomb | Range overlap + actual-byte caps |
 | Recursive 42.zip | Classic | No nested recurse; depth limit when nested *is* allowed |
 | Declared vs actual size | ZipDiff A2 + bombs | Measure actual |
-| TAR GNU long-name / PAX metadata bombs | exarch already bounds 4 MiB | Metadata size cap |
+| TAR GNU long-name / PAX metadata bombs | Extension payloads can drive allocation and state | Policy metadata cap plus profile-specific extension, record, keyword, and count caps |
 | setuid/setgid | Still default-on in tar extractors | Strip |
 | Polyglot / magic vs extension | Jana/Shmatikov chameleon; Panakkal mixed containers | Magic authority; report conflict |
 | Wheel `RECORD` vs ZIP | PyPI 2025–2026; uv CVE-2025-54368 | Dedicated wheel container and consumer profiles |
@@ -110,6 +110,22 @@ Raw ustar adds a second explicitly selected parser, not a parser race. `Policy::
 | Hidden bytes and concatenation | Require zero member padding, two zero terminator blocks, and only complete zero record-padding blocks through exact source end. |
 | Metadata or count exhaustion | Charge every admitted header and terminator against the metadata cap before growing member state; bind the member-count ceiling to the identity encoding width. |
 | Parser-produced range drift | Run an independent codec-free covering audit before payload execution and independently reconstruct the published layout vector. |
+
+### Restricted POSIX PAX threats
+
+Raw PAX is a third explicitly selected TAR parser path, not a wider ustar mode or parser race. `Policy::default_v5()` must authorize `tar-pax`, and `ArchiveSelection::TarPax(TarPaxInterpretationProfile::PortableV1)` must select it before source ingestion. Its profile digest is `db951f620acf54e67845144e138f9f16994439847a97601e20a424dfea7f4445`. Filename suffixes, carrier names, and observed magic never trigger a retry.
+
+| Attack | Restricted PAX control |
+|---|---|
+| Record-length disagreement | Require one through twenty canonical decimal digits, exact full-record byte count including the newline, complete payload consumption, and checked arithmetic. |
+| Unknown or security-sensitive metadata | Admit only exact `path` and `size`; deny timestamps, ownership, link, charset, sparse, vendor, unknown, duplicate, and empty-value records. |
+| Local or global precedence confusion | Use a fixed four-field state, resolve local then global then underlying ustar independently for path and size, and retain exact extension and record provenance. |
+| Orphan or chained local state | Require each local `x` header to be followed immediately by exactly one ordinary member, then clear local state. Deny another extension or terminator while local state is pending. |
+| Extension metadata bomb | Cap one extension payload at 65,536 bytes, one extension at two records, keyword discovery at 16 bytes, and one archive at 1,024 extensions, in addition to `max_metadata_bytes`. |
+| Hidden alternate path or size | Preserve the checksum-covered underlying ustar name and size as evidence, apply only the resolved effective values to topology and payload geometry, and bind both plus provenance into `sealrTreeV5`. |
+| Carrier path effect | Treat extension carrier names as structural evidence only. They never enter destination topology, file count, retention, later reads, or materialization. |
+| Mixed TAR dialect interpretation | Deny GNU carriers, links, sparse files, devices, FIFOs, base-256 numbers, concatenation, recovery behavior, and every unknown type. |
+| Parser and audit shared mistake | Independently reparse physical headers, canonical records, exact covering, padding, state transitions, effective values, and provenance before readiness. |
 
 ### Wheel consumer threats
 
@@ -137,7 +153,7 @@ You et al. §7.2, seven strategies:
 | **Normalize** (extract + repack to an unambiguous ZIP) | Phase 3. Powerful; must not become a second parser. Normalize **with this engine**, then the output is the artifact. |
 | Identify ambiguous patterns | **Current strict default.** Known ambiguous or malformed structure is denied. A future compatibility profile must be separately versioned rather than acting as an insecure fallback. |
 | Incorporate multiple parsers | Research/CI only (ZipDiff corpus). Not in the hot path. |
-| Fix unique/outlier behaviors | A versioned interpretation specification and executable behavior must agree. Current main has seven preview profile identities: four ZIP32 profiles, one explicit strict ZIP64 profile, raw portable ustar, and strict gzip-wrapped portable ustar. None is yet stable. |
+| Fix unique/outlier behaviors | A versioned interpretation specification and executable behavior must agree. Current main has eight preview profile identities: four ZIP32 profiles, one explicit strict ZIP64 profile, raw portable ustar, strict gzip-wrapped portable ustar, and restricted raw POSIX PAX. None is yet stable. |
 | Better format design | Later (next-gen container). |
 
 Default posture: **reject ambiguity**. Future SFX or APK support would require separate named interpretation and consumer profiles recorded in evidence, never an `--insecure` fallback.
@@ -146,6 +162,6 @@ Default posture: **reject ambiguity**. Future SFX or APK support would require s
 
 ## What we are not
 
-Sealr is not an antivirus or package inventory system. It does not claim CRC is a signature and does not run competing parsers during an invocation. Current main explicitly selects exactly one ZIP32, strict ZIP64, raw portable ustar, or strict gzip-wrapped portable ustar path with versioned rules and returns a structured finding at the deterministic refusal point. ZIP64 and gzip-wrapped ustar are in-process only under policy v3 and v4 respectively; supervised selection fails closed until later semantic records can bind their evidence. A rejected view may be partial and must not be treated as a complete inventory.
+Sealr is not an antivirus or package inventory system. It does not claim CRC is a signature and does not run competing parsers during an invocation. Current main explicitly selects exactly one ZIP32, strict ZIP64, raw portable ustar, strict gzip-wrapped portable ustar, or restricted raw PAX path with versioned rules and returns a structured finding at the deterministic refusal point. ZIP64 and every TAR selection are in process only under their exact policy versions; supervised selection fails closed before source access and without fallback until later semantic records can bind their evidence. A rejected view may be partial and must not be treated as a complete inventory.
 
 Property tests, fuzzing, model checking, native race stress, and release provenance support different claims. None alone establishes unique interpretation, complete filesystem race freedom, or a formally verified extractor. Every assurance result is scoped to its input domain, model, platform, tool version, and stated assumptions.

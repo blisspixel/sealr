@@ -127,6 +127,8 @@ Unknown error codes must be treated as rejection by consumers.
 | `tar.truncated` | A complete header, payload, padding region, or checked offset is unavailable. |
 | `tar.type` | A record type is invalid for the portable profile, or a regular-file or directory invariant is violated. |
 | `tar.feature_unsupported` | A recognized PAX, GNU, link, special-file, or base-256 extension is outside the selected portable ustar profile. |
+| `tar.pax.record` | A PAX record violates the restricted profile's canonical length, delimiter, keyword, value, or complete-consumption grammar. |
+| `tar.pax.state` | Local or global PAX state violates the restricted profile's ordering, lifetime, or precedence contract. |
 
 ## Reserved registry work
 

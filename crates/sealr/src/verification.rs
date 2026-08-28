@@ -79,6 +79,13 @@ impl PayloadPlan {
                 uncompressed_size: member.declared_uncomp_size,
                 integrity: PayloadIntegrity::None,
             },
+            MemberEvidence::TarPax(tar_pax) => Self {
+                source: DomainRange::original(tar_pax.tar.payload),
+                codec: PayloadCodec::Raw,
+                compressed_size: tar_pax.tar.payload.len,
+                uncompressed_size: member.declared_uncomp_size,
+                integrity: PayloadIntegrity::None,
+            },
         }
     }
 
@@ -108,6 +115,16 @@ impl PayloadPlan {
                 domain: SnapshotDomainId::FIRST_DERIVED,
                 range: member.payload,
             },
+            codec: PayloadCodec::Raw,
+            compressed_size: member.payload.len,
+            uncompressed_size: member.size,
+            integrity: PayloadIntegrity::None,
+        }
+    }
+
+    pub(crate) fn from_tar_pax(member: &crate::tar_pax::PaxMember) -> Self {
+        Self {
+            source: DomainRange::original(member.payload),
             codec: PayloadCodec::Raw,
             compressed_size: member.payload.len,
             uncompressed_size: member.size,

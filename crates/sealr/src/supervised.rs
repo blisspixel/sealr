@@ -168,6 +168,10 @@ fn supervised_zip_profile(
             SupervisionErrorKind::IsolationUnavailable,
             "the authenticated worker contract currently supports ZIP profiles only",
         )),
+        ArchiveSelection::TarPax(_) => Err(SupervisionError::new(
+            SupervisionErrorKind::IsolationUnavailable,
+            "restricted PAX TAR requires a future semantic-record worker contract",
+        )),
     }
 }
 
@@ -176,7 +180,9 @@ mod selection_tests {
     use super::*;
     #[cfg(not(target_os = "linux"))]
     use crate::{Policy, Source};
-    use crate::{TarGzipInterpretationProfile, TarInterpretationProfile};
+    use crate::{
+        TarGzipInterpretationProfile, TarInterpretationProfile, TarPaxInterpretationProfile,
+    };
 
     #[test]
     fn worker_boundary_accepts_only_an_explicit_zip_selection() {
@@ -195,6 +201,12 @@ mod selection_tests {
         let error = supervised_zip_profile(&zip64).unwrap_err();
         assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
         assert!(error.to_string().contains("semantic-record v3"));
+
+        let tar_pax = ApplyOptions::new()
+            .with_tar_pax_interpretation_profile(TarPaxInterpretationProfile::PortableV1);
+        let error = supervised_zip_profile(&tar_pax).unwrap_err();
+        assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
+        assert!(error.to_string().contains("PAX TAR"));
 
         let tar_gzip = ApplyOptions::new()
             .with_tar_gzip_interpretation_profile(TarGzipInterpretationProfile::UstarPortableV1);
