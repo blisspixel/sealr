@@ -1,0 +1,108 @@
+{
+  "schema": "sealr.zip64-fuzz-seeds.v1",
+  "target": "zip64_strict_ascii_v1",
+  "toolchain": "nightly-2026-08-01",
+  "cargoFuzzVersion": "0.13.2",
+  "libfuzzerSysVersion": "0.4.13",
+  "bounds": {
+    "maxInputBytes": 1048576,
+    "maxTotalSeconds": 600,
+    "perInputTimeoutSeconds": 5,
+    "rssLimitMiB": 1024,
+    "jobs": 1
+  },
+  "failureArtifact": {
+    "directoryName": "sealr-zip64-fuzz-artifacts",
+    "uploadOn": "failure",
+    "retentionDays": 7
+  },
+  "dictionary": {
+    "path": "fuzz/dictionaries/zip64_strict_ascii_v1_dictionary",
+    "bytes": 318,
+    "sha256": "8769f14ff8db361bb320150f5a0329affac0863e2f14b21b1e1a5dd8ce436318"
+  },
+  "generator": "fuzz/generate_zip64_fuzz_seeds.ps1",
+  "seeds": [
+    {
+      "path": "fuzz/corpus/zip64_strict_ascii_v1/invalid-cpython-placeholder-values",
+      "bytes": 165,
+      "sha256": "cd676d60451cf91fb895553728c530abd94e1044e512dea3943136e727e2aaa9",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/zip64_strict_ascii_v1/invalid-trailing-byte",
+      "bytes": 126,
+      "sha256": "ecf78d5c313bb79f066e86a0bcabe880cdd4222364e2a2d8152a1a18327656ab",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/zip64_strict_ascii_v1/invalid-truncated-central-directory",
+      "bytes": 115,
+      "sha256": "d5e8c4c18605364a0b99a01ec3c455f808506870c25d0f11667f786407fb9b87",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/zip64_strict_ascii_v1/invalid-unsigned-zip64-descriptor",
+      "bytes": 161,
+      "sha256": "c7d89c1a139ad802fded7d31ce9cc7bdf8618366241015acd1068601bfc69a9c",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/zip64_strict_ascii_v1/invalid-zip-rs-placeholder-values",
+      "bytes": 165,
+      "sha256": "303d377e0e9d3cc46691350a5b7fb5f9d02d8f7d07ec4c8a6572cb015ad8c6b5",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/zip64_strict_ascii_v1/invalid-zip64-eocd-extensible-sector",
+      "bytes": 98,
+      "sha256": "6e71e4df0c57d9fae8c4a06bd2829f480ef6ce1698311b7da817af68dfa55b17",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/zip64_strict_ascii_v1/invalid-zip64-locator-offset",
+      "bytes": 98,
+      "sha256": "9f2d6fae3302e7b9c69e012c9605c834698791ade04d9a0b3e45f3d3ee5fc595",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/zip64_strict_ascii_v1/raw-short",
+      "bytes": 2,
+      "sha256": "fcab7fcc2b4cffd9bb45003bfc2e468a04ef6f77ca8200a7341f027631584d25",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/zip64_strict_ascii_v1/unsupported-plain-zip32",
+      "bytes": 22,
+      "sha256": "8739c76e681f900923b900c9df0ef75cf421d39cabb54650c4b9ad19b6a76d85",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/zip64_strict_ascii_v1/valid-cpython-forced-seek",
+      "bytes": 125,
+      "sha256": "d52b1d6a24c68a55dc9a19f3b1c7f8a4a6a21b1926f1ebb028c548a34d7f1048",
+      "generated": true,
+      "producerShape": "cpython-seek-forced"
+    },
+    {
+      "path": "fuzz/corpus/zip64_strict_ascii_v1/valid-cpython-streaming-zeros",
+      "bytes": 165,
+      "sha256": "dba792c2207cd909f5b0cf0853cadf7421efd8c4c50a5bbd40794c7e68a355d5",
+      "generated": true,
+      "producerShape": "cpython-streaming-zero-pair"
+    },
+    {
+      "path": "fuzz/corpus/zip64_strict_ascii_v1/valid-empty-global-zip64",
+      "bytes": 98,
+      "sha256": "bee2347a1445b151beec2c6fc2ab0da2fabab81dd93714f9b1043484784c1425",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/zip64_strict_ascii_v1/valid-zip-rs-streaming-maxima",
+      "bytes": 165,
+      "sha256": "ff190e9df63dbe9383ea68fdb8d7e4fae9726b448995319f5c4e868fe60ec3c0",
+      "generated": true,
+      "producerShape": "zip-rs-streaming-max-pair"
+    }
+  ]
+}

@@ -50,6 +50,30 @@
       "generated": true
     },
     {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/invalid-extra-declared-length-overrun",
+      "bytes": 36,
+      "sha256": "fd2c5c56b7fc622ac93975ff8bad703fff1182d0aee39b9eabb66d554d66ae60",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/invalid-extra-si2-zero",
+      "bytes": 36,
+      "sha256": "e8efdb4166e7428fbcaf924376baec13b546034ca2e5c5bb58b229e4da572378",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/invalid-extra-trailing-remainder",
+      "bytes": 37,
+      "sha256": "c228f642ec6bd0407ddd0e5d1f4f0ff6c8d8159ece2a1f7063a7af45eeda03ed",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/invalid-extra-truncated-subfield-header",
+      "bytes": 36,
+      "sha256": "cac3434f572d96940eea3d91d72c459e86b8160ccb29e7bcbf2c68664b07cc66",
+      "generated": true
+    },
+    {
       "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/trailing-byte",
       "bytes": 28,
       "sha256": "ddf12c68b6eafc0a5a5ace06d101f3966a9f5c8e675ce87da97fc4a41a28b5be",
@@ -64,13 +88,13 @@
     {
       "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/truncated-extra-length",
       "bytes": 11,
-      "sha256": "6fcc0a54a7825501eec85ee4a66d22c85d8c1bdebae6d3812c50cb42dd8f85b4",
+      "sha256": "12d75400d2d14ec7e7ca55fe5dd3c3d4c70167da3914d4e73d9c667a45f97010",
       "generated": true
     },
     {
       "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/truncated-extra-payload",
       "bytes": 14,
-      "sha256": "b36ef315b1407d8920e9a65cbac92f5e8196ba39f67bf7f0d9aeabde14e4a41f",
+      "sha256": "fd55f471e415cbe49f5d7ed63826a03af3b18b95e4093b6cf7de4f49fe4d3f33",
       "generated": true
     },
     {
@@ -111,8 +135,8 @@
     },
     {
       "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/valid-all-optional-fields",
-      "bytes": 60,
-      "sha256": "49e3204ccfd76bfef781a6fbf560320cfaf7dddcf1a497a99aa91c9311e5026c",
+      "bytes": 64,
+      "sha256": "a02873ac6cce3b6027aebcb53a50b488f02ef280668de4772b9f1e3810475d24",
       "generated": true
     },
     {
@@ -129,8 +153,8 @@
     },
     {
       "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/valid-optional-extra",
-      "bytes": 32,
-      "sha256": "201ff446ee8746df4be174e4255cb9da8f93168cc903b3269ec82e3635b97f6b",
+      "bytes": 36,
+      "sha256": "b37c163312586789b493ab500d2bf3e905679f500ac455fde5d81d9c525ba455",
       "generated": true
     },
     {

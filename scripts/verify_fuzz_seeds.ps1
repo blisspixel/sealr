@@ -13,6 +13,8 @@ $tarManifestPath = Join-Path $workspace 'fuzz/tar-seed-manifest.json'
 $tarManifest = Get-Content -Raw -LiteralPath $tarManifestPath | ConvertFrom-Json
 $gzipManifestPath = Join-Path $workspace 'fuzz/gzip-seed-manifest.json'
 $gzipManifest = Get-Content -Raw -LiteralPath $gzipManifestPath | ConvertFrom-Json
+$zip64ManifestPath = Join-Path $workspace 'fuzz/zip64-seed-manifest.json'
+$zip64Manifest = Get-Content -Raw -LiteralPath $zip64ManifestPath | ConvertFrom-Json
 
 if ($manifest.schema -ne 'sealr.fuzz-seeds.v1' -or
     $manifest.target -ne 'protocol_decoders' -or
@@ -41,6 +43,13 @@ if ($gzipManifest.schema -ne 'sealr.gzip-fuzz-seeds.v1' -or
     $gzipManifest.cargoFuzzVersion -ne '0.13.2' -or
     $gzipManifest.libfuzzerSysVersion -ne '0.4.13') {
     throw 'gzip fuzz manifest identity or pinned tools changed unexpectedly'
+}
+if ($zip64Manifest.schema -ne 'sealr.zip64-fuzz-seeds.v1' -or
+    $zip64Manifest.target -ne 'zip64_strict_ascii_v1' -or
+    $zip64Manifest.toolchain -ne 'nightly-2026-08-01' -or
+    $zip64Manifest.cargoFuzzVersion -ne '0.13.2' -or
+    $zip64Manifest.libfuzzerSysVersion -ne '0.4.13') {
+    throw 'ZIP64 fuzz manifest identity or pinned tools changed unexpectedly'
 }
 
 $expectedBounds = [ordered]@{
@@ -75,6 +84,18 @@ foreach ($name in $expectedGzipBounds.Keys) {
         throw "gzip fuzz bound $name changed unexpectedly"
     }
 }
+$expectedZip64Bounds = [ordered]@{
+    maxInputBytes = 1048576
+    maxTotalSeconds = 600
+    perInputTimeoutSeconds = 5
+    rssLimitMiB = 1024
+    jobs = 1
+}
+foreach ($name in $expectedZip64Bounds.Keys) {
+    if ($zip64Manifest.bounds.$name -ne $expectedZip64Bounds[$name]) {
+        throw "ZIP64 fuzz bound $name changed unexpectedly"
+    }
+}
 if ($manifest.failureArtifact.directoryName -ne 'sealr-fuzz-artifacts' -or
     $manifest.failureArtifact.uploadOn -ne 'failure' -or
     $manifest.failureArtifact.retentionDays -ne 7) {
@@ -94,6 +115,11 @@ if ($gzipManifest.failureArtifact.directoryName -ne 'sealr-gzip-fuzz-artifacts' 
     $gzipManifest.failureArtifact.uploadOn -ne 'failure' -or
     $gzipManifest.failureArtifact.retentionDays -ne 7) {
     throw 'gzip fuzz failure artifact policy changed unexpectedly'
+}
+if ($zip64Manifest.failureArtifact.directoryName -ne 'sealr-zip64-fuzz-artifacts' -or
+    $zip64Manifest.failureArtifact.uploadOn -ne 'failure' -or
+    $zip64Manifest.failureArtifact.retentionDays -ne 7) {
+    throw 'ZIP64 fuzz failure artifact policy changed unexpectedly'
 }
 
 function Assert-ManifestFile {
@@ -153,6 +179,10 @@ Assert-ManifestFile -Entry $gzipManifest.dictionary
 foreach ($seed in $gzipManifest.seeds) {
     Assert-ManifestFile -Entry $seed
 }
+Assert-ManifestFile -Entry $zip64Manifest.dictionary
+foreach ($seed in $zip64Manifest.seeds) {
+    Assert-ManifestFile -Entry $seed
+}
 
 $corpusRoot = Join-Path $workspace 'fuzz/corpus/protocol_decoders'
 $actualSeeds = @(
@@ -198,6 +228,17 @@ if ($actualGzipSeeds.Count -ne $declaredGzipSeeds.Count -or
     @(Compare-Object $actualGzipSeeds $declaredGzipSeeds).Count -ne 0) {
     throw 'gzip fuzz corpus and seed manifest contain different paths'
 }
+$zip64CorpusRoot = Join-Path $workspace 'fuzz/corpus/zip64_strict_ascii_v1'
+$actualZip64Seeds = @(
+    Get-ChildItem -LiteralPath $zip64CorpusRoot -File |
+        ForEach-Object { [IO.Path]::GetRelativePath($workspace, $_.FullName).Replace('\', '/') } |
+        Sort-Object
+)
+$declaredZip64Seeds = @($zip64Manifest.seeds.path | Sort-Object)
+if ($actualZip64Seeds.Count -ne $declaredZip64Seeds.Count -or
+    @(Compare-Object $actualZip64Seeds $declaredZip64Seeds).Count -ne 0) {
+    throw 'ZIP64 fuzz corpus and seed manifest contain different paths'
+}
 
 if ([string]$tarManifest.generator -cne 'scripts/generate_tar_fuzz_seeds.ps1') {
     throw 'TAR fuzz seed generator path changed unexpectedly'
@@ -209,10 +250,10 @@ if ([string]$gzipManifest.generator -cne 'scripts/generate_gzip_fuzz_seeds.ps1')
 $generatedGzipSeeds = @(
     $gzipManifest.seeds | Where-Object { $_.generated -is [bool] -and $_.generated }
 )
-if ($generatedGzipSeeds.Count -ne 23 -or
+if ($generatedGzipSeeds.Count -ne 27 -or
     @($gzipManifest.seeds | Where-Object { $_.generated -isnot [bool] }).Count -ne 0 -or
     @($gzipManifest.seeds | Where-Object { $_.generated -is [bool] -and -not $_.generated }).Count -ne 0) {
-    throw 'gzip fuzz seeds must classify exactly 23 generated entries'
+    throw 'gzip fuzz seeds must classify exactly 27 generated entries'
 }
 $gzipGenerator = Join-Path $workspace ([string]$gzipManifest.generator)
 $gzipGenerationRoot = Join-Path (
@@ -259,6 +300,78 @@ try {
             throw "refusing to remove unexpected gzip fuzz generation path: $resolvedGenerationRoot"
         }
         Remove-Item -LiteralPath $resolvedGenerationRoot -Recurse -Force
+    }
+}
+if ([string]$zip64Manifest.generator -cne 'fuzz/generate_zip64_fuzz_seeds.ps1') {
+    throw 'ZIP64 fuzz seed generator path changed unexpectedly'
+}
+$generatedZip64Seeds = @(
+    $zip64Manifest.seeds | Where-Object { $_.generated -is [bool] -and $_.generated }
+)
+if ($generatedZip64Seeds.Count -ne 13 -or
+    @($zip64Manifest.seeds | Where-Object { $_.generated -isnot [bool] }).Count -ne 0 -or
+    @($zip64Manifest.seeds | Where-Object { $_.generated -is [bool] -and -not $_.generated }).Count -ne 0) {
+    throw 'ZIP64 fuzz seeds must classify exactly 13 generated entries'
+}
+$producerShapes = @(
+    $zip64Manifest.seeds |
+        Where-Object { $null -ne $_.PSObject.Properties['producerShape'] } |
+        ForEach-Object { '{0}={1}' -f [string]$_.path, [string]$_.producerShape } |
+        Sort-Object
+)
+$expectedProducerShapes = @(
+    'fuzz/corpus/zip64_strict_ascii_v1/valid-cpython-forced-seek=cpython-seek-forced'
+    'fuzz/corpus/zip64_strict_ascii_v1/valid-cpython-streaming-zeros=cpython-streaming-zero-pair'
+    'fuzz/corpus/zip64_strict_ascii_v1/valid-zip-rs-streaming-maxima=zip-rs-streaming-max-pair'
+) | Sort-Object
+if (($producerShapes -join "`n") -cne ($expectedProducerShapes -join "`n")) {
+    throw 'ZIP64 fuzz producer shapes must bind the exact CPython and zip-rs corpus'
+}
+$zip64Generator = Join-Path $workspace ([string]$zip64Manifest.generator)
+$zip64GenerationRoot = Join-Path (
+    [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar
+    )
+) ("sealr-zip64-fuzz-seeds-{0}" -f [Guid]::NewGuid().ToString('N'))
+try {
+    & $zip64Generator -OutputDirectory $zip64GenerationRoot
+    $actualGeneratedZip64Names = @(
+        Get-ChildItem -LiteralPath $zip64GenerationRoot -File |
+            ForEach-Object Name |
+            Sort-Object
+    )
+    $expectedGeneratedZip64Names = @(
+        $generatedZip64Seeds.path |
+            ForEach-Object { [IO.Path]::GetFileName([string]$_) } |
+            Sort-Object
+    )
+    if ($actualGeneratedZip64Names.Count -ne $expectedGeneratedZip64Names.Count -or
+        @(Compare-Object $actualGeneratedZip64Names $expectedGeneratedZip64Names).Count -ne 0) {
+        throw 'ZIP64 fuzz seed generator produced a different exact file set'
+    }
+    foreach ($entry in $generatedZip64Seeds) {
+        $generatedPath = Join-Path $zip64GenerationRoot ([IO.Path]::GetFileName([string]$entry.path))
+        $generatedFile = Get-Item -LiteralPath $generatedPath
+        $generatedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $generatedPath).Hash.ToLowerInvariant()
+        if ($generatedFile.Length -ne $entry.bytes -or $generatedHash -cne [string]$entry.sha256) {
+            throw "ZIP64 fuzz seed generator did not reproduce $($entry.path)"
+        }
+    }
+} finally {
+    if (Test-Path -LiteralPath $zip64GenerationRoot) {
+        $resolvedZip64GenerationRoot = [IO.Path]::GetFullPath($zip64GenerationRoot)
+        $zip64GenerationParent = [IO.Path]::GetDirectoryName($resolvedZip64GenerationRoot)
+        $zip64GenerationLeaf = [IO.Path]::GetFileName($resolvedZip64GenerationRoot)
+        $expectedTemporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+            [IO.Path]::DirectorySeparatorChar,
+            [IO.Path]::AltDirectorySeparatorChar
+        )
+        if ($zip64GenerationParent -cne $expectedTemporaryParent -or
+            $zip64GenerationLeaf -notmatch '^sealr-zip64-fuzz-seeds-[0-9a-f]{32}$') {
+            throw "refusing to remove unexpected ZIP64 fuzz generation path: $resolvedZip64GenerationRoot"
+        }
+        Remove-Item -LiteralPath $resolvedZip64GenerationRoot -Recurse -Force
     }
 }
 $generatedTarSeeds = @($tarManifest.seeds | Where-Object { $_.generated -is [bool] -and $_.generated })
@@ -326,6 +439,9 @@ $tarTarget = Get-Content -Raw -LiteralPath (
 )
 $gzipTarget = Get-Content -Raw -LiteralPath (
     Join-Path $workspace 'fuzz/fuzz_targets/gzip_rfc1952_single_member_v1.rs'
+)
+$zip64Target = Get-Content -Raw -LiteralPath (
+    Join-Path $workspace 'fuzz/fuzz_targets/zip64_strict_ascii_v1.rs'
 )
 $workflow = Get-Content -Raw -LiteralPath (Join-Path $workspace '.github/workflows/fuzz.yml')
 $releaseWorkflow = Get-Content -Raw -LiteralPath (Join-Path $workspace '.github/workflows/release.yml')
@@ -556,9 +672,10 @@ function Assert-FuzzMetadataBinding {
         'protocol_decoders'
         'semantic_records'
         'tar_ustar_portable_v1'
+        'zip64_strict_ascii_v1'
     )
     if (($targetNames -join "`n") -cne ($expectedTargetNames -join "`n")) {
-        throw 'Cargo metadata must contain exactly the gzip, protocol, semantic, and TAR fuzz targets'
+        throw 'Cargo metadata must contain exactly the gzip, protocol, semantic, TAR, and ZIP64 fuzz targets'
     }
     $manifestDirectory = Split-Path ([IO.Path]::GetFullPath($ManifestPath)) -Parent
     foreach ($targetContract in @(
@@ -577,6 +694,10 @@ function Assert-FuzzMetadataBinding {
         @{
             Name = 'gzip_rfc1952_single_member_v1'
             RelativePath = 'fuzz_targets/gzip_rfc1952_single_member_v1.rs'
+        }
+        @{
+            Name = 'zip64_strict_ascii_v1'
+            RelativePath = 'fuzz_targets/zip64_strict_ascii_v1.rs'
         }
     )) {
         $matchingTargets = @(
@@ -763,6 +884,42 @@ function Assert-GzipFuzzTargetSource {
     }
 }
 
+function Assert-Zip64FuzzTargetSource {
+    param([Parameter(Mandatory)] [string] $TargetSource)
+
+    $expectedSource = @(
+        '#![no_main]'
+        ''
+        'use libfuzzer_sys::fuzz_target;'
+        'use sealr::{apply_with_options, ApplyOptions, Policy, Request, Source, ZipInterpretationProfile};'
+        ''
+        'fuzz_target!(|input: &[u8]| {'
+        '    let mut policy = Policy::default_v3();'
+        '    policy.max_archive_bytes = 1_048_576;'
+        '    policy.max_files = 256;'
+        '    policy.max_member_bytes = 65_536;'
+        '    policy.max_total_bytes = 262_144;'
+        '    policy.max_metadata_bytes = 262_144;'
+        '    let options = ApplyOptions::new()'
+        '        .with_interpretation_profile(ZipInterpretationProfile::Zip64StrictAsciiV1);'
+        '    let _ = apply_with_options('
+        '        Request {'
+        '            source: Source::Bytes {'
+        '                path: Some("fuzz.zip"),'
+        '                data: input,'
+        '            },'
+        '            policy: &policy,'
+        '            dest: None,'
+        '        },'
+        '        &options,'
+        '    );'
+        '});'
+    ) -join "`n"
+    if ((Normalize-WorkflowBlock $TargetSource) -cne $expectedSource) {
+        throw 'ZIP64 fuzz target source must drive the exact bounded public strict-profile path'
+    }
+}
+
 function Assert-FuzzCargoManifestContract {
     param([Parameter(Mandatory)] [string] $CargoManifest)
 
@@ -810,6 +967,13 @@ function Assert-FuzzCargoManifestContract {
         'doc = false'
         'bench = false'
         ''
+        '[[bin]]'
+        'name = "zip64_strict_ascii_v1"'
+        'path = "fuzz_targets/zip64_strict_ascii_v1.rs"'
+        'test = false'
+        'doc = false'
+        'bench = false'
+        ''
         '[workspace]'
     ) -join "`n"
     if ((Normalize-WorkflowBlock $CargoManifest) -cne $expectedManifest) {
@@ -839,6 +1003,7 @@ Assert-FuzzMetadataBinding `
 Assert-SemanticFuzzTargetSource -TargetSource $semanticTarget
 Assert-TarFuzzTargetSource -TargetSource $tarTarget
 Assert-GzipFuzzTargetSource -TargetSource $gzipTarget
+Assert-Zip64FuzzTargetSource -TargetSource $zip64Target
 Assert-FuzzCargoManifestContract -CargoManifest $fuzzCargo
 
 $temporaryBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
@@ -905,6 +1070,13 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = 'zip64_strict_ascii_v1'
+path = 'fuzz_targets/zip64_strict_ascii_v1.rs'
+test = false
+doc = false
+bench = false
+
 [workspace]
 '@
     [IO.File]::WriteAllText(
@@ -929,6 +1101,11 @@ bench = false
     )
     [IO.File]::WriteAllText(
         (Join-Path $temporaryFixture 'fuzz_targets/gzip_rfc1952_single_member_v1.rs'),
+        "fn main() {}`n",
+        [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+        (Join-Path $temporaryFixture 'fuzz_targets/zip64_strict_ascii_v1.rs'),
         "fn main() {}`n",
         [Text.UTF8Encoding]::new($false)
     )
@@ -998,6 +1175,13 @@ bench = false
 [[bin]]
 name = "gzip_rfc1952_single_member_v1"
 path = "fuzz_targets/gzip_rfc1952_single_member_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "zip64_strict_ascii_v1"
+path = "fuzz_targets/zip64_strict_ascii_v1.rs"
 test = false
 doc = false
 bench = false
@@ -1083,6 +1267,7 @@ $protocolJob = Get-WorkflowJobBlock -Content $workflow -JobName 'protocol'
 $semanticJob = Get-WorkflowJobBlock -Content $workflow -JobName 'semantic'
 $tarJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_ustar'
 $gzipJob = Get-WorkflowJobBlock -Content $workflow -JobName 'gzip'
+$zip64Job = Get-WorkflowJobBlock -Content $workflow -JobName 'zip64'
 Assert-FuzzJobContract `
     -JobBlock $protocolJob `
     -JobManifest $manifest `
@@ -1111,6 +1296,13 @@ Assert-FuzzJobContract `
     -JobDisplayName 'Bounded RFC 1952 gzip' `
     -FuzzStepName 'Fuzz bounded RFC 1952 gzip' `
     -ReproducerName 'gzip-rfc1952-reproducer'
+Assert-FuzzJobContract `
+    -JobBlock $zip64Job `
+    -JobManifest $zip64Manifest `
+    -JobName 'zip64' `
+    -JobDisplayName 'Bounded strict ZIP64' `
+    -FuzzStepName 'Fuzz bounded strict ZIP64 planning' `
+    -ReproducerName 'zip64-strict-reproducer'
 
 function Assert-FuzzWorkflowContract {
     param(
@@ -1118,7 +1310,8 @@ function Assert-FuzzWorkflowContract {
         [Parameter(Mandatory)] [string] $ExpectedProtocolJob,
         [Parameter(Mandatory)] [string] $ExpectedSemanticJob,
         [Parameter(Mandatory)] [string] $ExpectedTarJob,
-        [Parameter(Mandatory)] [string] $ExpectedGzipJob
+        [Parameter(Mandatory)] [string] $ExpectedGzipJob,
+        [Parameter(Mandatory)] [string] $ExpectedZip64Job
     )
 
     $expectedHeader = @(
@@ -1142,7 +1335,8 @@ function Assert-FuzzWorkflowContract {
         (Normalize-WorkflowBlock $ExpectedProtocolJob) + "`n`n" +
         (Normalize-WorkflowBlock $ExpectedSemanticJob) + "`n`n" +
         (Normalize-WorkflowBlock $ExpectedTarJob) + "`n`n" +
-        (Normalize-WorkflowBlock $ExpectedGzipJob)
+        (Normalize-WorkflowBlock $ExpectedGzipJob) + "`n`n" +
+        (Normalize-WorkflowBlock $ExpectedZip64Job)
     if ((Normalize-WorkflowBlock $CandidateWorkflow) -cne $expectedWorkflow) {
         throw 'Scheduled fuzz workflow must exactly match its trigger, authority, concurrency, and job contracts'
     }
@@ -1153,7 +1347,8 @@ Assert-FuzzWorkflowContract `
     -ExpectedProtocolJob $protocolJob `
     -ExpectedSemanticJob $semanticJob `
     -ExpectedTarJob $tarJob `
-    -ExpectedGzipJob $gzipJob
+    -ExpectedGzipJob $gzipJob `
+    -ExpectedZip64Job $zip64Job
 $manualOnlyWorkflow = [regex]::Replace(
     $workflow,
     '(?m)^  schedule:\r?\n    - cron: "31 8 \* \* 1"\r?\n',
@@ -1170,7 +1365,8 @@ try {
         -ExpectedProtocolJob $protocolJob `
         -ExpectedSemanticJob $semanticJob `
         -ExpectedTarJob $tarJob `
-        -ExpectedGzipJob $gzipJob
+        -ExpectedGzipJob $gzipJob `
+        -ExpectedZip64Job $zip64Job
 } catch {
     $manualOnlyRejected = $true
 }
@@ -1390,13 +1586,74 @@ Assert-GzipJobMutationRejected `
     -MutatedJob $inertArtifactGzipJob `
     -Label 'inert gzip artifact evidence with a drifted upload path'
 
+function Assert-Zip64JobMutationRejected {
+    param(
+        [Parameter(Mandatory)] [string] $MutatedJob,
+        [Parameter(Mandatory)] [string] $Label
+    )
+
+    if ($MutatedJob -ceq $zip64Job) {
+        throw "ZIP64 fuzz verifier regression could not construct its $Label fixture"
+    }
+    try {
+        Assert-FuzzJobContract `
+            -JobBlock $MutatedJob `
+            -JobManifest $zip64Manifest `
+            -JobName 'zip64' `
+            -JobDisplayName 'Bounded strict ZIP64' `
+            -FuzzStepName 'Fuzz bounded strict ZIP64 planning' `
+            -ReproducerName 'zip64-strict-reproducer'
+    } catch {
+        return
+    }
+    throw "ZIP64 fuzz verifier accepted its $Label fixture"
+}
+
+$expectedZip64MaxLen = '-max_len={0} \' -f $zip64Manifest.bounds.maxInputBytes
+$weakenedZip64Job = $zip64Job.Replace($expectedZip64MaxLen, '-max_len=64 \')
+Assert-Zip64JobMutationRejected `
+    -MutatedJob $weakenedZip64Job `
+    -Label 'weakened ZIP64 job masked by other job tokens'
+
+$duplicateZip64Job = $zip64Job.Replace(
+    $expectedZip64MaxLen,
+    "$expectedZip64MaxLen`n            -max_len=64 \"
+)
+Assert-Zip64JobMutationRejected `
+    -MutatedJob $duplicateZip64Job `
+    -Label 'duplicate last-wins ZIP64 bound'
+
+$inactiveZip64Job = $zip64Job.Replace(
+    '          set -euo pipefail',
+    "          if false; then`n          set -euo pipefail"
+).Replace(
+    '            -print_final_stats=1',
+    "            -print_final_stats=1`n          fi`n          true"
+)
+Assert-Zip64JobMutationRejected `
+    -MutatedJob $inactiveZip64Job `
+    -Label 'inactive ZIP64 command followed by a successful no-op'
+
+$expectedZip64ArtifactPath = '          path: ${{ runner.temp }}/sealr-zip64-fuzz-artifacts/'
+$inertArtifactZip64Job = $zip64Job.Replace(
+    $expectedZip64ArtifactPath,
+    '          path: ${{ runner.temp }}/wrong-artifacts/'
+).Replace(
+    '        with:',
+    "        env:`n          INERT_MANIFEST_EVIDENCE: |`n            $($expectedZip64ArtifactPath.Trim())`n        with:"
+)
+Assert-Zip64JobMutationRejected `
+    -MutatedJob $inertArtifactZip64Job `
+    -Label 'inert ZIP64 artifact evidence with a drifted upload path'
+
 foreach ($required in @(
     'Require exact protected main fuzz evidence',
     'actions/workflows/fuzz.yml/runs',
     'Bounded worker protocol',
     'Bounded semantic records',
     'Bounded raw POSIX ustar',
-    'Bounded RFC 1952 gzip'
+    'Bounded RFC 1952 gzip',
+    'Bounded strict ZIP64'
 )) {
     if (-not $releaseWorkflow.Contains($required, [StringComparison]::Ordinal)) {
         throw "Release workflow is missing exact fuzz evidence: $required"
@@ -1409,6 +1666,7 @@ foreach ($required in @(
     "'Bounded semantic records'",
     "'Bounded raw POSIX ustar'",
     "'Bounded RFC 1952 gzip'",
+    "'Bounded strict ZIP64'",
     'Get-ExactFuzzState',
     'fuzz_run_id'
 )) {
@@ -1417,4 +1675,4 @@ foreach ($required in @(
     }
 }
 
-Write-Host "Fuzz seed verification passed: $($actualSeeds.Count) protocol, $($actualSemanticSeeds.Count) semantic, $($actualTarSeeds.Count) TAR, and $($actualGzipSeeds.Count) gzip seeds, pinned nightly and tool versions."
+Write-Host "Fuzz seed verification passed: $($actualSeeds.Count) protocol, $($actualSemanticSeeds.Count) semantic, $($actualTarSeeds.Count) TAR, $($actualGzipSeeds.Count) gzip, and $($actualZip64Seeds.Count) ZIP64 seeds, pinned nightly and tool versions."

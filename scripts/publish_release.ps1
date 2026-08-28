@@ -22,6 +22,7 @@ $ExpectedFuzzJobs = @(
     'Bounded semantic records'
     'Bounded raw POSIX ustar'
     'Bounded RFC 1952 gzip'
+    'Bounded strict ZIP64'
 )
 $ExpectedCiJobs = @(
     'Format, lint, test, and docs'

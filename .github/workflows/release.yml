@@ -225,6 +225,7 @@ jobs:
             "Bounded semantic records"
             "Bounded raw POSIX ustar"
             "Bounded RFC 1952 gzip"
+            "Bounded strict ZIP64"
           )
           for required in "${required_fuzz_jobs[@]}"; do
             count="$(jq --arg name "${required}" '[.jobs[] | select(.name == $name)] | length' <<<"${jobs_json}")"

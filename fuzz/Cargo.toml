@@ -41,4 +41,11 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "zip64_strict_ascii_v1"
+path = "fuzz_targets/zip64_strict_ascii_v1.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

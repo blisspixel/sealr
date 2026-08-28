@@ -77,6 +77,8 @@ function New-GzipMember {
     $bytes = [Collections.Generic.List[byte]]::new()
     $bytes.AddRange([byte[]]@(0x1f, 0x8b, 8, $Flags, 0x78, 0x56, 0x34, 0x12, 0, 255))
     if (($Flags -band 0x04) -ne 0) {
+        Add-UInt16LittleEndian -Bytes $bytes -Value 7
+        $bytes.AddRange([Text.Encoding]::ASCII.GetBytes('SL'))
         Add-UInt16LittleEndian -Bytes $bytes -Value 3
         $bytes.AddRange([Text.Encoding]::ASCII.GetBytes('xyz'))
     }
@@ -180,6 +182,29 @@ Write-Seed -Name 'zero-padding' -Bytes $zeroPadding
 Write-Seed -Name 'truncated-fixed-header' -Bytes (Get-Prefix $stored 9)
 Write-Seed -Name 'truncated-extra-length' -Bytes (Get-Prefix $extra 11)
 Write-Seed -Name 'truncated-extra-payload' -Bytes (Get-Prefix $extra 14)
+
+$truncatedSubfieldHeader = Copy-Bytes $extra
+$truncatedSubfieldHeader[10] = 3
+$truncatedSubfieldHeader[11] = 0
+Write-Seed -Name 'invalid-extra-truncated-subfield-header' -Bytes $truncatedSubfieldHeader
+
+$declaredLengthOverrun = Copy-Bytes $extra
+$declaredLengthOverrun[14] = 4
+$declaredLengthOverrun[15] = 0
+Write-Seed -Name 'invalid-extra-declared-length-overrun' -Bytes $declaredLengthOverrun
+
+$trailingRemainder = [byte[]]::new($extra.Length + 1)
+[Array]::Copy($extra, 0, $trailingRemainder, 0, 19)
+$trailingRemainder[19] = 0x7f
+[Array]::Copy($extra, 19, $trailingRemainder, 20, $extra.Length - 19)
+$trailingRemainder[10] = 8
+$trailingRemainder[11] = 0
+Write-Seed -Name 'invalid-extra-trailing-remainder' -Bytes $trailingRemainder
+
+$zeroSi2 = Copy-Bytes $extra
+$zeroSi2[13] = 0
+Write-Seed -Name 'invalid-extra-si2-zero' -Bytes $zeroSi2
+
 Write-Seed -Name 'unterminated-name' -Bytes (Get-Prefix $name 21)
 Write-Seed -Name 'unterminated-comment' -Bytes (Get-Prefix $comment 23)
 Write-Seed -Name 'truncated-header-crc' -Bytes (Get-Prefix $headerCrc 11)
