@@ -66,6 +66,8 @@ pub enum FindingCode {
     TarFeatureUnsupported,
     TarPaxRecord,
     TarPaxState,
+    TarGnuLongName,
+    TarGnuState,
     FormatUnsupported,
     FormatMagic,
     GzipExtra,
@@ -140,6 +142,8 @@ impl FindingCode {
             Self::TarFeatureUnsupported => "tar.feature_unsupported",
             Self::TarPaxRecord => "tar.pax.record",
             Self::TarPaxState => "tar.pax.state",
+            Self::TarGnuLongName => "tar.gnu.long_name",
+            Self::TarGnuState => "tar.gnu.state",
             Self::FormatUnsupported => "format.unsupported",
             Self::FormatMagic => "format.magic",
             Self::GzipExtra => "gzip.extra",
@@ -198,8 +202,10 @@ mod tests {
     use super::FindingCode;
 
     #[test]
-    fn pax_finding_codes_are_stable() {
+    fn tar_extension_finding_codes_are_stable() {
         assert_eq!(FindingCode::TarPaxRecord.as_str(), "tar.pax.record");
         assert_eq!(FindingCode::TarPaxState.as_str(), "tar.pax.state");
+        assert_eq!(FindingCode::TarGnuLongName.as_str(), "tar.gnu.long_name");
+        assert_eq!(FindingCode::TarGnuState.as_str(), "tar.gnu.state");
     }
 }

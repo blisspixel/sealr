@@ -1273,6 +1273,8 @@ fn finding_code_tag(code: FindingCode) -> u16 {
         FindingCode::QuotaDerived => 66,
         FindingCode::TarPaxRecord => 67,
         FindingCode::TarPaxState => 68,
+        FindingCode::TarGnuLongName => 69,
+        FindingCode::TarGnuState => 70,
     }
 }
 
@@ -1347,6 +1349,8 @@ fn finding_code_from_tag(tag: u16, offset: usize) -> Result<FindingCode, RecordE
         66 => FindingCode::QuotaDerived,
         67 => FindingCode::TarPaxRecord,
         68 => FindingCode::TarPaxState,
+        69 => FindingCode::TarGnuLongName,
+        70 => FindingCode::TarGnuState,
         _ => {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidEnum,
@@ -4720,6 +4724,20 @@ mod tests {
         );
     }
 
+    #[test]
+    fn gnu_tar_finding_codes_append_stable_wire_tags() {
+        assert_eq!(finding_code_tag(FindingCode::TarGnuLongName), 69);
+        assert_eq!(finding_code_tag(FindingCode::TarGnuState), 70);
+        assert_eq!(
+            finding_code_from_tag(69, 0).unwrap(),
+            FindingCode::TarGnuLongName
+        );
+        assert_eq!(
+            finding_code_from_tag(70, 0).unwrap(),
+            FindingCode::TarGnuState
+        );
+    }
+
     fn test_zip_evidence(member: &IrMember) -> &ZipMemberEvidence {
         member
             .zip_evidence()
@@ -4743,7 +4761,8 @@ mod tests {
             ArchiveEvidence::Zip64(_)
             | ArchiveEvidence::Tar(_)
             | ArchiveEvidence::TarGzip(_)
-            | ArchiveEvidence::TarPax(_) => {
+            | ArchiveEvidence::TarPax(_)
+            | ArchiveEvidence::TarGnuLongName(_) => {
                 panic!("semantic-record test archive must carry ZIP evidence")
             }
         }

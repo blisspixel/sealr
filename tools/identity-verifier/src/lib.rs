@@ -38,6 +38,11 @@ const TAR_PAX_PROFILE_SCHEMA: &str = "sealr.profile.tar.pax-portable.v1";
 const TAR_PAX_IR_SCHEMA: &str = "sealr.archive-ir.tar-pax.v1";
 const TAR_PAX_TREE_ENCODING: &str = "sealrTreeV5";
 const TAR_PAX_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-pax.v1";
+const TAR_GNU_LONGNAME_MANIFEST_SCHEMA: &str = "sealr.tar-gnu-longname-identity-conformance.v1";
+const TAR_GNU_LONGNAME_PROFILE_SCHEMA: &str = "sealr.profile.tar.gnu-longname-portable.v1";
+const TAR_GNU_LONGNAME_IR_SCHEMA: &str = "sealr.archive-ir.tar-gnu-longname.v1";
+const TAR_GNU_LONGNAME_TREE_ENCODING: &str = "sealrTreeV6";
+const TAR_GNU_LONGNAME_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gnu-longname.v1";
 const TAR_PORTABLE_PROFILE_SCHEMA: &str = "sealr.profile.tar.ustar-portable.v1";
 const TAR_PORTABLE_PROFILE_DIGEST: &str =
     "3c87c5ec4c1ad5377eb60ebb308e9e394aaf7a4133dddf5587829b4510af1700";
@@ -47,6 +52,8 @@ const GZIP_DECODER_PARAMETERS: &[u8] = b"rfc1951-window-bits=15;preset-dictionar
 const MAX_DERIVED_TAR_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_PAX_EXTENSION_BYTES: u64 = 64 * 1024;
 const MAX_PAX_EXTENSIONS: usize = 1024;
+const MAX_GNU_LONGNAME_CARRIERS: usize = 1024;
+const MAX_GNU_LONGNAME_PAYLOAD_BYTES: u64 = 8192;
 
 const FILE: u8 = 1;
 const DIRECTORY: u8 = 2;
@@ -64,6 +71,8 @@ const PAX_KEYWORD_SIZE: u8 = 2;
 const PAX_SOURCE_USTAR: u8 = 0;
 const PAX_SOURCE_GLOBAL: u8 = 1;
 const PAX_SOURCE_LOCAL: u8 = 2;
+const GNU_PATH_SOURCE_HEADER: u8 = 0;
+const GNU_PATH_SOURCE_CARRIER: u8 = 1;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct VerificationSummary {
@@ -483,6 +492,106 @@ struct TarPaxLayoutRoot {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct TarGnuLongNameManifest {
+    schema: String,
+    archive_ir_schema: String,
+    profile: TarGnuLongNameProfileVector,
+    layout_encoding: String,
+    layout_label: String,
+    content_encoding: String,
+    content_label: String,
+    cases: Vec<TarGnuLongNameCase>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGnuLongNameProfileVector {
+    id: String,
+    digest: DigestHex,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGnuLongNameCase {
+    id: String,
+    source_bytes_hex: String,
+    source: DigestHex,
+    archive_ir: TarGnuLongNameArchiveIr,
+    layout_preimage_hex: String,
+    layout_root: TarGnuLongNameLayoutRoot,
+    content_root: TarContentRoot,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGnuLongNameArchiveIr {
+    schema: String,
+    profile: String,
+    profile_digest: String,
+    source_digest: DigestHex,
+    format: String,
+    tar_covering: TarCovering,
+    gnu_longname_carriers: Vec<TarGnuLongNameCarrier>,
+    members: Vec<TarGnuLongNameMember>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGnuLongNameCarrier {
+    raw_name_bytes: Vec<u8>,
+    path_bytes: Vec<u8>,
+    header: ByteRange,
+    payload: ByteRange,
+    path: ByteRange,
+    padding: ByteRange,
+    mode: u32,
+    mtime: u64,
+    header_checksum: u32,
+    header_sha256: String,
+    payload_sha256: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGnuLongNameMember {
+    raw_name_bytes: Vec<u8>,
+    decoded_name: String,
+    canonical_path: String,
+    components: Vec<String>,
+    kind: MemberKind,
+    declared_uncomp_size: u64,
+    tar_gnu_longname: TarGnuLongNameMemberEvidence,
+    actual_uncomp_size: u64,
+    actual_crc: u32,
+    content_sha256: String,
+    verification: MemberVerification,
+    normalization_actions: Vec<NormalizationAction>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGnuLongNameMemberEvidence {
+    tar: TarGzipMemberEvidence,
+    base_name_bytes: Vec<u8>,
+    path_source: TarGnuLongNamePathSource,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq)]
+#[serde(tag = "source", rename_all = "kebab-case", deny_unknown_fields)]
+enum TarGnuLongNamePathSource {
+    Header,
+    Carrier { carrier_index: u32 },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TarGnuLongNameLayoutRoot {
+    #[serde(rename = "sealrTreeV6")]
+    sealr_tree_v6: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ProfileVector {
     id: String,
     digest: DigestHex,
@@ -853,6 +962,51 @@ struct TarPaxProfileDefinition {
     denied_features: [&'static str; 10],
 }
 
+#[derive(Serialize)]
+struct TarGnuLongNameProfileDefinition {
+    schema: &'static str,
+    status: &'static str,
+    format: &'static str,
+    block_bytes: u16,
+    header_magic_and_version: &'static str,
+    accepted_types: [&'static str; 3],
+    numeric_encoding: &'static str,
+    checksum: &'static str,
+    fixed_text_fields: &'static str,
+    owner_names: &'static str,
+    mode: &'static str,
+    linkname: &'static str,
+    device_numbers: &'static str,
+    gnu_tail: &'static str,
+    carrier_names: &'static str,
+    carrier_payload: &'static str,
+    carrier_state: &'static str,
+    physical_name_binding: &'static str,
+    min_effective_path_bytes: u8,
+    max_effective_path_bytes: &'static str,
+    max_carrier_payload_bytes: u16,
+    max_carrier_headers: u16,
+    carrier_materialization: &'static str,
+    member_padding: &'static str,
+    termination: &'static str,
+    destination_metadata: &'static str,
+    names: &'static str,
+    unicode_repertoire_version: &'static str,
+    unicode_repertoire: &'static str,
+    unicode_repertoire_implementation: &'static str,
+    character_restrictions: &'static str,
+    path_grammar: &'static str,
+    reserved_names: &'static str,
+    normalization_unicode_version: &'static str,
+    normalization_implementation: &'static str,
+    case_folding_unicode_version: &'static str,
+    case_folding_implementation: &'static str,
+    normalization: &'static str,
+    case_collision: &'static str,
+    component_limit: &'static str,
+    denied_features: [&'static str; 13],
+}
+
 pub fn verify_manifest_json(bytes: &[u8]) -> Result<VerificationSummary, VerifyError> {
     if bytes.len() > MAX_MANIFEST_BYTES {
         return Err(VerifyError::new(format!(
@@ -870,8 +1024,22 @@ pub fn verify_manifest_json(bytes: &[u8]) -> Result<VerificationSummary, VerifyE
         ZIP64_MANIFEST_SCHEMA => verify_zip64_identity_vector_json(bytes),
         TAR_GZIP_MANIFEST_SCHEMA => verify_tar_gzip_identity_vector_json(bytes),
         TAR_PAX_MANIFEST_SCHEMA => verify_tar_pax_identity_vector_json(bytes),
+        TAR_GNU_LONGNAME_MANIFEST_SCHEMA => verify_tar_gnu_longname_identity_vector_json(bytes),
         schema => Err(VerifyError::new(format!("unsupported schema {schema:?}"))),
     }
+}
+
+pub fn verify_tar_gnu_longname_identity_vector_json(
+    bytes: &[u8],
+) -> Result<VerificationSummary, VerifyError> {
+    if bytes.len() > MAX_MANIFEST_BYTES {
+        return Err(VerifyError::new(format!(
+            "TAR/GNU long-name manifest exceeds {MAX_MANIFEST_BYTES} bytes"
+        )));
+    }
+    let manifest: TarGnuLongNameManifest = serde_json::from_slice(bytes)
+        .map_err(|error| VerifyError::new(format!("TAR/GNU long-name JSON: {error}")))?;
+    verify_tar_gnu_longname_manifest(&manifest)
 }
 
 pub fn verify_tar_pax_identity_vector_json(
@@ -2001,6 +2169,707 @@ fn encode_tar_pax_content(ir: &TarPaxArchiveIr) -> Result<Vec<u8>, VerifyError> 
         body.extend_from_slice(&decode_digest(
             &member.content_sha256,
             "PAX member content digest",
+        )?);
+    }
+    Ok(preimage(CONTENT_LABEL, &body))
+}
+
+#[derive(Clone)]
+struct ParsedGnuLongNameState {
+    path_bytes: Vec<u8>,
+    carrier_index: u32,
+}
+
+struct ParsedGnuLongNameHeader {
+    raw_name: Vec<u8>,
+    mode: u32,
+    size: u64,
+    mtime: u64,
+    checksum: u32,
+    sha256: String,
+    typeflag: u8,
+}
+
+fn verify_tar_gnu_longname_manifest(
+    manifest: &TarGnuLongNameManifest,
+) -> Result<VerificationSummary, VerifyError> {
+    const EXPECTED_CASE_IDS: [&str; 2] = ["long-file", "arbitrary-carrier-directory-and-header"];
+    if manifest.schema != TAR_GNU_LONGNAME_MANIFEST_SCHEMA
+        || manifest.archive_ir_schema != TAR_GNU_LONGNAME_IR_SCHEMA
+        || manifest.layout_encoding != TAR_GNU_LONGNAME_TREE_ENCODING
+        || manifest.layout_label != TAR_GNU_LONGNAME_LAYOUT_LABEL
+        || manifest.content_encoding != TREE_ENCODING
+        || manifest.content_label != CONTENT_LABEL
+    {
+        return Err(VerifyError::new(
+            "unsupported TAR/GNU long-name manifest contract",
+        ));
+    }
+    if manifest.cases.len() != EXPECTED_CASE_IDS.len()
+        || manifest
+            .cases
+            .iter()
+            .zip(EXPECTED_CASE_IDS)
+            .any(|(case, expected)| case.id != expected)
+    {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name v1 manifest must contain exactly the two canonical ordered cases",
+        ));
+    }
+    verify_tar_gnu_longname_profile(&manifest.profile)?;
+    let mut sources = HashSet::new();
+    for case in &manifest.cases {
+        if !sources.insert(case.source.sha256.as_str()) {
+            return Err(VerifyError::new(
+                "TAR/GNU long-name canonical cases must bind distinct sources",
+            ));
+        }
+        verify_tar_gnu_longname_case(case, &manifest.profile)
+            .map_err(|error| error.context(&format!("case {:?}", case.id)))?;
+    }
+    Ok(VerificationSummary {
+        profiles: 1,
+        cases: manifest.cases.len(),
+        layout_roots: manifest.cases.len(),
+        content_roots: manifest.cases.len(),
+    })
+}
+
+fn verify_tar_gnu_longname_profile(
+    profile: &TarGnuLongNameProfileVector,
+) -> Result<(), VerifyError> {
+    if profile.id != TAR_GNU_LONGNAME_PROFILE_SCHEMA {
+        return Err(VerifyError::new(
+            "unsupported TAR/GNU long-name profile identity",
+        ));
+    }
+    verify_digest(&profile.digest.sha256, "TAR/GNU long-name profile digest")?;
+    let canonical = serde_json::to_vec(&TarGnuLongNameProfileDefinition {
+        schema: TAR_GNU_LONGNAME_PROFILE_SCHEMA,
+        status: "supported-preview",
+        format: "old-gnu-tar-long-name-only",
+        block_bytes: 512,
+        header_magic_and_version: "7573746172202000",
+        accepted_types: ["regular-0-or-nul", "directory-5-size-zero", "long-name-L"],
+        numeric_encoding: "one-or-more-ascii-octal-digits;one-or-more-nul-or-space-terminators;no-leading-space;base256-denied",
+        checksum: "six-octal-digits-nul-space;unsigned-byte-sum-with-spaces",
+        fixed_text_fields: "name-may-fill-field;after-first-nul-all-bytes-zero",
+        owner_names: "nul-terminated-printable-ascii;remaining-bytes-zero",
+        mode: "ascii-octal-permission-bits<=07777",
+        linkname: "all-zero",
+        device_numbers: "all-zero-bytes-or-ascii-octal-zero;never-applied",
+        gnu_tail: "header-345-through-511-all-zero",
+        carrier_names:
+            "structurally-valid-oldgnu-text-not-destination-validated-and-bound-as-evidence",
+        carrier_payload:
+            "strict-utf8-effective-path-followed-by-exactly-one-final-nul;no-embedded-nul",
+        carrier_state:
+            "at-most-one-pending-L-consumed-by-exactly-one-following-file-or-directory",
+        physical_name_binding:
+            "ordinary-header-name-bound-as-overridden-evidence-without-equality-rule",
+        min_effective_path_bytes: 1,
+        max_effective_path_bytes: "min-8191-and-256-times-policy-max-path-depth-minus-1",
+        max_carrier_payload_bytes: 8192,
+        max_carrier_headers: 1024,
+        carrier_materialization: "metadata-only-never-a-member",
+        member_padding: "zero-to-512-byte-boundary",
+        termination: "two-zero-blocks;remaining-complete-blocks-zero",
+        destination_metadata: "uid-gid-uname-gname-mtime-not-applied;mode-recorded-not-applied;setid-and-special-effects-never-applied",
+        names: "strict-utf8-oldgnu-name-or-L-value",
+        unicode_repertoire_version: "16.0.0",
+        unicode_repertoire: "public-assigned-no-private-use",
+        unicode_repertoire_implementation: "unicode-general-category-1.1.0-exact",
+        character_restrictions: "unicode-16-general-category-cc;white-space-0085-00a0-1680-2000..200a-2028-2029-202f-205f-3000;bidi-control-061c-200e-200f-202a..202e-2066..2069",
+        path_grammar: "jail-portable-v1:absolute-or-drive-denied;slash-only;empty-denied;dot-denied;dotdot-denied;colon-denied;ascii-illegal-003c-003e-0022-007c-003f-002a;trailing-dot-or-space-denied;duplicate-and-file-directory-topology-denied",
+        reserved_names: "ascii-case-insensitive-stem-before-dot:CON,PRN,AUX,NUL,COM1,COM2,COM3,COM4,COM5,COM6,COM7,COM8,COM9,LPT1,LPT2,LPT3,LPT4,LPT5,LPT6,LPT7,LPT8,LPT9,COM¹,COM²,COM³,LPT¹,LPT²,LPT³",
+        normalization_unicode_version: "17.0.0-stable-for-16.0.0-repertoire",
+        normalization_implementation: "unicode-normalization-0.1.25-exact",
+        case_folding_unicode_version: "16.0.0",
+        case_folding_implementation: "caseless-0.2.2-exact",
+        normalization: "unicode-17-full-nfc-over-unicode-16-repertoire-no-dot-component",
+        case_collision: "unicode-16-full-default-case-fold-then-nfc",
+        component_limit: "utf8-bytes<=255-and-utf16-code-units<=255",
+        denied_features: [
+            "pax-local-header",
+            "pax-global-header",
+            "gnu-long-link",
+            "gnu-sparse",
+            "gnu-incremental",
+            "hard-link",
+            "symbolic-link",
+            "device-or-fifo",
+            "base-256-numbers",
+            "mixed-dialect-state",
+            "orphan-or-chained-carrier",
+            "multi-volume",
+            "concatenated-archive",
+        ],
+    })
+    .map_err(|error| {
+        VerifyError::new(format!(
+            "TAR/GNU long-name profile serialization: {error}"
+        ))
+    })?;
+    let actual = sha256_hex(&canonical);
+    if actual != profile.digest.sha256 {
+        return Err(VerifyError::new(format!(
+            "TAR/GNU long-name profile digest does not match its canonical definition: calculated {actual}"
+        )));
+    }
+    Ok(())
+}
+
+fn verify_tar_gnu_longname_case(
+    case: &TarGnuLongNameCase,
+    profile: &TarGnuLongNameProfileVector,
+) -> Result<(), VerifyError> {
+    let source = decode_hex(&case.source_bytes_hex, "TAR/GNU long-name source bytes")?;
+    if source.len() > MAX_DERIVED_TAR_BYTES as usize {
+        return Err(VerifyError::new(format!(
+            "TAR/GNU long-name source exceeds the {MAX_DERIVED_TAR_BYTES}-byte verifier cap"
+        )));
+    }
+    verify_digest(&case.source.sha256, "TAR/GNU long-name source digest")?;
+    if sha256_hex(&source) != case.source.sha256 {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name source bytes do not match their digest",
+        ));
+    }
+    let ir = &case.archive_ir;
+    if ir.schema != TAR_GNU_LONGNAME_IR_SCHEMA
+        || ir.profile != profile.id
+        || ir.profile_digest != profile.digest.sha256
+        || ir.source_digest.sha256 != case.source.sha256
+        || ir.format != "tar-gnu-longname"
+    {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name IR source, format, or profile identity does not match the case",
+        ));
+    }
+    verify_tar_gnu_longname_source(&source, ir)?;
+
+    let actual_preimage = encode_tar_gnu_longname_layout(ir)?;
+    let committed_preimage = decode_hex(
+        &case.layout_preimage_hex,
+        "TAR/GNU long-name layout preimage",
+    )?;
+    if actual_preimage != committed_preimage {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name layout preimage does not match reconstructed evidence",
+        ));
+    }
+    verify_digest(
+        &case.layout_root.sealr_tree_v6,
+        "TAR/GNU long-name layout root",
+    )?;
+    if sha256_hex(&actual_preimage) != case.layout_root.sealr_tree_v6 {
+        return Err(VerifyError::new("TAR/GNU long-name layout root mismatch"));
+    }
+    let content_preimage = encode_tar_gnu_longname_content(ir)?;
+    verify_digest(
+        &case.content_root.sealr_tree_v1,
+        "TAR/GNU long-name content root",
+    )?;
+    if sha256_hex(&content_preimage) != case.content_root.sealr_tree_v1 {
+        return Err(VerifyError::new("TAR/GNU long-name content root mismatch"));
+    }
+    Ok(())
+}
+
+fn verify_tar_gnu_longname_source(
+    source: &[u8],
+    ir: &TarGnuLongNameArchiveIr,
+) -> Result<(), VerifyError> {
+    if source.len() < 1024 || !source.len().is_multiple_of(512) {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name source is not a complete block-aligned archive",
+        ));
+    }
+    if ir.gnu_longname_carriers.len() > MAX_GNU_LONGNAME_CARRIERS
+        || ir.members.len() > MAX_MEMBERS_PER_CASE
+    {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name evidence exceeds verifier limits",
+        ));
+    }
+    let source_len = u64::try_from(source.len())
+        .map_err(|_| VerifyError::new("TAR/GNU long-name source length exceeds u64"))?;
+    let mut offset = 0_u64;
+    let mut carrier_index = 0_usize;
+    let mut member_index = 0_usize;
+    let mut pending: Option<ParsedGnuLongNameState> = None;
+    let mut paths = HashSet::new();
+
+    loop {
+        let header_range = ByteRange { offset, len: 512 };
+        let header = range_bytes(source, header_range, "TAR/GNU long-name header")?;
+        if header.iter().all(|byte| *byte == 0) {
+            if pending.is_some() {
+                return Err(VerifyError::new("orphan TAR/GNU long-name carrier"));
+            }
+            break;
+        }
+        let parsed = parse_tar_gnu_longname_header(header)?;
+        match parsed.typeflag {
+            b'L' => {
+                if pending.is_some() {
+                    return Err(VerifyError::new(
+                        "TAR/GNU long-name carrier is chained instead of being consumed",
+                    ));
+                }
+                if parsed.size < 2 || parsed.size > MAX_GNU_LONGNAME_PAYLOAD_BYTES {
+                    return Err(VerifyError::new(
+                        "TAR/GNU long-name carrier payload is outside the 2 through 8192-byte bound",
+                    ));
+                }
+                let carrier = ir.gnu_longname_carriers.get(carrier_index).ok_or_else(|| {
+                    VerifyError::new("source contains an undeclared TAR/GNU long-name carrier")
+                })?;
+                let payload = ByteRange {
+                    offset: offset.checked_add(512).ok_or_else(|| {
+                        VerifyError::new("TAR/GNU long-name carrier payload offset overflows")
+                    })?,
+                    len: parsed.size,
+                };
+                let padding = ByteRange {
+                    offset: checked_range_end(payload, "TAR/GNU long-name carrier payload")?,
+                    len: (512 - (parsed.size % 512)) % 512,
+                };
+                let payload_bytes =
+                    range_bytes(source, payload, "TAR/GNU long-name carrier payload")?;
+                if payload_bytes.last() != Some(&0)
+                    || payload_bytes[..payload_bytes.len() - 1].contains(&0)
+                {
+                    return Err(VerifyError::new(
+                        "TAR/GNU long-name carrier does not contain one final NUL",
+                    ));
+                }
+                let path_bytes = &payload_bytes[..payload_bytes.len() - 1];
+                std::str::from_utf8(path_bytes).map_err(|_| {
+                    VerifyError::new("TAR/GNU long-name carrier path is not strict UTF-8")
+                })?;
+                let path_range = ByteRange {
+                    offset: payload.offset,
+                    len: payload.len - 1,
+                };
+                if carrier.raw_name_bytes != parsed.raw_name
+                    || carrier.path_bytes != path_bytes
+                    || carrier.header != header_range
+                    || carrier.payload != payload
+                    || carrier.path != path_range
+                    || carrier.padding != padding
+                    || carrier.mode != parsed.mode
+                    || carrier.mtime != parsed.mtime
+                    || carrier.header_checksum != parsed.checksum
+                    || carrier.header_sha256 != parsed.sha256
+                    || carrier.payload_sha256 != sha256_hex(payload_bytes)
+                    || range_bytes(source, padding, "TAR/GNU long-name carrier padding")?
+                        .iter()
+                        .any(|byte| *byte != 0)
+                {
+                    return Err(VerifyError::new(
+                        "TAR/GNU long-name carrier evidence disagrees with source bytes or geometry",
+                    ));
+                }
+                verify_digest(
+                    &carrier.header_sha256,
+                    "TAR/GNU long-name carrier header digest",
+                )?;
+                verify_digest(
+                    &carrier.payload_sha256,
+                    "TAR/GNU long-name carrier payload digest",
+                )?;
+                pending = Some(ParsedGnuLongNameState {
+                    path_bytes: path_bytes.to_vec(),
+                    carrier_index: u32::try_from(carrier_index).map_err(|_| {
+                        VerifyError::new("TAR/GNU long-name carrier index exceeds u32")
+                    })?,
+                });
+                carrier_index += 1;
+                offset = checked_range_end(padding, "TAR/GNU long-name carrier record")?;
+            }
+            0 | b'0' | b'5' => {
+                let member = ir.members.get(member_index).ok_or_else(|| {
+                    VerifyError::new("source contains an undeclared TAR/GNU long-name member")
+                })?;
+                let state = pending.take();
+                let (effective_name, path_source) = match state {
+                    Some(state) => (
+                        state.path_bytes,
+                        TarGnuLongNamePathSource::Carrier {
+                            carrier_index: state.carrier_index,
+                        },
+                    ),
+                    None => (parsed.raw_name.clone(), TarGnuLongNamePathSource::Header),
+                };
+                let payload = ByteRange {
+                    offset: offset.checked_add(512).ok_or_else(|| {
+                        VerifyError::new("TAR/GNU long-name member payload offset overflows")
+                    })?,
+                    len: parsed.size,
+                };
+                let padding = ByteRange {
+                    offset: checked_range_end(payload, "TAR/GNU long-name member payload")?,
+                    len: (512 - (parsed.size % 512)) % 512,
+                };
+                let canonical = verify_tar_gnu_longname_member(
+                    source,
+                    member,
+                    header_range,
+                    payload,
+                    padding,
+                    &parsed,
+                    &effective_name,
+                    path_source,
+                )?;
+                if !paths.insert(canonical) {
+                    return Err(VerifyError::new(
+                        "TAR/GNU long-name source resolves duplicate member paths",
+                    ));
+                }
+                member_index += 1;
+                offset = checked_range_end(padding, "TAR/GNU long-name member record")?;
+            }
+            typeflag => {
+                return Err(VerifyError::new(format!(
+                    "unsupported TAR/GNU long-name typeflag 0x{typeflag:02x}"
+                )));
+            }
+        }
+    }
+
+    if carrier_index != ir.gnu_longname_carriers.len() || member_index != ir.members.len() {
+        return Err(VerifyError::new(
+            "declared TAR/GNU long-name carriers or members are not present in the source",
+        ));
+    }
+    let terminator = ByteRange { offset, len: 1024 };
+    let terminator_end = checked_range_end(terminator, "TAR/GNU long-name terminator")?;
+    let trailing = ByteRange {
+        offset: terminator_end,
+        len: source_len.checked_sub(terminator_end).ok_or_else(|| {
+            VerifyError::new("TAR/GNU long-name terminator extends beyond source")
+        })?,
+    };
+    if ir.tar_covering.member_records
+        != (ByteRange {
+            offset: 0,
+            len: offset,
+        })
+        || ir.tar_covering.terminator != terminator
+        || ir.tar_covering.trailing_zeros != trailing
+        || range_bytes(source, terminator, "TAR/GNU long-name terminator")?
+            .iter()
+            .any(|byte| *byte != 0)
+        || range_bytes(source, trailing, "TAR/GNU long-name trailing zeros")?
+            .iter()
+            .any(|byte| *byte != 0)
+    {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name covering does not exactly bind the terminator and trailing blocks",
+        ));
+    }
+    Ok(())
+}
+
+fn parse_tar_gnu_longname_header(header: &[u8]) -> Result<ParsedGnuLongNameHeader, VerifyError> {
+    if header.len() != 512 || header[257..265] != *b"ustar  \0" {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name header is not exact old-GNU magic and version",
+        ));
+    }
+    if header[157..257].iter().any(|byte| *byte != 0) || header[345..].iter().any(|byte| *byte != 0)
+    {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name header has nonzero linkname, sparse, time, or reserved bytes",
+        ));
+    }
+    if header[148..154]
+        .iter()
+        .any(|byte| !(b'0'..=b'7').contains(byte))
+        || header[154] != 0
+        || header[155] != b' '
+    {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name checksum field is not six octal digits, NUL, space",
+        ));
+    }
+    let declared = parse_tar_octal(&header[148..156], "TAR/GNU long-name checksum")?;
+    let actual = header
+        .iter()
+        .enumerate()
+        .try_fold(0_u32, |sum, (index, byte)| {
+            sum.checked_add(u32::from(if (148..156).contains(&index) {
+                b' '
+            } else {
+                *byte
+            }))
+            .ok_or_else(|| VerifyError::new("TAR/GNU long-name checksum overflows u32"))
+        })?;
+    if declared != u64::from(actual) {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name header checksum does not match source bytes",
+        ));
+    }
+    let typeflag = header[156];
+    if !matches!(typeflag, 0 | b'0' | b'5' | b'L') {
+        return Err(VerifyError::new(format!(
+            "unsupported TAR/GNU long-name typeflag 0x{typeflag:02x}"
+        )));
+    }
+    let mode = parse_tar_octal(&header[100..108], "TAR/GNU long-name mode")?;
+    let _uid = parse_tar_octal(&header[108..116], "TAR/GNU long-name uid")?;
+    let _gid = parse_tar_octal(&header[116..124], "TAR/GNU long-name gid")?;
+    let size = parse_tar_octal(&header[124..136], "TAR/GNU long-name size")?;
+    let mtime = parse_tar_octal(&header[136..148], "TAR/GNU long-name mtime")?;
+    if typeflag == b'5' && size != 0 {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name directory has a nonzero size",
+        ));
+    }
+    if mode > 0o7777
+        || parse_tar_device_number(&header[329..337], "TAR/GNU long-name devmajor")? != 0
+        || parse_tar_device_number(&header[337..345], "TAR/GNU long-name devminor")? != 0
+    {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name numeric fields are outside the profile",
+        ));
+    }
+    verify_tar_owner_text(&header[265..297], "TAR/GNU long-name uname")?;
+    verify_tar_owner_text(&header[297..329], "TAR/GNU long-name gname")?;
+    let raw_name = tar_text_field(&header[..100], "TAR/GNU long-name name", false)?.to_vec();
+    Ok(ParsedGnuLongNameHeader {
+        raw_name,
+        mode: u32::try_from(mode)
+            .map_err(|_| VerifyError::new("TAR/GNU long-name mode exceeds u32"))?,
+        size,
+        mtime,
+        checksum: actual,
+        sha256: sha256_hex(header),
+        typeflag,
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn verify_tar_gnu_longname_member(
+    source: &[u8],
+    member: &TarGnuLongNameMember,
+    header: ByteRange,
+    payload: ByteRange,
+    padding: ByteRange,
+    parsed: &ParsedGnuLongNameHeader,
+    effective_name: &[u8],
+    path_source: TarGnuLongNamePathSource,
+) -> Result<String, VerifyError> {
+    let decoded = std::str::from_utf8(effective_name)
+        .map_err(|_| VerifyError::new("effective TAR/GNU long-name path is not strict UTF-8"))?;
+    let is_directory = parsed.typeflag == b'5';
+    let (canonical, components, strip_directory_slash) =
+        verify_portable_gnu_longname_path(decoded, is_directory)?;
+    let normalization_matches = if strip_directory_slash {
+        member.normalization_actions.len() == 1
+            && matches!(
+                member.normalization_actions.first(),
+                Some(NormalizationAction::StripDirectoryTrailingSlash)
+            )
+    } else {
+        member.normalization_actions.is_empty()
+    };
+    let tar = &member.tar_gnu_longname.tar;
+    if member.raw_name_bytes != effective_name
+        || member.decoded_name != decoded
+        || member.canonical_path != canonical
+        || member.components != components
+        || matches!(member.kind, MemberKind::Directory) != is_directory
+        || member.declared_uncomp_size != parsed.size
+        || tar.header != header
+        || tar.payload != payload
+        || tar.padding != padding
+        || tar.mode != parsed.mode
+        || tar.mtime != parsed.mtime
+        || tar.header_checksum != parsed.checksum
+        || tar.header_sha256 != parsed.sha256
+        || member.tar_gnu_longname.base_name_bytes != parsed.raw_name
+        || member.tar_gnu_longname.path_source != path_source
+        || member.actual_uncomp_size != parsed.size
+        || !matches!(member.verification, MemberVerification::Verified)
+        || !normalization_matches
+    {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name member evidence disagrees with source bytes or resolved state",
+        ));
+    }
+    verify_digest(&tar.header_sha256, "TAR/GNU long-name member header digest")?;
+    verify_digest(
+        &member.content_sha256,
+        "TAR/GNU long-name member content digest",
+    )?;
+    let payload_bytes = range_bytes(source, payload, "TAR/GNU long-name member payload")?;
+    if sha256_hex(payload_bytes) != member.content_sha256
+        || crc32_ieee_bytes(payload_bytes) != member.actual_crc
+        || range_bytes(source, padding, "TAR/GNU long-name member padding")?
+            .iter()
+            .any(|byte| *byte != 0)
+    {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name member content digest, CRC, or padding is invalid",
+        ));
+    }
+    Ok(canonical)
+}
+
+fn verify_portable_gnu_longname_path(
+    decoded: &str,
+    is_directory: bool,
+) -> Result<(String, Vec<String>, bool), VerifyError> {
+    if decoded.is_empty()
+        || decoded.len() > 8191
+        || decoded.starts_with('/')
+        || decoded.contains('\\')
+        || decoded
+            .chars()
+            .any(|character| character == '\0' || character.is_control())
+    {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name path is outside the portable destination grammar",
+        ));
+    }
+    let strip_directory_slash = is_directory && decoded.ends_with('/');
+    if !is_directory && decoded.ends_with('/') {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name file path has a trailing slash",
+        ));
+    }
+    let canonical = if strip_directory_slash {
+        &decoded[..decoded.len() - 1]
+    } else {
+        decoded
+    };
+    if canonical.is_empty() {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name path becomes empty after directory normalization",
+        ));
+    }
+    let components: Vec<String> = canonical.split('/').map(str::to_owned).collect();
+    if components.iter().any(|component| {
+        component.is_empty()
+            || component == "."
+            || component == ".."
+            || component.len() > 255
+            || component.encode_utf16().count() > 255
+            || component.contains(':')
+            || component
+                .bytes()
+                .any(|byte| matches!(byte, b'<' | b'>' | b'"' | b'|' | b'?' | b'*'))
+            || component.ends_with('.')
+            || component.ends_with(' ')
+    }) {
+        return Err(VerifyError::new(
+            "TAR/GNU long-name path component is outside the portable destination grammar",
+        ));
+    }
+    Ok((canonical.to_owned(), components, strip_directory_slash))
+}
+
+fn encode_tar_gnu_longname_layout(ir: &TarGnuLongNameArchiveIr) -> Result<Vec<u8>, VerifyError> {
+    let mut body = Vec::new();
+    encode_range(&mut body, ir.tar_covering.member_records);
+    encode_range(&mut body, ir.tar_covering.terminator);
+    encode_range(&mut body, ir.tar_covering.trailing_zeros);
+    push_u32(
+        &mut body,
+        u32::try_from(ir.gnu_longname_carriers.len())
+            .map_err(|_| VerifyError::new("TAR/GNU long-name carrier count exceeds u32"))?,
+    );
+    for carrier in &ir.gnu_longname_carriers {
+        push_bytes(&mut body, &carrier.raw_name_bytes)?;
+        push_bytes(&mut body, &carrier.path_bytes)?;
+        encode_range(&mut body, carrier.header);
+        encode_range(&mut body, carrier.payload);
+        encode_range(&mut body, carrier.path);
+        encode_range(&mut body, carrier.padding);
+        push_u32(&mut body, carrier.mode);
+        push_u64(&mut body, carrier.mtime);
+        push_u32(&mut body, carrier.header_checksum);
+        body.extend_from_slice(&decode_digest(
+            &carrier.header_sha256,
+            "TAR/GNU long-name carrier header digest",
+        )?);
+        body.extend_from_slice(&decode_digest(
+            &carrier.payload_sha256,
+            "TAR/GNU long-name carrier payload digest",
+        )?);
+    }
+    let mut members: Vec<_> = ir.members.iter().collect();
+    members.sort_by(|left, right| {
+        left.canonical_path
+            .as_bytes()
+            .cmp(right.canonical_path.as_bytes())
+    });
+    push_u32(
+        &mut body,
+        u32::try_from(members.len())
+            .map_err(|_| VerifyError::new("TAR/GNU long-name member count exceeds u32"))?,
+    );
+    for member in members {
+        push_bytes(&mut body, member.canonical_path.as_bytes())?;
+        body.push(kind_tag(&member.kind));
+        push_bytes(&mut body, &member.raw_name_bytes)?;
+        push_bytes(&mut body, &member.tar_gnu_longname.base_name_bytes)?;
+        push_u64(&mut body, member.declared_uncomp_size);
+        encode_range(&mut body, member.tar_gnu_longname.tar.header);
+        encode_range(&mut body, member.tar_gnu_longname.tar.payload);
+        encode_range(&mut body, member.tar_gnu_longname.tar.padding);
+        push_u32(&mut body, member.tar_gnu_longname.tar.mode);
+        push_u64(&mut body, member.tar_gnu_longname.tar.mtime);
+        push_u32(&mut body, member.tar_gnu_longname.tar.header_checksum);
+        body.extend_from_slice(&decode_digest(
+            &member.tar_gnu_longname.tar.header_sha256,
+            "TAR/GNU long-name member header digest",
+        )?);
+        match member.tar_gnu_longname.path_source {
+            TarGnuLongNamePathSource::Header => body.push(GNU_PATH_SOURCE_HEADER),
+            TarGnuLongNamePathSource::Carrier { carrier_index } => {
+                body.push(GNU_PATH_SOURCE_CARRIER);
+                push_u32(&mut body, carrier_index);
+            }
+        }
+        push_u32(
+            &mut body,
+            u32::try_from(member.normalization_actions.len()).map_err(|_| {
+                VerifyError::new("TAR/GNU long-name normalization count exceeds u32")
+            })?,
+        );
+        encode_normalization_actions(&mut body, &member.normalization_actions);
+    }
+    Ok(preimage(TAR_GNU_LONGNAME_LAYOUT_LABEL, &body))
+}
+
+fn encode_tar_gnu_longname_content(ir: &TarGnuLongNameArchiveIr) -> Result<Vec<u8>, VerifyError> {
+    let mut members: Vec<_> = ir.members.iter().collect();
+    members.sort_by(|left, right| {
+        left.canonical_path
+            .as_bytes()
+            .cmp(right.canonical_path.as_bytes())
+    });
+    let mut body = Vec::new();
+    push_u32(
+        &mut body,
+        u32::try_from(members.len())
+            .map_err(|_| VerifyError::new("TAR/GNU long-name content member count exceeds u32"))?,
+    );
+    for member in members {
+        if !matches!(member.verification, MemberVerification::Verified) {
+            return Err(VerifyError::new(
+                "TAR/GNU long-name content identity contains an unverified member",
+            ));
+        }
+        push_bytes(&mut body, member.canonical_path.as_bytes())?;
+        body.push(kind_tag(&member.kind));
+        push_u64(&mut body, member.actual_uncomp_size);
+        body.extend_from_slice(&decode_digest(
+            &member.content_sha256,
+            "TAR/GNU long-name member content digest",
         )?);
     }
     Ok(preimage(CONTENT_LABEL, &body))
@@ -4840,6 +5709,8 @@ mod tests {
         include_bytes!("../../../crates/sealr/tests/conformance/tar-gzip-identity-v1.json");
     const TAR_PAX_VECTORS: &[u8] =
         include_bytes!("../../../crates/sealr/tests/conformance/tar-pax-identity-v1.json");
+    const TAR_GNU_LONGNAME_VECTORS: &[u8] =
+        include_bytes!("../../../crates/sealr/tests/conformance/tar-gnu-longname-identity-v1.json");
     const TAR_LAYOUT_VECTOR: &[u8] =
         include_bytes!("../../../crates/sealr/tests/conformance/tar-layout-v2.json");
 
@@ -5023,6 +5894,122 @@ mod tests {
             .contains("PAX directory has a nonzero underlying size"));
         parse_tar_pax_header(&header(0, b'5')).expect("zero-size directory remains canonical");
         parse_tar_pax_header(&header(1, b'0')).expect("nonzero regular file remains canonical");
+    }
+
+    #[test]
+    fn committed_tar_gnu_longname_vectors_verify_state_and_both_roots_independently() {
+        let expected = VerificationSummary {
+            profiles: 1,
+            cases: 2,
+            layout_roots: 2,
+            content_roots: 2,
+        };
+        assert_eq!(
+            verify_tar_gnu_longname_identity_vector_json(TAR_GNU_LONGNAME_VECTORS).unwrap(),
+            expected
+        );
+        assert_eq!(
+            verify_manifest_json(TAR_GNU_LONGNAME_VECTORS).unwrap(),
+            expected
+        );
+
+        let manifest: TarGnuLongNameManifest =
+            serde_json::from_slice(TAR_GNU_LONGNAME_VECTORS).unwrap();
+        assert_eq!(
+            manifest.profile.digest.sha256,
+            "08fe2698806da997bc42e7e13a45cbf412a4a7056dec39c62456202680b91fa4"
+        );
+        assert_eq!(
+            manifest.cases[0].layout_root.sealr_tree_v6,
+            "40eca4cb8b52bcb3f52d7706620b643125c2b9134ac0b26ecf43f13e254d9a1a"
+        );
+        assert_eq!(
+            manifest.cases[0].content_root.sealr_tree_v1,
+            "7d0746a82186263db1ab62a81d7ce54812778c05fe4df090359738cb634f4fee"
+        );
+        assert_eq!(
+            manifest.cases[1].layout_root.sealr_tree_v6,
+            "062c3182f1be41752f697f693123d064ea93d52b4c73a3ace6948dab54a2f23b"
+        );
+        assert_eq!(
+            manifest.cases[1].content_root.sealr_tree_v1,
+            "d85889f682cd54562a3896540403a8d04d3b15f5f9ff15a80c4fb8abe08e4dc6"
+        );
+    }
+
+    #[test]
+    fn tar_gnu_longname_profile_digest_is_reconstructed_without_sealr() {
+        let manifest: TarGnuLongNameManifest =
+            serde_json::from_slice(TAR_GNU_LONGNAME_VECTORS).unwrap();
+        verify_tar_gnu_longname_profile(&manifest.profile).unwrap();
+    }
+
+    #[test]
+    fn tar_gnu_longname_magic_payload_and_state_mutations_are_rejected() {
+        fn mutate_source(
+            vector: &mut serde_json::Value,
+            case_index: usize,
+            mutate: impl FnOnce(&mut [u8], &serde_json::Value),
+        ) {
+            let mut source = decode_hex(
+                vector["cases"][case_index]["source_bytes_hex"]
+                    .as_str()
+                    .unwrap(),
+                "test TAR/GNU long-name source",
+            )
+            .unwrap();
+            mutate(&mut source, &vector["cases"][case_index]);
+            let digest = sha256_hex(&source);
+            vector["cases"][case_index]["source_bytes_hex"] = serde_json::json!(hex_bytes(&source));
+            vector["cases"][case_index]["source"]["sha256"] = serde_json::json!(digest.clone());
+            vector["cases"][case_index]["archive_ir"]["source_digest"]["sha256"] =
+                serde_json::json!(digest);
+        }
+
+        let mut vector: serde_json::Value =
+            serde_json::from_slice(TAR_GNU_LONGNAME_VECTORS).unwrap();
+        mutate_source(&mut vector, 0, |source, _| source[263] = b'0');
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("exact old-GNU magic"));
+
+        let mut vector: serde_json::Value =
+            serde_json::from_slice(TAR_GNU_LONGNAME_VECTORS).unwrap();
+        mutate_source(&mut vector, 0, |source, case| {
+            let payload = &case["archive_ir"]["gnu_longname_carriers"][0]["payload"];
+            let end = payload["offset"].as_u64().unwrap() + payload["len"].as_u64().unwrap();
+            source[usize::try_from(end - 1).unwrap()] = 1;
+        });
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("one final NUL"));
+
+        let mut vector: serde_json::Value =
+            serde_json::from_slice(TAR_GNU_LONGNAME_VECTORS).unwrap();
+        vector["cases"][0]["archive_ir"]["members"][0]["tar_gnu_longname"]["path_source"]
+            ["carrier_index"] = serde_json::json!(1);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("resolved state"));
+    }
+
+    #[test]
+    fn tar_gnu_longname_carrier_evidence_profile_and_layout_mutations_are_rejected() {
+        let mut vector: serde_json::Value =
+            serde_json::from_slice(TAR_GNU_LONGNAME_VECTORS).unwrap();
+        vector["cases"][1]["archive_ir"]["gnu_longname_carriers"][0]["raw_name_bytes"][0] =
+            serde_json::json!(0);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("carrier evidence"));
+
+        let mut vector: serde_json::Value =
+            serde_json::from_slice(TAR_GNU_LONGNAME_VECTORS).unwrap();
+        vector["profile"]["digest"]["sha256"] = serde_json::json!("0".repeat(64));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("profile digest"));
+
+        let mut vector: serde_json::Value =
+            serde_json::from_slice(TAR_GNU_LONGNAME_VECTORS).unwrap();
+        vector["cases"][0]["layout_root"]["sealrTreeV6"] = serde_json::json!("0".repeat(64));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("layout root mismatch"));
     }
 
     #[test]

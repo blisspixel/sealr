@@ -554,6 +554,115 @@ try {
         throw 'packaged restricted PAX materialization did not preserve the effective admitted tree'
     }
 
+    $gnuManifestPath = Resolve-RequiredFile `
+        -Path (Join-Path $workspace 'crates/sealr/tests/conformance/tar-gnu-longname-producers-v1.json') `
+        -Role 'old-GNU long-name producer corpus'
+    $gnuManifest = Get-Content -Raw -LiteralPath $gnuManifestPath | ConvertFrom-Json
+    $gnuFixture = @($gnuManifest.fixtures | Where-Object { $_.id -ceq 'gnu-tar-1.35' })
+    if ($gnuManifest.schema -cne 'sealr.tar-gnu-longname-producer-fixtures.v1' -or
+        $gnuFixture.Count -ne 1) {
+        throw 'old-GNU long-name producer corpus does not contain exactly one GNU tar fixture'
+    }
+    $gnuFixture = $gnuFixture[0]
+    if ($gnuFixture.len -ne 10240 -or
+        $gnuFixture.source_sha256 -cne '0953f9d5cd95b15786620225bca10b4fbecf017c8b06a48ac5872ec985a6a1cc' -or
+        $gnuFixture.layout_sha256 -cne 'df34e19111a92bd9785bad127f6dbca2fd45429d61b5e174a9e6c1c318f3dd84' -or
+        $gnuFixture.content_sha256 -cne '4f6857e09b37a13750d51e1a36bb43730da3c7592c94495b8d0f5ee41ead4855') {
+        throw 'old-GNU long-name fixture identity changed'
+    }
+    $gnuBytes = [byte[]]::new([int]$gnuFixture.len)
+    $previousSpanEnd = 0
+    foreach ($span in $gnuFixture.spans) {
+        $spanBytes = [System.Convert]::FromHexString([string]$span.hex)
+        $spanOffset = [int]$span.offset
+        $spanEnd = $spanOffset + $spanBytes.Length
+        if ($spanOffset -lt $previousSpanEnd -or $spanEnd -gt $gnuBytes.Length -or
+            @($spanBytes | Where-Object { $_ -eq 0 }).Count -ne 0) {
+            throw 'old-GNU sparse span is unordered, overlapping, out of range, or contains zero bytes'
+        }
+        [System.Array]::Copy($spanBytes, 0, $gnuBytes, $spanOffset, $spanBytes.Length)
+        $previousSpanEnd = $spanEnd
+    }
+    $gnuArchivePath = Join-Path $temporaryRoot 'portable-gnu-longname.tar'
+    [System.IO.File]::WriteAllBytes($gnuArchivePath, $gnuBytes)
+    $gnuHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $gnuArchivePath).Hash.ToLowerInvariant()
+    if ($gnuHash -cne $gnuFixture.source_sha256) {
+        throw "reconstructed old-GNU source digest changed: $gnuHash"
+    }
+
+    $gnuInspect = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-gnu-longname', $gnuArchivePath) `
+        -Role 'packaged old-GNU long-name inspect'
+    if ($gnuInspect.ExitCode -ne 0) {
+        throw "packaged old-GNU long-name inspect failed: $($gnuInspect.Stderr)"
+    }
+    $gnuView = $gnuInspect.Stdout | ConvertFrom-Json
+    $gnuReceipt = $gnuInspect.Stderr | ConvertFrom-Json
+    if ($gnuView.schema -cne 'sealr.view.v1' -or
+        $gnuReceipt.schema -cne 'sealr.receipt.v2' -or
+        $gnuView.source.magic -cne 'tar' -or
+        $gnuView.interpretation.status -cne 'interpreted' -or
+        $gnuView.admission.status -cne 'admitted' -or
+        $gnuView.verification.status -cne 'complete' -or
+        $gnuView.effect.status -cne 'not-requested' -or
+        @($gnuView.members).Count -ne 1 -or
+        $gnuView.members[0].path -cne $gnuFixture.member_path -or
+        $gnuView.members[0].method -cne 'raw' -or
+        $gnuView.members[0].uncomp_bytes -ne 22 -or
+        $gnuReceipt.policy.id -cne 'sealr:policy/default/v6' -or
+        $gnuReceipt.policy.digest.sha256 -cne 'aefc8a1baa113d7face30857ef64fe8f47c647fae863a72810b80380f8fd4178' -or
+        $gnuReceipt.identities.interpretation.id -cne 'sealr.profile.tar.gnu-longname-portable.v1' -or
+        $gnuReceipt.identities.interpretation.digest.sha256 -cne '08fe2698806da997bc42e7e13a45cbf412a4a7056dec39c62456202680b91fa4' -or
+        $gnuReceipt.identities.layout.sealrTreeV6 -cne $gnuFixture.layout_sha256 -or
+        $gnuReceipt.identities.content.sealrTreeV1 -cne $gnuFixture.content_sha256) {
+        throw 'packaged old-GNU long-name inspect returned unexpected semantic evidence'
+    }
+
+    $gnuDefault = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @($gnuArchivePath) `
+        -Role 'packaged old-GNU compatibility-default refusal'
+    $gnuDefaultView = $gnuDefault.Stdout | ConvertFrom-Json
+    $gnuDefaultReceipt = $gnuDefault.Stderr | ConvertFrom-Json
+    if ($gnuDefault.ExitCode -ne 2 -or
+        $gnuDefaultView.verdict -cne 'rejected' -or
+        $gnuDefaultView.source.magic -cne 'unknown' -or
+        $gnuDefaultView.policy.id -cne 'sealr:policy/default/v1' -or
+        $gnuDefaultView.interpretation.status -cne 'unsupported' -or
+        $gnuDefaultView.admission.status -cne 'not-evaluated' -or
+        @($gnuDefaultView.members).Count -ne 0 -or
+        $gnuDefaultReceipt.identities.interpretation.id -cne 'sealr.profile.zip.strict-ascii.v1' -or
+        $gnuDefaultReceipt.identities.layout.status -cne 'unavailable' -or
+        $gnuDefaultReceipt.identities.content.status -cne 'unavailable') {
+        throw 'packaged compatibility default unexpectedly recognized old-GNU long-name TAR'
+    }
+
+    $gnuDestination = Join-Path $temporaryRoot 'old-gnu-longname-output'
+    $gnuMaterialize = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', 'tar-gnu-longname', $gnuArchivePath, '--dest', $gnuDestination) `
+        -Role 'packaged old-GNU long-name materialization'
+    if ($gnuMaterialize.ExitCode -ne 0) {
+        throw "packaged old-GNU long-name materialization failed: $($gnuMaterialize.Stderr)"
+    }
+    $gnuMaterializedView = $gnuMaterialize.Stdout | ConvertFrom-Json
+    $gnuMaterializedReceipt = $gnuMaterialize.Stderr | ConvertFrom-Json
+    $gnuFiles = @(Get-ChildItem -LiteralPath $gnuDestination -Recurse -Force -File | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($gnuDestination, $_.FullName).Replace('\', '/')
+        })
+    $leakedStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+    $gnuMaterializedPath = Join-Path $gnuDestination ([string]$gnuFixture.member_path)
+    if (-not $gnuMaterializedView.wrote -or
+        $gnuMaterializedView.effect.status -cne 'committed' -or
+        $gnuMaterializedReceipt.identities.layout.sealrTreeV6 -cne $gnuFixture.layout_sha256 -or
+        $gnuMaterializedReceipt.identities.content.sealrTreeV1 -cne $gnuFixture.content_sha256 -or
+        $gnuFiles.Count -ne 1 -or $gnuFiles[0] -cne $gnuFixture.member_path -or
+        [System.IO.File]::ReadAllText($gnuMaterializedPath) -cne "gnu longname portable`n" -or
+        $leakedStages.Count -ne 0) {
+        throw 'packaged old-GNU long-name materialization did not preserve the effective admitted tree'
+    }
+
     if ($TargetTriple -ne $windowsTarget) {
         foreach ($relative in $expectedFiles) {
             $expectedMode = if ($relative -in @($binaryName, 'libexec/sealr/sealr-worker')) { '755' } else { '644' }
@@ -631,6 +740,25 @@ try {
             (Test-Path -LiteralPath $paxWorkerDestination) -or
             $workerStages.Count -ne 0) {
             throw 'packaged restricted PAX worker selection did not fail closed without fallback'
+        }
+        $gnuWorkerDestination = Join-Path $temporaryRoot 'old-gnu-longname-worker-output'
+        $gnuWorker = Invoke-Captured `
+            -FilePath $packagedCli `
+            -Arguments @(
+                '--format', 'tar-gnu-longname',
+                '--worker-manifest', $manifestPath,
+                $gnuArchivePath,
+                '--dest', $gnuWorkerDestination
+            ) `
+            -Role 'packaged old-GNU long-name worker refusal'
+        $workerStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+        if ($gnuWorker.ExitCode -ne 1 -or
+            -not [string]::IsNullOrEmpty($gnuWorker.Stdout) -or
+            $gnuWorker.Stderr -notmatch 'isolation unavailable' -or
+            $gnuWorker.Stderr -notmatch 'GNU long-name TAR' -or
+            (Test-Path -LiteralPath $gnuWorkerDestination) -or
+            $workerStages.Count -ne 0) {
+            throw 'packaged old-GNU long-name worker selection did not fail closed without fallback'
         }
         $elfHeader = readelf --file-header $helper | Out-String
         if ($LASTEXITCODE -ne 0 -or

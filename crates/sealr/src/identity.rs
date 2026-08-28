@@ -10,10 +10,10 @@ use serde::ser::{SerializeMap, Serializer};
 use serde::Serialize;
 
 use crate::ir::{
-    ArchiveFormat, ArchiveIR, ExtraDisposition, ExtraSite, IrMember, MemberKind,
-    MemberVerification, NormalizationAction, PaxExtensionKind, PaxKeyword, PaxValueSource,
-    TarGzipInterpretationProfile, TarInterpretationProfile, TarPaxInterpretationProfile,
-    ZipInterpretationProfile,
+    ArchiveFormat, ArchiveIR, ExtraDisposition, ExtraSite, GnuLongNamePathSource, IrMember,
+    MemberKind, MemberVerification, NormalizationAction, PaxExtensionKind, PaxKeyword,
+    PaxValueSource, TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile,
+    TarInterpretationProfile, TarPaxInterpretationProfile, ZipInterpretationProfile,
 };
 use crate::outcome::{DigestHex, SourceDigest, VerificationStatus};
 use crate::policy::hex_sha256;
@@ -24,11 +24,13 @@ pub const TREE_ENCODING_V2_ID: &str = "sealrTreeV2";
 pub const TREE_ENCODING_V3_ID: &str = "sealrTreeV3";
 pub const TREE_ENCODING_V4_ID: &str = "sealrTreeV4";
 pub const TREE_ENCODING_V5_ID: &str = "sealrTreeV5";
+pub const TREE_ENCODING_V6_ID: &str = "sealrTreeV6";
 const LAYOUT_LABEL: &str = "sealr.tree.layout.v1";
 const TAR_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-ustar.v1";
 const ZIP64_LAYOUT_LABEL: &str = "sealr.tree.layout.zip64.v1";
 const TAR_GZIP_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gzip-ustar.v1";
 const TAR_PAX_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-pax.v1";
+const TAR_GNU_LONGNAME_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gnu-longname.v1";
 const CONTENT_LABEL: &str = "sealr.tree.content.v1";
 const FILE: u8 = 1;
 const DIRECTORY: u8 = 2;
@@ -46,6 +48,8 @@ const PAX_KEYWORD_SIZE: u8 = 2;
 const PAX_SOURCE_USTAR: u8 = 0;
 const PAX_SOURCE_GLOBAL: u8 = 1;
 const PAX_SOURCE_LOCAL: u8 = 2;
+const GNU_PATH_SOURCE_HEADER: u8 = 0;
+const GNU_PATH_SOURCE_CARRIER: u8 = 1;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
@@ -55,6 +59,7 @@ pub enum TreeRoot {
     SealrTreeV3 { hex: String },
     SealrTreeV4 { hex: String },
     SealrTreeV5 { hex: String },
+    SealrTreeV6 { hex: String },
     Unavailable,
 }
 
@@ -93,6 +98,12 @@ impl TreeRoot {
         }
     }
 
+    pub fn from_v6_bytes(bytes: &[u8]) -> Self {
+        Self::SealrTreeV6 {
+            hex: hex_sha256(bytes),
+        }
+    }
+
     pub fn hex(&self) -> Option<&str> {
         match self {
             Self::SealrTreeV1 { hex } => Some(hex),
@@ -100,6 +111,7 @@ impl TreeRoot {
             Self::SealrTreeV3 { hex } => Some(hex),
             Self::SealrTreeV4 { hex } => Some(hex),
             Self::SealrTreeV5 { hex } => Some(hex),
+            Self::SealrTreeV6 { hex } => Some(hex),
             Self::Unavailable => None,
         }
     }
@@ -131,6 +143,11 @@ impl Serialize for TreeRoot {
             Self::SealrTreeV5 { hex } => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 map.serialize_entry(TREE_ENCODING_V5_ID, hex)?;
+                map.end()
+            }
+            Self::SealrTreeV6 { hex } => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry(TREE_ENCODING_V6_ID, hex)?;
                 map.end()
             }
             Self::Unavailable => {
@@ -181,6 +198,13 @@ impl OutcomeIdentities {
     pub fn unavailable_for_tar_pax(
         source: SourceDigest,
         profile: TarPaxInterpretationProfile,
+    ) -> Self {
+        Self::unavailable_for_named(source, profile.id(), profile.digest())
+    }
+
+    pub fn unavailable_for_tar_gnu_longname(
+        source: SourceDigest,
+        profile: TarGnuLongNameInterpretationProfile,
     ) -> Self {
         Self::unavailable_for_named(source, profile.id(), profile.digest())
     }
@@ -380,6 +404,79 @@ pub fn encode_tar_pax_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
         }
     }
     Some(preimage(TAR_PAX_LAYOUT_LABEL, &body))
+}
+
+/// Canonical physical-layout encoding for the old-GNU long-name profile.
+pub fn encode_tar_gnu_longname_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
+    if ir.format() != ArchiveFormat::TarGnuLongName {
+        return None;
+    }
+    let covering = ir.tar_covering()?;
+    let carriers = ir.gnu_longname_carriers()?;
+    let members = sorted_members(ir);
+    let mut body = Vec::new();
+    encode_range(&mut body, covering.member_records);
+    encode_range(&mut body, covering.terminator);
+    encode_range(&mut body, covering.trailing_zeros);
+    push_u32(&mut body, u32::try_from(carriers.len()).ok()?);
+    for carrier in carriers {
+        push_bytes(&mut body, &carrier.raw_name_bytes);
+        push_bytes(&mut body, &carrier.path_bytes);
+        encode_range(&mut body, carrier.header);
+        encode_range(&mut body, carrier.payload);
+        encode_range(&mut body, carrier.path);
+        encode_range(&mut body, carrier.padding);
+        push_u32(&mut body, carrier.mode);
+        push_u64(&mut body, carrier.mtime);
+        push_u32(&mut body, carrier.header_checksum);
+        body.extend_from_slice(&parse_hex32(&carrier.header_sha256)?);
+        body.extend_from_slice(&parse_hex32(&carrier.payload_sha256)?);
+    }
+    push_u32(&mut body, u32::try_from(members.len()).ok()?);
+    for member in members {
+        if member.format() != ArchiveFormat::TarGnuLongName {
+            return None;
+        }
+        let evidence = member.tar_gnu_longname_evidence()?;
+        push_bytes(&mut body, member.canonical_path.as_bytes());
+        body.push(match member.kind {
+            MemberKind::File => FILE,
+            MemberKind::Directory => DIRECTORY,
+        });
+        push_bytes(&mut body, &member.raw_name_bytes);
+        push_bytes(&mut body, &evidence.base_name_bytes);
+        push_u64(&mut body, member.declared_uncomp_size);
+        encode_range(&mut body, evidence.tar.header);
+        encode_range(&mut body, evidence.tar.payload);
+        encode_range(&mut body, evidence.tar.padding);
+        push_u32(&mut body, evidence.tar.mode);
+        push_u64(&mut body, evidence.tar.mtime);
+        push_u32(&mut body, evidence.tar.header_checksum);
+        body.extend_from_slice(&parse_hex32(&evidence.tar.header_sha256)?);
+        match evidence.path_source {
+            GnuLongNamePathSource::Header => body.push(GNU_PATH_SOURCE_HEADER),
+            GnuLongNamePathSource::Carrier { carrier_index } => {
+                body.push(GNU_PATH_SOURCE_CARRIER);
+                push_u32(&mut body, carrier_index);
+            }
+        }
+        push_u32(
+            &mut body,
+            u32::try_from(member.normalization_actions.len()).ok()?,
+        );
+        for action in &member.normalization_actions {
+            match action {
+                NormalizationAction::StripDirectoryTrailingSlash => {
+                    body.push(NORM_STRIP_DIR_SLASH);
+                }
+                NormalizationAction::DropDotComponent { component_index } => {
+                    body.push(NORM_DROP_DOT);
+                    push_u32(&mut body, *component_index);
+                }
+            }
+        }
+    }
+    Some(preimage(TAR_GNU_LONGNAME_LAYOUT_LABEL, &body))
 }
 
 fn tar_layout_body(ir: &ArchiveIR, expected_format: ArchiveFormat) -> Option<Vec<u8>> {
@@ -674,6 +771,9 @@ pub fn layout_root(ir: &ArchiveIR) -> TreeRoot {
             .unwrap_or_else(TreeRoot::unavailable),
         ArchiveFormat::TarPax => encode_tar_pax_layout(ir)
             .map(|bytes| TreeRoot::from_v5_bytes(&bytes))
+            .unwrap_or_else(TreeRoot::unavailable),
+        ArchiveFormat::TarGnuLongName => encode_tar_gnu_longname_layout(ir)
+            .map(|bytes| TreeRoot::from_v6_bytes(&bytes))
             .unwrap_or_else(TreeRoot::unavailable),
     }
 }

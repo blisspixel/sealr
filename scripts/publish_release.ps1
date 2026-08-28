@@ -22,6 +22,7 @@ $ExpectedFuzzJobs = @(
     'Bounded semantic records'
     'Bounded raw POSIX ustar'
     'Bounded raw POSIX PAX'
+    'Bounded raw GNU long-name TAR'
     'Bounded RFC 1952 gzip'
     'Bounded public TAR gzip ustar'
     'Bounded strict ZIP64'

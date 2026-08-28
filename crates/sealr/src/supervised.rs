@@ -172,6 +172,10 @@ fn supervised_zip_profile(
             SupervisionErrorKind::IsolationUnavailable,
             "restricted PAX TAR requires a future semantic-record worker contract",
         )),
+        ArchiveSelection::TarGnuLongName(_) => Err(SupervisionError::new(
+            SupervisionErrorKind::IsolationUnavailable,
+            "restricted GNU long-name TAR requires a future semantic-record worker contract",
+        )),
     }
 }
 
@@ -181,7 +185,8 @@ mod selection_tests {
     #[cfg(not(target_os = "linux"))]
     use crate::{Policy, Source};
     use crate::{
-        TarGzipInterpretationProfile, TarInterpretationProfile, TarPaxInterpretationProfile,
+        TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile,
+        TarInterpretationProfile, TarPaxInterpretationProfile,
     };
 
     #[test]
@@ -207,6 +212,13 @@ mod selection_tests {
         let error = supervised_zip_profile(&tar_pax).unwrap_err();
         assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
         assert!(error.to_string().contains("PAX TAR"));
+
+        let tar_gnu = ApplyOptions::new().with_tar_gnu_longname_interpretation_profile(
+            TarGnuLongNameInterpretationProfile::PortableV1,
+        );
+        let error = supervised_zip_profile(&tar_gnu).unwrap_err();
+        assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
+        assert!(error.to_string().contains("GNU long-name TAR"));
 
         let tar_gzip = ApplyOptions::new()
             .with_tar_gzip_interpretation_profile(TarGzipInterpretationProfile::UstarPortableV1);

@@ -6,6 +6,20 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+### Added
+
+- Added the explicitly selected `sealr.profile.tar.gnu-longname-portable.v1` restricted raw old-GNU long-name preview. Its canonical profile digest is `08fe2698806da997bc42e7e13a45cbf412a4a7056dec39c62456202680b91fa4`; policy v6 authorizes the separate `tar-gnu-longname` format with digest `aefc8a1baa113d7face30857ef64fe8f47c647fae863a72810b80380f8fd4178`.
+- Added strict single-carrier state management for `L` header blocks over exact old-GNU physical headers. An `L` carrier payload must contain strict UTF-8 path bytes and exactly one terminating NUL, and must be immediately consumed by the next file or directory member.
+- Added `sealr.archive-ir.tar-gnu-longname.v1`, GNU-native carrier and member evidence, and `sealrTreeV6` with layout label `sealr.tree.layout.tar-gnu-longname.v1`, preserving the format-neutral `sealrTreeV1` content identity.
+- Added explicit Rust and CLI selection through `ArchiveSelection::TarGnuLongName`, `TarGnuLongNameInterpretationProfile::PortableV1`, `ArchiveFormat::TarGnuLongName`, and `--format tar-gnu-longname`.
+- Added independent GNU long-name conformance vectors and extended the standalone identity verifier.
+- Added a dedicated bounded fuzz campaign and 16 digest-pinned deterministic seeds for old-GNU long-name archives.
+
+### Security
+
+- Denied GNU `K` long links, sparse files, GNU base-256 numbers, mixed PAX/GNU state, orphan carriers, links, devices, and concatenation.
+- The authenticated Linux worker fails closed on `tar-gnu-longname` without fallback until a later semantic record supports GNU evidence.
+
 ## [0.1.0-alpha.11] - 2026-08-28
 
 ### Added

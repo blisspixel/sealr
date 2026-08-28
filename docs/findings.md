@@ -129,6 +129,8 @@ Unknown error codes must be treated as rejection by consumers.
 | `tar.feature_unsupported` | A recognized PAX, GNU, link, special-file, or base-256 extension is outside the selected portable ustar profile. |
 | `tar.pax.record` | A PAX record violates the restricted profile's canonical length, delimiter, keyword, value, or complete-consumption grammar. |
 | `tar.pax.state` | Local or global PAX state violates the restricted profile's ordering, lifetime, or precedence contract. |
+| `tar.gnu.long_name` | A GNU long-name carrier violates the portable profile's canonical length, delimiter, single NUL terminator, or payload grammar. |
+| `tar.gnu.state` | GNU long-name carrier state violates the portable profile's immediate-consumption, single-carrier, or ordering contract. |
 
 ## Reserved registry work
 

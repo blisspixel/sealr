@@ -9,6 +9,7 @@ pub const POLICY_FORMAT_ZIP64: &str = "zip64";
 pub const POLICY_FORMAT_TAR_USTAR: &str = "tar-ustar";
 pub const POLICY_FORMAT_TAR_GZIP_USTAR: &str = "tar-gzip-ustar";
 pub const POLICY_FORMAT_TAR_PAX: &str = "tar-pax";
+pub const POLICY_FORMAT_TAR_GNU_LONGNAME: &str = "tar-gnu-longname";
 
 /// Pre-release Sealr policy, hashed in this struct's deterministic serialized field order.
 ///
@@ -174,6 +175,24 @@ impl Policy {
         }
     }
 
+    /// Construct the v6 policy, which additionally authorizes the restricted
+    /// raw old-GNU long-name profile.
+    pub fn default_v6() -> Self {
+        Self {
+            schema: "sealr.policy.v6",
+            id: "sealr:policy/default/v6".into(),
+            formats: vec![
+                POLICY_FORMAT_ZIP.into(),
+                POLICY_FORMAT_ZIP64.into(),
+                POLICY_FORMAT_TAR_USTAR.into(),
+                POLICY_FORMAT_TAR_GZIP_USTAR.into(),
+                POLICY_FORMAT_TAR_PAX.into(),
+                POLICY_FORMAT_TAR_GNU_LONGNAME.into(),
+            ],
+            ..Self::default_v5()
+        }
+    }
+
     pub fn digest_hex(&self) -> String {
         let json = serde_json::to_vec(self).expect("policy serializes");
         hex_sha256(&json)
@@ -224,6 +243,13 @@ impl Policy {
                     self.formats
                 )));
             }
+            "sealr.policy.v6" if valid_v6_formats(&self.formats) => {}
+            "sealr.policy.v6" => {
+                return Err(unsupported(format!(
+                    "formats {:?} are not a canonical nonempty subset of [\"zip\", \"zip64\", \"tar-ustar\", \"tar-gzip-ustar\", \"tar-pax\", \"tar-gnu-longname\"]",
+                    self.formats
+                )));
+            }
             _ => {
                 return Err(unsupported(format!(
                     "policy schema {} is unsupported",
@@ -262,7 +288,11 @@ impl Policy {
         }
         if matches!(
             self.schema,
-            "sealr.policy.v2" | "sealr.policy.v3" | "sealr.policy.v4" | "sealr.policy.v5"
+            "sealr.policy.v2"
+                | "sealr.policy.v3"
+                | "sealr.policy.v4"
+                | "sealr.policy.v5"
+                | "sealr.policy.v6"
         ) && self.max_files > u64::from(u32::MAX)
         {
             return Err(unsupported(format!(
@@ -271,8 +301,8 @@ impl Policy {
             )));
         }
         match (self.schema, self.max_derived_archive_bytes) {
-            ("sealr.policy.v4" | "sealr.policy.v5", Some(_)) => {}
-            ("sealr.policy.v4" | "sealr.policy.v5", None) => {
+            ("sealr.policy.v4" | "sealr.policy.v5" | "sealr.policy.v6", Some(_)) => {}
+            ("sealr.policy.v4" | "sealr.policy.v5" | "sealr.policy.v6", None) => {
                 return Err(unsupported(format!(
                     "{} requires an explicit max_derived_archive_bytes cap",
                     self.schema
@@ -281,7 +311,7 @@ impl Policy {
             (_, None) => {}
             (_, Some(value)) => {
                 return Err(unsupported(format!(
-                    "max_derived_archive_bytes={value} is only supported by sealr.policy.v4 and sealr.policy.v5"
+                    "max_derived_archive_bytes={value} is only supported by sealr.policy.v4, sealr.policy.v5, and sealr.policy.v6"
                 )));
             }
         }
@@ -355,6 +385,20 @@ fn valid_v5_formats(formats: &[String]) -> bool {
             POLICY_FORMAT_TAR_USTAR,
             POLICY_FORMAT_TAR_GZIP_USTAR,
             POLICY_FORMAT_TAR_PAX,
+        ],
+    )
+}
+
+fn valid_v6_formats(formats: &[String]) -> bool {
+    valid_canonical_subset(
+        formats,
+        &[
+            POLICY_FORMAT_ZIP,
+            POLICY_FORMAT_ZIP64,
+            POLICY_FORMAT_TAR_USTAR,
+            POLICY_FORMAT_TAR_GZIP_USTAR,
+            POLICY_FORMAT_TAR_PAX,
+            POLICY_FORMAT_TAR_GNU_LONGNAME,
         ],
     )
 }
@@ -455,6 +499,18 @@ mod tests {
         r#""encrypted":"deny","atomic":false}"#,
     );
 
+    const DEFAULT_V6_JSON: &str = concat!(
+        r#"{"schema":"sealr.policy.v6","id":"sealr:policy/default/v6","#,
+        r#""formats":["zip","zip64","tar-ustar","tar-gzip-ustar","tar-pax","tar-gnu-longname"],"#,
+        r#""max_archive_bytes":536870912,"max_derived_archive_bytes":536870912,"#,
+        r#""max_files":10000,"max_member_bytes":1073741824,"#,
+        r#""max_total_bytes":5368709120,"max_ratio":100,"max_path_depth":32,"#,
+        r#""max_metadata_bytes":4194304,"max_dict_bytes":67108864,"symlinks":"deny","#,
+        r#""hardlinks":"deny","overwrite":"refuse","setuid":"strip","nested_depth":1,"#,
+        r#""ambiguity":"deny","case_fold_collision":"deny","magic_vs_extension":"deny","#,
+        r#""encrypted":"deny","atomic":false}"#,
+    );
+
     #[test]
     fn default_policy_digest_is_stable() {
         assert_eq!(
@@ -496,6 +552,14 @@ mod tests {
     }
 
     #[test]
+    fn tar_gnu_longname_policy_digest_is_stable() {
+        assert_eq!(
+            Policy::default_v6().digest_hex(),
+            "aefc8a1baa113d7face30857ef64fe8f47c647fae863a72810b80380f8fd4178"
+        );
+    }
+
+    #[test]
     fn default_policy_serializations_are_stable() {
         assert_eq!(
             serde_json::to_string(&Policy::default_v1()).unwrap(),
@@ -517,6 +581,10 @@ mod tests {
             serde_json::to_string(&Policy::default_v5()).unwrap(),
             DEFAULT_V5_JSON
         );
+        assert_eq!(
+            serde_json::to_string(&Policy::default_v6()).unwrap(),
+            DEFAULT_V6_JSON
+        );
     }
 
     #[test]
@@ -534,6 +602,9 @@ mod tests {
 
         let v5 = Policy::default_v5().compile().expect("v5 default compiles");
         assert_eq!(v5, v4, "v5 preserves all compiled controls and limits");
+
+        let v6 = Policy::default_v6().compile().expect("v6 default compiles");
+        assert_eq!(v6, v5, "v6 preserves all compiled controls and limits");
     }
 
     #[test]
@@ -592,6 +663,9 @@ mod tests {
         );
         assert!(Policy::default_v5()
             .compile_for_format(POLICY_FORMAT_TAR_PAX)
+            .is_ok());
+        assert!(Policy::default_v6()
+            .compile_for_format(POLICY_FORMAT_TAR_GNU_LONGNAME)
             .is_ok());
     }
 
@@ -726,6 +800,29 @@ mod tests {
         ];
         for mask in 1_u8..(1_u8 << canonical.len()) {
             let mut policy = Policy::default_v5();
+            policy.formats = canonical
+                .iter()
+                .enumerate()
+                .filter_map(|(index, format)| {
+                    (mask & (1_u8 << index) != 0).then_some((*format).to_owned())
+                })
+                .collect();
+            policy.compile().expect("canonical subset compiles");
+        }
+    }
+
+    #[test]
+    fn tar_gnu_longname_policy_accepts_every_canonical_nonempty_subset() {
+        let canonical = [
+            POLICY_FORMAT_ZIP,
+            POLICY_FORMAT_ZIP64,
+            POLICY_FORMAT_TAR_USTAR,
+            POLICY_FORMAT_TAR_GZIP_USTAR,
+            POLICY_FORMAT_TAR_PAX,
+            POLICY_FORMAT_TAR_GNU_LONGNAME,
+        ];
+        for mask in 1_u8..(1_u8 << canonical.len()) {
+            let mut policy = Policy::default_v6();
             policy.formats = canonical
                 .iter()
                 .enumerate()
