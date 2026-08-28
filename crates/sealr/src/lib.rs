@@ -122,11 +122,12 @@ pub use apply::{
 };
 pub use findings::{Finding, FindingCode, Severity};
 pub use identity::{
-    content_root, encode_tar_layout, layout_root, OutcomeIdentities, TreeRoot, TREE_ENCODING_ID,
-    TREE_ENCODING_V2_ID,
+    content_root, encode_tar_layout, encode_zip64_layout, layout_root, OutcomeIdentities, TreeRoot,
+    TREE_ENCODING_ID, TREE_ENCODING_V2_ID, TREE_ENCODING_V3_ID,
 };
 pub use ir::{
     tar_ustar_portable_v1_canonical_bytes, tar_ustar_portable_v1_digest,
+    zip64_strict_ascii_v1_canonical_bytes, zip64_strict_ascii_v1_digest,
     zip_portable_utf8_v1_canonical_bytes, zip_portable_utf8_v1_digest,
     zip_strict_ascii_v1_canonical_bytes, zip_strict_ascii_v1_digest,
     zip_strict_ascii_v2_canonical_bytes, zip_strict_ascii_v2_digest,
@@ -134,9 +135,10 @@ pub use ir::{
     ArchiveFormat, ArchiveIR, ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite, IrMember,
     MemberContainerFacts, MemberEvidence, MemberKind, MemberSourceRanges, MemberVerification,
     NormalizationAction, TarArchiveCovering, TarInterpretationProfile, TarMemberEvidence,
+    Zip64ArchiveCovering, Zip64DataDescriptorWidth, Zip64LocalValueShape, Zip64MemberEvidence,
     ZipInterpretationProfile, ZipMemberEvidence, ARCHIVE_IR_SCHEMA, TAR_ARCHIVE_IR_SCHEMA,
-    TAR_USTAR_PORTABLE_V1, ZIP_PORTABLE_UTF8_V1, ZIP_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2,
-    ZIP_WHEEL_UTF8_V1,
+    TAR_USTAR_PORTABLE_V1, ZIP64_ARCHIVE_IR_SCHEMA, ZIP64_STRICT_ASCII_V1, ZIP_PORTABLE_UTF8_V1,
+    ZIP_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2, ZIP_WHEEL_UTF8_V1,
 };
 pub use jail::{
     jail_name, jail_relative, join_under_dest, JailedName, PORTABLE_NAME_MAX_COMPONENT_UTF16_UNITS,
@@ -149,7 +151,7 @@ pub use outcome::{
 };
 pub use policy::{
     hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget, POLICY_FORMAT_TAR_USTAR,
-    POLICY_FORMAT_ZIP,
+    POLICY_FORMAT_ZIP, POLICY_FORMAT_ZIP64,
 };
 pub use snapshot::SnapshotKind;
 pub use supervised::{

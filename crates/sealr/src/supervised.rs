@@ -155,7 +155,11 @@ fn supervised_zip_profile(
     options: &ApplyOptions,
 ) -> Result<crate::ZipInterpretationProfile, SupervisionError> {
     match options.archive_selection() {
-        ArchiveSelection::Zip(profile) => Ok(profile),
+        ArchiveSelection::Zip(profile) if !profile.is_zip64() => Ok(profile),
+        ArchiveSelection::Zip(_) => Err(SupervisionError::new(
+            SupervisionErrorKind::IsolationUnavailable,
+            "ZIP64 requires the not-yet-promoted semantic-record v3 worker contract",
+        )),
         _ => Err(SupervisionError::new(
             SupervisionErrorKind::IsolationUnavailable,
             "the authenticated worker contract currently supports ZIP profiles only",
@@ -179,6 +183,12 @@ mod selection_tests {
         let error = supervised_zip_profile(&tar).unwrap_err();
         assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
         assert!(error.to_string().contains("ZIP profiles only"));
+
+        let zip64 = ApplyOptions::new()
+            .with_interpretation_profile(crate::ZipInterpretationProfile::Zip64StrictAsciiV1);
+        let error = supervised_zip_profile(&zip64).unwrap_err();
+        assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
+        assert!(error.to_string().contains("semantic-record v3"));
     }
 }
 

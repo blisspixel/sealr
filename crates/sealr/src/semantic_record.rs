@@ -698,12 +698,20 @@ fn encode_binding_validated(
     encoder.fixed(&binding.operation_id);
     encoder.u64(binding.source_len);
     encoder.fixed(&binding.source_sha256);
-    encoder.u8(match binding.profile {
+    let profile_tag = match binding.profile {
         ZipInterpretationProfile::StrictAsciiV1 => 1,
         ZipInterpretationProfile::StrictAsciiV2 => 2,
         ZipInterpretationProfile::WheelUtf8V1 => 3,
         ZipInterpretationProfile::PortableUtf8V1 => 4,
-    });
+        ZipInterpretationProfile::Zip64StrictAsciiV1 => {
+            return Err(RecordError::new(
+                RecordErrorKind::UnsupportedVersion,
+                encoder.bytes.len(),
+                "ZIP64 requires semantic-record v3",
+            ));
+        }
+    };
+    encoder.u8(profile_tag);
     encoder.fixed(&binding.profile_sha256);
     encoder.string(&binding.policy_id)?;
     encoder.fixed(&binding.policy_sha256);
@@ -4705,7 +4713,7 @@ mod tests {
     fn test_zip_covering_mut(ir: &mut ArchiveIR) -> &mut ArchiveCovering {
         match &mut ir.evidence {
             ArchiveEvidence::Zip(covering) => covering,
-            ArchiveEvidence::Tar(_) => {
+            ArchiveEvidence::Zip64(_) | ArchiveEvidence::Tar(_) => {
                 panic!("semantic-record test archive must carry ZIP evidence")
             }
         }

@@ -5,6 +5,7 @@ use crate::findings::{Finding, FindingCode};
 pub use crate::ratio::ratio_exceeds;
 
 pub const POLICY_FORMAT_ZIP: &str = "zip";
+pub const POLICY_FORMAT_ZIP64: &str = "zip64";
 pub const POLICY_FORMAT_TAR_USTAR: &str = "tar-ustar";
 
 /// Pre-release Sealr policy, hashed in this struct's deterministic serialized field order.
@@ -116,6 +117,23 @@ impl Policy {
         }
     }
 
+    /// Construct the v3 policy, which additionally authorizes strict ZIP64.
+    ///
+    /// Format selection remains explicit. The policy authorizes interpretation
+    /// but does not infer a format from names, extensions, or overlapping magic.
+    pub fn default_v3() -> Self {
+        Self {
+            schema: "sealr.policy.v3",
+            id: "sealr:policy/default/v3".into(),
+            formats: vec![
+                POLICY_FORMAT_ZIP.into(),
+                POLICY_FORMAT_ZIP64.into(),
+                POLICY_FORMAT_TAR_USTAR.into(),
+            ],
+            ..Self::default_v1()
+        }
+    }
+
     pub fn digest_hex(&self) -> String {
         let json = serde_json::to_vec(self).expect("policy serializes");
         hex_sha256(&json)
@@ -142,6 +160,13 @@ impl Policy {
             "sealr.policy.v2" => {
                 return Err(unsupported(format!(
                     "formats {:?} are not a canonical nonempty subset of [\"zip\", \"tar-ustar\"]",
+                    self.formats
+                )));
+            }
+            "sealr.policy.v3" if valid_v3_formats(&self.formats) => {}
+            "sealr.policy.v3" => {
+                return Err(unsupported(format!(
+                    "formats {:?} are not a canonical nonempty subset of [\"zip\", \"zip64\", \"tar-ustar\"]",
                     self.formats
                 )));
             }
@@ -181,7 +206,9 @@ impl Policy {
                 self.max_dict_bytes, defaults.max_dict_bytes
             )));
         }
-        if self.schema == "sealr.policy.v2" && self.max_files > u64::from(u32::MAX) {
+        if matches!(self.schema, "sealr.policy.v2" | "sealr.policy.v3")
+            && self.max_files > u64::from(u32::MAX)
+        {
             return Err(unsupported(format!(
                 "max_files={} exceeds the u32 identity-encoding limit",
                 self.max_files
@@ -221,11 +248,36 @@ impl Policy {
 }
 
 fn valid_v2_formats(formats: &[String]) -> bool {
-    match formats {
-        [only] => only == POLICY_FORMAT_ZIP || only == POLICY_FORMAT_TAR_USTAR,
-        [first, second] => first == POLICY_FORMAT_ZIP && second == POLICY_FORMAT_TAR_USTAR,
-        _ => false,
+    valid_canonical_subset(formats, &[POLICY_FORMAT_ZIP, POLICY_FORMAT_TAR_USTAR])
+}
+
+fn valid_v3_formats(formats: &[String]) -> bool {
+    valid_canonical_subset(
+        formats,
+        &[
+            POLICY_FORMAT_ZIP,
+            POLICY_FORMAT_ZIP64,
+            POLICY_FORMAT_TAR_USTAR,
+        ],
+    )
+}
+
+fn valid_canonical_subset(formats: &[String], canonical: &[&str]) -> bool {
+    if formats.is_empty() {
+        return false;
     }
+
+    let mut next = 0;
+    for format in formats {
+        let Some(relative_index) = canonical[next..]
+            .iter()
+            .position(|candidate| *candidate == format)
+        else {
+            return false;
+        };
+        next += relative_index + 1;
+    }
+    true
 }
 
 fn check_reserved(name: &str, actual: &str, supported: &str) -> Result<(), Finding> {
@@ -251,6 +303,37 @@ pub fn hex_sha256(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    const DEFAULT_V1_JSON: &str = concat!(
+        r#"{"schema":"sealr.policy.v1","id":"sealr:policy/default/v1","formats":["zip"],"#,
+        r#""max_archive_bytes":536870912,"max_files":10000,"max_member_bytes":1073741824,"#,
+        r#""max_total_bytes":5368709120,"max_ratio":100,"max_path_depth":32,"#,
+        r#""max_metadata_bytes":4194304,"max_dict_bytes":67108864,"symlinks":"deny","#,
+        r#""hardlinks":"deny","overwrite":"refuse","setuid":"strip","nested_depth":1,"#,
+        r#""ambiguity":"deny","case_fold_collision":"deny","magic_vs_extension":"deny","#,
+        r#""encrypted":"deny","atomic":false}"#,
+    );
+
+    const DEFAULT_V2_JSON: &str = concat!(
+        r#"{"schema":"sealr.policy.v2","id":"sealr:policy/default/v2","#,
+        r#""formats":["zip","tar-ustar"],"max_archive_bytes":536870912,"max_files":10000,"#,
+        r#""max_member_bytes":1073741824,"max_total_bytes":5368709120,"max_ratio":100,"#,
+        r#""max_path_depth":32,"max_metadata_bytes":4194304,"max_dict_bytes":67108864,"#,
+        r#""symlinks":"deny","hardlinks":"deny","overwrite":"refuse","setuid":"strip","#,
+        r#""nested_depth":1,"ambiguity":"deny","case_fold_collision":"deny","#,
+        r#""magic_vs_extension":"deny","encrypted":"deny","atomic":false}"#,
+    );
+
+    const DEFAULT_V3_JSON: &str = concat!(
+        r#"{"schema":"sealr.policy.v3","id":"sealr:policy/default/v3","#,
+        r#""formats":["zip","zip64","tar-ustar"],"max_archive_bytes":536870912,"#,
+        r#""max_files":10000,"max_member_bytes":1073741824,"max_total_bytes":5368709120,"#,
+        r#""max_ratio":100,"max_path_depth":32,"max_metadata_bytes":4194304,"#,
+        r#""max_dict_bytes":67108864,"symlinks":"deny","hardlinks":"deny","#,
+        r#""overwrite":"refuse","setuid":"strip","nested_depth":1,"ambiguity":"deny","#,
+        r#""case_fold_collision":"deny","magic_vs_extension":"deny","encrypted":"deny","#,
+        r#""atomic":false}"#,
+    );
+
     #[test]
     fn default_policy_digest_is_stable() {
         assert_eq!(
@@ -268,11 +351,38 @@ mod tests {
     }
 
     #[test]
+    fn zip64_policy_digest_is_stable() {
+        assert_eq!(
+            Policy::default_v3().digest_hex(),
+            "2cc96c7a2dd83617b3c80df7ec5ae7e4b92f74b0b391d70aa73f54f3f82068bd"
+        );
+    }
+
+    #[test]
+    fn default_policy_serializations_are_stable() {
+        assert_eq!(
+            serde_json::to_string(&Policy::default_v1()).unwrap(),
+            DEFAULT_V1_JSON
+        );
+        assert_eq!(
+            serde_json::to_string(&Policy::default_v2()).unwrap(),
+            DEFAULT_V2_JSON
+        );
+        assert_eq!(
+            serde_json::to_string(&Policy::default_v3()).unwrap(),
+            DEFAULT_V3_JSON
+        );
+    }
+
+    #[test]
     fn default_policy_compiles() {
-        let compiled = Policy::default_v1().compile().expect("default compiles");
-        assert_eq!(compiled.budget.max_ratio, Some(100));
-        assert!(!compiled.effect.member_sync);
-        assert_eq!(compiled.target, TargetModel::PortableV1);
+        let v1 = Policy::default_v1().compile().expect("default compiles");
+        assert_eq!(v1.budget.max_ratio, Some(100));
+        assert!(!v1.effect.member_sync);
+        assert_eq!(v1.target, TargetModel::PortableV1);
+
+        let v3 = Policy::default_v3().compile().expect("v3 default compiles");
+        assert_eq!(v3, v1, "v3 preserves all compiled controls and limits");
     }
 
     #[test]
@@ -319,6 +429,16 @@ mod tests {
         assert!(Policy::default_v2()
             .compile_for_format(POLICY_FORMAT_TAR_USTAR)
             .is_ok());
+        assert!(Policy::default_v3()
+            .compile_for_format(POLICY_FORMAT_ZIP64)
+            .is_ok());
+        assert_eq!(
+            Policy::default_v2()
+                .compile_for_format(POLICY_FORMAT_ZIP64)
+                .unwrap_err()
+                .code,
+            FindingCode::PolicyUnsupported
+        );
     }
 
     #[test]
@@ -339,6 +459,45 @@ mod tests {
     }
 
     #[test]
+    fn zip64_policy_accepts_every_canonical_nonempty_subset() {
+        for formats in [
+            vec![POLICY_FORMAT_ZIP.into()],
+            vec![POLICY_FORMAT_ZIP64.into()],
+            vec![POLICY_FORMAT_TAR_USTAR.into()],
+            vec![POLICY_FORMAT_ZIP.into(), POLICY_FORMAT_ZIP64.into()],
+            vec![POLICY_FORMAT_ZIP.into(), POLICY_FORMAT_TAR_USTAR.into()],
+            vec![POLICY_FORMAT_ZIP64.into(), POLICY_FORMAT_TAR_USTAR.into()],
+            vec![
+                POLICY_FORMAT_ZIP.into(),
+                POLICY_FORMAT_ZIP64.into(),
+                POLICY_FORMAT_TAR_USTAR.into(),
+            ],
+        ] {
+            let mut policy = Policy::default_v3();
+            policy.formats = formats;
+            policy.compile().expect("canonical subset compiles");
+        }
+    }
+
+    #[test]
+    fn zip64_policy_rejects_empty_reordered_duplicate_and_unknown_formats() {
+        for formats in [
+            Vec::new(),
+            vec![POLICY_FORMAT_ZIP64.into(), POLICY_FORMAT_ZIP.into()],
+            vec![POLICY_FORMAT_TAR_USTAR.into(), POLICY_FORMAT_ZIP64.into()],
+            vec![POLICY_FORMAT_ZIP64.into(), POLICY_FORMAT_ZIP64.into()],
+            vec![POLICY_FORMAT_ZIP.into(), "7z".into()],
+        ] {
+            let mut policy = Policy::default_v3();
+            policy.formats = formats;
+            assert_eq!(
+                policy.compile().unwrap_err().code,
+                FindingCode::PolicyUnsupported
+            );
+        }
+    }
+
+    #[test]
     fn atomic_true_compiles_to_member_sync() {
         let mut policy = Policy::default_v1();
         policy.atomic = true;
@@ -348,12 +507,13 @@ mod tests {
 
     #[test]
     fn member_cap_cannot_exceed_the_identity_encoding() {
-        let mut policy = Policy::default_v2();
-        policy.max_files = u64::from(u32::MAX) + 1;
-        assert_eq!(
-            policy.compile().unwrap_err().code,
-            FindingCode::PolicyUnsupported
-        );
+        for mut policy in [Policy::default_v2(), Policy::default_v3()] {
+            policy.max_files = u64::from(u32::MAX) + 1;
+            assert_eq!(
+                policy.compile().unwrap_err().code,
+                FindingCode::PolicyUnsupported
+            );
+        }
     }
 
     #[test]

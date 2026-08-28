@@ -5,7 +5,7 @@ use std::path::Path;
 #[cfg(test)]
 use std::fs;
 
-use crate::covering::{audit_covering, audit_tar_covering};
+use crate::covering::{audit_covering, audit_tar_covering, audit_zip64_covering};
 use crate::findings::{Finding, FindingCode, Severity};
 use crate::identity::OutcomeIdentities;
 use crate::ir::{
@@ -20,7 +20,6 @@ use crate::outcome::{
 };
 use crate::policy::{
     hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget, POLICY_FORMAT_TAR_USTAR,
-    POLICY_FORMAT_ZIP,
 };
 use crate::quota::{QuotaError, QuotaState};
 use crate::snapshot::{SnapshotKind, SnapshotSet, SourceSnapshot, TransformGraph};
@@ -146,7 +145,7 @@ impl ApplyOptions {
     /// Return the container format selected for this operation.
     pub fn archive_format(&self) -> crate::ArchiveFormat {
         match self.selection {
-            ArchiveSelection::Zip(_) => crate::ArchiveFormat::Zip32,
+            ArchiveSelection::Zip(profile) => profile.archive_format(),
             ArchiveSelection::TarUstar(_) => crate::ArchiveFormat::TarUstar,
         }
     }
@@ -669,7 +668,7 @@ impl PlanningContext {
         policy: &Policy,
         profile: ZipInterpretationProfile,
     ) -> Result<Self, Finding> {
-        let controls = policy.compile_for_format(POLICY_FORMAT_ZIP)?;
+        let controls = policy.compile_for_format(profile.policy_format())?;
         Ok(Self {
             policy_id: policy.id.clone(),
             policy_sha256: policy.digest_hex(),
@@ -833,10 +832,10 @@ fn plan_snapshot<'a>(snapshot: SourceSnapshot<'a>, context: PlanningContext) -> 
     let controls = context.controls;
     let budget = controls.budget;
 
-    let magic = match detect_magic(&snapshot) {
+    let magic = match detect_magic(&snapshot, interpretation_profile) {
         Ok(magic) => magic,
         Err(finding) => {
-            let axes = parse_failure_axes(&finding);
+            let axes = parse_failure_axes_for_profile(&finding, interpretation_profile);
             return terminal_plan(snapshot, context, "unknown", vec![finding], None, axes);
         }
     };
@@ -857,7 +856,7 @@ fn plan_snapshot<'a>(snapshot: SourceSnapshot<'a>, context: PlanningContext) -> 
     ) {
         Ok(parsed) => parsed,
         Err(finding) => {
-            let axes = parse_failure_axes(&finding);
+            let axes = parse_failure_axes_for_profile(&finding, interpretation_profile);
             return terminal_plan(snapshot, context, "zip", vec![finding], None, axes);
         }
     };
@@ -890,7 +889,10 @@ fn plan_snapshot<'a>(snapshot: SourceSnapshot<'a>, context: PlanningContext) -> 
         return terminal_plan(snapshot, context, "zip", vec![finding], None, axes);
     }
 
-    let covering = parsed.covering();
+    let zip32_covering = (!interpretation_profile.is_zip64()).then(|| parsed.covering());
+    let zip64_covering = interpretation_profile
+        .is_zip64()
+        .then(|| parsed.zip64_covering());
     let mut findings = Vec::new();
     let mut planned: Vec<(ZipMember, Vec<String>, Vec<NormalizationAction>)> = Vec::new();
     let mut dest_seen: BTreeMap<String, bool> = BTreeMap::new();
@@ -1049,16 +1051,37 @@ fn plan_snapshot<'a>(snapshot: SourceSnapshot<'a>, context: PlanningContext) -> 
         .iter()
         .map(|(member, _, _)| PayloadPlan::from_zip(member))
         .collect();
-    let ir = ArchiveIR::with_covering(
-        interpretation_profile,
-        snapshot.digest().clone(),
-        covering,
-        planned
-            .into_iter()
-            .map(|(zip, components, actions)| IrMember::from_planned(zip, components, actions))
-            .collect(),
-    );
-    if let Err(finding) = audit_covering(&snapshot, &ir) {
+    let ir_members = planned
+        .into_iter()
+        .map(|(zip, components, actions)| {
+            if interpretation_profile.is_zip64() {
+                IrMember::from_zip64_planned(zip, components, actions)
+            } else {
+                IrMember::from_planned(zip, components, actions)
+            }
+        })
+        .collect();
+    let ir = if interpretation_profile.is_zip64() {
+        ArchiveIR::with_zip64(
+            interpretation_profile,
+            snapshot.digest().clone(),
+            zip64_covering.expect("ZIP64 parser supplies ZIP64 covering"),
+            ir_members,
+        )
+    } else {
+        ArchiveIR::with_covering(
+            interpretation_profile,
+            snapshot.digest().clone(),
+            zip32_covering.expect("ZIP32 parser supplies ZIP32 covering"),
+            ir_members,
+        )
+    };
+    let covering_result = if interpretation_profile.is_zip64() {
+        audit_zip64_covering(&snapshot, &ir)
+    } else {
+        audit_covering(&snapshot, &ir)
+    };
+    if let Err(finding) = covering_result {
         findings.push(finding);
         let cause = first_error(&findings);
         let axes = SemanticAxes::structure_stop(
@@ -1507,17 +1530,22 @@ fn path_conflict(seen: &BTreeMap<String, bool>, path: &str, is_dir: bool) -> Opt
     None
 }
 
-fn detect_magic(snapshot: &SourceSnapshot<'_>) -> Result<&'static str, Finding> {
+fn detect_magic(
+    snapshot: &SourceSnapshot<'_>,
+    profile: ZipInterpretationProfile,
+) -> Result<&'static str, Finding> {
     let prefix_len =
         usize::try_from(snapshot.len().min(4)).expect("a four-byte prefix always fits usize");
     let mut prefix = [0_u8; 4];
     snapshot.read_exact_at(0, &mut prefix[..prefix_len])?;
     let bytes = &prefix[..prefix_len];
-    if bytes.len() >= 4
+    let legacy_zip_magic = bytes.len() >= 4
         && bytes[0] == 0x50
         && bytes[1] == 0x4b
-        && (bytes[2] == 0x03 || bytes[2] == 0x05)
-    {
+        && (bytes[2] == 0x03 || bytes[2] == 0x05);
+    let selected_empty_zip64_magic =
+        profile == ZipInterpretationProfile::Zip64StrictAsciiV1 && bytes == ZIP64_EMPTY_PREFIX;
+    if legacy_zip_magic || selected_empty_zip64_magic {
         Ok("zip")
     } else if bytes.len() >= 2 && bytes[0] == 0x1f && bytes[1] == 0x8b {
         Ok("gz")
@@ -1525,6 +1553,8 @@ fn detect_magic(snapshot: &SourceSnapshot<'_>) -> Result<&'static str, Finding> 
         Ok("unknown")
     }
 }
+
+const ZIP64_EMPTY_PREFIX: &[u8] = &[0x50, 0x4b, 0x06, 0x06];
 
 #[allow(clippy::too_many_arguments)]
 fn finish(
@@ -1658,6 +1688,15 @@ pub(crate) fn member_view(member: &IrMember) -> MemberView {
             zip.declared_comp_size,
             zip.declared_crc,
         ),
+        crate::ir::MemberEvidence::Zip64(zip64) => (
+            if zip64.zip.method == 0 {
+                "store"
+            } else {
+                "deflate"
+            },
+            zip64.zip.declared_comp_size,
+            zip64.zip.declared_crc,
+        ),
         crate::ir::MemberEvidence::Tar(tar) => ("raw", tar.payload.len, 0),
     };
     MemberView {
@@ -1758,6 +1797,25 @@ fn parse_failure_axes(finding: &Finding) -> SemanticAxes {
         _ => AdmissionStatus::NotEvaluated,
     };
     SemanticAxes::structure_stop(interpretation, admission, finding)
+}
+
+fn parse_failure_axes_for_profile(
+    finding: &Finding,
+    profile: ZipInterpretationProfile,
+) -> SemanticAxes {
+    if profile.is_zip64() && finding.code == FindingCode::ZipDiffC5Zip64 {
+        let interpretation = if finding.detail == "archive contains no ZIP64 construct" {
+            InterpretationStatus::Unsupported
+        } else {
+            InterpretationStatus::Malformed
+        };
+        return SemanticAxes::structure_stop(
+            interpretation,
+            AdmissionStatus::NotEvaluated,
+            finding,
+        );
+    }
+    parse_failure_axes(finding)
 }
 
 #[cfg(test)]
@@ -2229,6 +2287,7 @@ mod tests {
                 data_descriptor: None,
                 central_header: crate::ir::ByteRange { offset: 0, len: 0 },
             },
+            zip64_evidence: None,
         };
         let mut sink = io::sink();
         let budget = Policy::default_v1().compile().unwrap().budget;
@@ -2283,6 +2342,7 @@ mod tests {
                 data_descriptor: None,
                 central_header: crate::ir::ByteRange { offset: 0, len: 0 },
             },
+            zip64_evidence: None,
         };
         let fail_at = compressed.len() / 2;
         let reader = BufReader::with_capacity(
@@ -2336,6 +2396,7 @@ mod tests {
                 data_descriptor: None,
                 central_header: crate::ir::ByteRange { offset: 0, len: 0 },
             },
+            zip64_evidence: None,
         };
         let chunked = ChunkedReader {
             inner: Cursor::new(&payload),
@@ -2397,6 +2458,7 @@ mod tests {
                 data_descriptor: None,
                 central_header: crate::ir::ByteRange { offset: 0, len: 0 },
             },
+            zip64_evidence: None,
         };
         let chunked = ChunkedReader {
             inner: Cursor::new(&compressed),

@@ -55,6 +55,13 @@ impl PayloadPlan {
                 uncompressed_size: member.declared_uncomp_size,
                 integrity: PayloadIntegrity::Crc32(zip.declared_crc),
             },
+            MemberEvidence::Zip64(zip64) => Self {
+                source: DomainRange::original(zip64.zip.source_ranges.compressed_payload),
+                codec: payload_codec_from_zip_method(zip64.zip.method),
+                compressed_size: zip64.zip.declared_comp_size,
+                uncompressed_size: member.declared_uncomp_size,
+                integrity: PayloadIntegrity::Crc32(zip64.zip.declared_crc),
+            },
             MemberEvidence::Tar(tar) => Self {
                 source: DomainRange::original(tar.payload),
                 codec: PayloadCodec::Raw,

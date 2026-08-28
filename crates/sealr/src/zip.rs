@@ -66,9 +66,28 @@ enum Zip64ExtraResolutionError {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[allow(dead_code)]
-enum DataDescriptorWidth {
+pub(crate) enum DataDescriptorWidth {
     Zip32,
     Zip64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Zip64LocalValueShape {
+    Absent,
+    Exact,
+    StreamingZeros,
+    StreamingMaxima,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ParsedZip64MemberEvidence {
+    pub local_version_needed: u16,
+    pub central_version_needed: u16,
+    pub central_presence_mask: u8,
+    pub central_legacy_sentinel_mask: u8,
+    pub local_legacy_sentinel_mask: u8,
+    pub local_value_shape: Zip64LocalValueShape,
+    pub descriptor_width: Option<DataDescriptorWidth>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -408,6 +427,7 @@ pub struct ZipMember {
     pub is_dir: bool,
     pub extra_fields: Vec<ExtraFieldRecord>,
     pub source_ranges: MemberSourceRanges,
+    pub(crate) zip64_evidence: Option<ParsedZip64MemberEvidence>,
 }
 
 struct LocalHeader {
@@ -440,6 +460,17 @@ impl ZipArchive {
         crate::ir::ArchiveCovering::from_zip32(
             self.cd_offset,
             self.cd_size,
+            self.eocd_offset,
+            self.comment_len,
+        )
+    }
+
+    pub(crate) fn zip64_covering(&self) -> crate::ir::Zip64ArchiveCovering {
+        crate::ir::Zip64ArchiveCovering::from_parsed(
+            self.cd_offset,
+            self.cd_size,
+            self.zip64_eocd,
+            self.zip64_locator,
             self.eocd_offset,
             self.comment_len,
         )
@@ -789,6 +820,36 @@ pub(crate) fn parse_zip64_strict_ascii_v1(
             )
             .on(&name));
         }
+        let local_value_shape = match local_zip64_data {
+            None => Zip64LocalValueShape::Absent,
+            Some(data)
+                if data[..8] == central_values.uncompressed_size.to_le_bytes()
+                    && data[8..16] == central_values.compressed_size.to_le_bytes() =>
+            {
+                Zip64LocalValueShape::Exact
+            }
+            Some(data)
+                if uses_descriptor
+                    && data[..8] == 0_u64.to_le_bytes()
+                    && data[8..16] == 0_u64.to_le_bytes() =>
+            {
+                Zip64LocalValueShape::StreamingZeros
+            }
+            Some(data)
+                if uses_descriptor
+                    && data[..8] == u64::MAX.to_le_bytes()
+                    && data[8..16] == u64::MAX.to_le_bytes() =>
+            {
+                Zip64LocalValueShape::StreamingMaxima
+            }
+            Some(_) => {
+                return Err(Finding::error(
+                    FindingCode::ZipDiffC5Zip64,
+                    "ZIP64 local value shape is not admitted",
+                )
+                .on(&name));
+            }
+        };
         let local_uses_zip64 = local_zip64.is_some();
         if local_uses_zip64 && local.version_needed < 45 {
             return Err(Finding::error(
@@ -1006,6 +1067,18 @@ pub(crate) fn parse_zip64_strict_ascii_v1(
                     len: central_header_len,
                 },
             },
+            zip64_evidence: Some(ParsedZip64MemberEvidence {
+                local_version_needed: local.version_needed,
+                central_version_needed: version_needed,
+                central_presence_mask: central_zip64.map_or(0, |_| central_values.presence_mask),
+                central_legacy_sentinel_mask: u8::from(legacy_uncomp == u32::MAX)
+                    | (u8::from(legacy_comp == u32::MAX) << 1)
+                    | (u8::from(legacy_lfh_offset == u32::MAX) << 2),
+                local_legacy_sentinel_mask: u8::from(local.uncomp_size == u32::MAX)
+                    | (u8::from(local.comp_size == u32::MAX) << 1),
+                local_value_shape,
+                descriptor_width: uses_descriptor.then_some(descriptor_width),
+            }),
         });
         has_member_zip64 |= central_uses_zip64 || local_uses_zip64;
         pos = record_end;
@@ -1128,6 +1201,9 @@ pub fn parse_zip_with_profile(
     max_metadata_bytes: u64,
     profile: ZipInterpretationProfile,
 ) -> Result<ZipArchive, Finding> {
+    if profile == ZipInterpretationProfile::Zip64StrictAsciiV1 {
+        return parse_zip64_strict_ascii_v1(snapshot, max_files, max_metadata_bytes);
+    }
     #[cfg(test)]
     PARSE_CALLS.with(|calls| calls.set(calls.get() + 1));
 
@@ -1429,6 +1505,7 @@ pub fn parse_zip_with_profile(
                     len: cdh_len,
                 },
             },
+            zip64_evidence: None,
         });
         metadata_bytes = metadata_bytes
             .checked_add(name_len as u64)
@@ -1671,7 +1748,8 @@ fn validate_general_purpose_flags(
             ZipInterpretationProfile::StrictAsciiV2 => 1 << 3,
             ZipInterpretationProfile::PortableUtf8V1 => (1 << 3) | (1 << 11),
             ZipInterpretationProfile::WheelUtf8V1 => 1 << 11,
-            ZipInterpretationProfile::StrictAsciiV1 => unreachable!(),
+            ZipInterpretationProfile::StrictAsciiV1
+            | ZipInterpretationProfile::Zip64StrictAsciiV1 => unreachable!(),
         };
         let denied = flags & !allowed;
         if denied != 0 {

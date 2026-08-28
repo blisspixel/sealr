@@ -6,13 +6,19 @@
 
 use crate::findings::{Finding, FindingCode};
 use crate::interval::{CheckedInterval, IntervalError};
-use crate::ir::{ArchiveFormat, ArchiveIR, ByteRange};
+use crate::ir::{
+    ArchiveFormat, ArchiveIR, ByteRange, ExtraDisposition, ExtraSite, MemberKind,
+    Zip64DataDescriptorWidth, Zip64LocalValueShape,
+};
 use crate::policy::hex_sha256;
 use crate::snapshot::SourceSnapshot;
 
 const LFH_SIG: [u8; 4] = [0x50, 0x4b, 0x03, 0x04];
 const CDH_SIG: [u8; 4] = [0x50, 0x4b, 0x01, 0x02];
 const EOCD_SIG: [u8; 4] = [0x50, 0x4b, 0x05, 0x06];
+const ZIP64_EOCD_SIG: [u8; 4] = [0x50, 0x4b, 0x06, 0x06];
+const ZIP64_LOCATOR_SIG: [u8; 4] = [0x50, 0x4b, 0x06, 0x07];
+const DATA_DESCRIPTOR_SIG: [u8; 4] = [0x50, 0x4b, 0x07, 0x08];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CoveringAuditError<'member> {
@@ -55,6 +61,470 @@ impl<'member> CoveringAuditError<'member> {
 /// claimed member header signatures at the recorded offsets.
 pub(crate) fn audit_covering(snapshot: &SourceSnapshot<'_>, ir: &ArchiveIR) -> Result<(), Finding> {
     audit_covering_fallible(snapshot, ir).map_err(CoveringAuditError::into_finding)
+}
+
+/// Independently check strict ZIP64 archive and member evidence without
+/// invoking the structural parser or a payload codec.
+pub(crate) fn audit_zip64_covering(
+    snapshot: &SourceSnapshot<'_>,
+    ir: &ArchiveIR,
+) -> Result<(), Finding> {
+    let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
+    if ir.format() != ArchiveFormat::Zip64 {
+        return Err(fail("ZIP64 covering audit received a non-ZIP64 IR"));
+    }
+    if ir.source_digest != *snapshot.digest() {
+        return Err(fail("source digest does not match the snapshot"));
+    }
+    let covering = ir
+        .zip64_covering()
+        .ok_or_else(|| fail("ZIP64 IR has no ZIP64 covering"))?;
+    let local_cover = checked_interval(covering.local_records, "local-record covering overflow")
+        .map_err(CoveringAuditError::into_finding)?;
+    let central_cover = checked_interval(
+        covering.central_directory,
+        "central-directory covering overflow",
+    )
+    .map_err(CoveringAuditError::into_finding)?;
+    let eocd_end = checked_range_end(covering.eocd, "EOCD covering overflow")?;
+    let comment_end = checked_range_end(covering.comment, "comment covering overflow")?;
+    if covering.local_records.offset != 0
+        || local_cover.end() != central_cover.start()
+        || covering.eocd.len != 22
+        || eocd_end != covering.comment.offset
+        || comment_end != snapshot.len()
+    {
+        return Err(fail(
+            "ZIP64 top-level ranges do not exactly partition the snapshot",
+        ));
+    }
+
+    let pair = match (covering.zip64_eocd, covering.zip64_locator) {
+        (None, None) => None,
+        (Some(record), Some(locator)) => Some((record, locator)),
+        _ => return Err(fail("ZIP64 end-record evidence is only partially present")),
+    };
+    let expected_after_cd = pair.map_or(covering.eocd.offset, |(record, _)| record.offset);
+    if central_cover.end() != expected_after_cd {
+        return Err(fail(
+            "ZIP64 central directory does not abut the next end record",
+        ));
+    }
+
+    let mut eocd = [0_u8; 22];
+    snapshot
+        .read_exact_at(covering.eocd.offset, &mut eocd)
+        .map_err(|_| fail("claimed ZIP64 classic EOCD is outside the snapshot"))?;
+    if eocd[0..4] != EOCD_SIG || le_u16(&eocd, 4) != 0 || le_u16(&eocd, 6) != 0 {
+        return Err(fail("claimed ZIP64 classic EOCD is invalid or spanned"));
+    }
+    if u64::from(le_u16(&eocd, 20)) != covering.comment.len {
+        return Err(fail(
+            "ZIP64 EOCD comment length does not match the covering",
+        ));
+    }
+    let classic_count_disk = le_u16(&eocd, 8);
+    let classic_count_total = le_u16(&eocd, 10);
+    let classic_cd_size = le_u32(&eocd, 12);
+    let classic_cd_offset = le_u32(&eocd, 16);
+    let resolved_count = ir.members.len() as u64;
+    let mut zip64_end_version_needed = None;
+
+    if let Some((record_range, locator_range)) = pair {
+        if record_range.len != 56
+            || locator_range.len != 20
+            || checked_range_end(record_range, "ZIP64 EOCD range overflow")? != locator_range.offset
+            || checked_range_end(locator_range, "ZIP64 locator range overflow")?
+                != covering.eocd.offset
+        {
+            return Err(fail("ZIP64 end pair does not have fixed adjacent geometry"));
+        }
+        let mut record = [0_u8; 56];
+        let mut locator = [0_u8; 20];
+        snapshot
+            .read_exact_at(record_range.offset, &mut record)
+            .map_err(|_| fail("claimed ZIP64 EOCD is outside the snapshot"))?;
+        snapshot
+            .read_exact_at(locator_range.offset, &mut locator)
+            .map_err(|_| fail("claimed ZIP64 locator is outside the snapshot"))?;
+        if record[0..4] != ZIP64_EOCD_SIG
+            || le_u64(&record, 4) != 44
+            || le_u32(&record, 16) != 0
+            || le_u32(&record, 20) != 0
+            || le_u64(&record, 24) != resolved_count
+            || le_u64(&record, 32) != resolved_count
+            || le_u64(&record, 40) != covering.central_directory.len
+            || le_u64(&record, 48) != covering.central_directory.offset
+        {
+            return Err(fail("ZIP64 EOCD disagrees with the represented archive"));
+        }
+        zip64_end_version_needed = Some(le_u16(&record, 14));
+        if locator[0..4] != ZIP64_LOCATOR_SIG
+            || le_u32(&locator, 4) != 0
+            || le_u64(&locator, 8) != record_range.offset
+            || le_u32(&locator, 16) != 1
+        {
+            return Err(fail("ZIP64 locator disagrees with the represented archive"));
+        }
+        let has_sentinel = classic_count_disk == u16::MAX
+            || classic_count_total == u16::MAX
+            || classic_cd_size == u32::MAX
+            || classic_cd_offset == u32::MAX;
+        if !has_sentinel
+            || !canonical_end_u16(classic_count_disk, resolved_count)
+            || !canonical_end_u16(classic_count_total, resolved_count)
+            || !canonical_end_u32(classic_cd_size, covering.central_directory.len)
+            || !canonical_end_u32(classic_cd_offset, covering.central_directory.offset)
+        {
+            return Err(fail(
+                "classic EOCD is not canonical for the ZIP64 end record",
+            ));
+        }
+    } else if u64::from(classic_count_disk) != resolved_count
+        || u64::from(classic_count_total) != resolved_count
+        || u64::from(classic_cd_size) != covering.central_directory.len
+        || u64::from(classic_cd_offset) != covering.central_directory.offset
+    {
+        return Err(fail(
+            "classic EOCD disagrees with member-only ZIP64 evidence",
+        ));
+    }
+
+    let mut local_ranges = Vec::new();
+    local_ranges
+        .try_reserve_exact(ir.members.len())
+        .map_err(|_| fail("ZIP64 covering audit could not reserve local ranges"))?;
+    let mut central_ranges = Vec::new();
+    central_ranges
+        .try_reserve_exact(ir.members.len())
+        .map_err(|_| fail("ZIP64 covering audit could not reserve central ranges"))?;
+    for member in &ir.members {
+        let zip64 = member
+            .zip64_evidence()
+            .ok_or_else(|| fail("ZIP64 member lacks ZIP64 evidence").on(&member.decoded_name))?;
+        let zip = &zip64.zip;
+        let ranges = &zip.source_ranges;
+        let local_header = checked_interval(ranges.local_header, "ZIP64 local header overflow")
+            .map_err(CoveringAuditError::into_finding)?;
+        let payload = checked_interval(ranges.compressed_payload, "ZIP64 payload overflow")
+            .map_err(CoveringAuditError::into_finding)?;
+        let central_header = checked_interval(ranges.central_header, "ZIP64 CDH overflow")
+            .map_err(CoveringAuditError::into_finding)?;
+        let descriptor = ranges
+            .data_descriptor
+            .map(|range| checked_interval(range, "ZIP64 descriptor overflow"))
+            .transpose()
+            .map_err(CoveringAuditError::into_finding)?;
+        if ranges.local_header.len < 30 || ranges.central_header.len < 46 {
+            return Err(
+                fail("ZIP64 member header range is shorter than its fixed header")
+                    .on(&member.decoded_name),
+            );
+        }
+        let mut local = [0_u8; 30];
+        let mut central = [0_u8; 46];
+        snapshot
+            .read_exact_at(ranges.local_header.offset, &mut local)
+            .map_err(|_| fail("claimed ZIP64 LFH is outside the snapshot"))?;
+        snapshot
+            .read_exact_at(ranges.central_header.offset, &mut central)
+            .map_err(|_| fail("claimed ZIP64 CDH is outside the snapshot"))?;
+        if local[0..4] != LFH_SIG || central[0..4] != CDH_SIG {
+            return Err(
+                fail("claimed ZIP64 member header signature is invalid").on(&member.decoded_name)
+            );
+        }
+        let local_name_len = u64::from(le_u16(&local, 26));
+        let local_extra_len = u64::from(le_u16(&local, 28));
+        let central_name_len = u64::from(le_u16(&central, 28));
+        let central_extra_len = u64::from(le_u16(&central, 30));
+        let central_comment_len = u64::from(le_u16(&central, 32));
+        if ranges.local_header.len != 30 + local_name_len + local_extra_len
+            || ranges.central_header.len
+                != 46 + central_name_len + central_extra_len + central_comment_len
+            || local_header.end() != payload.start()
+            || ranges.compressed_payload.len != zip.declared_comp_size
+            || !local_cover.contains(local_header)
+            || !central_cover.contains(central_header)
+        {
+            return Err(
+                fail("ZIP64 member ranges disagree with encoded header lengths")
+                    .on(&member.decoded_name),
+            );
+        }
+        if le_u16(&local, 4) != zip64.local_version_needed
+            || le_u16(&central, 6) != zip64.central_version_needed
+        {
+            return Err(
+                fail("ZIP64 member version evidence disagrees with the source")
+                    .on(&member.decoded_name),
+            );
+        }
+        let central_legacy_mask = u8::from(le_u32(&central, 24) == u32::MAX)
+            | (u8::from(le_u32(&central, 20) == u32::MAX) << 1)
+            | (u8::from(le_u32(&central, 42) == u32::MAX) << 2);
+        let local_legacy_mask = u8::from(le_u32(&local, 22) == u32::MAX)
+            | (u8::from(le_u32(&local, 18) == u32::MAX) << 1);
+        if central_legacy_mask != zip64.central_legacy_sentinel_mask
+            || local_legacy_mask != zip64.local_legacy_sentinel_mask
+        {
+            return Err(
+                fail("ZIP64 legacy sentinel evidence disagrees with the source")
+                    .on(&member.decoded_name),
+            );
+        }
+        audit_zip64_common_member(snapshot, member, &local, &central, pair.is_some())?;
+        audit_zip64_extras(snapshot, member, &local, &central)?;
+        audit_zip64_descriptor(snapshot, member)?;
+
+        let local_end = descriptor.map_or_else(|| payload.end(), CheckedInterval::end);
+        if descriptor.is_some_and(|value| payload.end() != value.start()) {
+            return Err(fail("ZIP64 payload does not abut its descriptor").on(&member.decoded_name));
+        }
+        local_ranges.push(
+            CheckedInterval::from_bounds(local_header.start(), local_end)
+                .map_err(|_| fail("ZIP64 local record range underflows"))?,
+        );
+        central_ranges.push(central_header);
+    }
+
+    if let Some(version_needed) = zip64_end_version_needed {
+        let maximum_member_version = ir
+            .members
+            .iter()
+            .filter_map(|member| member.zip64_evidence())
+            .map(|evidence| evidence.central_version_needed)
+            .max()
+            .unwrap_or(0);
+        if version_needed != 45
+            && (maximum_member_version == 0 || version_needed != maximum_member_version)
+        {
+            return Err(fail(
+                "ZIP64 EOCD extraction version is neither 4.5 nor the maximum member version",
+            ));
+        }
+    }
+
+    local_ranges.sort_unstable_by_key(|interval| interval.start());
+    central_ranges.sort_unstable_by_key(|interval| interval.start());
+    validate_ordered_partition(
+        local_cover,
+        &local_ranges,
+        "first ZIP64 local record does not start the covering",
+        "last ZIP64 local record does not end the covering",
+        "ZIP64 local records do not partition the covering",
+    )
+    .map_err(CoveringAuditError::into_finding)?;
+    validate_ordered_partition(
+        central_cover,
+        &central_ranges,
+        "first ZIP64 central header does not start the covering",
+        "last ZIP64 central header does not end the covering",
+        "ZIP64 central headers do not partition the covering",
+    )
+    .map_err(CoveringAuditError::into_finding)?;
+    Ok(())
+}
+
+fn audit_zip64_common_member(
+    snapshot: &SourceSnapshot<'_>,
+    member: &crate::ir::IrMember,
+    local: &[u8; 30],
+    central: &[u8; 46],
+    has_global_end_pair: bool,
+) -> Result<(), Finding> {
+    let fail = |detail: &'static str| {
+        Finding::error(FindingCode::CoveringInconsistent, detail).on(&member.decoded_name)
+    };
+    let zip64 = member
+        .zip64_evidence()
+        .ok_or_else(|| fail("ZIP64 member lacks ZIP64 evidence"))?;
+    let zip = &zip64.zip;
+    let local_flags = le_u16(local, 6);
+    let central_flags = le_u16(central, 8);
+    let local_method = le_u16(local, 8);
+    let central_method = le_u16(central, 10);
+    if local_flags != zip.flags
+        || central_flags != zip.flags
+        || local_method != zip.method
+        || central_method != zip.method
+        || !matches!(zip.flags, 0 | 0x0008)
+        || !matches!(zip.method, 0 | 8)
+    {
+        return Err(fail(
+            "ZIP64 common method or flag evidence disagrees with the source",
+        ));
+    }
+    if le_u32(central, 16) != zip.declared_crc
+        || le_u16(central, 34) != 0
+        || (le_u16(central, 4) >> 8) as u8 != zip.creator_system
+        || le_u32(central, 38) != zip.external_attributes
+    {
+        return Err(fail(
+            "ZIP64 common central-directory evidence disagrees with the source",
+        ));
+    }
+
+    let local_name_offset = zip
+        .source_ranges
+        .local_header
+        .offset
+        .checked_add(30)
+        .ok_or_else(|| fail("ZIP64 local name offset overflows"))?;
+    let central_name_offset = zip
+        .source_ranges
+        .central_header
+        .offset
+        .checked_add(46)
+        .ok_or_else(|| fail("ZIP64 central name offset overflows"))?;
+    let local_name = snapshot
+        .read_vec(local_name_offset, u64::from(le_u16(local, 26)))
+        .map_err(|_| fail("ZIP64 local name is outside the snapshot"))?;
+    let central_name = snapshot
+        .read_vec(central_name_offset, u64::from(le_u16(central, 28)))
+        .map_err(|_| fail("ZIP64 central name is outside the snapshot"))?;
+    if local_name != member.raw_name_bytes
+        || central_name != member.raw_name_bytes
+        || !member.raw_name_bytes.is_ascii()
+        || member.decoded_name.as_bytes() != member.raw_name_bytes
+    {
+        return Err(fail("ZIP64 member name evidence disagrees with the source"));
+    }
+    let source_is_directory = member.raw_name_bytes.ends_with(b"/");
+    if source_is_directory != matches!(member.kind, MemberKind::Directory) {
+        return Err(fail("ZIP64 member kind disagrees with its source name"));
+    }
+    let dos_directory = zip.external_attributes & 0x10 != 0;
+    let unix_kind = (zip.external_attributes >> 16) & 0xf000;
+    let attribute_is_directory = dos_directory || unix_kind == 0x4000;
+    let attribute_is_regular = unix_kind == 0x8000;
+    let attribute_is_special = unix_kind != 0 && unix_kind != 0x4000 && unix_kind != 0x8000;
+    if attribute_is_special
+        || (attribute_is_directory && attribute_is_regular)
+        || (attribute_is_directory != source_is_directory
+            && (attribute_is_directory || attribute_is_regular))
+        || (source_is_directory
+            && (zip.declared_comp_size != 0
+                || member.declared_uncomp_size != 0
+                || zip.method != 0
+                || zip.declared_crc != 0))
+    {
+        return Err(fail(
+            "ZIP64 directory metadata disagrees with the admitted member kind",
+        ));
+    }
+
+    let local_crc = le_u32(local, 14);
+    let local_comp = le_u32(local, 18);
+    let local_uncomp = le_u32(local, 22);
+    let uses_descriptor = zip.flags & 0x0008 != 0;
+    if (!uses_descriptor && local_crc != zip.declared_crc)
+        || (uses_descriptor && local_crc != 0 && local_crc != zip.declared_crc)
+    {
+        return Err(fail("ZIP64 local CRC evidence disagrees with the source"));
+    }
+    match zip64.local_value_shape {
+        Zip64LocalValueShape::Absent => {
+            let sizes_match = if uses_descriptor {
+                (local_comp == 0 || u64::from(local_comp) == zip.declared_comp_size)
+                    && (local_uncomp == 0 || u64::from(local_uncomp) == member.declared_uncomp_size)
+            } else {
+                u64::from(local_comp) == zip.declared_comp_size
+                    && u64::from(local_uncomp) == member.declared_uncomp_size
+            };
+            if zip64.local_zip64_extra.is_some() || !sizes_match {
+                return Err(fail(
+                    "ZIP64 absent local values disagree with legacy size fields",
+                ));
+            }
+        }
+        Zip64LocalValueShape::Exact => {
+            let forced = local_uncomp == u32::MAX && local_comp == u32::MAX;
+            let canonical = canonical_member_u32(local_uncomp, member.declared_uncomp_size)
+                && canonical_member_u32(local_comp, zip.declared_comp_size);
+            if zip64.local_zip64_extra.is_none() || (!forced && !canonical) {
+                return Err(fail(
+                    "ZIP64 exact local values disagree with legacy size fields",
+                ));
+            }
+        }
+        Zip64LocalValueShape::StreamingZeros => {
+            if !uses_descriptor
+                || zip64.local_zip64_extra.is_none()
+                || local_uncomp != u32::MAX
+                || local_comp != u32::MAX
+            {
+                return Err(fail(
+                    "ZIP64 zero streaming values disagree with legacy placeholders",
+                ));
+            }
+        }
+        Zip64LocalValueShape::StreamingMaxima => {
+            if !uses_descriptor
+                || zip64.local_zip64_extra.is_none()
+                || local_uncomp != 0
+                || local_comp != 0
+            {
+                return Err(fail(
+                    "ZIP64 maximum streaming values disagree with legacy placeholders",
+                ));
+            }
+        }
+    }
+
+    if zip64.local_zip64_extra.is_some() && zip64.local_version_needed < 45 {
+        return Err(fail("ZIP64 local extra requires extraction version 4.5"));
+    }
+    let central_legacy_comp = le_u32(central, 20);
+    let central_legacy_uncomp = le_u32(central, 24);
+    let central_legacy_offset = le_u32(central, 42);
+    let standard_offset_only = zip64.central_presence_mask == 0b100
+        && u64::from(central_legacy_uncomp) == member.declared_uncomp_size
+        && u64::from(central_legacy_comp) == zip.declared_comp_size
+        && matches!(
+            (zip.method, zip64.central_version_needed),
+            (0, 10) | (8, 20)
+        );
+    let go_offset_only = zip64.central_presence_mask == 0b111
+        && central_legacy_uncomp == u32::MAX
+        && central_legacy_comp == u32::MAX
+        && zip64.central_version_needed == 20
+        && matches!(zip.method, 0 | 8);
+    let offset_only = has_global_end_pair
+        && (standard_offset_only || go_offset_only)
+        && central_legacy_offset == u32::MAX
+        && member.declared_uncomp_size < u64::from(u32::MAX)
+        && zip.declared_comp_size < u64::from(u32::MAX)
+        && zip.source_ranges.local_header.offset >= u64::from(u32::MAX);
+    if zip64.central_zip64_extra.is_some() && zip64.central_version_needed < 45 && !offset_only {
+        return Err(fail(
+            "ZIP64 central evidence has no admitted low-version offset-only shape",
+        ));
+    }
+    let expected_descriptor_width = uses_descriptor.then_some(
+        if zip64.local_zip64_extra.is_some()
+            || zip.declared_comp_size >= u64::from(u32::MAX)
+            || member.declared_uncomp_size >= u64::from(u32::MAX)
+        {
+            Zip64DataDescriptorWidth::Zip64
+        } else {
+            Zip64DataDescriptorWidth::Zip32
+        },
+    );
+    if zip64.descriptor_width != expected_descriptor_width {
+        return Err(fail(
+            "ZIP64 descriptor-width evidence is not canonical for the member",
+        ));
+    }
+    Ok(())
+}
+
+fn canonical_member_u32(legacy: u32, resolved: u64) -> bool {
+    if resolved < u64::from(u32::MAX) {
+        u64::from(legacy) == resolved
+    } else {
+        legacy == u32::MAX
+    }
 }
 
 /// Independently check a portable-ustar IR's source partition and recorded
@@ -142,6 +612,273 @@ pub(crate) fn audit_tar_covering(
         "claimed TAR trailing record padding contains nonzero bytes",
     )?;
     Ok(())
+}
+
+fn audit_zip64_extras(
+    snapshot: &SourceSnapshot<'_>,
+    member: &crate::ir::IrMember,
+    local: &[u8; 30],
+    central: &[u8; 46],
+) -> Result<(), Finding> {
+    let fail = |detail: &'static str| {
+        Finding::error(FindingCode::CoveringInconsistent, detail).on(&member.decoded_name)
+    };
+    let zip64 = member
+        .zip64_evidence()
+        .ok_or_else(|| fail("ZIP64 member lacks ZIP64 evidence"))?;
+    let zip = &zip64.zip;
+    for field in &zip.extra_fields {
+        let header_end = checked_range_end(
+            field.header_range,
+            "ZIP64 extra-field header range overflows",
+        )
+        .map_err(|_| fail("ZIP64 extra-field header range overflows"))?;
+        if field.id != 0x0001
+            || field.disposition != ExtraDisposition::Semantic
+            || field.header_range.len != 4
+            || header_end != field.data_range.offset
+        {
+            return Err(fail(
+                "ZIP64 extra-field evidence is not the closed semantic language",
+            ));
+        }
+    }
+    for (site, expected) in [
+        (ExtraSite::Local, zip64.local_zip64_extra),
+        (ExtraSite::Central, zip64.central_zip64_extra),
+    ] {
+        let mut matching = zip.extra_fields.iter().filter(|field| field.site == site);
+        let actual = matching.next().map(|field| field.data_range);
+        if matching.next().is_some() || actual != expected {
+            return Err(fail("ZIP64 site-specific extra evidence is inconsistent"));
+        }
+        if let Some(data_range) = expected {
+            let header_offset = data_range
+                .offset
+                .checked_sub(4)
+                .ok_or_else(|| fail("ZIP64 extra header offset underflows"))?;
+            let mut header = [0_u8; 4];
+            snapshot
+                .read_exact_at(header_offset, &mut header)
+                .map_err(|_| fail("ZIP64 extra header is outside the snapshot"))?;
+            if le_u16(&header, 0) != 0x0001 || u64::from(le_u16(&header, 2)) != data_range.len {
+                return Err(fail("ZIP64 extra header disagrees with its evidence"));
+            }
+        }
+    }
+
+    let local_extra_start = zip
+        .source_ranges
+        .local_header
+        .offset
+        .checked_add(30 + u64::from(le_u16(local, 26)))
+        .ok_or_else(|| fail("ZIP64 local extra offset overflows"))?;
+    let local_extra_end = local_extra_start
+        .checked_add(u64::from(le_u16(local, 28)))
+        .ok_or_else(|| fail("ZIP64 local extra range overflows"))?;
+    let central_extra_start = zip
+        .source_ranges
+        .central_header
+        .offset
+        .checked_add(46 + u64::from(le_u16(central, 28)))
+        .ok_or_else(|| fail("ZIP64 central extra offset overflows"))?;
+    let central_extra_end = central_extra_start
+        .checked_add(u64::from(le_u16(central, 30)))
+        .ok_or_else(|| fail("ZIP64 central extra range overflows"))?;
+    for (range, start, end) in [
+        (zip64.local_zip64_extra, local_extra_start, local_extra_end),
+        (
+            zip64.central_zip64_extra,
+            central_extra_start,
+            central_extra_end,
+        ),
+    ] {
+        if let Some(range) = range {
+            let header_start = range
+                .offset
+                .checked_sub(4)
+                .ok_or_else(|| fail("ZIP64 extra range underflows"))?;
+            let range_end = checked_range_end(range, "ZIP64 extra data range overflows")
+                .map_err(|_| fail("ZIP64 extra data range overflows"))?;
+            if header_start != start || range_end != end {
+                return Err(fail(
+                    "ZIP64 extra does not exactly fill its header extra area",
+                ));
+            }
+        } else if start != end {
+            return Err(fail("unrepresented ZIP64 header extra bytes remain"));
+        }
+    }
+
+    match zip64.local_zip64_extra {
+        None => {
+            if zip64.local_value_shape != Zip64LocalValueShape::Absent {
+                return Err(fail(
+                    "absent local ZIP64 extra has a non-absent value shape",
+                ));
+            }
+        }
+        Some(range) => {
+            if range.len != 16 || zip64.local_value_shape == Zip64LocalValueShape::Absent {
+                return Err(fail("local ZIP64 extra has an invalid semantic shape"));
+            }
+            let data = snapshot
+                .read_vec(range.offset, range.len)
+                .map_err(|_| fail("local ZIP64 extra is outside the snapshot"))?;
+            let values = [le_u64(&data, 0), le_u64(&data, 8)];
+            let expected = [member.declared_uncomp_size, zip.declared_comp_size];
+            let valid = match zip64.local_value_shape {
+                Zip64LocalValueShape::Absent => false,
+                Zip64LocalValueShape::Exact => values == expected,
+                Zip64LocalValueShape::StreamingZeros => values == [0, 0],
+                Zip64LocalValueShape::StreamingMaxima => values == [u64::MAX, u64::MAX],
+            };
+            if !valid {
+                return Err(fail("local ZIP64 value shape disagrees with the source"));
+            }
+        }
+    }
+
+    match zip64.central_zip64_extra {
+        None => {
+            if zip64.central_presence_mask != 0 || zip64.central_legacy_sentinel_mask != 0 {
+                return Err(fail("absent central ZIP64 extra has semantic fields"));
+            }
+            if u64::from(le_u32(central, 24)) != member.declared_uncomp_size
+                || u64::from(le_u32(central, 20)) != zip.declared_comp_size
+                || u64::from(le_u32(central, 42)) != zip.source_ranges.local_header.offset
+            {
+                return Err(fail(
+                    "central legacy values disagree with resolved ZIP64 evidence",
+                ));
+            }
+        }
+        Some(range) => {
+            let mask = zip64.central_presence_mask;
+            if mask == 0 || mask > 0b111 || range.len != u64::from(mask.count_ones()) * 8 {
+                return Err(fail(
+                    "central ZIP64 presence mask disagrees with its data length",
+                ));
+            }
+            if mask & zip64.central_legacy_sentinel_mask != zip64.central_legacy_sentinel_mask {
+                return Err(fail("central ZIP64 presence mask omits a legacy sentinel"));
+            }
+            let data = snapshot
+                .read_vec(range.offset, range.len)
+                .map_err(|_| fail("central ZIP64 extra is outside the snapshot"))?;
+            let legacy = [
+                le_u32(central, 24),
+                le_u32(central, 20),
+                le_u32(central, 42),
+            ];
+            let resolved = [
+                member.declared_uncomp_size,
+                zip.declared_comp_size,
+                zip.source_ranges.local_header.offset,
+            ];
+            let required_mask = legacy
+                .iter()
+                .enumerate()
+                .fold(0_u8, |required, (index, value)| {
+                    required | (u8::from(*value == u32::MAX) << index)
+                });
+            let mut matching_masks = 0_u8;
+            let mut unique_mask = 0_u8;
+            for candidate in 1_u8..8 {
+                if candidate.count_ones() != mask.count_ones()
+                    || candidate & required_mask != required_mask
+                {
+                    continue;
+                }
+                let mut candidate_values = legacy.map(u64::from);
+                let mut cursor = 0_usize;
+                let mut valid = true;
+                for index in 0..3 {
+                    if candidate & (1 << index) == 0 {
+                        continue;
+                    }
+                    let value = le_u64(&data, cursor);
+                    cursor += 8;
+                    if legacy[index] == u32::MAX {
+                        candidate_values[index] = value;
+                    } else if value != u64::from(legacy[index]) {
+                        valid = false;
+                        break;
+                    }
+                }
+                if valid && candidate_values == resolved {
+                    matching_masks = matching_masks.saturating_add(1);
+                    unique_mask = candidate;
+                }
+            }
+            if matching_masks != 1 || unique_mask != mask {
+                return Err(fail(
+                    "central ZIP64 values do not have one evidence-selected interpretation",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn audit_zip64_descriptor(
+    snapshot: &SourceSnapshot<'_>,
+    member: &crate::ir::IrMember,
+) -> Result<(), Finding> {
+    let fail = |detail: &'static str| {
+        Finding::error(FindingCode::CoveringInconsistent, detail).on(&member.decoded_name)
+    };
+    let zip64 = member
+        .zip64_evidence()
+        .ok_or_else(|| fail("ZIP64 member lacks ZIP64 evidence"))?;
+    let zip = &zip64.zip;
+    match (zip64.descriptor_width, zip.source_ranges.data_descriptor) {
+        (None, None) if zip.flags & 0x0008 == 0 => Ok(()),
+        (Some(width), Some(range)) if zip.flags & 0x0008 != 0 => {
+            let expected_len = match width {
+                Zip64DataDescriptorWidth::Zip32 => 16,
+                Zip64DataDescriptorWidth::Zip64 => 24,
+            };
+            if range.len != expected_len {
+                return Err(fail("ZIP64 descriptor range has the wrong width"));
+            }
+            let data = snapshot
+                .read_vec(range.offset, range.len)
+                .map_err(|_| fail("ZIP64 descriptor is outside the snapshot"))?;
+            if data[0..4] != DATA_DESCRIPTOR_SIG || le_u32(&data, 4) != zip.declared_crc {
+                return Err(fail(
+                    "ZIP64 descriptor signature or CRC disagrees with evidence",
+                ));
+            }
+            let (compressed, uncompressed) = match width {
+                Zip64DataDescriptorWidth::Zip32 => {
+                    (u64::from(le_u32(&data, 8)), u64::from(le_u32(&data, 12)))
+                }
+                Zip64DataDescriptorWidth::Zip64 => (le_u64(&data, 8), le_u64(&data, 16)),
+            };
+            if compressed != zip.declared_comp_size || uncompressed != member.declared_uncomp_size {
+                return Err(fail("ZIP64 descriptor sizes disagree with evidence"));
+            }
+            Ok(())
+        }
+        _ => Err(fail("ZIP64 descriptor evidence disagrees with flag bit 3")),
+    }
+}
+
+fn canonical_end_u16(legacy: u16, resolved: u64) -> bool {
+    if resolved < u64::from(u16::MAX) {
+        u64::from(legacy) == resolved || legacy == u16::MAX
+    } else {
+        legacy == u16::MAX
+    }
+}
+
+fn canonical_end_u32(legacy: u32, resolved: u64) -> bool {
+    if resolved < u64::from(u32::MAX) {
+        u64::from(legacy) == resolved || legacy == u32::MAX
+    } else {
+        legacy == u32::MAX
+    }
 }
 
 fn audit_zero_range(
@@ -461,6 +1198,19 @@ fn le_u32(bytes: &[u8], offset: usize) -> u32 {
     ])
 }
 
+fn le_u64(bytes: &[u8], offset: usize) -> u64 {
+    u64::from_le_bytes([
+        bytes[offset],
+        bytes[offset + 1],
+        bytes[offset + 2],
+        bytes[offset + 3],
+        bytes[offset + 4],
+        bytes[offset + 5],
+        bytes[offset + 6],
+        bytes[offset + 7],
+    ])
+}
+
 fn inconsistent(detail: &'static str) -> CoveringAuditError<'static> {
     CoveringAuditError::Inconsistent {
         detail,
@@ -475,7 +1225,7 @@ mod tests {
     use crate::findings::Finding;
     use crate::ir::{
         ArchiveEvidence, ArchiveIR, MemberEvidence, TarInterpretationProfile, TarMemberEvidence,
-        ZipMemberEvidence,
+        Zip64MemberEvidence, ZipInterpretationProfile, ZipMemberEvidence,
     };
     use crate::policy::Policy;
     use std::io::{Cursor, Write};
@@ -525,6 +1275,25 @@ mod tests {
         bytes
     }
 
+    fn make_zip64() -> Vec<u8> {
+        let hex = concat!(
+            "504b03042d0000000800000021000b5704bbffffffffffffffff01001400",
+            "6101001000100000000000000005000000000000007374440500504b0102",
+            "2d002d0000000800000021000b5704bb0500000010000000010000000000",
+            "00000000000080010000000061504b050600000000010001002f00000038",
+            "0000000000",
+        );
+        let (pairs, remainder) = hex.as_bytes().as_chunks::<2>();
+        assert!(remainder.is_empty());
+        pairs
+            .iter()
+            .map(|pair| {
+                u8::from_str_radix(std::str::from_utf8(pair).expect("hex is ASCII"), 16)
+                    .expect("fixture hex is valid")
+            })
+            .collect()
+    }
+
     fn admitted_tar_ir(bytes: &[u8]) -> ArchiveIR {
         let policy = Policy::default_v2();
         let options = ApplyOptions::new()
@@ -547,29 +1316,163 @@ mod tests {
     fn tar_covering_mut(ir: &mut ArchiveIR) -> &mut crate::ir::TarArchiveCovering {
         match &mut ir.evidence {
             ArchiveEvidence::Tar(covering) => covering,
-            ArchiveEvidence::Zip(_) => panic!("expected TAR evidence"),
+            ArchiveEvidence::Zip(_) | ArchiveEvidence::Zip64(_) => {
+                panic!("expected TAR evidence")
+            }
         }
     }
 
     fn zip_covering_mut(ir: &mut ArchiveIR) -> &mut crate::ir::ArchiveCovering {
         match &mut ir.evidence {
             ArchiveEvidence::Zip(covering) => covering,
-            ArchiveEvidence::Tar(_) => panic!("expected ZIP evidence"),
+            ArchiveEvidence::Zip64(_) | ArchiveEvidence::Tar(_) => panic!("expected ZIP evidence"),
+        }
+    }
+
+    fn zip64_covering_mut(ir: &mut ArchiveIR) -> &mut crate::ir::Zip64ArchiveCovering {
+        match &mut ir.evidence {
+            ArchiveEvidence::Zip64(covering) => covering,
+            ArchiveEvidence::Zip(_) | ArchiveEvidence::Tar(_) => {
+                panic!("expected ZIP64 evidence")
+            }
         }
     }
 
     fn tar_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut TarMemberEvidence {
         match &mut ir.members[index].evidence {
             MemberEvidence::Tar(evidence) => evidence,
-            MemberEvidence::Zip(_) => panic!("expected TAR member evidence"),
+            MemberEvidence::Zip(_) | MemberEvidence::Zip64(_) => {
+                panic!("expected TAR member evidence")
+            }
         }
     }
 
     fn zip_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut ZipMemberEvidence {
         match &mut ir.members[index].evidence {
             MemberEvidence::Zip(evidence) => evidence,
-            MemberEvidence::Tar(_) => panic!("expected ZIP member evidence"),
+            MemberEvidence::Zip64(_) | MemberEvidence::Tar(_) => {
+                panic!("expected ZIP member evidence")
+            }
         }
+    }
+
+    fn zip64_member_mut(ir: &mut ArchiveIR, index: usize) -> &mut Zip64MemberEvidence {
+        match &mut ir.members[index].evidence {
+            MemberEvidence::Zip64(evidence) => evidence,
+            MemberEvidence::Zip(_) | MemberEvidence::Tar(_) => {
+                panic!("expected ZIP64 member evidence")
+            }
+        }
+    }
+
+    fn admitted_zip64_ir(bytes: &[u8]) -> ArchiveIR {
+        let policy = Policy::default_v3();
+        let options = ApplyOptions::new()
+            .with_interpretation_profile(ZipInterpretationProfile::Zip64StrictAsciiV1);
+        let outcome = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("cover-zip64.zip"),
+                    data: bytes,
+                },
+                policy: &policy,
+                dest: None,
+            },
+            &options,
+        );
+        assert!(!outcome.rejected(), "{:?}", outcome.view.findings);
+        outcome.archive_ir().cloned().expect("admitted ZIP64 IR")
+    }
+
+    #[test]
+    fn zip64_covering_oracle_rejects_native_evidence_drift() {
+        let bytes = make_zip64();
+        let original = admitted_zip64_ir(&bytes);
+        let snapshot = crate::snapshot::SourceSnapshot::borrowed(None, &bytes);
+        audit_zip64_covering(&snapshot, &original).expect("source-derived ZIP64 evidence audits");
+
+        macro_rules! rejects {
+            ($ir:ident, $edit:block) => {{
+                let mut $ir = original.clone();
+                $edit
+                let snapshot = crate::snapshot::SourceSnapshot::borrowed(None, &bytes);
+                assert_eq!(
+                    audit_zip64_covering(&snapshot, &$ir).unwrap_err().code,
+                    FindingCode::CoveringInconsistent
+                );
+            }};
+        }
+
+        rejects!(ir, {
+            zip64_covering_mut(&mut ir).eocd.len = 23;
+        });
+        rejects!(ir, {
+            zip64_covering_mut(&mut ir).zip64_eocd = Some(ByteRange { offset: 0, len: 56 });
+        });
+        rejects!(ir, {
+            zip64_covering_mut(&mut ir).central_directory.len += 1;
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0).zip.method ^= 8;
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0).zip.flags = 0x0008;
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0).zip.declared_crc ^= 1;
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0).zip.creator_system ^= 1;
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0).zip.external_attributes ^= 1;
+        });
+        rejects!(ir, {
+            ir.members[0].raw_name_bytes[0] = b'b';
+        });
+        rejects!(ir, {
+            ir.members[0].kind = MemberKind::Directory;
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0).local_version_needed = 20;
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0).central_version_needed = 20;
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0).central_presence_mask = 1;
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0).central_legacy_sentinel_mask = 1;
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0).local_legacy_sentinel_mask = 0;
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0).local_value_shape = Zip64LocalValueShape::StreamingZeros;
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0).local_zip64_extra = None;
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0).central_zip64_extra =
+                zip64_member_mut(&mut ir, 0).local_zip64_extra;
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0).descriptor_width = Some(Zip64DataDescriptorWidth::Zip32);
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0)
+                .zip
+                .source_ranges
+                .local_header
+                .len = u64::MAX;
+        });
+        rejects!(ir, {
+            zip64_member_mut(&mut ir, 0).zip.extra_fields[0]
+                .header_range
+                .len = u64::MAX;
+        });
     }
 
     #[test]

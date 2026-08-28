@@ -18,8 +18,10 @@ use crate::policy::hex_sha256;
 
 pub const TREE_ENCODING_ID: &str = "sealrTreeV1";
 pub const TREE_ENCODING_V2_ID: &str = "sealrTreeV2";
+pub const TREE_ENCODING_V3_ID: &str = "sealrTreeV3";
 const LAYOUT_LABEL: &str = "sealr.tree.layout.v1";
 const TAR_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-ustar.v1";
+const ZIP64_LAYOUT_LABEL: &str = "sealr.tree.layout.zip64.v1";
 const CONTENT_LABEL: &str = "sealr.tree.content.v1";
 const FILE: u8 = 1;
 const DIRECTORY: u8 = 2;
@@ -36,6 +38,7 @@ const NORM_DROP_DOT: u8 = 2;
 pub enum TreeRoot {
     SealrTreeV1 { hex: String },
     SealrTreeV2 { hex: String },
+    SealrTreeV3 { hex: String },
     Unavailable,
 }
 
@@ -56,10 +59,17 @@ impl TreeRoot {
         }
     }
 
+    pub fn from_v3_bytes(bytes: &[u8]) -> Self {
+        Self::SealrTreeV3 {
+            hex: hex_sha256(bytes),
+        }
+    }
+
     pub fn hex(&self) -> Option<&str> {
         match self {
             Self::SealrTreeV1 { hex } => Some(hex),
             Self::SealrTreeV2 { hex } => Some(hex),
+            Self::SealrTreeV3 { hex } => Some(hex),
             Self::Unavailable => None,
         }
     }
@@ -76,6 +86,11 @@ impl Serialize for TreeRoot {
             Self::SealrTreeV2 { hex } => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 map.serialize_entry(TREE_ENCODING_V2_ID, hex)?;
+                map.end()
+            }
+            Self::SealrTreeV3 { hex } => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry(TREE_ENCODING_V3_ID, hex)?;
                 map.end()
             }
             Self::Unavailable => {
@@ -260,9 +275,58 @@ pub fn encode_tar_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
     Some(preimage(TAR_LAYOUT_LABEL, &body))
 }
 
+pub fn encode_zip64_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
+    let covering = ir.zip64_covering()?;
+    let members = sorted_members(ir);
+    let mut body = Vec::new();
+    encode_range(&mut body, covering.local_records);
+    encode_range(&mut body, covering.central_directory);
+    encode_optional_range(&mut body, covering.zip64_eocd);
+    encode_optional_range(&mut body, covering.zip64_locator);
+    encode_range(&mut body, covering.eocd);
+    encode_range(&mut body, covering.comment);
+    push_u32(
+        &mut body,
+        u32::try_from(members.len()).expect("planned member count is bounded by policy"),
+    );
+    for member in members {
+        encode_layout_member(&mut body, member);
+        let evidence = member.zip64_evidence()?;
+        push_u16(&mut body, evidence.local_version_needed);
+        push_u16(&mut body, evidence.central_version_needed);
+        body.push(evidence.central_presence_mask);
+        body.push(evidence.central_legacy_sentinel_mask);
+        body.push(evidence.local_legacy_sentinel_mask);
+        body.push(match evidence.local_value_shape {
+            crate::ir::Zip64LocalValueShape::Absent => 0,
+            crate::ir::Zip64LocalValueShape::Exact => 1,
+            crate::ir::Zip64LocalValueShape::StreamingZeros => 2,
+            crate::ir::Zip64LocalValueShape::StreamingMaxima => 3,
+        });
+        encode_optional_range(&mut body, evidence.local_zip64_extra);
+        encode_optional_range(&mut body, evidence.central_zip64_extra);
+        body.push(match evidence.descriptor_width {
+            None => 0,
+            Some(crate::ir::Zip64DataDescriptorWidth::Zip32) => 1,
+            Some(crate::ir::Zip64DataDescriptorWidth::Zip64) => 2,
+        });
+    }
+    Some(preimage(ZIP64_LAYOUT_LABEL, &body))
+}
+
 fn encode_range(out: &mut Vec<u8>, range: crate::ir::ByteRange) {
     push_u64(out, range.offset);
     push_u64(out, range.len);
+}
+
+fn encode_optional_range(out: &mut Vec<u8>, range: Option<crate::ir::ByteRange>) {
+    match range {
+        Some(range) => {
+            out.push(1);
+            encode_range(out, range);
+        }
+        None => out.push(0),
+    }
 }
 
 fn encode_layout_member(out: &mut Vec<u8>, member: &IrMember) {
@@ -378,6 +442,9 @@ fn parse_hex32(hex: &str) -> Option<[u8; 32]> {
 pub fn layout_root(ir: &ArchiveIR) -> TreeRoot {
     match ir.format() {
         ArchiveFormat::Zip32 => TreeRoot::from_bytes(&encode_layout(ir)),
+        ArchiveFormat::Zip64 => encode_zip64_layout(ir)
+            .map(|bytes| TreeRoot::from_v3_bytes(&bytes))
+            .unwrap_or_else(TreeRoot::unavailable),
         ArchiveFormat::TarUstar => encode_tar_layout(ir)
             .map(|bytes| TreeRoot::from_v2_bytes(&bytes))
             .unwrap_or_else(TreeRoot::unavailable),
