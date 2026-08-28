@@ -6,10 +6,12 @@ use sealr::{
     apply_supervised, apply_with_options, AdmissionStatus, ApplyOptions, ArchiveFormat,
     LinuxWorker, MemberReadErrorKind, Policy, Request, RetentionPlan, RetentionStatus, Source,
     TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
-    TarPaxInterpretationProfile, TarZstdInterpretationProfile, TreeRoot, VerificationStatus,
+    TarPaxInterpretationProfile, TarXzInterpretationProfile, TarZstdInterpretationProfile,
+    TreeRoot, VerificationStatus,
     VerifiedArchive, ZipInterpretationProfile, TAR_GNU_LONGNAME_PORTABLE_V1,
     TAR_GZIP_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_PAX_PORTABLE_V1, TAR_PAX_PORTABLE_V1,
-    TAR_USTAR_PORTABLE_V1, TAR_ZSTD_USTAR_PORTABLE_V1, ZIP_STRICT_ASCII_V2,
+    TAR_USTAR_PORTABLE_V1, TAR_XZ_USTAR_PORTABLE_V1, TAR_ZSTD_USTAR_PORTABLE_V1,
+    ZIP_STRICT_ASCII_V2,
 };
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
@@ -485,6 +487,65 @@ fn main() {
         zstd_archive.read_member("later.txt", 4).unwrap_err().kind(),
         MemberReadErrorKind::LimitExceeded
     );
+
+    let xz_policy = Policy::default_v9();
+    let xz_options = ApplyOptions::new()
+        .with_tar_xz_interpretation_profile(TarXzInterpretationProfile::UstarPortableV1)
+        .with_retention(
+            RetentionPlan::new(8, 8)
+                .with_path("retained.txt")
+                .expect("canonical xz-wrapped TAR retention path"),
+        );
+    let xz_tar = portable_tar();
+    let xz_outcome = {
+        let xz_bytes = xz_wrapped(&xz_tar);
+        apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("portable.tar.xz"),
+                    data: &xz_bytes,
+                },
+                policy: &xz_policy,
+                dest: None,
+            },
+            &xz_options,
+        )
+    };
+    assert!(
+        matches!(xz_outcome.admission, AdmissionStatus::Admitted),
+        "{:?}",
+        xz_outcome.view.findings
+    );
+    assert!(matches!(
+        xz_outcome.verification,
+        VerificationStatus::Complete
+    ));
+    let xz_ir = xz_outcome.archive_ir().expect("xz-wrapped ustar IR");
+    assert_eq!(xz_ir.format(), ArchiveFormat::TarXzUstar);
+    assert_eq!(xz_ir.profile(), TAR_XZ_USTAR_PORTABLE_V1);
+    let xz_wrapper = xz_ir.xz_evidence().expect("xz-wrapped ustar wrapper evidence");
+    assert_eq!(xz_wrapper.derived_output_len, xz_tar.len() as u64);
+    assert_eq!(xz_wrapper.blocks.len(), 1);
+    assert!(matches!(
+        xz_outcome.receipt.identities.layout,
+        TreeRoot::SealrTreeV10 { .. }
+    ));
+    let xz_archive = xz_outcome
+        .into_verified_archive()
+        .expect("xz-wrapped portable ustar must expose verified authority");
+    assert_eq!(
+        xz_archive.retention_status("retained.txt"),
+        RetentionStatus::Retained
+    );
+    assert_eq!(
+        xz_archive.retained_member("retained.txt"),
+        Some(b"retained".as_slice())
+    );
+    assert_eq!(xz_archive.read_member("later.txt", 5).unwrap(), b"later");
+    assert_eq!(
+        xz_archive.read_member("later.txt", 4).unwrap_err().kind(),
+        MemberReadErrorKind::LimitExceeded
+    );
 }
 
 fn portable_tar() -> Vec<u8> {
@@ -557,6 +618,82 @@ fn zstd_wrapped(tar: &[u8]) -> Vec<u8> {
     bytes.extend_from_slice(&block_header.to_le_bytes()[..3]);
     bytes.extend_from_slice(tar);
     bytes
+}
+
+// A handcrafted single-stream XZ container carrying its derived TAR as
+// uncompressed LZMA2 chunks with a CRC32 check, so the exact wrapper bytes
+// remain reviewable without a compression dependency.
+fn xz_wrapped(tar: &[u8]) -> Vec<u8> {
+    fn push_varint(out: &mut Vec<u8>, mut value: u64) {
+        loop {
+            let byte = (value & 0x7F) as u8;
+            value >>= 7;
+            if value == 0 {
+                out.push(byte);
+                break;
+            }
+            out.push(byte | 0x80);
+        }
+    }
+
+    let mut lzma2 = Vec::new();
+    let mut first = true;
+    for chunk in tar.chunks(0xFFFF) {
+        lzma2.push(if first { 0x01 } else { 0x02 });
+        first = false;
+        let size = (chunk.len() - 1) as u16;
+        lzma2.extend_from_slice(&size.to_be_bytes());
+        lzma2.extend_from_slice(chunk);
+    }
+    lzma2.push(0x00);
+
+    let check_value = crc32(tar).to_le_bytes();
+
+    let mut header = vec![0_u8; 2];
+    push_varint(&mut header, 0x21);
+    push_varint(&mut header, 1);
+    header.push(22);
+    while (header.len() + 4) % 4 != 0 {
+        header.push(0);
+    }
+    header[0] = ((header.len() + 4) / 4 - 1) as u8;
+    let header_crc = crc32(&header);
+    header.extend_from_slice(&header_crc.to_le_bytes());
+
+    let mut stream = vec![0xFD, b'7', b'z', b'X', b'Z', 0x00];
+    stream.push(0);
+    stream.push(0x01);
+    stream.extend_from_slice(&crc32(&[0, 0x01]).to_le_bytes());
+
+    let block_start = stream.len();
+    stream.extend_from_slice(&header);
+    stream.extend_from_slice(&lzma2);
+    let unpadded = (stream.len() - block_start + check_value.len()) as u64;
+    while (stream.len() - block_start) % 4 != 0 {
+        stream.push(0);
+    }
+    stream.extend_from_slice(&check_value);
+
+    let index_start = stream.len();
+    stream.push(0);
+    push_varint(&mut stream, 1);
+    push_varint(&mut stream, unpadded);
+    push_varint(&mut stream, tar.len() as u64);
+    while (stream.len() - index_start) % 4 != 0 {
+        stream.push(0);
+    }
+    let index_crc = crc32(&stream[index_start..]);
+    stream.extend_from_slice(&index_crc.to_le_bytes());
+    let index_len = stream.len() - index_start;
+
+    let backward = (index_len as u32 / 4) - 1;
+    let mut footer_body = backward.to_le_bytes().to_vec();
+    footer_body.push(0);
+    footer_body.push(0x01);
+    stream.extend_from_slice(&crc32(&footer_body).to_le_bytes());
+    stream.extend_from_slice(&footer_body);
+    stream.extend_from_slice(b"YZ");
+    stream
 }
 
 fn crc32(bytes: &[u8]) -> u32 {

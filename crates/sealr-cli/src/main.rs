@@ -6,7 +6,8 @@ use clap::{Parser, ValueEnum};
 use sealr::{
     apply_supervised, apply_with_options, ApplyOptions, LinuxWorker, Policy, Request, Source,
     TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
-    TarPaxInterpretationProfile, TarZstdInterpretationProfile, ZipInterpretationProfile,
+    TarPaxInterpretationProfile, TarXzInterpretationProfile, TarZstdInterpretationProfile,
+    ZipInterpretationProfile,
 };
 use serde::Serialize;
 
@@ -44,6 +45,7 @@ enum CliFormat {
     #[value(name = "tar-gzip-gnu-longname")]
     TarGzipGnuLongName,
     TarZstdUstar,
+    TarXzUstar,
 }
 
 fn main() -> ExitCode {
@@ -93,6 +95,11 @@ fn main() -> ExitCode {
             ApplyOptions::new().with_tar_zstd_interpretation_profile(
                 TarZstdInterpretationProfile::UstarPortableV1,
             ),
+        ),
+        CliFormat::TarXzUstar => (
+            Policy::default_v9(),
+            ApplyOptions::new()
+                .with_tar_xz_interpretation_profile(TarXzInterpretationProfile::UstarPortableV1),
         ),
     };
     let request = Request {

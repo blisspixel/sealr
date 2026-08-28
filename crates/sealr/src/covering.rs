@@ -712,6 +712,187 @@ fn gzip_isize(len: u64) -> u32 {
     u32::try_from(len % (u64::from(u32::MAX) + 1)).expect("gzip ISIZE modulo always fits u32")
 }
 
+/// Independently replay the restricted XZ container grammar over the
+/// original snapshot without invoking a decompressor.
+pub(crate) fn audit_xz_wrapper_covering(
+    snapshot: &SourceSnapshot<'_>,
+    evidence: &crate::ir::XzWrapperEvidence,
+) -> Result<(), Finding> {
+    const HEADER_MAGIC: [u8; 6] = [0xFD, b'7', b'z', b'X', b'Z', 0x00];
+    const FOOTER_MAGIC: [u8; 2] = *b"YZ";
+    const MAX_DICT_BYTES: u32 = 8 * 1024 * 1024;
+    const MAX_BLOCKS: usize = 4096;
+    let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
+    let crc32 = |bytes: &[u8]| {
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(bytes);
+        hasher.finalize()
+    };
+
+    let expected_check_len = match evidence.check_id {
+        0x01 => 4_u64,
+        0x04 => 8,
+        0x0A => 32,
+        _ => return Err(fail("xz evidence carries a check id outside the profile")),
+    };
+    if evidence.blocks.is_empty() || evidence.blocks.len() > MAX_BLOCKS {
+        return Err(fail("xz evidence block count is outside the profile"));
+    }
+
+    if evidence.header != (crate::ir::ByteRange { offset: 0, len: 12 }) {
+        return Err(fail("xz stream-header range is not the fixed prefix"));
+    }
+    let mut header = [0_u8; 12];
+    snapshot
+        .read_exact_at(0, &mut header)
+        .map_err(|_| fail("xz stream header is outside the original snapshot"))?;
+    if header[..6] != HEADER_MAGIC
+        || header[6] != 0
+        || header[7] != evidence.check_id
+        || crc32(&header[6..8])
+            != u32::from_le_bytes([header[8], header[9], header[10], header[11]])
+    {
+        return Err(fail("xz stream header disagrees with the evidence"));
+    }
+
+    let footer_end = checked_range_end(evidence.footer, "xz footer overflow")?;
+    if evidence.footer.len != 12 || footer_end != snapshot.len() {
+        return Err(fail("xz footer range is not the terminal twelve bytes"));
+    }
+    let mut footer = [0_u8; 12];
+    snapshot
+        .read_exact_at(evidence.footer.offset, &mut footer)
+        .map_err(|_| fail("xz stream footer is outside the original snapshot"))?;
+    if footer[10..12] != FOOTER_MAGIC
+        || footer[8] != 0
+        || footer[9] != evidence.check_id
+        || crc32(&footer[4..10]) != u32::from_le_bytes([footer[0], footer[1], footer[2], footer[3]])
+    {
+        return Err(fail("xz stream footer disagrees with the evidence"));
+    }
+    let backward_stored = u32::from_le_bytes([footer[4], footer[5], footer[6], footer[7]]);
+    if (u64::from(backward_stored) + 1) * 4 != evidence.index.len {
+        return Err(fail(
+            "xz footer backward size disagrees with the recorded index",
+        ));
+    }
+    let index_end = checked_range_end(evidence.index, "xz index overflow")?;
+    if index_end != evidence.footer.offset {
+        return Err(fail("xz index range does not abut the footer"));
+    }
+    let index_bytes = snapshot
+        .read_vec(evidence.index.offset, evidence.index.len)
+        .map_err(|_| fail("xz index is outside the original snapshot"))?;
+    if index_bytes.first() != Some(&0) {
+        return Err(fail("xz index indicator is missing"));
+    }
+    let crc_offset = index_bytes.len() - 4;
+    if crc32(&index_bytes[..crc_offset])
+        != u32::from_le_bytes([
+            index_bytes[crc_offset],
+            index_bytes[crc_offset + 1],
+            index_bytes[crc_offset + 2],
+            index_bytes[crc_offset + 3],
+        ])
+    {
+        return Err(fail("xz index CRC32 disagrees with its bytes"));
+    }
+
+    let mut expected_offset = 12_u64;
+    let mut uncompressed_total = 0_u64;
+    for block in &evidence.blocks {
+        if block.header.offset != expected_offset
+            || block.header.len < 8
+            || block.header.len % 4 != 0
+        {
+            return Err(fail("xz block header geometry disagrees with the evidence"));
+        }
+        let header_bytes = snapshot
+            .read_vec(block.header.offset, block.header.len)
+            .map_err(|_| fail("xz block header is outside the original snapshot"))?;
+        if (u64::from(header_bytes[0]) + 1) * 4 != block.header.len {
+            return Err(fail("xz block header size byte disagrees with its range"));
+        }
+        let crc_at = header_bytes.len() - 4;
+        if crc32(&header_bytes[..crc_at])
+            != u32::from_le_bytes([
+                header_bytes[crc_at],
+                header_bytes[crc_at + 1],
+                header_bytes[crc_at + 2],
+                header_bytes[crc_at + 3],
+            ])
+        {
+            return Err(fail("xz block header CRC32 disagrees with its bytes"));
+        }
+        let flags = header_bytes[1];
+        if flags & 0x3C != 0 || flags & 0x03 != 0 {
+            return Err(fail("xz block flags are outside the restricted profile"));
+        }
+        if (flags & 0x40 != 0) != block.declared_compressed.is_some()
+            || (flags & 0x80 != 0) != block.declared_uncompressed.is_some()
+            || block.declared_compressed.is_some() != block.declared_uncompressed.is_some()
+        {
+            return Err(fail("xz declared-size flags disagree with the evidence"));
+        }
+        if let (Some(compressed), Some(uncompressed)) =
+            (block.declared_compressed, block.declared_uncompressed)
+        {
+            if compressed != block.compressed.len || uncompressed != block.uncompressed_len {
+                return Err(fail("xz declared sizes disagree with the evidence"));
+            }
+        }
+        if block.dict_size > MAX_DICT_BYTES {
+            return Err(fail("xz dictionary evidence exceeds the profile ceiling"));
+        }
+        if block.compressed.offset != block.header.offset + block.header.len
+            || block.compressed.len == 0
+            || block.padding.offset
+                != checked_range_end(block.compressed, "xz compressed overflow")?
+            || block.padding.len
+                != (block.header.len + block.compressed.len).next_multiple_of(4)
+                    - (block.header.len + block.compressed.len)
+            || block.check.offset != checked_range_end(block.padding, "xz padding overflow")?
+            || block.check.len != expected_check_len
+            || block.check_value.len() as u64 != expected_check_len
+        {
+            return Err(fail("xz block ranges do not exactly partition the block"));
+        }
+        let padding = snapshot
+            .read_vec(block.padding.offset, block.padding.len)
+            .map_err(|_| fail("xz block padding is outside the original snapshot"))?;
+        if padding.iter().any(|byte| *byte != 0) {
+            return Err(fail("xz block padding is not zero"));
+        }
+        let check = snapshot
+            .read_vec(block.check.offset, block.check.len)
+            .map_err(|_| fail("xz block check is outside the original snapshot"))?;
+        if check != block.check_value {
+            return Err(fail("xz block check bytes disagree with the evidence"));
+        }
+        expected_offset = checked_range_end(block.check, "xz block overflow")?;
+        uncompressed_total = uncompressed_total
+            .checked_add(block.uncompressed_len)
+            .ok_or_else(|| fail("xz uncompressed totals overflowed u64"))?;
+    }
+    if expected_offset != evidence.index.offset {
+        return Err(fail("xz blocks do not exactly tile the block region"));
+    }
+    if uncompressed_total != evidence.derived_output_len {
+        return Err(fail(
+            "xz uncompressed totals disagree with the derived output length",
+        ));
+    }
+    if evidence.derived_output_sha256.len() != 64
+        || !evidence
+            .derived_output_sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(fail("xz derived-output identity is malformed"));
+    }
+    Ok(())
+}
+
 /// Independently replay the restricted RFC 8878 wrapper grammar over the
 /// original snapshot without invoking a decompressor.
 pub(crate) fn audit_zstd_wrapper_covering(
@@ -887,7 +1068,10 @@ pub(crate) fn audit_tar_covering(
     let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
     if !matches!(
         ir.format(),
-        ArchiveFormat::TarUstar | ArchiveFormat::TarGzipUstar | ArchiveFormat::TarZstdUstar
+        ArchiveFormat::TarUstar
+            | ArchiveFormat::TarGzipUstar
+            | ArchiveFormat::TarZstdUstar
+            | ArchiveFormat::TarXzUstar
     ) {
         return Err(fail("TAR covering audit received a non-TAR IR"));
     }
@@ -911,6 +1095,16 @@ pub(crate) fn audit_tar_covering(
                 .ok_or_else(|| fail("zstd-wrapped TAR IR has no wrapper evidence"))?;
             if zstd.derived_output_len != snapshot.len()
                 || snapshot.digest().sha256() != Some(zstd.derived_output_sha256.as_str())
+            {
+                return Err(fail("derived TAR identity does not match its snapshot"));
+            }
+        }
+        ArchiveFormat::TarXzUstar => {
+            let xz = ir
+                .xz_evidence()
+                .ok_or_else(|| fail("xz-wrapped TAR IR has no wrapper evidence"))?;
+            if xz.derived_output_len != snapshot.len()
+                || snapshot.digest().sha256() != Some(xz.derived_output_sha256.as_str())
             {
                 return Err(fail("derived TAR identity does not match its snapshot"));
             }
@@ -2960,6 +3154,7 @@ mod tests {
             ArchiveEvidence::TarGzipPax(evidence) => &mut evidence.pax.tar,
             ArchiveEvidence::TarGzipGnuLongName(evidence) => &mut evidence.gnu.tar,
             ArchiveEvidence::TarZstd(evidence) => &mut evidence.tar,
+            ArchiveEvidence::TarXz(evidence) => &mut evidence.tar,
             ArchiveEvidence::Zip(_) | ArchiveEvidence::Zip64(_) | ArchiveEvidence::TarGzip(_) => {
                 panic!("expected TAR evidence")
             }
@@ -2976,7 +3171,8 @@ mod tests {
             | ArchiveEvidence::TarGnuLongName(_)
             | ArchiveEvidence::TarGzipPax(_)
             | ArchiveEvidence::TarGzipGnuLongName(_)
-            | ArchiveEvidence::TarZstd(_) => {
+            | ArchiveEvidence::TarZstd(_)
+            | ArchiveEvidence::TarXz(_) => {
                 panic!("expected ZIP evidence")
             }
         }
@@ -2992,7 +3188,8 @@ mod tests {
             | ArchiveEvidence::TarGnuLongName(_)
             | ArchiveEvidence::TarGzipPax(_)
             | ArchiveEvidence::TarGzipGnuLongName(_)
-            | ArchiveEvidence::TarZstd(_) => {
+            | ArchiveEvidence::TarZstd(_)
+            | ArchiveEvidence::TarXz(_) => {
                 panic!("expected ZIP64 evidence")
             }
         }
@@ -3006,7 +3203,7 @@ mod tests {
             }
             MemberEvidence::TarGnuLongName(evidence)
             | MemberEvidence::TarGzipGnuLongName(evidence) => &mut evidence.tar,
-            MemberEvidence::TarZstd(evidence) => evidence,
+            MemberEvidence::TarZstd(evidence) | MemberEvidence::TarXz(evidence) => evidence,
             MemberEvidence::Zip(_) | MemberEvidence::Zip64(_) | MemberEvidence::TarGzip(_) => {
                 panic!("expected TAR member evidence")
             }
@@ -3023,7 +3220,8 @@ mod tests {
             | ArchiveEvidence::TarGzip(_)
             | ArchiveEvidence::TarGnuLongName(_)
             | ArchiveEvidence::TarGzipGnuLongName(_)
-            | ArchiveEvidence::TarZstd(_) => panic!("expected PAX archive evidence"),
+            | ArchiveEvidence::TarZstd(_)
+            | ArchiveEvidence::TarXz(_) => panic!("expected PAX archive evidence"),
         }
     }
 
@@ -3036,7 +3234,8 @@ mod tests {
             | MemberEvidence::TarGzip(_)
             | MemberEvidence::TarGnuLongName(_)
             | MemberEvidence::TarGzipGnuLongName(_)
-            | MemberEvidence::TarZstd(_) => panic!("expected PAX member evidence"),
+            | MemberEvidence::TarZstd(_)
+            | MemberEvidence::TarXz(_) => panic!("expected PAX member evidence"),
         }
     }
 
@@ -3050,7 +3249,8 @@ mod tests {
             | ArchiveEvidence::TarGzip(_)
             | ArchiveEvidence::TarPax(_)
             | ArchiveEvidence::TarGzipPax(_)
-            | ArchiveEvidence::TarZstd(_) => panic!("expected GNU long-name archive evidence"),
+            | ArchiveEvidence::TarZstd(_)
+            | ArchiveEvidence::TarXz(_) => panic!("expected GNU long-name archive evidence"),
         }
     }
 
@@ -3067,7 +3267,8 @@ mod tests {
             | MemberEvidence::TarGzip(_)
             | MemberEvidence::TarPax(_)
             | MemberEvidence::TarGzipPax(_)
-            | MemberEvidence::TarZstd(_) => panic!("expected GNU long-name member evidence"),
+            | MemberEvidence::TarZstd(_)
+            | MemberEvidence::TarXz(_) => panic!("expected GNU long-name member evidence"),
         }
     }
 
@@ -3081,7 +3282,8 @@ mod tests {
             | MemberEvidence::TarGnuLongName(_)
             | MemberEvidence::TarGzipPax(_)
             | MemberEvidence::TarGzipGnuLongName(_)
-            | MemberEvidence::TarZstd(_) => {
+            | MemberEvidence::TarZstd(_)
+            | MemberEvidence::TarXz(_) => {
                 panic!("expected ZIP member evidence")
             }
         }
@@ -3097,7 +3299,8 @@ mod tests {
             | MemberEvidence::TarGnuLongName(_)
             | MemberEvidence::TarGzipPax(_)
             | MemberEvidence::TarGzipGnuLongName(_)
-            | MemberEvidence::TarZstd(_) => {
+            | MemberEvidence::TarZstd(_)
+            | MemberEvidence::TarXz(_) => {
                 panic!("expected ZIP64 member evidence")
             }
         }
