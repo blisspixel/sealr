@@ -176,3 +176,117 @@ fn the_policy_digest_covers_exactly_the_compact_declaration_order_bytes() {
         );
     }
 }
+
+fn rejected_fixture_zip() -> Vec<u8> {
+    let mut cursor = Cursor::new(Vec::new());
+    {
+        let mut writer = ZipWriter::new(&mut cursor);
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+        writer.start_file("../escape.txt", options).expect("member");
+        writer.write_all(b"outside").expect("payload");
+        writer.finish().expect("finish");
+    }
+    cursor.into_inner()
+}
+
+fn apply_fixture(bytes: &[u8]) -> sealr::Outcome {
+    let policy = Policy::default_v1();
+    apply(Request {
+        source: Source::Bytes {
+            path: Some("evidence.zip"),
+            data: bytes,
+        },
+        policy: &policy,
+        dest: None,
+    })
+}
+
+#[test]
+fn canonical_evidence_bytes_are_exactly_the_digested_bytes() {
+    let outcome = apply_fixture(&fixture_zip());
+    assert!(!outcome.rejected());
+    let evidence = outcome
+        .canonical_evidence()
+        .expect("canonicalization is total");
+
+    let view_digest: String = Sha256::digest(&evidence.view_bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(evidence.view_digest, view_digest);
+    let receipt_digest: String = Sha256::digest(&evidence.receipt_bytes)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect();
+    assert_eq!(evidence.receipt_digest, receipt_digest);
+
+    let receipt: Value = serde_json::from_slice(&evidence.receipt_bytes).expect("one document");
+    assert_eq!(receipt["schema"], "sealr.receipt.v3");
+    assert_eq!(receipt["canonicalization"], "rfc8785");
+    assert_eq!(receipt["view_schema"], "sealr.view.v2");
+    assert_eq!(receipt["view_digest"]["sha256"], view_digest);
+
+    let view: Value = serde_json::from_slice(&evidence.view_bytes).expect("one document");
+    assert_eq!(view["schema"], "sealr.view.v2");
+
+    assert_eq!(*evidence.view_bytes.last().unwrap(), b'}');
+    assert_eq!(*evidence.receipt_bytes.last().unwrap(), b'}');
+}
+
+#[test]
+fn the_canonical_lineage_carries_identical_semantic_content() {
+    let outcome = apply_fixture(&fixture_zip());
+    let evidence = outcome
+        .canonical_evidence()
+        .expect("canonicalization is total");
+
+    let mut v1_view = serde_json::to_value(&outcome.view).expect("v1 view");
+    let mut v2_view: Value = serde_json::from_slice(&evidence.view_bytes).expect("v2 view");
+    assert_eq!(v1_view["schema"], "sealr.view.v1");
+    assert_eq!(v2_view["schema"], "sealr.view.v2");
+    v1_view.as_object_mut().unwrap().remove("schema");
+    v2_view.as_object_mut().unwrap().remove("schema");
+    assert_eq!(v1_view, v2_view, "views must differ only in schema");
+
+    let mut v2_receipt = serde_json::to_value(&outcome.receipt).expect("v2 receipt");
+    let mut v3_receipt: Value =
+        serde_json::from_slice(&evidence.receipt_bytes).expect("v3 receipt");
+    for key in ["schema", "canonicalization", "view_schema", "view_digest"] {
+        v2_receipt.as_object_mut().unwrap().remove(key);
+        v3_receipt.as_object_mut().unwrap().remove(key);
+    }
+    assert_eq!(
+        v2_receipt, v3_receipt,
+        "receipts must differ only in the four enumerated fields"
+    );
+}
+
+#[test]
+fn the_shipped_receipt_lineage_never_carries_the_canonicalization_fields() {
+    let outcome = apply_fixture(&fixture_zip());
+    let receipt = serde_json::to_value(&outcome.receipt).expect("receipt");
+    let object = receipt.as_object().expect("object");
+    assert_eq!(receipt["schema"], "sealr.receipt.v2");
+    assert!(!object.contains_key("canonicalization"));
+    assert!(!object.contains_key("view_schema"));
+}
+
+#[test]
+fn canonicalization_is_total_on_rejection_paths_and_deterministic() {
+    let outcome = apply_fixture(&rejected_fixture_zip());
+    assert!(outcome.rejected());
+    let first = outcome
+        .canonical_evidence()
+        .expect("rejected outcomes canonicalize");
+    let second = outcome
+        .canonical_evidence()
+        .expect("rejected outcomes canonicalize");
+    assert_eq!(first.view_bytes, second.view_bytes);
+    assert_eq!(first.receipt_bytes, second.receipt_bytes);
+
+    let view: Value = serde_json::from_slice(&first.view_bytes).expect("one document");
+    assert_eq!(view["verdict"], "rejected");
+    assert_canonical_domain(&view, "rejected canonical view");
+    let receipt: Value = serde_json::from_slice(&first.receipt_bytes).expect("one document");
+    assert_canonical_domain(&receipt, "rejected canonical receipt");
+}
