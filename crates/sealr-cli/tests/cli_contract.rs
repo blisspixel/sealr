@@ -441,6 +441,7 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert!(help_text.contains("--view <NEW_FILE>"));
     assert!(help_text.contains("--receipt <NEW_FILE>"));
     assert!(help_text.contains("--policy <FILE>"));
+    assert!(help_text.contains("--canonical"));
     assert!(help_text.contains("inspect"));
     assert!(help_text.contains("materialize"));
     assert!(help_text.contains("--version"));
@@ -1788,6 +1789,111 @@ fn invalid_policy_files_are_refused_before_any_evaluation() {
     let output = sealr(&[&fixtures.allowed, Path::new("--policy"), &missing]);
     assert_eq!(output.status.code(), Some(2));
     assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn canonical_evidence_files_carry_exactly_the_digested_bytes() {
+    let (run, fixtures) = fixture_set("canonical-files");
+    let view_path = run.path.join("evidence.view.json");
+    let receipt_path = run.path.join("evidence.receipt.json");
+
+    let output = sealr(&[
+        &fixtures.allowed,
+        Path::new("--canonical"),
+        Path::new("--view"),
+        &view_path,
+        Path::new("--receipt"),
+        &receipt_path,
+    ]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty(), "stdout must stay silent");
+    assert!(output.stderr.is_empty(), "stderr must stay silent");
+
+    let view_bytes = fs::read(&view_path).expect("view file");
+    let receipt_bytes = fs::read(&receipt_path).expect("receipt file");
+    assert_eq!(*view_bytes.last().unwrap(), b'}', "no trailing newline");
+    assert_eq!(*receipt_bytes.last().unwrap(), b'}', "no trailing newline");
+
+    let view = json(&view_bytes, "canonical view");
+    let receipt = json(&receipt_bytes, "canonical receipt");
+    assert_eq!(view["schema"], "sealr.view.v2");
+    assert_eq!(receipt["schema"], "sealr.receipt.v3");
+    assert_eq!(receipt["canonicalization"], "rfc8785");
+    assert_eq!(receipt["view_schema"], "sealr.view.v2");
+    assert_eq!(
+        receipt["view_digest"]["sha256"],
+        sealr::hex_sha256(&view_bytes).as_str(),
+        "hashing the view file must reproduce the receipt's view_digest"
+    );
+
+    let again_view = run.path.join("again.view.json");
+    let again_receipt = run.path.join("again.receipt.json");
+    let output = sealr(&[
+        &fixtures.allowed,
+        Path::new("--canonical"),
+        Path::new("--view"),
+        &again_view,
+        Path::new("--receipt"),
+        &again_receipt,
+    ]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(
+        fs::read(&again_view).expect("second view file"),
+        view_bytes,
+        "same-machine canonical emission is byte-deterministic"
+    );
+}
+
+#[test]
+fn canonical_rejection_evidence_holds_the_same_property() {
+    let (run, fixtures) = fixture_set("canonical-rejected");
+    let view_path = run.path.join("rejected.view.json");
+    let receipt_path = run.path.join("rejected.receipt.json");
+
+    let output = sealr(&[
+        &fixtures.rejected,
+        Path::new("--canonical"),
+        Path::new("--view"),
+        &view_path,
+        Path::new("--receipt"),
+        &receipt_path,
+    ]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+    let view_bytes = fs::read(&view_path).expect("view file");
+    let receipt = json(&fs::read(&receipt_path).expect("receipt file"), "receipt");
+    assert_eq!(receipt["verdict"], "rejected");
+    assert_eq!(
+        receipt["view_digest"]["sha256"],
+        sealr::hex_sha256(&view_bytes).as_str()
+    );
+}
+
+#[test]
+fn canonical_requires_both_evidence_file_flags() {
+    let (run, fixtures) = fixture_set("canonical-flags");
+    let view_path = run.path.join("only.view.json");
+
+    let output = sealr(&[&fixtures.allowed, Path::new("--canonical")]);
+    assert_eq!(output.status.code(), Some(2), "clap usage error expected");
+    assert!(output.stdout.is_empty());
+
+    let output = sealr(&[
+        &fixtures.allowed,
+        Path::new("--canonical"),
+        Path::new("--view"),
+        &view_path,
+    ]);
+    assert_eq!(output.status.code(), Some(2), "clap usage error expected");
+    assert!(!view_path.exists(), "no file is claimed on a usage error");
 }
 
 #[test]

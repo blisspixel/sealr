@@ -22,7 +22,15 @@ Digest definitions:
 
 The CLI prints views and receipts — and writes `--view`/`--receipt` files — as **pretty-printed** JSON for human readability. Pretty bytes are a presentation of the same document, not the digested bytes: hashing an emitted file does not reproduce `view_digest`, and the receipt carries no digest of itself. A verifier that wants the covered bytes today must re-serialize the parsed document compactly in declaration order per this page.
 
-This split is a known limitation of the declaration-order lineage, not an accident. A planned RFC 8785 (JCS) lineage — new schema identifiers, never a mutation of the shipped ones — will make the emitted file bytes exactly the canonical digested bytes.
+This split is a known limitation of the declaration-order lineage, not an accident. The RFC 8785 lineage below removes it for consumers who select it.
+
+## The canonical RFC 8785 lineage (`sealr.view.v2`, `sealr.receipt.v3`)
+
+`Outcome::canonical_evidence()` emits the same finished evidence in the canonical lineage, where **the emitted bytes are exactly the digested bytes**: hashing the view bytes reproduces the receipt's `view_digest`, and hashing the receipt bytes produces the receipt's externally nameable digest (a receipt cannot contain its own digest). The documents carry identical semantic content to the shipped lineage; they differ only in the schema identifiers, the receipt's two canonicalization-binding fields (`canonicalization: "rfc8785"` and `view_schema: "sealr.view.v2"`), and the digest coverage. The shipped `sealr.view.v1`/`sealr.receipt.v2` bytes are untouched by the emission, and the two new receipt fields are absent from v2 receipts.
+
+Canonical encoding follows RFC 8785 exactly — properties sorted by raw-name UTF-16 code units, the JCS escape table, no whitespace — over the same integer-only domain stated above. Canonicalization is total over every reachable evidence document: the only numeric fields in views and receipts are verified byte counts and verification frontiers bounded by real ingested bytes, so no reachable value approaches the 2^53 − 1 ceiling. If canonicalization ever fails, that is an internal regression: the registered `evidence.canonicalization` finding is returned and no bytes are produced — never a silent fallback to the declaration-order lineage.
+
+Two conditional shapes exist in the evidence documents and are part of both lineages' schemas: `findings[].member` is present only when a finding names a member, and the materialization object's platform-specific sub-object appears only on the platform that produces it. `view.source.path` may be JSON `null`.
 
 ## Frozen invariants
 

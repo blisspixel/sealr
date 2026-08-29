@@ -1282,6 +1282,7 @@ fn finding_code_tag(code: FindingCode) -> u16 {
         FindingCode::CodecBzip2InvalidStream => 75,
         FindingCode::CodecBzip2TrailingInput => 76,
         FindingCode::SevenZInvalidStructure => 77,
+        FindingCode::EvidenceCanonicalization => 78,
     }
 }
 
@@ -1365,6 +1366,7 @@ fn finding_code_from_tag(tag: u16, offset: usize) -> Result<FindingCode, RecordE
         75 => FindingCode::CodecBzip2InvalidStream,
         76 => FindingCode::CodecBzip2TrailingInput,
         77 => FindingCode::SevenZInvalidStructure,
+        78 => FindingCode::EvidenceCanonicalization,
         _ => {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidEnum,

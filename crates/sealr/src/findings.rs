@@ -80,6 +80,7 @@ pub enum FindingCode {
     CodecBzip2InvalidStream,
     CodecBzip2TrailingInput,
     SevenZInvalidStructure,
+    EvidenceCanonicalization,
     CrcMismatch,
     MethodUnsupported,
 }
@@ -163,6 +164,7 @@ impl FindingCode {
             Self::CodecBzip2InvalidStream => "codec.bzip2.invalid_stream",
             Self::CodecBzip2TrailingInput => "codec.bzip2.trailing_input",
             Self::SevenZInvalidStructure => "sevenz.invalid_structure",
+            Self::EvidenceCanonicalization => "evidence.canonicalization",
             Self::CrcMismatch => "crc.mismatch",
             Self::MethodUnsupported => "method.unsupported",
         }

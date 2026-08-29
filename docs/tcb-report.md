@@ -14,7 +14,7 @@ pwsh -NoProfile -File scripts/generate_tcb_report.ps1
 
 | Measurement | Value |
 |---|---|
-| Runtime Rust lines (crates/sealr/src) | 44242 |
+| Runtime Rust lines (crates/sealr/src) | 44318 |
 | In-crate test lines | 18423 |
 | `unsafe` uses in runtime code | 51 |
 | `unsafe` uses in test code | 13 |
@@ -78,11 +78,11 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 
 | File | Runtime lines | Test lines | Runtime `unsafe` | Runtime panic sites |
 |---|---|---|---|---|
-| `crates/sealr/src/apply.rs` | 5374 | 2134 | 0 | 54 |
+| `crates/sealr/src/apply.rs` | 5446 | 2134 | 0 | 54 |
 | `crates/sealr/src/bzip2.rs` | 892 | 205 | 0 | 3 |
 | `crates/sealr/src/canonical_json.rs` | 175 | 132 | 0 | 0 |
 | `crates/sealr/src/covering.rs` | 3182 | 1082 | 0 | 11 |
-| `crates/sealr/src/findings.rs` | 213 | 12 | 0 | 0 |
+| `crates/sealr/src/findings.rs` | 215 | 12 | 0 | 0 |
 | `crates/sealr/src/gzip.rs` | 1092 | 369 | 0 | 13 |
 | `crates/sealr/src/identity.rs` | 1225 | 118 | 0 | 6 |
 | `crates/sealr/src/interval.rs` | 128 | 90 | 0 | 1 |
@@ -96,7 +96,7 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/policy.rs` | 877 | 798 | 0 | 1 |
 | `crates/sealr/src/quota.rs` | 82 | 51 | 0 | 0 |
 | `crates/sealr/src/ratio.rs` | 34 | 58 | 0 | 0 |
-| `crates/sealr/src/semantic_record.rs` | 4701 | 4011 | 0 | 45 |
+| `crates/sealr/src/semantic_record.rs` | 4703 | 4011 | 0 | 45 |
 | `crates/sealr/src/semantic_record/executor.rs` | 500 | 0 | 0 | 0 |
 | `crates/sealr/src/semantic_record/member_read.rs` | 244 | 0 | 0 | 0 |
 | `crates/sealr/src/semantic_record/peak_live.rs` | 0 | 489 | 0 | 0 |
