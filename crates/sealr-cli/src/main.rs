@@ -3,7 +3,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use clap::{Parser, ValueEnum};
+use clap::{Args, Parser, Subcommand, ValueEnum};
 use sealr::{
     apply_supervised, apply_with_options, ApplyOptions, LinuxWorker, Policy, Request,
     SevenZInterpretationProfile, Source, TarBzip2InterpretationProfile,
@@ -17,11 +17,14 @@ use serde::Serialize;
 #[command(
     name = "sealr",
     version,
-    about = "Untrusted archive × policy → (materialize | reject) × receipt × view"
+    about = "Untrusted archive × policy → (materialize | reject) × receipt × view",
+    args_conflicts_with_subcommands = true
 )]
 struct Cli {
+    #[command(subcommand)]
+    command: Option<CliCommand>,
     /// Archive file
-    archive: PathBuf,
+    archive: Option<PathBuf>,
     /// Exact container interpretation to apply
     #[arg(long, value_enum, default_value_t = CliFormat::Zip)]
     format: CliFormat,
@@ -37,6 +40,86 @@ struct Cli {
     /// Write the receipt JSON to this exact new file instead of stderr
     #[arg(long, value_name = "NEW_FILE")]
     receipt: Option<PathBuf>,
+}
+
+#[derive(Subcommand, Debug)]
+enum CliCommand {
+    /// Interpret and verify without writing any member file
+    Inspect {
+        #[command(flatten)]
+        common: CommonArgs,
+    },
+    /// Interpret, verify, and publish the tree into a new destination
+    Materialize {
+        #[command(flatten)]
+        common: CommonArgs,
+        /// Materialize into a new directory below an existing parent
+        #[arg(long)]
+        dest: PathBuf,
+    },
+}
+
+#[derive(Args, Debug)]
+struct CommonArgs {
+    /// Archive file
+    archive: PathBuf,
+    /// Exact container interpretation to apply
+    #[arg(long, value_enum, default_value_t = CliFormat::Zip)]
+    format: CliFormat,
+    /// Use the exact packaged Linux worker bound by this manifest
+    #[arg(long, value_name = "ABSOLUTE_PATH")]
+    worker_manifest: Option<PathBuf>,
+    /// Write the view JSON to this exact new file instead of stdout
+    #[arg(long, value_name = "NEW_FILE")]
+    view: Option<PathBuf>,
+    /// Write the receipt JSON to this exact new file instead of stderr
+    #[arg(long, value_name = "NEW_FILE")]
+    receipt: Option<PathBuf>,
+}
+
+/// One resolved invocation shape shared by the compatibility form and both
+/// subcommands, so every form runs the identical pipeline.
+struct ResolvedInvocation {
+    archive: PathBuf,
+    format: CliFormat,
+    dest: Option<PathBuf>,
+    worker_manifest: Option<PathBuf>,
+    view: Option<PathBuf>,
+    receipt: Option<PathBuf>,
+}
+
+fn resolve(cli: Cli) -> Result<ResolvedInvocation, String> {
+    match cli.command {
+        Some(CliCommand::Inspect { common }) => Ok(ResolvedInvocation {
+            archive: common.archive,
+            format: common.format,
+            dest: None,
+            worker_manifest: common.worker_manifest,
+            view: common.view,
+            receipt: common.receipt,
+        }),
+        Some(CliCommand::Materialize { common, dest }) => Ok(ResolvedInvocation {
+            archive: common.archive,
+            format: common.format,
+            dest: Some(dest),
+            worker_manifest: common.worker_manifest,
+            view: common.view,
+            receipt: common.receipt,
+        }),
+        None => {
+            let Some(archive) = cli.archive else {
+                return Err("an archive path or a subcommand is required".to_owned());
+            };
+            Ok(ResolvedInvocation {
+                archive,
+                format: cli.format,
+                dest: cli.dest,
+                worker_manifest: cli.worker_manifest,
+                view: cli.view,
+                receipt: cli.receipt,
+            })
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -61,7 +144,14 @@ enum CliFormat {
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
-    let (policy, options) = match cli.format {
+    let invocation = match resolve(cli) {
+        Ok(invocation) => invocation,
+        Err(message) => {
+            eprintln!("sealr: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    let (policy, options) = match invocation.format {
         CliFormat::Zip => (Policy::default_v1(), ApplyOptions::new()),
         CliFormat::Zip64 => (
             Policy::default_v3(),
@@ -125,11 +215,11 @@ fn main() -> ExitCode {
         ),
     };
     let request = Request {
-        source: Source::Path(&cli.archive),
+        source: Source::Path(&invocation.archive),
         policy: &policy,
-        dest: cli.dest.as_deref(),
+        dest: invocation.dest.as_deref(),
     };
-    let worker = match cli.worker_manifest.as_deref() {
+    let worker = match invocation.worker_manifest.as_deref() {
         Some(manifest) => match LinuxWorker::load_from_manifest(manifest) {
             Ok(worker) => Some(worker),
             Err(error) => {
@@ -142,11 +232,11 @@ fn main() -> ExitCode {
     // Output destinations are claimed before any evaluation or materialization
     // effect, and an existing file is never overwritten. A refusal after a
     // partial claim discards the claim so the filesystem is unchanged.
-    let view_output = match ClaimedOutput::claim("view", cli.view.as_deref()) {
+    let view_output = match ClaimedOutput::claim("view", invocation.view.as_deref()) {
         Ok(claimed) => claimed,
         Err(exit) => return exit,
     };
-    let receipt_output = match ClaimedOutput::claim("receipt", cli.receipt.as_deref()) {
+    let receipt_output = match ClaimedOutput::claim("receipt", invocation.receipt.as_deref()) {
         Ok(claimed) => claimed,
         Err(exit) => {
             if let Some(view) = view_output {
