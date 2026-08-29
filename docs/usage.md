@@ -26,7 +26,16 @@ cargo run --locked -p sealr-cli -- inspect path/to/archive.zip
 cargo run --locked -p sealr-cli -- materialize path/to/archive.zip --dest ./out
 ```
 
-`inspect` accepts no `--dest`; `materialize` requires one. Top-level flags cannot be mixed with a subcommand, and the compatibility form (`sealr <ARCHIVE> [--dest ...]`) remains unchanged. One consequence of subcommand parsing: an archive file literally named `inspect` or `materialize` in the working directory must be passed with a path prefix (`./inspect`).
+`inspect` accepts no `--dest`; `materialize` requires one.
+
+A caller-authored policy replaces the format's default policy:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.zip --policy my-policy.json
+```
+
+`--policy` names a JSON policy document. It is deserialized strictly — unknown fields are refused — then validated into a proven policy: string fields must match the exact supported vocabulary, the schema must be a known version, every cap must sit within the 2^53-1 double-safe ceiling, and the policy must compile. A refused policy never reaches evaluation: the CLI prints the exact typed reason on stderr and exits `2` with no JSON documents, matching the argument-error class. A validated policy that does not authorize the selected `--format` produces the ordinary evidence-bearing policy rejection. The receipt binds the caller policy's own id and digest.
+ Top-level flags cannot be mixed with a subcommand, and the compatibility form (`sealr <ARCHIVE> [--dest ...]`) remains unchanged. One consequence of subcommand parsing: an archive file literally named `inspect` or `materialize` in the working directory must be passed with a path prefix (`./inspect`).
 
 Portable raw ustar is selected explicitly and requires no filename-extension inference:
 
@@ -239,11 +248,12 @@ Options:
       --worker-manifest <ABSOLUTE_PATH>  Use the exact packaged Linux worker bound by this manifest
       --view <NEW_FILE>                  Write the view JSON to this exact new file instead of stdout
       --receipt <NEW_FILE>               Write the receipt JSON to this exact new file instead of stderr
+      --policy <FILE>                    Validate and use this exact JSON policy document instead of the format's default policy
   -h, --help                             Print help
   -V, --version                          Print version
 ```
 
-Policy files, JSONL output, mounts, folder scans, force replacement, other isolation backends, and signing are roadmap items. They are not accepted flags today.
+JSONL output, mounts, folder scans, force replacement, other isolation backends, and signing are roadmap items. They are not accepted flags today.
 
 ## Target CLI experience
 

@@ -440,6 +440,7 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert!(help_text.contains("--worker-manifest <ABSOLUTE_PATH>"));
     assert!(help_text.contains("--view <NEW_FILE>"));
     assert!(help_text.contains("--receipt <NEW_FILE>"));
+    assert!(help_text.contains("--policy <FILE>"));
     assert!(help_text.contains("inspect"));
     assert!(help_text.contains("materialize"));
     assert!(help_text.contains("--version"));
@@ -1689,6 +1690,104 @@ fn shared_view_and_receipt_path_is_refused() {
         !shared.exists(),
         "a refused run must leave the filesystem unchanged"
     );
+}
+
+fn policy_json(mutate: impl FnOnce(&mut serde_json::Value)) -> String {
+    let mut value = serde_json::to_value(sealr::Policy::default_v1()).expect("policy serializes");
+    mutate(&mut value);
+    serde_json::to_string_pretty(&value).expect("policy renders")
+}
+
+#[test]
+fn a_validated_policy_file_replaces_the_default_and_binds_its_identity() {
+    let (run, fixtures) = fixture_set("policy-file");
+    let policy_path = run.path.join("caller-policy.json");
+    fs::write(
+        &policy_path,
+        policy_json(|value| {
+            value["id"] = serde_json::json!("sealr:policy/caller/one");
+        }),
+    )
+    .expect("write policy file");
+
+    let output = sealr(&[&fixtures.allowed, Path::new("--policy"), &policy_path]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt = json(&output.stderr, "stderr");
+    assert_eq!(receipt["verdict"], "allowed");
+    assert_eq!(receipt["policy"]["id"], "sealr:policy/caller/one");
+    assert_ne!(
+        receipt["policy"]["digest"]["sha256"],
+        json(&sealr(&[&fixtures.allowed]).stderr, "default stderr")["policy"]["digest"]["sha256"],
+        "a caller policy with its own id must carry its own digest"
+    );
+}
+
+#[test]
+fn a_policy_file_that_does_not_authorize_the_selected_format_rejects_with_evidence() {
+    let run = RunDirectory::create("policy-file-format");
+    let archive = run.path.join("mission.tar");
+    write_tar_fixture(&archive);
+    let policy_path = run.path.join("zip-only.json");
+    fs::write(&policy_path, policy_json(|_| {})).expect("write policy file");
+
+    let output = sealr(&[
+        Path::new("--format"),
+        Path::new("tar-ustar"),
+        &archive,
+        Path::new("--policy"),
+        &policy_path,
+    ]);
+
+    assert_eq!(output.status.code(), Some(2));
+    let view = json(&output.stdout, "stdout");
+    assert_eq!(view["verdict"], "rejected", "{view}");
+}
+
+#[test]
+fn invalid_policy_files_are_refused_before_any_evaluation() {
+    let (run, fixtures) = fixture_set("policy-file-invalid");
+
+    let unknown_field = run.path.join("unknown-field.json");
+    fs::write(
+        &unknown_field,
+        policy_json(|value| {
+            value["insecure"] = serde_json::json!(true);
+        }),
+    )
+    .expect("write policy file");
+    let output = sealr(&[&fixtures.allowed, Path::new("--policy"), &unknown_field]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        output.stdout.is_empty(),
+        "no view JSON for a refused policy"
+    );
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(message.contains("unknown field"), "{message}");
+
+    let bad_vocabulary = run.path.join("bad-vocabulary.json");
+    fs::write(
+        &bad_vocabulary,
+        policy_json(|value| {
+            value["symlinks"] = serde_json::json!("allow");
+        }),
+    )
+    .expect("write policy file");
+    let output = sealr(&[&fixtures.allowed, Path::new("--policy"), &bad_vocabulary]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(message.contains("policy.unsupported"), "{message}");
+
+    let missing = run.path.join("missing.json");
+    let output = sealr(&[&fixtures.allowed, Path::new("--policy"), &missing]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
 }
 
 #[test]

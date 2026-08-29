@@ -5,8 +5,8 @@ use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use sealr::{
-    apply_supervised, apply_with_options, ApplyOptions, LinuxWorker, Policy, Request,
-    SevenZInterpretationProfile, Source, TarBzip2InterpretationProfile,
+    apply_supervised, apply_with_options, ApplyOptions, LinuxWorker, Policy, PolicyDocument,
+    Request, SevenZInterpretationProfile, Source, TarBzip2InterpretationProfile,
     TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
     TarPaxInterpretationProfile, TarXzInterpretationProfile, TarZstdInterpretationProfile,
     ZipInterpretationProfile,
@@ -40,6 +40,10 @@ struct Cli {
     /// Write the receipt JSON to this exact new file instead of stderr
     #[arg(long, value_name = "NEW_FILE")]
     receipt: Option<PathBuf>,
+    /// Validate and use this exact JSON policy document instead of the
+    /// format's default policy
+    #[arg(long, value_name = "FILE")]
+    policy: Option<PathBuf>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -75,6 +79,10 @@ struct CommonArgs {
     /// Write the receipt JSON to this exact new file instead of stderr
     #[arg(long, value_name = "NEW_FILE")]
     receipt: Option<PathBuf>,
+    /// Validate and use this exact JSON policy document instead of the
+    /// format's default policy
+    #[arg(long, value_name = "FILE")]
+    policy: Option<PathBuf>,
 }
 
 /// One resolved invocation shape shared by the compatibility form and both
@@ -86,6 +94,7 @@ struct ResolvedInvocation {
     worker_manifest: Option<PathBuf>,
     view: Option<PathBuf>,
     receipt: Option<PathBuf>,
+    policy: Option<PathBuf>,
 }
 
 fn resolve(cli: Cli) -> Result<ResolvedInvocation, String> {
@@ -97,6 +106,7 @@ fn resolve(cli: Cli) -> Result<ResolvedInvocation, String> {
             worker_manifest: common.worker_manifest,
             view: common.view,
             receipt: common.receipt,
+            policy: common.policy,
         }),
         Some(CliCommand::Materialize { common, dest }) => Ok(ResolvedInvocation {
             archive: common.archive,
@@ -105,6 +115,7 @@ fn resolve(cli: Cli) -> Result<ResolvedInvocation, String> {
             worker_manifest: common.worker_manifest,
             view: common.view,
             receipt: common.receipt,
+            policy: common.policy,
         }),
         None => {
             let Some(archive) = cli.archive else {
@@ -117,6 +128,7 @@ fn resolve(cli: Cli) -> Result<ResolvedInvocation, String> {
                 worker_manifest: cli.worker_manifest,
                 view: cli.view,
                 receipt: cli.receipt,
+                policy: cli.policy,
             })
         }
     }
@@ -151,7 +163,14 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let (policy, options) = match invocation.format {
+    let caller_policy = match invocation.policy.as_deref().map(load_policy).transpose() {
+        Ok(policy) => policy,
+        Err(message) => {
+            eprintln!("sealr: {message}");
+            return ExitCode::from(2);
+        }
+    };
+    let (default_policy, options) = match invocation.format {
         CliFormat::Zip => (Policy::default_v1(), ApplyOptions::new()),
         CliFormat::Zip64 => (
             Policy::default_v3(),
@@ -214,6 +233,7 @@ fn main() -> ExitCode {
                 .with_sevenz_interpretation_profile(SevenZInterpretationProfile::CopyPortableV1),
         ),
     };
+    let policy = caller_policy.unwrap_or(default_policy);
     let request = Request {
         source: Source::Path(&invocation.archive),
         policy: &policy,
@@ -277,6 +297,38 @@ fn main() -> ExitCode {
         &out.receipt,
         out.cli_exit_code(),
     )
+}
+
+/// Read, parse, and validate one JSON policy document, or explain exactly
+/// why it was refused. A refused policy never reaches evaluation.
+fn load_policy(path: &Path) -> Result<Policy, String> {
+    const MAX_POLICY_BYTES: u64 = 1024 * 1024;
+    let metadata = std::fs::metadata(path)
+        .map_err(|error| format!("policy file {} was not readable: {error}", path.display()))?;
+    if metadata.len() > MAX_POLICY_BYTES {
+        return Err(format!(
+            "policy file {} of {} bytes exceeds the {MAX_POLICY_BYTES}-byte bound",
+            path.display(),
+            metadata.len()
+        ));
+    }
+    let bytes = std::fs::read(path)
+        .map_err(|error| format!("policy file {} was not readable: {error}", path.display()))?;
+    let document: PolicyDocument = serde_json::from_slice(&bytes).map_err(|error| {
+        format!(
+            "policy file {} is not one valid policy document: {error}",
+            path.display()
+        )
+    })?;
+    let validated = document.validate().map_err(|finding| {
+        format!(
+            "policy file {} was refused: {}: {}",
+            path.display(),
+            finding.code.as_str(),
+            finding.detail
+        )
+    })?;
+    Ok(validated.into_policy())
 }
 
 /// An output file this process created itself and may therefore remove again.
