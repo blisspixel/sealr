@@ -1,5 +1,6 @@
+use std::fs::File;
 use std::io::{self, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
@@ -30,6 +31,12 @@ struct Cli {
     /// Use the exact packaged Linux worker bound by this manifest
     #[arg(long, value_name = "ABSOLUTE_PATH")]
     worker_manifest: Option<PathBuf>,
+    /// Write the view JSON to this exact new file instead of stdout
+    #[arg(long, value_name = "NEW_FILE")]
+    view: Option<PathBuf>,
+    /// Write the receipt JSON to this exact new file instead of stderr
+    #[arg(long, value_name = "NEW_FILE")]
+    receipt: Option<PathBuf>,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -122,31 +129,101 @@ fn main() -> ExitCode {
         policy: &policy,
         dest: cli.dest.as_deref(),
     };
-    let out = if let Some(manifest) = cli.worker_manifest.as_deref() {
-        let worker = match LinuxWorker::load_from_manifest(manifest) {
-            Ok(worker) => worker,
+    let worker = match cli.worker_manifest.as_deref() {
+        Some(manifest) => match LinuxWorker::load_from_manifest(manifest) {
+            Ok(worker) => Some(worker),
             Err(error) => {
                 eprintln!("sealr: supervised execution failed: {error}");
                 return ExitCode::FAILURE;
             }
-        };
-        match apply_supervised(request, &options, &worker) {
+        },
+        None => None,
+    };
+    // Output destinations are claimed before any evaluation or materialization
+    // effect, and an existing file is never overwritten. A refusal after a
+    // partial claim discards the claim so the filesystem is unchanged.
+    let view_output = match ClaimedOutput::claim("view", cli.view.as_deref()) {
+        Ok(claimed) => claimed,
+        Err(exit) => return exit,
+    };
+    let receipt_output = match ClaimedOutput::claim("receipt", cli.receipt.as_deref()) {
+        Ok(claimed) => claimed,
+        Err(exit) => {
+            if let Some(view) = view_output {
+                view.discard();
+            }
+            return exit;
+        }
+    };
+    let out = if let Some(worker) = worker.as_ref() {
+        match apply_supervised(request, &options, worker) {
             Ok(outcome) => outcome,
             Err(error) => {
                 eprintln!("sealr: supervised execution failed: {error}");
+                if let Some(view) = view_output {
+                    view.discard();
+                }
+                if let Some(receipt) = receipt_output {
+                    receipt.discard();
+                }
                 return ExitCode::FAILURE;
             }
         }
     } else {
         apply_with_options(request, &options)
     };
+    let mut view_writer: Box<dyn Write> = match view_output {
+        Some(claimed) => Box::new(claimed.into_file()),
+        None => Box::new(io::stdout().lock()),
+    };
+    let mut receipt_writer: Box<dyn Write> = match receipt_output {
+        Some(claimed) => Box::new(claimed.into_file()),
+        None => Box::new(io::stderr().lock()),
+    };
     write_outputs(
-        &mut io::stdout().lock(),
-        &mut io::stderr().lock(),
+        &mut view_writer,
+        &mut receipt_writer,
         &out.view,
         &out.receipt,
         out.cli_exit_code(),
     )
+}
+
+/// An output file this process created itself and may therefore remove again.
+struct ClaimedOutput {
+    path: PathBuf,
+    file: File,
+}
+
+impl ClaimedOutput {
+    fn claim(label: &str, path: Option<&Path>) -> Result<Option<Self>, ExitCode> {
+        let Some(path) = path else {
+            return Ok(None);
+        };
+        match File::create_new(path) {
+            Ok(file) => Ok(Some(Self {
+                path: path.to_path_buf(),
+                file,
+            })),
+            Err(error) => {
+                eprintln!(
+                    "sealr: {label} output file {} was not created: {error}",
+                    path.display()
+                );
+                Err(ExitCode::FAILURE)
+            }
+        }
+    }
+
+    fn discard(self) {
+        let Self { path, file } = self;
+        drop(file);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    fn into_file(self) -> File {
+        self.file
+    }
 }
 
 fn write_json(writer: &mut impl Write, value: &impl Serialize) -> io::Result<()> {

@@ -11,6 +11,14 @@ cargo run --locked -p sealr-cli -- path/to/archive.zip
 
 The inspectable view is printed as pretty JSON on stdout. The unsigned receipt is printed as pretty JSON on stderr. No member files are created.
 
+Both documents can be captured as files instead:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.zip --view evidence.view.json --receipt evidence.receipt.json
+```
+
+`--view` and `--receipt` each name a file that must not yet exist; the redirected stream stays silent and the bytes written are identical to the stream output. Both destinations are claimed before any evaluation or materialization effect, an existing file is never overwritten, and a refused claim exits `1` leaving the filesystem unchanged. Semantic exit codes are unaffected by redirection.
+
 Portable raw ustar is selected explicitly and requires no filename-extension inference:
 
 ```text
@@ -197,7 +205,7 @@ Receipts are currently unsigned and the kernel jail is unavailable.
 | `0` | The archive was admitted. `wrote` says whether a destination was committed. |
 | `2` | The archive was not admitted (denied, malformed, unsupported, or indeterminate). View and receipt are still emitted. |
 | `3` | The archive was admitted but the requested destination effect failed. View and receipt still record `admission: admitted`. |
-| `1` | The selected supervised boundary failed, or a view or receipt stream could not be written. |
+| `1` | The selected supervised boundary failed, a `--view` or `--receipt` output file could not be claimed, or a view or receipt stream could not be written. |
 | Clap default | Command-line syntax or argument error. |
 
 Source open and read failures currently become a structured rejection and therefore exit `2`. Receipts mark those failures as `interpretation: indeterminate` with an unavailable source digest. An admitted archive whose destination cannot be published exits `3`. The compatibility `verdict` remains `rejected` on that path so older adapters keep working.
@@ -214,11 +222,13 @@ Options:
       --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar, tar-gzip-ustar, tar-pax, tar-gnu-longname, tar-gzip-pax, tar-gzip-gnu-longname, tar-zstd-ustar, tar-xz-ustar, tar-bzip2-ustar, 7z-copy]
       --dest <DEST>                      Materialize into a new directory below an existing parent
       --worker-manifest <ABSOLUTE_PATH>  Use the exact packaged Linux worker bound by this manifest
+      --view <NEW_FILE>                  Write the view JSON to this exact new file instead of stdout
+      --receipt <NEW_FILE>               Write the receipt JSON to this exact new file instead of stderr
   -h, --help                             Print help
   -V, --version                          Print version
 ```
 
-Policy files, JSONL output, receipt paths, mounts, folder scans, force replacement, other isolation backends, and signing are roadmap items. They are not accepted flags today.
+Policy files, JSONL output, mounts, folder scans, force replacement, other isolation backends, and signing are roadmap items. They are not accepted flags today.
 
 ## Target CLI experience
 
