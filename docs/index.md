@@ -50,6 +50,7 @@ Start with the [README](../README.md) for the published Alpha.11 boundary and a 
 | [Policy](policy.md) | Current policy schema, compilation, and defaults |
 | [Receipt attestation](attestation.md) | Signing receipts with external DSSE tools and the signer-agnostic statement builder |
 | [Evidence encoding contract](evidence-encoding.md) | The normative declaration-order canonical JSON behind every policy digest and `view_digest` |
+| [Public API surface contract](api-surface.md) | The role-grouped supported surface, compile-time pinned by `tests/api_surface.rs` |
 
 Repository vulnerability reporting and supported-version policy are in [SECURITY.md](../SECURITY.md).
 
