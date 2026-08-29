@@ -8,6 +8,8 @@ The project is in initial development. Compatibility may change between preview 
 
 ### Added
 
+- Added the committed, regenerable trusted-computing-base report `docs/tcb-report.md` with its pure-measurement generator `scripts/generate_tcb_report.ps1` and drift gate `scripts/verify_tcb_report.ps1`. The report inventories runtime lines, the `unsafe` and FFI surface (confined to four platform modules and now enforced by the generator), panic sites, per-target runtime dependency graphs cross-checked against the pinned contract, and every cfg-gated module.
+- Added `CONTRIBUTING.md` with explicit TCB change control: a 300-800 changed-line pull-request cap for trusted-computing-base code, mechanical-change separation, non-author review (tracked as an open 1.0 gate while the project has a single maintainer), and same-PR TCB report regeneration. `SECURITY.md` gains the matching change-control section and corrects its unsafe-boundary statement to the measured four platform modules.
 - Added the runnable downstream-consumer demonstration `cargo run --locked -p sealr --example wheel_admission`: one wheel admitted once, its source file deleted, and the install plan evaluated, materialized, and realized purely from the retained verified capability — plus a hostile `..` container refused at admission and an admitted container whose lying `RECORD` is denied by the consumer with an exact finding.
 - Added `RealizedOutput::new`, the missing public constructor without which an external consumer could not call `realize_identity` at all, since the struct is non-exhaustive. The demonstration surfaced the gap.
 - Added the additive CLI evidence-capture flags `--view <NEW_FILE>` and `--receipt <NEW_FILE>`, writing byte-identical view and receipt JSON to files instead of stdout and stderr. Each destination must not yet exist, is claimed before any evaluation or materialization effect, and is never an overwrite; a refused claim exits `1` with the filesystem unchanged, and semantic exit codes are unaffected by redirection.
@@ -51,6 +53,11 @@ The project is in initial development. Compatibility may change between preview 
 - Added explicit Rust and CLI selection through `ArchiveSelection::TarGnuLongName`, `TarGnuLongNameInterpretationProfile::PortableV1`, `ArchiveFormat::TarGnuLongName`, and `--format tar-gnu-longname`.
 - Added independent GNU long-name conformance vectors and extended the standalone identity verifier.
 - Added a dedicated bounded fuzz campaign and 16 digest-pinned deterministic seeds for old-GNU long-name archives.
+
+### Changed
+
+- Restructured the README to lead with the semantic-continuity claim — an untrusted archive becomes one verified, reusable tree capability, or nothing — followed by a thirty-second CLI session, a twenty-line downstream consumer, and an explicit non-goals section. The near-term plan and roadmap record that parser breadth is deliberately frozen at twelve profiles while the downstream-usefulness, measured-compatibility, and independent-review milestones land; the parked 7z LZMA/LZMA2 step is named and resumable on its feature branch.
+- Documented that the policy `atomic` field selects durability, not atomicity: staging and native no-replace publication are unconditional, `atomic: true` additionally syncs each completed member (`member-sync`), and the historical field name is kept because the policy schema and digest are an immutable contract.
 
 ### Security
 
