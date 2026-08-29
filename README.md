@@ -24,6 +24,12 @@ cargo run --locked -p sealr-cli -- path/to/archive.zip
 # Materialize into a new destination below an existing parent — or nothing.
 cargo run --locked -p sealr-cli -- path/to/archive.zip --dest ./out
 
+# Real-world release zips are usually ZIP64; select that profile explicitly.
+# (The default is deliberately narrow ZIP32; a ZIP64 archive rejects with
+# zip.diff.c5_zip64 until you select it — that is the finding telling you which
+# door to use, not the tool failing.)
+cargo run --locked -p sealr-cli -- path/to/archive.zip --format zip64 --dest ./out
+
 # Capture both evidence documents as files.
 cargo run --locked -p sealr-cli -- path/to/archive.zip --view v.json --receipt r.json
 ```
