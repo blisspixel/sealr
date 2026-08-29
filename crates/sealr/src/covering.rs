@@ -712,6 +712,159 @@ fn gzip_isize(len: u64) -> u32 {
     u32::try_from(len % (u64::from(u32::MAX) + 1)).expect("gzip ISIZE modulo always fits u32")
 }
 
+/// Independently replay the restricted Copy 7z container over the original
+/// snapshot: signature and version, both header CRCs, the dense partition
+/// (signature header, contiguous pack streams, raw next header, nothing
+/// else), folder and substream tiling, every declared payload CRC, and the
+/// recorded evidence geometry.
+pub(crate) fn audit_sevenz_covering(
+    snapshot: &SourceSnapshot<'_>,
+    ir: &ArchiveIR,
+) -> Result<(), Finding> {
+    let fail = |detail: &'static str| Finding::error(FindingCode::CoveringInconsistent, detail);
+    let crc32 = |bytes: &[u8]| {
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(bytes);
+        hasher.finalize()
+    };
+    if ir.format() != ArchiveFormat::SevenZCopy {
+        return Err(fail("7z covering audit received a non-7z IR"));
+    }
+    let sevenz = ir
+        .sevenz_evidence()
+        .ok_or_else(|| fail("7z IR has no container evidence"))?;
+
+    let mut signature_header = [0_u8; 32];
+    snapshot
+        .read_exact_at(0, &mut signature_header)
+        .map_err(|_| fail("7z signature header is outside the snapshot"))?;
+    if signature_header[..6] != crate::sevenz::SIGNATURE
+        || signature_header[6] != 0
+        || signature_header[7] != sevenz.version_minor
+    {
+        return Err(fail("7z signature header disagrees with the evidence"));
+    }
+    let declared_start_crc = u32::from_le_bytes([
+        signature_header[8],
+        signature_header[9],
+        signature_header[10],
+        signature_header[11],
+    ]);
+    if crc32(&signature_header[12..32]) != declared_start_crc {
+        return Err(fail("7z start-header CRC32 disagrees with its bytes"));
+    }
+    let next_offset = u64::from_le_bytes(signature_header[12..20].try_into().expect("8 bytes"));
+    let next_size = u64::from_le_bytes(signature_header[20..28].try_into().expect("8 bytes"));
+    let next_crc = u32::from_le_bytes(signature_header[28..32].try_into().expect("4 bytes"));
+    if sevenz.next_header
+        != (crate::ir::ByteRange {
+            offset: 32_u64
+                .checked_add(next_offset)
+                .ok_or_else(|| fail("7z next-header offset overflowed u64"))?,
+            len: next_size,
+        })
+        || sevenz.next_header_crc != next_crc
+    {
+        return Err(fail("7z next-header geometry disagrees with the evidence"));
+    }
+    let header_end = checked_range_end(sevenz.next_header, "7z next-header overflow")?;
+    if header_end != snapshot.len() {
+        return Err(fail("7z next header does not end at the end of the source"));
+    }
+    let header_bytes = snapshot
+        .read_vec(sevenz.next_header.offset, sevenz.next_header.len)
+        .map_err(|_| fail("7z next header is outside the snapshot"))?;
+    if crc32(&header_bytes) != next_crc {
+        return Err(fail("7z next-header CRC32 disagrees with its bytes"));
+    }
+    if header_bytes.first() != Some(&0x01) {
+        return Err(fail("7z next header is not a raw kHeader"));
+    }
+
+    if sevenz.pack_region.offset != 32
+        || checked_range_end(sevenz.pack_region, "7z pack-region overflow")?
+            != sevenz.next_header.offset
+    {
+        return Err(fail("7z pack region does not tile the dense covering"));
+    }
+    let mut cursor = 32_u64;
+    for folder in &sevenz.folders {
+        if folder.pack_stream.offset != cursor {
+            return Err(fail("7z pack streams are not contiguous"));
+        }
+        if folder.unpack_size != folder.pack_stream.len {
+            return Err(fail(
+                "a Copy folder's unpack size disagrees with its pack size",
+            ));
+        }
+        cursor = checked_range_end(folder.pack_stream, "7z pack-stream overflow")?;
+        let mut sub_cursor = folder.pack_stream.offset;
+        for substream in &folder.substreams {
+            if substream.payload.offset != sub_cursor || substream.payload.len == 0 {
+                return Err(fail("7z substreams do not exactly tile their folder"));
+            }
+            sub_cursor = checked_range_end(substream.payload, "7z substream overflow")?;
+            // Substream payload CRCs bind through the member payload plans, so
+            // a lie is attributed precisely at member verification rather than
+            // conflated with the structural covering.
+        }
+        if sub_cursor != cursor {
+            return Err(fail("7z substreams do not exactly tile their folder"));
+        }
+        let folder_bytes = snapshot
+            .read_vec(folder.pack_stream.offset, folder.pack_stream.len)
+            .map_err(|_| fail("a 7z pack stream is outside the snapshot"))?;
+        if let Some(declared) = folder.pack_crc {
+            if crc32(&folder_bytes) != declared {
+                return Err(fail("a 7z pack-stream CRC32 disagrees with its bytes"));
+            }
+        }
+        if let Some(declared) = folder.folder_crc {
+            if crc32(&folder_bytes) != declared {
+                return Err(fail("a 7z folder CRC32 disagrees with its bytes"));
+            }
+        }
+    }
+    if cursor != sevenz.next_header.offset {
+        return Err(fail(
+            "7z pack streams do not end where the next header begins",
+        ));
+    }
+
+    // Every member's payload must be one recorded substream (or the canonical
+    // zero-length range at the pack end), mapped one to one and in order.
+    let mut substreams = sevenz
+        .folders
+        .iter()
+        .flat_map(|folder| folder.substreams.iter());
+    let empty_offset = sevenz.next_header.offset;
+    for member in ir.members() {
+        let evidence = match &member.evidence {
+            crate::ir::MemberEvidence::SevenZ(evidence) => evidence,
+            _ => return Err(fail("7z IR carries a non-7z member evidence variant")),
+        };
+        if evidence.payload.len == 0 {
+            if evidence.payload.offset != empty_offset || evidence.declared_crc.is_some() {
+                return Err(fail("a 7z empty member's payload range is not canonical"));
+            }
+            continue;
+        }
+        let substream = substreams
+            .next()
+            .ok_or_else(|| fail("7z members exceed the recorded substreams"))?;
+        if substream.payload != evidence.payload
+            || substream.declared_crc != evidence.declared_crc
+            || member.declared_uncomp_size != evidence.payload.len
+        {
+            return Err(fail("a 7z member disagrees with its recorded substream"));
+        }
+    }
+    if substreams.next().is_some() {
+        return Err(fail("7z substreams exceed the recorded members"));
+    }
+    Ok(())
+}
+
 /// Independently replay the restricted bzip2 container grammar over the
 /// original snapshot without invoking a decompressor: the fixed prefix, the
 /// unique-shift footer recovery, the full block-magic scan, per-block CRC and
@@ -3331,7 +3484,10 @@ mod tests {
             ArchiveEvidence::TarZstd(evidence) => &mut evidence.tar,
             ArchiveEvidence::TarXz(evidence) => &mut evidence.tar,
             ArchiveEvidence::TarBzip2(evidence) => &mut evidence.tar,
-            ArchiveEvidence::Zip(_) | ArchiveEvidence::Zip64(_) | ArchiveEvidence::TarGzip(_) => {
+            ArchiveEvidence::Zip(_)
+            | ArchiveEvidence::Zip64(_)
+            | ArchiveEvidence::TarGzip(_)
+            | ArchiveEvidence::SevenZ(_) => {
                 panic!("expected TAR evidence")
             }
         }
@@ -3349,7 +3505,8 @@ mod tests {
             | ArchiveEvidence::TarGzipGnuLongName(_)
             | ArchiveEvidence::TarZstd(_)
             | ArchiveEvidence::TarXz(_)
-            | ArchiveEvidence::TarBzip2(_) => {
+            | ArchiveEvidence::TarBzip2(_)
+            | ArchiveEvidence::SevenZ(_) => {
                 panic!("expected ZIP evidence")
             }
         }
@@ -3367,7 +3524,8 @@ mod tests {
             | ArchiveEvidence::TarGzipGnuLongName(_)
             | ArchiveEvidence::TarZstd(_)
             | ArchiveEvidence::TarXz(_)
-            | ArchiveEvidence::TarBzip2(_) => {
+            | ArchiveEvidence::TarBzip2(_)
+            | ArchiveEvidence::SevenZ(_) => {
                 panic!("expected ZIP64 evidence")
             }
         }
@@ -3384,7 +3542,10 @@ mod tests {
             MemberEvidence::TarZstd(evidence)
             | MemberEvidence::TarXz(evidence)
             | MemberEvidence::TarBzip2(evidence) => evidence,
-            MemberEvidence::Zip(_) | MemberEvidence::Zip64(_) | MemberEvidence::TarGzip(_) => {
+            MemberEvidence::Zip(_)
+            | MemberEvidence::Zip64(_)
+            | MemberEvidence::TarGzip(_)
+            | MemberEvidence::SevenZ(_) => {
                 panic!("expected TAR member evidence")
             }
         }
@@ -3402,7 +3563,8 @@ mod tests {
             | ArchiveEvidence::TarGzipGnuLongName(_)
             | ArchiveEvidence::TarZstd(_)
             | ArchiveEvidence::TarXz(_)
-            | ArchiveEvidence::TarBzip2(_) => panic!("expected PAX archive evidence"),
+            | ArchiveEvidence::TarBzip2(_)
+            | ArchiveEvidence::SevenZ(_) => panic!("expected PAX archive evidence"),
         }
     }
 
@@ -3417,7 +3579,8 @@ mod tests {
             | MemberEvidence::TarGzipGnuLongName(_)
             | MemberEvidence::TarZstd(_)
             | MemberEvidence::TarXz(_)
-            | MemberEvidence::TarBzip2(_) => panic!("expected PAX member evidence"),
+            | MemberEvidence::TarBzip2(_)
+            | MemberEvidence::SevenZ(_) => panic!("expected PAX member evidence"),
         }
     }
 
@@ -3433,7 +3596,8 @@ mod tests {
             | ArchiveEvidence::TarGzipPax(_)
             | ArchiveEvidence::TarZstd(_)
             | ArchiveEvidence::TarXz(_)
-            | ArchiveEvidence::TarBzip2(_) => panic!("expected GNU long-name archive evidence"),
+            | ArchiveEvidence::TarBzip2(_)
+            | ArchiveEvidence::SevenZ(_) => panic!("expected GNU long-name archive evidence"),
         }
     }
 
@@ -3452,7 +3616,8 @@ mod tests {
             | MemberEvidence::TarGzipPax(_)
             | MemberEvidence::TarZstd(_)
             | MemberEvidence::TarXz(_)
-            | MemberEvidence::TarBzip2(_) => panic!("expected GNU long-name member evidence"),
+            | MemberEvidence::TarBzip2(_)
+            | MemberEvidence::SevenZ(_) => panic!("expected GNU long-name member evidence"),
         }
     }
 
@@ -3468,7 +3633,8 @@ mod tests {
             | MemberEvidence::TarGzipGnuLongName(_)
             | MemberEvidence::TarZstd(_)
             | MemberEvidence::TarXz(_)
-            | MemberEvidence::TarBzip2(_) => {
+            | MemberEvidence::TarBzip2(_)
+            | MemberEvidence::SevenZ(_) => {
                 panic!("expected ZIP member evidence")
             }
         }
@@ -3486,7 +3652,8 @@ mod tests {
             | MemberEvidence::TarGzipGnuLongName(_)
             | MemberEvidence::TarZstd(_)
             | MemberEvidence::TarXz(_)
-            | MemberEvidence::TarBzip2(_) => {
+            | MemberEvidence::TarBzip2(_)
+            | MemberEvidence::SevenZ(_) => {
                 panic!("expected ZIP64 member evidence")
             }
         }

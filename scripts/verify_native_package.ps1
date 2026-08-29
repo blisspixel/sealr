@@ -1188,6 +1188,100 @@ try {
         throw 'packaged bzip2-wrapped ustar materialization did not preserve the effective admitted tree'
     }
 
+    # 7-Zip 26.02 `7z a -m0=Copy -mhc=off` output holding exactly
+    # mission/plan.txt with `verify twice, decode once`: one Copy folder and
+    # a raw next header.
+    $sevenzHex = '377abcaf271c000435c12a4919000000000000005a00000000000000eaaeb7e6766572696679' +
+        '2074776963652c206465636f6465206f6e63650104060001091900070b01000101000c1900080a0103b4' +
+        '4165000005011123006d0069007300730069006f006e002f0070006c0061006e002e0074007800740000' +
+        '001900140a01000000d4bda237dd0115060100200000000000'
+    $sevenzBytes = [System.Convert]::FromHexString($sevenzHex)
+    if ($sevenzBytes.Length -ne 147) {
+        throw "native-package 7z Copy fixture length changed: $($sevenzBytes.Length)"
+    }
+    $sevenzArchivePath = Join-Path $temporaryRoot 'mission.7z'
+    [System.IO.File]::WriteAllBytes($sevenzArchivePath, $sevenzBytes)
+    $sevenzSourceHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $sevenzArchivePath).Hash.ToLowerInvariant()
+    if ($sevenzSourceHash -cne 'ebefe20d0dfd944e29a0987e4b182c80595e2a7ec4d1efe3217123e22259c289') {
+        throw "native-package 7z Copy fixture identity changed: $sevenzSourceHash"
+    }
+
+    $sevenzInspect = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', '7z-copy', $sevenzArchivePath) `
+        -Role 'packaged 7z Copy inspect'
+    if ($sevenzInspect.ExitCode -ne 0) {
+        throw "packaged 7z Copy inspect failed: $($sevenzInspect.Stderr)"
+    }
+    $sevenzView = $sevenzInspect.Stdout | ConvertFrom-Json
+    $sevenzReceipt = $sevenzInspect.Stderr | ConvertFrom-Json
+    if ($sevenzView.schema -cne 'sealr.view.v1' -or
+        $sevenzReceipt.schema -cne 'sealr.receipt.v2' -or
+        $sevenzView.source.magic -cne '7z' -or
+        $sevenzView.interpretation.status -cne 'interpreted' -or
+        $sevenzView.admission.status -cne 'admitted' -or
+        $sevenzView.verification.status -cne 'complete' -or
+        $sevenzView.effect.status -cne 'not-requested' -or
+        @($sevenzView.members).Count -ne 1 -or
+        $sevenzView.members[0].path -cne 'mission/plan.txt' -or
+        $sevenzView.members[0].method -cne 'copy' -or
+        $sevenzView.members[0].uncomp_bytes -ne 25 -or
+        $sevenzReceipt.policy.id -cne 'sealr:policy/default/v11' -or
+        $sevenzReceipt.policy.digest.sha256 -cne 'afa0aeb04ceca00706b31dfd250216a87f2af0ada6e98d3815873de0d15172fc' -or
+        $sevenzReceipt.identities.interpretation.id -cne 'sealr.profile.7z.copy-portable.v1' -or
+        $sevenzReceipt.identities.interpretation.digest.sha256 -cne '7b6604ad59b5aecf9ebdfa42d7d48d3df663813798992741dd6d74ea56f60b75' -or
+        $sevenzReceipt.identities.layout.sealrTreeV12 -cne 'df4c1271279959b9fbd90e56078913779e134f52a69c52d959878ad76bff9a9d' -or
+        $sevenzReceipt.identities.content.sealrTreeV1 -cne 'bc8f6d6f7870aeab647cff08db25471a729bd2a41e095d49d6254c49afc34278') {
+        throw 'packaged 7z Copy inspect returned unexpected semantic evidence'
+    }
+
+    $sevenzDefault = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @($sevenzArchivePath) `
+        -Role 'packaged 7z Copy compatibility-default refusal'
+    $sevenzDefaultView = $sevenzDefault.Stdout | ConvertFrom-Json
+    $sevenzDefaultReceipt = $sevenzDefault.Stderr | ConvertFrom-Json
+    if ($sevenzDefault.ExitCode -ne 2 -or
+        $sevenzDefaultView.verdict -cne 'rejected' -or
+        $sevenzDefaultView.source.magic -cne 'unknown' -or
+        $sevenzDefaultView.policy.id -cne 'sealr:policy/default/v1' -or
+        $sevenzDefaultView.interpretation.status -cne 'unsupported' -or
+        $sevenzDefaultView.admission.status -cne 'not-evaluated' -or
+        @($sevenzDefaultView.members).Count -ne 0 -or
+        $sevenzDefaultReceipt.identities.interpretation.id -cne 'sealr.profile.zip.strict-ascii.v1' -or
+        $sevenzDefaultReceipt.identities.layout.status -cne 'unavailable' -or
+        $sevenzDefaultReceipt.identities.content.status -cne 'unavailable') {
+        throw 'packaged compatibility default unexpectedly recognized the 7z container'
+    }
+
+    $sevenzDestination = Join-Path $temporaryRoot 'sevenz-copy-output'
+    $sevenzMaterialize = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @('--format', '7z-copy', $sevenzArchivePath, '--dest', $sevenzDestination) `
+        -Role 'packaged 7z Copy materialization'
+    if ($sevenzMaterialize.ExitCode -ne 0) {
+        throw "packaged 7z Copy materialization failed: $($sevenzMaterialize.Stderr)"
+    }
+    $sevenzMaterializedView = $sevenzMaterialize.Stdout | ConvertFrom-Json
+    $sevenzMaterializedReceipt = $sevenzMaterialize.Stderr | ConvertFrom-Json
+    $sevenzFiles = @(Get-ChildItem -LiteralPath $sevenzDestination -Recurse -Force -File | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($sevenzDestination, $_.FullName).Replace('\', '/')
+        })
+    $sevenzDirectories = @(Get-ChildItem -LiteralPath $sevenzDestination -Recurse -Force -Directory | ForEach-Object {
+            [System.IO.Path]::GetRelativePath($sevenzDestination, $_.FullName).Replace('\', '/')
+        })
+    $leakedStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+    if (-not $sevenzMaterializedView.wrote -or
+        $sevenzMaterializedView.effect.status -cne 'committed' -or
+        $sevenzMaterializedReceipt.identities.layout.sealrTreeV12 -cne $sevenzReceipt.identities.layout.sealrTreeV12 -or
+        $sevenzMaterializedReceipt.identities.content.sealrTreeV1 -cne $sevenzReceipt.identities.content.sealrTreeV1 -or
+        $sevenzFiles.Count -ne 1 -or $sevenzFiles[0] -cne 'mission/plan.txt' -or
+        $sevenzDirectories.Count -ne 1 -or $sevenzDirectories[0] -cne 'mission' -or
+        [System.IO.File]::ReadAllText((Join-Path $sevenzDestination 'mission/plan.txt')) -cne 'verify twice, decode once' -or
+        $leakedStages.Count -ne 0) {
+        throw 'packaged 7z Copy materialization did not preserve the effective admitted tree'
+    }
+
     if ($TargetTriple -ne $windowsTarget) {
         foreach ($relative in $expectedFiles) {
             $expectedMode = if ($relative -in @($binaryName, 'libexec/sealr/sealr-worker')) { '755' } else { '644' }
@@ -1379,6 +1473,25 @@ try {
             (Test-Path -LiteralPath $bzip2WorkerDestination) -or
             $workerStages.Count -ne 0) {
             throw 'packaged bzip2-wrapped ustar worker selection did not fail closed without fallback'
+        }
+        $sevenzWorkerDestination = Join-Path $temporaryRoot 'sevenz-copy-worker-output'
+        $sevenzWorker = Invoke-Captured `
+            -FilePath $packagedCli `
+            -Arguments @(
+                '--format', '7z-copy',
+                '--worker-manifest', $manifestPath,
+                $sevenzArchivePath,
+                '--dest', $sevenzWorkerDestination
+            ) `
+            -Role 'packaged 7z Copy worker refusal'
+        $workerStages = @(Get-ChildItem -LiteralPath $temporaryRoot -Force -Directory -Filter '.sealr-stage-*')
+        if ($sevenzWorker.ExitCode -ne 1 -or
+            -not [string]::IsNullOrEmpty($sevenzWorker.Stdout) -or
+            $sevenzWorker.Stderr -notmatch 'isolation unavailable' -or
+            $sevenzWorker.Stderr -notmatch '7z container' -or
+            (Test-Path -LiteralPath $sevenzWorkerDestination) -or
+            $workerStages.Count -ne 0) {
+            throw 'packaged 7z Copy worker selection did not fail closed without fallback'
         }
         $elfHeader = readelf --file-header $helper | Out-String
         if ($LASTEXITCODE -ne 0 -or

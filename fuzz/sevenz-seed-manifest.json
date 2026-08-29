@@ -1,0 +1,45 @@
+{
+  "schema": "sealr.sevenz-copy-fuzz-seeds.v1",
+  "target": "sevenz_copy_portable_v1",
+  "toolchain": "nightly-2026-08-01",
+  "cargoFuzzVersion": "0.13.2",
+  "libfuzzerSysVersion": "0.4.13",
+  "sanitizer": "address",
+  "bounds": {
+    "maxInputBytes": 262144,
+    "maxDerivedArchiveBytes": 131072,
+    "maxMetadataBytes": 32768,
+    "maxFiles": 64,
+    "maxMemberBytes": 32768,
+    "maxTotalBytes": 65536,
+    "maxPathDepth": 16,
+    "maxRatio": 32,
+    "maxTotalSeconds": 600,
+    "perInputTimeoutSeconds": 5,
+    "rssLimitMiB": 1024,
+    "jobs": 1
+  },
+  "failureArtifact": {
+    "directoryName": "sealr-sevenz-copy-fuzz-artifacts",
+    "uploadOn": "failure",
+    "retentionDays": 7
+  },
+  "dictionary": {"path": "fuzz/dictionaries/sevenz_copy_portable_v1_dictionary", "bytes": 484, "sha256": "c7cfbd9a8cabb7c2c77e79f0a2b9d6434ff89296127617a6429f0957c7149c10"},
+  "targetSource": {"path": "fuzz/fuzz_targets/sevenz_copy_portable_v1.rs", "bytes": 2736, "sha256": "74d2b3513566584d51e7c6c683f78e7946ef237a13c1cbd643c9ca1673e7227a"},
+  "generatorSource": {"path": "fuzz/generate_sevenz_fuzz_seeds.ps1", "bytes": 7335, "sha256": "ab6bdaf54596291b1fc139d01cfcc9ba2498695213e9a657d27c698123625db5"},
+  "generator": "fuzz/generate_sevenz_fuzz_seeds.ps1",
+  "seeds": [
+    {"path":"fuzz/corpus/sevenz_copy_portable_v1/invalid-magic","bytes":147,"sha256":"9d3a37c41ae7c1553d9451fac30d8472f376cdf53545b9917c497211f906d3fd","generated":true},
+    {"path":"fuzz/corpus/sevenz_copy_portable_v1/invalid-next-crc","bytes":147,"sha256":"d3e8e5228cb422353469a74fdcd898220cbe7ea98d5e37b168596fb76d9ab3b8","generated":true},
+    {"path":"fuzz/corpus/sevenz_copy_portable_v1/invalid-payload-crc-lie","bytes":147,"sha256":"a8c1a07d26cab07e79ed0f21c6c4d567ba4363fdaab8a3d2bc97b0a9d7c38d5e","generated":true},
+    {"path":"fuzz/corpus/sevenz_copy_portable_v1/invalid-start-crc","bytes":147,"sha256":"e8a94aef00398dae21af1fbd1579ce6a97f1c0a22f7f6e690be0b5890e4e4391","generated":true},
+    {"path":"fuzz/corpus/sevenz_copy_portable_v1/invalid-trailing-byte","bytes":148,"sha256":"698bc639a9ba52e4a2b22309063d5c29032ac44fc995fce52739dca361a74a2f","generated":true},
+    {"path":"fuzz/corpus/sevenz_copy_portable_v1/invalid-truncated","bytes":20,"sha256":"32742f1c483c8bc421f89b771dbf25e2b2571965224976caab4ecbde59ee8263","generated":true},
+    {"path":"fuzz/corpus/sevenz_copy_portable_v1/unsupported-encoded-header","bytes":185,"sha256":"8be4c9434de2f7a0d806d28588f79c07b5107207ba491305ce6029b9405d1671","generated":true},
+    {"path":"fuzz/corpus/sevenz_copy_portable_v1/unsupported-major-version","bytes":147,"sha256":"c0d3789b48be242180db5413ef2df102616103d55fc4d0f67e30ba7ca21d024a","generated":true},
+    {"path":"fuzz/corpus/sevenz_copy_portable_v1/unsupported-minor-version","bytes":147,"sha256":"2a506b6d6554b60c946d4c701a90c1974d8a3196be141182f7a7a0651e1db350","generated":true},
+    {"path":"fuzz/corpus/sevenz_copy_portable_v1/valid-cli-dir-and-empty-matrix","bytes":191,"sha256":"6b3130dbd159c99cd5ad537b01162800ff7b52035321686adf1f9daa3bd66794","generated":true},
+    {"path":"fuzz/corpus/sevenz_copy_portable_v1/valid-cli-fileonly","bytes":147,"sha256":"ebefe20d0dfd944e29a0987e4b182c80595e2a7ec4d1efe3217123e22259c289","generated":true},
+    {"path":"fuzz/corpus/sevenz_copy_portable_v1/valid-cli-multi-two-folders","bytes":338,"sha256":"d867087a94e11ef3cefb0e61e31ea0431e4e0622f8e2a49829819f7b77d5a67c","generated":true}
+  ]
+}
