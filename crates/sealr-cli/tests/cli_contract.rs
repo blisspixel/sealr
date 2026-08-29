@@ -423,7 +423,7 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert!(help.stderr.is_empty());
     let help_text = String::from_utf8(help.stdout).expect("help should be UTF-8");
     assert!(help_text.contains("Usage: sealr"));
-    assert!(help_text.contains("<ARCHIVE>"));
+    assert!(help_text.contains("[ARCHIVE]"));
     assert!(help_text.contains("--dest <DEST>"));
     assert!(help_text.contains("--format <FORMAT>"));
     assert!(help_text.contains("zip64"));
@@ -440,6 +440,8 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert!(help_text.contains("--worker-manifest <ABSOLUTE_PATH>"));
     assert!(help_text.contains("--view <NEW_FILE>"));
     assert!(help_text.contains("--receipt <NEW_FILE>"));
+    assert!(help_text.contains("inspect"));
+    assert!(help_text.contains("materialize"));
     assert!(help_text.contains("--version"));
 
     let version = sealr_text(&["--version"]);
@@ -1686,5 +1688,100 @@ fn shared_view_and_receipt_path_is_refused() {
     assert!(
         !shared.exists(),
         "a refused run must leave the filesystem unchanged"
+    );
+}
+
+#[test]
+fn the_inspect_subcommand_is_byte_identical_to_the_compatibility_form() {
+    let (_run, fixtures) = fixture_set("subcommand-inspect");
+
+    let bare = sealr(&[&fixtures.allowed]);
+    let subcommand = sealr(&[Path::new("inspect"), &fixtures.allowed]);
+
+    assert_eq!(subcommand.status.code(), Some(0));
+    assert_eq!(subcommand.stdout, bare.stdout, "view streams must agree");
+    assert_eq!(subcommand.stderr, bare.stderr, "receipt streams must agree");
+}
+
+#[test]
+fn the_materialize_subcommand_publishes_the_same_tree_as_the_dest_flag() {
+    let (run, fixtures) = fixture_set("subcommand-materialize");
+    let destination = run.path.join("materialized");
+
+    let output = sealr(&[
+        Path::new("materialize"),
+        &fixtures.allowed,
+        Path::new("--dest"),
+        &destination,
+    ]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let view = json(&output.stdout, "stdout");
+    let receipt = json(&output.stderr, "stderr");
+    assert_eq!(view["verdict"], "allowed");
+    assert_eq!(view["wrote"], true);
+    assert_eq!(receipt["effect"]["status"], "committed");
+    assert!(destination
+        .join(walkthrough_fixtures::CONFIG_PATH)
+        .is_file());
+    assert!(destination.join(walkthrough_fixtures::HELLO_PATH).is_file());
+}
+
+#[test]
+fn the_inspect_subcommand_refuses_a_destination() {
+    let (run, fixtures) = fixture_set("subcommand-inspect-dest");
+    let destination = run.path.join("blocked");
+
+    let output = sealr(&[
+        Path::new("inspect"),
+        &fixtures.allowed,
+        Path::new("--dest"),
+        &destination,
+    ]);
+
+    assert_eq!(output.status.code(), Some(2), "clap usage error expected");
+    assert!(output.stdout.is_empty(), "no view JSON on a usage error");
+    assert!(!destination.exists());
+}
+
+#[test]
+fn the_materialize_subcommand_requires_a_destination() {
+    let (_run, fixtures) = fixture_set("subcommand-materialize-nodest");
+    let output = sealr(&[Path::new("materialize"), &fixtures.allowed]);
+    assert_eq!(output.status.code(), Some(2), "clap usage error expected");
+    assert!(output.stdout.is_empty());
+}
+
+#[test]
+fn top_level_arguments_conflict_with_subcommands() {
+    let (run, fixtures) = fixture_set("subcommand-conflict");
+    let destination = run.path.join("blocked");
+
+    let output = sealr(&[
+        Path::new("--dest"),
+        &destination,
+        Path::new("inspect"),
+        &fixtures.allowed,
+    ]);
+
+    assert_eq!(output.status.code(), Some(2), "clap usage error expected");
+    assert!(output.stdout.is_empty());
+    assert!(!destination.exists());
+}
+
+#[test]
+fn a_missing_archive_and_subcommand_is_a_usage_error() {
+    let output = sealr_text(&[]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        message.contains("an archive path or a subcommand is required"),
+        "unexpected diagnostic: {message}"
     );
 }

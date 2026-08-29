@@ -19,6 +19,15 @@ cargo run --locked -p sealr-cli -- path/to/archive.zip --view evidence.view.json
 
 `--view` and `--receipt` each name a file that must not yet exist; the redirected stream stays silent and the bytes written are identical to the stream output. Both destinations are claimed before any evaluation or materialization effect, an existing file is never overwritten, and a refused claim exits `1` leaving the filesystem unchanged. Semantic exit codes are unaffected by redirection.
 
+The same two operations are also explicit subcommands. Each subcommand resolves to the identical pipeline as the flag form, so streams, files, findings, and exit codes are byte-for-byte the same:
+
+```text
+cargo run --locked -p sealr-cli -- inspect path/to/archive.zip
+cargo run --locked -p sealr-cli -- materialize path/to/archive.zip --dest ./out
+```
+
+`inspect` accepts no `--dest`; `materialize` requires one. Top-level flags cannot be mixed with a subcommand, and the compatibility form (`sealr <ARCHIVE> [--dest ...]`) remains unchanged. One consequence of subcommand parsing: an archive file literally named `inspect` or `materialize` in the working directory must be passed with a path prefix (`./inspect`).
+
 Portable raw ustar is selected explicitly and requires no filename-extension inference:
 
 ```text
@@ -213,10 +222,16 @@ Source open and read failures currently become a structured rejection and theref
 ## Current CLI surface
 
 ```text
-Usage: sealr [OPTIONS] <ARCHIVE>
+Usage: sealr [OPTIONS] [ARCHIVE]
+       sealr <COMMAND>
+
+Commands:
+  inspect      Interpret and verify without writing any member file
+  materialize  Interpret, verify, and publish the tree into a new destination
+  help         Print this message or the help of the given subcommand(s)
 
 Arguments:
-  <ARCHIVE>  Archive file
+  [ARCHIVE]  Archive file
 
 Options:
       --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar, tar-gzip-ustar, tar-pax, tar-gnu-longname, tar-gzip-pax, tar-gzip-gnu-longname, tar-zstd-ustar, tar-xz-ustar, tar-bzip2-ustar, 7z-copy]
