@@ -63,6 +63,7 @@
     "src/xz.rs",
     "src/zip.rs",
     "src/zstd.rs",
+    "tests/api_surface.rs",
     "tests/bounded_path_memory.rs",
     "tests/evidence_encoding.rs",
     "tests/conformance/identity-v1.json",
