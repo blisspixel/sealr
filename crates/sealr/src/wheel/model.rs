@@ -276,6 +276,24 @@ pub struct RealizedOutput {
     pub size: u64,
 }
 
+impl RealizedOutput {
+    /// The only way an external consumer can report one realized file, since
+    /// the struct is non-exhaustive.
+    pub fn new(
+        scheme: InstallScheme,
+        relative_path: impl Into<String>,
+        sha256: impl Into<String>,
+        size: u64,
+    ) -> Self {
+        Self {
+            scheme,
+            relative_path: relative_path.into(),
+            sha256: sha256.into(),
+            size,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, thiserror::Error)]
 #[error("{code}: {detail}")]
 #[serde(deny_unknown_fields)]
