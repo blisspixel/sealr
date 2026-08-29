@@ -17,6 +17,7 @@
     "examples/wheel_admission.rs",
     "src/apply.rs",
     "src/bzip2.rs",
+    "src/canonical_json.rs",
     "src/covering.rs",
     "src/findings.rs",
     "src/gzip.rs",
