@@ -344,6 +344,21 @@ fn read_semantic(
         })
 }
 
+/// The exact retained-prefix length of the `script-prefix-classification.v1`
+/// rule. Launcher rewriting is a first-line property of at most twelve bytes;
+/// 1024 gives every conceivable first-line rule headroom while keeping script
+/// classification memory independent of script size.
+const SCRIPT_PREFIX_BYTES: u64 = 1024;
+
+fn read_script_prefix(archive: &VerifiedArchive, path: &str) -> Result<Vec<u8>, EvaluationFailure> {
+    archive
+        .read_member_prefix(path, SCRIPT_PREFIX_BYTES as usize)
+        .map_err(|error| EvaluationFailure::Infrastructure {
+            kind: member_read_kind(error.kind()),
+            detail: format!("verified prefix read of {path:?} failed: {error}"),
+        })
+}
+
 fn bind_record(
     archive: &VerifiedArchive,
     record_path: &str,
@@ -590,7 +605,7 @@ fn build_plan(
                 .actual_uncomp_size
                 .ok_or_else(|| internal_failure("verified script lacks size evidence"))?;
             inspected_script_bytes = inspected_script_bytes
-                .checked_add(size)
+                .checked_add(size.min(SCRIPT_PREFIX_BYTES))
                 .ok_or_else(|| EvaluationFailure::Denied(limit_overflow()))?;
             if inspected_script_bytes > limits.max_plan_inspection_bytes {
                 return denied(
@@ -602,8 +617,8 @@ fn build_plan(
                     .on(&member.canonical_path),
                 );
             }
-            let bytes = read_semantic(archive, &member.canonical_path, limits.max_script_bytes)?;
-            if has_python_shebang(&bytes) {
+            let prefix = read_script_prefix(archive, &member.canonical_path)?;
+            if has_python_shebang(&prefix) {
                 InstallTransform::RewritePythonShebang
             } else {
                 InstallTransform::Copy
@@ -1521,6 +1536,186 @@ mod tests {
                 .unwrap_err()
                 .code,
             "wheel.realization-copy-mismatch"
+        );
+    }
+
+    fn incompressible_bytes(len: usize, mut seed: u64) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(len);
+        while bytes.len() < len {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            bytes.extend_from_slice(&seed.to_le_bytes());
+        }
+        bytes.truncate(len);
+        bytes
+    }
+
+    #[test]
+    fn multi_megabyte_native_scripts_admit_with_a_verbatim_copy_plan() {
+        let payload = incompressible_bytes(20 * 1024 * 1024, 0x5ea1);
+        let expected_sha: String = Sha256::digest(&payload)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        let bytes = build_wheel(
+            vec![("demo-1.0.data/scripts/uv".into(), payload)],
+            |record| record,
+        );
+        let WheelEvaluation::Admitted { plan, .. } = evaluate_wheel(
+            "demo-1.0-py3-none-any.whl",
+            &verified(&bytes),
+            WheelLimits::default(),
+        ) else {
+            panic!("a large native script must admit under prefix classification");
+        };
+        let script = plan
+            .entries()
+            .iter()
+            .find(|entry| entry.relative_path == "uv")
+            .expect("script entry");
+        assert_eq!(script.transform, InstallTransform::Copy);
+        assert_eq!(script.sha256.as_deref(), Some(expected_sha.as_str()));
+        assert_eq!(script.size, Some(20 * 1024 * 1024));
+    }
+
+    #[test]
+    fn a_two_megabyte_script_is_no_longer_an_infrastructure_failure() {
+        let bytes = build_wheel(
+            vec![(
+                "demo-1.0.data/scripts/tool".into(),
+                incompressible_bytes(2 * 1024 * 1024, 0x7001),
+            )],
+            |record| record,
+        );
+        let WheelEvaluation::Admitted { plan, .. } = evaluate_wheel(
+            "demo-1.0-py3-none-any.whl",
+            &verified(&bytes),
+            WheelLimits::default(),
+        ) else {
+            panic!("the former one-to-sixteen-mebibyte seam must classify uniformly");
+        };
+        assert_eq!(
+            plan.entries()
+                .iter()
+                .find(|entry| entry.relative_path == "tool")
+                .expect("script entry")
+                .transform,
+            InstallTransform::Copy
+        );
+    }
+
+    #[test]
+    fn a_multi_megabyte_python_shebang_script_still_rewrites() {
+        let mut payload = b"#!python
+"
+        .to_vec();
+        payload.extend_from_slice(&incompressible_bytes(17 * 1024 * 1024, 0x9e8a));
+        let bytes = build_wheel(
+            vec![("demo-1.0.data/scripts/launcher".into(), payload)],
+            |record| record,
+        );
+        let WheelEvaluation::Admitted { plan, .. } = evaluate_wheel(
+            "demo-1.0-py3-none-any.whl",
+            &verified(&bytes),
+            WheelLimits::default(),
+        ) else {
+            panic!("a launcher script must admit at any size");
+        };
+        assert_eq!(
+            plan.entries()
+                .iter()
+                .find(|entry| entry.relative_path == "launcher")
+                .expect("script entry")
+                .transform,
+            InstallTransform::RewritePythonShebang
+        );
+    }
+
+    #[test]
+    fn a_shebang_prefix_without_its_newline_is_a_verbatim_copy() {
+        let mut payload = b"#!python".to_vec();
+        payload.extend_from_slice(&[b' '; 2048]);
+        payload.push(b'\n');
+        let bytes = build_wheel(
+            vec![("demo-1.0.data/scripts/oddity".into(), payload)],
+            |record| record,
+        );
+        let WheelEvaluation::Admitted { plan, .. } = evaluate_wheel(
+            "demo-1.0-py3-none-any.whl",
+            &verified(&bytes),
+            WheelLimits::default(),
+        ) else {
+            panic!("an unmatched first line is copied, not rewritten");
+        };
+        assert_eq!(
+            plan.entries()
+                .iter()
+                .find(|entry| entry.relative_path == "oddity")
+                .expect("script entry")
+                .transform,
+            InstallTransform::Copy
+        );
+    }
+
+    #[test]
+    fn the_prefix_aggregate_cap_stays_live_at_its_exact_boundary() {
+        let bytes = build_wheel(
+            vec![
+                (
+                    "demo-1.0.data/scripts/first".into(),
+                    incompressible_bytes(4096, 0xaaa),
+                ),
+                (
+                    "demo-1.0.data/scripts/second".into(),
+                    incompressible_bytes(4096, 0xbbb),
+                ),
+            ],
+            |record| record,
+        );
+        let archive = verified(&bytes);
+        let mut limits = WheelLimits {
+            max_plan_inspection_bytes: 2048,
+            ..WheelLimits::default()
+        };
+        assert!(matches!(
+            evaluate_wheel("demo-1.0-py3-none-any.whl", &archive, limits),
+            WheelEvaluation::Admitted { .. }
+        ));
+        limits.max_plan_inspection_bytes = 2047;
+        assert_eq!(
+            finding_code(&evaluate_wheel(
+                "demo-1.0-py3-none-any.whl",
+                &archive,
+                limits
+            )),
+            "wheel.script-aggregate-limit"
+        );
+    }
+
+    #[test]
+    fn small_scripts_charge_their_exact_size_against_the_aggregate() {
+        let bytes = build_wheel(
+            vec![("demo-1.0.data/scripts/tiny".into(), b"native".to_vec())],
+            |record| record,
+        );
+        let archive = verified(&bytes);
+        let mut limits = WheelLimits {
+            max_plan_inspection_bytes: 6,
+            ..WheelLimits::default()
+        };
+        assert!(matches!(
+            evaluate_wheel("demo-1.0-py3-none-any.whl", &archive, limits),
+            WheelEvaluation::Admitted { .. }
+        ));
+        limits.max_plan_inspection_bytes = 5;
+        assert_eq!(
+            finding_code(&evaluate_wheel(
+                "demo-1.0-py3-none-any.whl",
+                &archive,
+                limits
+            )),
+            "wheel.script-aggregate-limit"
         );
     }
 
