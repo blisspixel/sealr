@@ -137,8 +137,8 @@ pub mod __materialization_lifecycle_lab {
 }
 
 pub use apply::{
-    apply, apply_with_options, ApplyOptions, ArchiveSelection, EnvMeta, MemberView, Outcome,
-    PolicyMeta, Receipt, Request, Source, SourceMeta, ToolMeta, Verdict, View,
+    apply, apply_with_options, ApplyOptions, ArchiveSelection, CanonicalEvidence, EnvMeta,
+    MemberView, Outcome, PolicyMeta, Receipt, Request, Source, SourceMeta, ToolMeta, Verdict, View,
 };
 pub use findings::{Finding, FindingCode, Severity};
 pub use identity::{

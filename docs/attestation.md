@@ -43,6 +43,6 @@ The receipt appears byte-for-byte verbatim as the predicate; the subject carries
 ## Honest limitations
 
 - Receipts remain unsigned by sealr itself; `signed: false` inside the receipt stays true. The signature lives in the external envelope.
-- The receipt file bytes are pretty-printed presentation. The digests inside the receipt cover the compact declaration-order encoding, so a verifier of the *predicate content* re-serializes per the evidence encoding contract; the DSSE signature covers the exact file bytes it was given either way. The planned canonical lineage will remove this split.
+- A default-lineage receipt file is pretty-printed presentation: the digests inside it cover the compact declaration-order encoding, so a verifier of the *predicate content* re-serializes per the evidence encoding contract, while the DSSE signature covers the exact file bytes either way. A `sealr.receipt.v3` canonical-lineage file has no such split — its bytes are exactly the digested bytes.
 - The predicate-type URI is repo-anchored and versioned to the receipt schema. A receipt schema revision gets a new URI.
 - Verifying signatures *inside* sealr (for example, admitting only signed policy files) is a separate future decision with its own dependency review; nothing here pre-commits to it.

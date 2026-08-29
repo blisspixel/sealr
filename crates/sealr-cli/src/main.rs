@@ -44,6 +44,10 @@ struct Cli {
     /// format's default policy
     #[arg(long, value_name = "FILE")]
     policy: Option<PathBuf>,
+    /// Write the canonical RFC 8785 evidence lineage to the --view and
+    /// --receipt files, whose bytes are exactly the digested bytes
+    #[arg(long, requires = "view", requires = "receipt")]
+    canonical: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -83,6 +87,10 @@ struct CommonArgs {
     /// format's default policy
     #[arg(long, value_name = "FILE")]
     policy: Option<PathBuf>,
+    /// Write the canonical RFC 8785 evidence lineage to the --view and
+    /// --receipt files, whose bytes are exactly the digested bytes
+    #[arg(long, requires = "view", requires = "receipt")]
+    canonical: bool,
 }
 
 /// One resolved invocation shape shared by the compatibility form and both
@@ -95,6 +103,7 @@ struct ResolvedInvocation {
     view: Option<PathBuf>,
     receipt: Option<PathBuf>,
     policy: Option<PathBuf>,
+    canonical: bool,
 }
 
 fn resolve(cli: Cli) -> Result<ResolvedInvocation, String> {
@@ -107,6 +116,7 @@ fn resolve(cli: Cli) -> Result<ResolvedInvocation, String> {
             view: common.view,
             receipt: common.receipt,
             policy: common.policy,
+            canonical: common.canonical,
         }),
         Some(CliCommand::Materialize { common, dest }) => Ok(ResolvedInvocation {
             archive: common.archive,
@@ -116,6 +126,7 @@ fn resolve(cli: Cli) -> Result<ResolvedInvocation, String> {
             view: common.view,
             receipt: common.receipt,
             policy: common.policy,
+            canonical: common.canonical,
         }),
         None => {
             let Some(archive) = cli.archive else {
@@ -129,6 +140,7 @@ fn resolve(cli: Cli) -> Result<ResolvedInvocation, String> {
                 view: cli.view,
                 receipt: cli.receipt,
                 policy: cli.policy,
+                canonical: cli.canonical,
             })
         }
     }
@@ -282,6 +294,37 @@ fn main() -> ExitCode {
     } else {
         apply_with_options(request, &options)
     };
+    if invocation.canonical {
+        let view_claimed = view_output.expect("clap requires --view with --canonical");
+        let receipt_claimed = receipt_output.expect("clap requires --receipt with --canonical");
+        let evidence = match out.canonical_evidence() {
+            Ok(evidence) => evidence,
+            Err(finding) => {
+                eprintln!(
+                    "sealr: canonical evidence emission failed: {}: {}",
+                    finding.code.as_str(),
+                    finding.detail
+                );
+                view_claimed.discard();
+                receipt_claimed.discard();
+                return ExitCode::FAILURE;
+            }
+        };
+        let exit = out.cli_exit_code();
+        let mut view_file = view_claimed.into_file();
+        let mut receipt_file = receipt_claimed.into_file();
+        if view_file.write_all(&evidence.view_bytes).is_err()
+            || receipt_file.write_all(&evidence.receipt_bytes).is_err()
+        {
+            eprintln!("sealr: canonical evidence files were not completely written");
+            drop(view_file);
+            drop(receipt_file);
+            let _ = std::fs::remove_file(invocation.view.as_deref().expect("view path"));
+            let _ = std::fs::remove_file(invocation.receipt.as_deref().expect("receipt path"));
+            return ExitCode::FAILURE;
+        }
+        return ExitCode::from(exit);
+    }
     let mut view_writer: Box<dyn Write> = match view_output {
         Some(claimed) => Box::new(claimed.into_file()),
         None => Box::new(io::stdout().lock()),

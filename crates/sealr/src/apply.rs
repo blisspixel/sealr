@@ -5,6 +5,7 @@ use std::path::Path;
 #[cfg(test)]
 use std::fs;
 
+use crate::canonical_json::CanonicalJsonError;
 use crate::covering::{
     audit_bzip2_wrapper_covering, audit_covering, audit_gzip_wrapper_covering,
     audit_sevenz_covering, audit_tar_covering, audit_tar_gnu_longname_covering,
@@ -444,6 +445,10 @@ pub struct Receipt {
     pub policy: PolicyMeta,
     pub identities: OutcomeIdentities,
     pub view_digest: DigestHex,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub canonicalization: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view_schema: Option<&'static str>,
     pub tool: ToolMeta,
     pub environment: EnvMeta,
     pub materialization: MaterializationMeta,
@@ -522,6 +527,71 @@ impl Outcome {
     pub fn cli_exit_code(&self) -> u8 {
         compat_exit_code(&self.admission, &self.verification, &self.effect)
     }
+
+    /// Emit this outcome's evidence in the canonical RFC 8785 lineage:
+    /// `sealr.view.v2` and `sealr.receipt.v3`.
+    ///
+    /// The returned byte vectors are the exact canonical documents — the bytes
+    /// a consumer stores ARE the bytes the digests cover, so hashing the view
+    /// bytes reproduces the receipt's `view_digest` and hashing the receipt
+    /// bytes produces its externally nameable digest. The shipped
+    /// `sealr.view.v1` / `sealr.receipt.v2` documents on this outcome are
+    /// untouched: this is a pure post-construction emission with the identical
+    /// semantic content, differing only in the schema identifiers, the two
+    /// canonicalization-binding receipt fields, and the digest coverage.
+    ///
+    /// Canonicalization is total over every reachable evidence document — the
+    /// only numeric fields are verified byte counts bounded by real ingested
+    /// bytes — so failure indicates an internal regression and fails closed
+    /// with the registered `evidence.canonicalization` finding and no bytes.
+    pub fn canonical_evidence(&self) -> Result<CanonicalEvidence, Finding> {
+        let canonicalization_failure = |what: &str, error: &CanonicalJsonError| {
+            Finding::error(
+                FindingCode::EvidenceCanonicalization,
+                format!("the {what} did not canonicalize: {error}"),
+            )
+        };
+
+        let mut view = self.view.clone();
+        view.schema = "sealr.view.v2";
+        let view_bytes = crate::canonical_json::jcs_bytes(&view)
+            .map_err(|error| canonicalization_failure("view", &error))?;
+        let view_digest = crate::policy::hex_sha256(&view_bytes);
+
+        let mut receipt = self.receipt.clone();
+        receipt.schema = "sealr.receipt.v3";
+        receipt.canonicalization = Some("rfc8785");
+        receipt.view_schema = Some("sealr.view.v2");
+        receipt.view_digest = DigestHex {
+            sha256: view_digest.clone(),
+        };
+        let receipt_bytes = crate::canonical_json::jcs_bytes(&receipt)
+            .map_err(|error| canonicalization_failure("receipt", &error))?;
+        let receipt_digest = crate::policy::hex_sha256(&receipt_bytes);
+
+        Ok(CanonicalEvidence {
+            view_bytes,
+            receipt_bytes,
+            view_digest,
+            receipt_digest,
+        })
+    }
+}
+
+/// One outcome's evidence in the canonical RFC 8785 lineage, where the emitted
+/// bytes are exactly the digested bytes.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub struct CanonicalEvidence {
+    /// Exact `sealr.view.v2` canonical bytes.
+    pub view_bytes: Vec<u8>,
+    /// Exact `sealr.receipt.v3` canonical bytes.
+    pub receipt_bytes: Vec<u8>,
+    /// Lowercase-hex SHA-256 of `view_bytes`; also carried inside the receipt.
+    pub view_digest: String,
+    /// Lowercase-hex SHA-256 of `receipt_bytes`. A receipt cannot contain its
+    /// own digest; this is the name an external system binds.
+    pub receipt_digest: String,
 }
 
 pub fn apply(req: Request<'_>) -> Outcome {
@@ -4550,6 +4620,8 @@ pub(crate) fn finish_with_jail(
     let view_json = serde_json::to_vec(&view).expect("view json");
     let receipt = Receipt {
         schema: "sealr.receipt.v2",
+        canonicalization: None,
+        view_schema: None,
         verdict: verdict_s,
         wrote,
         interpretation: axes.interpretation.clone(),
