@@ -4,10 +4,11 @@ use std::process::ExitCode;
 
 use clap::{Parser, ValueEnum};
 use sealr::{
-    apply_supervised, apply_with_options, ApplyOptions, LinuxWorker, Policy, Request, Source,
-    TarBzip2InterpretationProfile, TarGnuLongNameInterpretationProfile,
-    TarGzipInterpretationProfile, TarInterpretationProfile, TarPaxInterpretationProfile,
-    TarXzInterpretationProfile, TarZstdInterpretationProfile, ZipInterpretationProfile,
+    apply_supervised, apply_with_options, ApplyOptions, LinuxWorker, Policy, Request,
+    SevenZInterpretationProfile, Source, TarBzip2InterpretationProfile,
+    TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
+    TarPaxInterpretationProfile, TarXzInterpretationProfile, TarZstdInterpretationProfile,
+    ZipInterpretationProfile,
 };
 use serde::Serialize;
 
@@ -47,6 +48,8 @@ enum CliFormat {
     TarZstdUstar,
     TarXzUstar,
     TarBzip2Ustar,
+    #[value(name = "7z-copy")]
+    SevenZCopy,
 }
 
 fn main() -> ExitCode {
@@ -107,6 +110,11 @@ fn main() -> ExitCode {
             ApplyOptions::new().with_tar_bzip2_interpretation_profile(
                 TarBzip2InterpretationProfile::UstarPortableV1,
             ),
+        ),
+        CliFormat::SevenZCopy => (
+            Policy::default_v11(),
+            ApplyOptions::new()
+                .with_sevenz_interpretation_profile(SevenZInterpretationProfile::CopyPortableV1),
         ),
     };
     let request = Request {

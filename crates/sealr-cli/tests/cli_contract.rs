@@ -436,6 +436,7 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert!(help_text.contains("tar-zstd-ustar"));
     assert!(help_text.contains("tar-xz-ustar"));
     assert!(help_text.contains("tar-bzip2-ustar"));
+    assert!(help_text.contains("7z-copy"));
     assert!(help_text.contains("--worker-manifest <ABSOLUTE_PATH>"));
     assert!(help_text.contains("--version"));
 
@@ -594,6 +595,7 @@ fn explicit_tar_pax_format_inspects_materializes_and_is_not_autodetected() {
         Some("tar-zstd-ustar"),
         Some("tar-xz-ustar"),
         Some("tar-bzip2-ustar"),
+        Some("7z-copy"),
         Some("zip64"),
     ] {
         let output = match format {
@@ -673,6 +675,7 @@ fn explicit_tar_gnu_longname_inspects_materializes_and_is_not_autodetected() {
         Some("tar-zstd-ustar"),
         Some("tar-xz-ustar"),
         Some("tar-bzip2-ustar"),
+        Some("7z-copy"),
         Some("zip64"),
     ] {
         let output = match format {
@@ -765,6 +768,7 @@ fn explicit_tar_gzip_pax_format_inspects_and_materializes() {
         Some("tar-zstd-ustar"),
         Some("tar-xz-ustar"),
         Some("tar-bzip2-ustar"),
+        Some("7z-copy"),
     ] {
         let output = match format {
             Some(format) => sealr(&[Path::new("--format"), Path::new(format), &archive]),
@@ -860,6 +864,7 @@ fn explicit_tar_gzip_gnu_longname_format_inspects_and_materializes() {
         Some("tar-zstd-ustar"),
         Some("tar-xz-ustar"),
         Some("tar-bzip2-ustar"),
+        Some("7z-copy"),
     ] {
         let output = match format {
             Some(format) => sealr(&[Path::new("--format"), Path::new(format), &archive]),
@@ -957,6 +962,7 @@ fn explicit_tar_zstd_ustar_format_inspects_and_materializes() {
         Some("tar-gzip-gnu-longname"),
         Some("tar-xz-ustar"),
         Some("tar-bzip2-ustar"),
+        Some("7z-copy"),
     ] {
         let output = match format {
             Some(format) => sealr(&[Path::new("--format"), Path::new(format), &archive]),
@@ -1054,6 +1060,7 @@ fn explicit_tar_xz_ustar_format_inspects_and_materializes() {
         Some("tar-gzip-gnu-longname"),
         Some("tar-zstd-ustar"),
         Some("tar-bzip2-ustar"),
+        Some("7z-copy"),
     ] {
         let output = match format {
             Some(format) => sealr(&[Path::new("--format"), Path::new(format), &archive]),
@@ -1157,6 +1164,7 @@ fn explicit_tar_bzip2_ustar_format_inspects_and_materializes() {
         Some("tar-gzip-gnu-longname"),
         Some("tar-zstd-ustar"),
         Some("tar-xz-ustar"),
+        Some("7z-copy"),
     ] {
         let output = match format {
             Some(format) => sealr(&[Path::new("--format"), Path::new(format), &archive]),
@@ -1166,6 +1174,124 @@ fn explicit_tar_bzip2_ustar_format_inspects_and_materializes() {
             output.status.code(),
             Some(2),
             "bzip2-wrapped ustar fixture should not be admitted under format selection {format:?}: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+}
+
+/// 7-Zip 26.02 `7z a -m0=Copy -mhc=off` output holding exactly
+/// `mission/plan.txt` with `verify twice, decode once`: one Copy folder and
+/// a raw next header.
+const SEVENZ_COPY_FIXTURE_HEX: &str = "377abcaf271c000435c12a4919000000000000005a00000000000000eaaeb7e67665726966792074776963652c206465636f6465206f6e63650104060001091900070b01000101000c1900080a0103b44165000005011123006d0069007300730069006f006e002f0070006c0061006e002e0074007800740000001900140a01000000d4bda237dd0115060100200000000000";
+
+fn write_sevenz_copy_fixture(path: &Path) {
+    let (pairs, remainder) = SEVENZ_COPY_FIXTURE_HEX.as_bytes().as_chunks::<2>();
+    assert!(remainder.is_empty());
+    let bytes: Vec<u8> = pairs
+        .iter()
+        .map(|pair| {
+            u8::from_str_radix(std::str::from_utf8(pair).expect("hex is ASCII"), 16)
+                .expect("7z Copy fixture hex is valid")
+        })
+        .collect();
+    fs::write(path, bytes).expect("7z Copy fixture should be writable");
+}
+
+#[test]
+fn explicit_sevenz_copy_format_inspects_and_materializes() {
+    let run = RunDirectory::create("sevenz-copy");
+    let archive = run.path.join("mission.7z");
+    write_sevenz_copy_fixture(&archive);
+
+    let inspect = sealr(&[Path::new("--format"), Path::new("7z-copy"), &archive]);
+    assert_eq!(
+        inspect.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&inspect.stdout),
+        String::from_utf8_lossy(&inspect.stderr)
+    );
+    let view = json(&inspect.stdout, "7z stdout");
+    let receipt = json(&inspect.stderr, "7z stderr");
+    assert_eq!(view["verdict"], "allowed");
+    assert_eq!(view["source"]["magic"], "7z");
+    assert_eq!(view["members"].as_array().map(Vec::len), Some(1));
+    assert_eq!(view["members"][0]["path"], "mission/plan.txt");
+    assert_eq!(view["members"][0]["method"], "copy");
+    assert_eq!(view["members"][0]["uncomp_bytes"], 25);
+    assert_eq!(view["policy"]["id"], "sealr:policy/default/v11");
+    assert_eq!(
+        view["policy"]["digest"]["sha256"],
+        "afa0aeb04ceca00706b31dfd250216a87f2af0ada6e98d3815873de0d15172fc"
+    );
+    assert_eq!(
+        receipt["source"]["sha256"],
+        "ebefe20d0dfd944e29a0987e4b182c80595e2a7ec4d1efe3217123e22259c289"
+    );
+    assert_eq!(
+        receipt["identities"]["interpretation"]["id"],
+        "sealr.profile.7z.copy-portable.v1"
+    );
+    assert_eq!(
+        receipt["identities"]["interpretation"]["digest"]["sha256"],
+        "7b6604ad59b5aecf9ebdfa42d7d48d3df663813798992741dd6d74ea56f60b75"
+    );
+    assert_eq!(
+        receipt["identities"]["layout"]["sealrTreeV12"],
+        "df4c1271279959b9fbd90e56078913779e134f52a69c52d959878ad76bff9a9d"
+    );
+    assert!(receipt["identities"]["layout"]
+        .get("sealrTreeV11")
+        .is_none());
+    assert_eq!(
+        receipt["identities"]["content"]["sealrTreeV1"],
+        "bc8f6d6f7870aeab647cff08db25471a729bd2a41e095d49d6254c49afc34278"
+    );
+    assert_eq!(receipt["policy"], view["policy"]);
+
+    let destination = run.path.join("materialized");
+    let materialize = sealr(&[
+        Path::new("--format"),
+        Path::new("7z-copy"),
+        &archive,
+        Path::new("--dest"),
+        &destination,
+    ]);
+    assert_eq!(
+        materialize.status.code(),
+        Some(0),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&materialize.stdout),
+        String::from_utf8_lossy(&materialize.stderr)
+    );
+    assert_eq!(
+        fs::read(destination.join("mission/plan.txt")).unwrap(),
+        b"verify twice, decode once"
+    );
+
+    for format in [
+        None,
+        Some("zip"),
+        Some("zip64"),
+        Some("tar-ustar"),
+        Some("tar-gzip-ustar"),
+        Some("tar-pax"),
+        Some("tar-gnu-longname"),
+        Some("tar-gzip-pax"),
+        Some("tar-gzip-gnu-longname"),
+        Some("tar-zstd-ustar"),
+        Some("tar-xz-ustar"),
+        Some("tar-bzip2-ustar"),
+    ] {
+        let output = match format {
+            Some(format) => sealr(&[Path::new("--format"), Path::new(format), &archive]),
+            None => sealr(&[&archive]),
+        };
+        assert_eq!(
+            output.status.code(),
+            Some(2),
+            "7z Copy fixture should not be admitted under format selection {format:?}: stdout={} stderr={}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );

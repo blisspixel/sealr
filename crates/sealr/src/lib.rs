@@ -33,6 +33,7 @@ mod zstd;
 // their codec and types remain outside the public API.
 #[allow(dead_code)]
 mod semantic_record;
+mod sevenz;
 mod verified;
 pub mod wheel;
 mod zip;
@@ -140,15 +141,16 @@ pub use apply::{
 };
 pub use findings::{Finding, FindingCode, Severity};
 pub use identity::{
-    content_root, encode_tar_bzip2_layout, encode_tar_gnu_longname_layout,
+    content_root, encode_sevenz_layout, encode_tar_bzip2_layout, encode_tar_gnu_longname_layout,
     encode_tar_gzip_gnu_longname_layout, encode_tar_gzip_layout, encode_tar_gzip_pax_layout,
     encode_tar_layout, encode_tar_pax_layout, encode_tar_xz_layout, encode_tar_zstd_layout,
     encode_zip64_layout, layout_root, OutcomeIdentities, TreeRoot, TREE_ENCODING_ID,
-    TREE_ENCODING_V10_ID, TREE_ENCODING_V11_ID, TREE_ENCODING_V2_ID, TREE_ENCODING_V3_ID,
-    TREE_ENCODING_V4_ID, TREE_ENCODING_V5_ID, TREE_ENCODING_V6_ID, TREE_ENCODING_V7_ID,
-    TREE_ENCODING_V8_ID, TREE_ENCODING_V9_ID,
+    TREE_ENCODING_V10_ID, TREE_ENCODING_V11_ID, TREE_ENCODING_V12_ID, TREE_ENCODING_V2_ID,
+    TREE_ENCODING_V3_ID, TREE_ENCODING_V4_ID, TREE_ENCODING_V5_ID, TREE_ENCODING_V6_ID,
+    TREE_ENCODING_V7_ID, TREE_ENCODING_V8_ID, TREE_ENCODING_V9_ID,
 };
 pub use ir::{
+    sevenz_copy_portable_v1_canonical_bytes, sevenz_copy_portable_v1_digest,
     tar_bzip2_ustar_portable_v1_canonical_bytes, tar_bzip2_ustar_portable_v1_digest,
     tar_gnu_longname_portable_v1_canonical_bytes, tar_gnu_longname_portable_v1_digest,
     tar_gzip_gnu_longname_portable_v1_canonical_bytes, tar_gzip_gnu_longname_portable_v1_digest,
@@ -167,17 +169,19 @@ pub use ir::{
     ExtraSite, GnuLongNameCarrierEvidence, GnuLongNamePathSource, GzipWrapperEvidence, IrMember,
     MemberContainerFacts, MemberEvidence, MemberKind, MemberSourceRanges, MemberVerification,
     NormalizationAction, PaxExtensionEvidence, PaxExtensionKind, PaxKeyword, PaxRecordEvidence,
-    PaxValueSource, TarArchiveCovering, TarBzip2ArchiveEvidence, TarBzip2InterpretationProfile,
-    TarGnuLongNameArchiveEvidence, TarGnuLongNameInterpretationProfile,
-    TarGnuLongNameMemberEvidence, TarGzipArchiveEvidence, TarGzipGnuLongNameArchiveEvidence,
-    TarGzipInterpretationProfile, TarGzipPaxArchiveEvidence, TarInterpretationProfile,
-    TarMemberEvidence, TarPaxArchiveEvidence, TarPaxInterpretationProfile, TarPaxMemberEvidence,
-    TarXzArchiveEvidence, TarXzInterpretationProfile, TarZstdArchiveEvidence,
-    TarZstdInterpretationProfile, XzBlockEvidence, XzWrapperEvidence, Zip64ArchiveCovering,
-    Zip64DataDescriptorWidth, Zip64LocalValueShape, Zip64MemberEvidence, ZipInterpretationProfile,
-    ZipMemberEvidence, ZstdWrapperEvidence, ARCHIVE_IR_SCHEMA, TAR_ARCHIVE_IR_SCHEMA,
-    TAR_BZIP2_ARCHIVE_IR_SCHEMA, TAR_BZIP2_USTAR_PORTABLE_V1, TAR_GNU_LONGNAME_ARCHIVE_IR_SCHEMA,
-    TAR_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_ARCHIVE_IR_SCHEMA,
+    PaxValueSource, SevenZArchiveEvidence, SevenZCopyArchiveEvidence, SevenZFolderEvidence,
+    SevenZInterpretationProfile, SevenZMemberEvidence, SevenZSubStreamEvidence, TarArchiveCovering,
+    TarBzip2ArchiveEvidence, TarBzip2InterpretationProfile, TarGnuLongNameArchiveEvidence,
+    TarGnuLongNameInterpretationProfile, TarGnuLongNameMemberEvidence, TarGzipArchiveEvidence,
+    TarGzipGnuLongNameArchiveEvidence, TarGzipInterpretationProfile, TarGzipPaxArchiveEvidence,
+    TarInterpretationProfile, TarMemberEvidence, TarPaxArchiveEvidence,
+    TarPaxInterpretationProfile, TarPaxMemberEvidence, TarXzArchiveEvidence,
+    TarXzInterpretationProfile, TarZstdArchiveEvidence, TarZstdInterpretationProfile,
+    XzBlockEvidence, XzWrapperEvidence, Zip64ArchiveCovering, Zip64DataDescriptorWidth,
+    Zip64LocalValueShape, Zip64MemberEvidence, ZipInterpretationProfile, ZipMemberEvidence,
+    ZstdWrapperEvidence, ARCHIVE_IR_SCHEMA, SEVENZ_COPY_ARCHIVE_IR_SCHEMA, SEVENZ_COPY_PORTABLE_V1,
+    TAR_ARCHIVE_IR_SCHEMA, TAR_BZIP2_ARCHIVE_IR_SCHEMA, TAR_BZIP2_USTAR_PORTABLE_V1,
+    TAR_GNU_LONGNAME_ARCHIVE_IR_SCHEMA, TAR_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_ARCHIVE_IR_SCHEMA,
     TAR_GZIP_GNU_LONGNAME_ARCHIVE_IR_SCHEMA, TAR_GZIP_GNU_LONGNAME_PORTABLE_V1,
     TAR_GZIP_PAX_ARCHIVE_IR_SCHEMA, TAR_GZIP_PAX_PORTABLE_V1, TAR_GZIP_USTAR_PORTABLE_V1,
     TAR_PAX_ARCHIVE_IR_SCHEMA, TAR_PAX_PORTABLE_V1, TAR_USTAR_PORTABLE_V1,
@@ -195,7 +199,7 @@ pub use outcome::{
     VerificationStatus, ViewCompleteness,
 };
 pub use policy::{
-    hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget,
+    hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget, POLICY_FORMAT_SEVENZ_COPY,
     POLICY_FORMAT_TAR_BZIP2_USTAR, POLICY_FORMAT_TAR_GNU_LONGNAME,
     POLICY_FORMAT_TAR_GZIP_GNU_LONGNAME, POLICY_FORMAT_TAR_GZIP_PAX, POLICY_FORMAT_TAR_GZIP_USTAR,
     POLICY_FORMAT_TAR_PAX, POLICY_FORMAT_TAR_USTAR, POLICY_FORMAT_TAR_XZ_USTAR,

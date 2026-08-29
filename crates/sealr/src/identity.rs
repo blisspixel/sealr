@@ -12,9 +12,10 @@ use serde::Serialize;
 use crate::ir::{
     ArchiveFormat, ArchiveIR, ExtraDisposition, ExtraSite, GnuLongNamePathSource, IrMember,
     MemberKind, MemberVerification, NormalizationAction, PaxExtensionKind, PaxKeyword,
-    PaxValueSource, TarBzip2InterpretationProfile, TarGnuLongNameInterpretationProfile,
-    TarGzipInterpretationProfile, TarInterpretationProfile, TarPaxInterpretationProfile,
-    TarXzInterpretationProfile, TarZstdInterpretationProfile, ZipInterpretationProfile,
+    PaxValueSource, SevenZInterpretationProfile, TarBzip2InterpretationProfile,
+    TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
+    TarPaxInterpretationProfile, TarXzInterpretationProfile, TarZstdInterpretationProfile,
+    ZipInterpretationProfile,
 };
 use crate::outcome::{DigestHex, SourceDigest, VerificationStatus};
 use crate::policy::hex_sha256;
@@ -31,6 +32,7 @@ pub const TREE_ENCODING_V8_ID: &str = "sealrTreeV8";
 pub const TREE_ENCODING_V9_ID: &str = "sealrTreeV9";
 pub const TREE_ENCODING_V10_ID: &str = "sealrTreeV10";
 pub const TREE_ENCODING_V11_ID: &str = "sealrTreeV11";
+pub const TREE_ENCODING_V12_ID: &str = "sealrTreeV12";
 const LAYOUT_LABEL: &str = "sealr.tree.layout.v1";
 const TAR_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-ustar.v1";
 const ZIP64_LAYOUT_LABEL: &str = "sealr.tree.layout.zip64.v1";
@@ -42,6 +44,7 @@ const TAR_GZIP_GNU_LONGNAME_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-gzip-gnu
 const TAR_ZSTD_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-zstd-ustar.v1";
 const TAR_XZ_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-xz-ustar.v1";
 const TAR_BZIP2_LAYOUT_LABEL: &str = "sealr.tree.layout.tar-bzip2-ustar.v1";
+const SEVENZ_COPY_LAYOUT_LABEL: &str = "sealr.tree.layout.7z-copy.v1";
 const CONTENT_LABEL: &str = "sealr.tree.content.v1";
 const FILE: u8 = 1;
 const DIRECTORY: u8 = 2;
@@ -76,6 +79,7 @@ pub enum TreeRoot {
     SealrTreeV9 { hex: String },
     SealrTreeV10 { hex: String },
     SealrTreeV11 { hex: String },
+    SealrTreeV12 { hex: String },
     Unavailable,
 }
 
@@ -150,6 +154,12 @@ impl TreeRoot {
         }
     }
 
+    pub fn from_v12_bytes(bytes: &[u8]) -> Self {
+        Self::SealrTreeV12 {
+            hex: hex_sha256(bytes),
+        }
+    }
+
     pub fn hex(&self) -> Option<&str> {
         match self {
             Self::SealrTreeV1 { hex } => Some(hex),
@@ -163,6 +173,7 @@ impl TreeRoot {
             Self::SealrTreeV9 { hex } => Some(hex),
             Self::SealrTreeV10 { hex } => Some(hex),
             Self::SealrTreeV11 { hex } => Some(hex),
+            Self::SealrTreeV12 { hex } => Some(hex),
             Self::Unavailable => None,
         }
     }
@@ -224,6 +235,11 @@ impl Serialize for TreeRoot {
             Self::SealrTreeV11 { hex } => {
                 let mut map = serializer.serialize_map(Some(1))?;
                 map.serialize_entry(TREE_ENCODING_V11_ID, hex)?;
+                map.end()
+            }
+            Self::SealrTreeV12 { hex } => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry(TREE_ENCODING_V12_ID, hex)?;
                 map.end()
             }
             Self::Unavailable => {
@@ -302,6 +318,13 @@ impl OutcomeIdentities {
     pub fn unavailable_for_tar_bzip2(
         source: SourceDigest,
         profile: TarBzip2InterpretationProfile,
+    ) -> Self {
+        Self::unavailable_for_named(source, profile.id(), profile.digest())
+    }
+
+    pub fn unavailable_for_sevenz(
+        source: SourceDigest,
+        profile: SevenZInterpretationProfile,
     ) -> Self {
         Self::unavailable_for_named(source, profile.id(), profile.digest())
     }
@@ -742,6 +765,72 @@ fn encode_zstd_wrapper_header(ir: &ArchiveIR) -> Option<Vec<u8>> {
     Some(body)
 }
 
+/// Canonical container-layout encoding for the restricted Copy 7z profile:
+/// the profile digest, the dense covering ranges, every folder and substream
+/// record with declared CRCs, name and dummy geometry, and each member's
+/// destination meaning with its container facts.
+pub fn encode_sevenz_layout(ir: &ArchiveIR) -> Option<Vec<u8>> {
+    if ir.format() != ArchiveFormat::SevenZCopy {
+        return None;
+    }
+    let sevenz = ir.sevenz_evidence()?;
+    let mut body = Vec::new();
+    body.extend_from_slice(&parse_hex32(&ir.profile_digest)?);
+    body.extend_from_slice(&parse_hex32(ir.source_digest().sha256()?)?);
+    body.push(sevenz.version_minor);
+    encode_range(&mut body, sevenz.pack_region);
+    encode_range(&mut body, sevenz.next_header);
+    push_u32(&mut body, sevenz.next_header_crc);
+    push_u32(&mut body, u32::try_from(sevenz.folders.len()).ok()?);
+    for folder in &sevenz.folders {
+        encode_range(&mut body, folder.pack_stream);
+        push_optional_u32(&mut body, folder.pack_crc);
+        push_u64(&mut body, folder.unpack_size);
+        push_optional_u32(&mut body, folder.folder_crc);
+        push_u32(&mut body, u32::try_from(folder.substreams.len()).ok()?);
+        for substream in &folder.substreams {
+            encode_range(&mut body, substream.payload);
+            push_optional_u32(&mut body, substream.declared_crc);
+        }
+    }
+    push_u64(&mut body, sevenz.name_region_bytes);
+    push_u64(&mut body, sevenz.dummy_bytes);
+    push_u32(&mut body, u32::try_from(ir.members().len()).ok()?);
+    for member in ir.members() {
+        let evidence = match &member.evidence {
+            crate::ir::MemberEvidence::SevenZ(evidence) => evidence,
+            _ => return None,
+        };
+        push_bytes(&mut body, &member.raw_name_bytes);
+        push_bytes(&mut body, member.canonical_path.as_bytes());
+        body.push(match member.kind {
+            crate::ir::MemberKind::File => 0,
+            crate::ir::MemberKind::Directory => 1,
+        });
+        push_u64(&mut body, member.declared_uncomp_size);
+        encode_range(&mut body, evidence.payload);
+        push_optional_u32(&mut body, evidence.declared_crc);
+        push_optional_u32(&mut body, evidence.attributes);
+        push_optional_u64(&mut body, evidence.mtime);
+        push_u32(
+            &mut body,
+            u32::try_from(member.normalization_actions.len()).ok()?,
+        );
+        for action in &member.normalization_actions {
+            match action {
+                NormalizationAction::StripDirectoryTrailingSlash => {
+                    body.push(NORM_STRIP_DIR_SLASH);
+                }
+                NormalizationAction::DropDotComponent { component_index } => {
+                    body.push(NORM_DROP_DOT);
+                    push_u32(&mut body, *component_index);
+                }
+            }
+        }
+    }
+    Some(preimage(SEVENZ_COPY_LAYOUT_LABEL, &body))
+}
+
 fn encode_bzip2_wrapper_header(ir: &ArchiveIR) -> Option<Vec<u8>> {
     let bzip2 = ir.bzip2_evidence()?;
     let transform = TransformProfile::Bzip2SingleStreamV1;
@@ -1110,6 +1199,9 @@ pub fn layout_root(ir: &ArchiveIR) -> TreeRoot {
             .unwrap_or_else(TreeRoot::unavailable),
         ArchiveFormat::TarBzip2Ustar => encode_tar_bzip2_layout(ir)
             .map(|bytes| TreeRoot::from_v11_bytes(&bytes))
+            .unwrap_or_else(TreeRoot::unavailable),
+        ArchiveFormat::SevenZCopy => encode_sevenz_layout(ir)
+            .map(|bytes| TreeRoot::from_v12_bytes(&bytes))
             .unwrap_or_else(TreeRoot::unavailable),
     }
 }

@@ -4,14 +4,15 @@ use std::io::{Cursor, Write};
 use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelLimits, CONSUMER_PROFILE_ID};
 use sealr::{
     apply_supervised, apply_with_options, AdmissionStatus, ApplyOptions, ArchiveFormat,
-    LinuxWorker, MemberReadErrorKind, Policy, Request, RetentionPlan, RetentionStatus, Source,
-    TarBzip2InterpretationProfile, TarGnuLongNameInterpretationProfile,
-    TarGzipInterpretationProfile, TarInterpretationProfile, TarPaxInterpretationProfile,
-    TarXzInterpretationProfile, TarZstdInterpretationProfile, TreeRoot, VerificationStatus,
-    VerifiedArchive, ZipInterpretationProfile, TAR_BZIP2_USTAR_PORTABLE_V1,
-    TAR_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_PAX_PORTABLE_V1,
-    TAR_PAX_PORTABLE_V1, TAR_USTAR_PORTABLE_V1, TAR_XZ_USTAR_PORTABLE_V1,
-    TAR_ZSTD_USTAR_PORTABLE_V1, ZIP_STRICT_ASCII_V2,
+    LinuxWorker, MemberReadErrorKind, Policy, Request, RetentionPlan, RetentionStatus,
+    SevenZInterpretationProfile, Source, TarBzip2InterpretationProfile,
+    TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
+    TarPaxInterpretationProfile, TarXzInterpretationProfile, TarZstdInterpretationProfile,
+    TreeRoot, VerificationStatus, VerifiedArchive, ZipInterpretationProfile,
+    SEVENZ_COPY_PORTABLE_V1, TAR_BZIP2_USTAR_PORTABLE_V1, TAR_GNU_LONGNAME_PORTABLE_V1,
+    TAR_GZIP_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_PAX_PORTABLE_V1, TAR_PAX_PORTABLE_V1,
+    TAR_USTAR_PORTABLE_V1, TAR_XZ_USTAR_PORTABLE_V1, TAR_ZSTD_USTAR_PORTABLE_V1,
+    ZIP_STRICT_ASCII_V2,
 };
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
@@ -614,7 +615,83 @@ fn main() {
             .kind(),
         MemberReadErrorKind::LimitExceeded
     );
+
+    // The restricted Copy 7z container replays pinned 7-Zip 26.02
+    // `7z a -m0=Copy -mhc=off` bytes carrying `mission/plan.txt` — the first
+    // container profile beyond ZIP, with zero new dependencies.
+    let sevenz_policy = Policy::default_v11();
+    let sevenz_options = ApplyOptions::new()
+        .with_sevenz_interpretation_profile(SevenZInterpretationProfile::CopyPortableV1)
+        .with_retention(
+            RetentionPlan::new(32, 32)
+                .with_path("mission/plan.txt")
+                .expect("canonical 7z retention path"),
+        );
+    let sevenz_bytes = decode_hex(SEVENZ_COPY_FILEONLY_FIXTURE_HEX);
+    let sevenz_outcome = apply_with_options(
+        Request {
+            source: Source::Bytes {
+                path: Some("mission.7z"),
+                data: &sevenz_bytes,
+            },
+            policy: &sevenz_policy,
+            dest: None,
+        },
+        &sevenz_options,
+    );
+    assert!(
+        matches!(sevenz_outcome.admission, AdmissionStatus::Admitted),
+        "{:?}",
+        sevenz_outcome.view.findings
+    );
+    assert!(matches!(
+        sevenz_outcome.verification,
+        VerificationStatus::Complete
+    ));
+    let sevenz_ir = sevenz_outcome.archive_ir().expect("7z Copy IR");
+    assert_eq!(sevenz_ir.format(), ArchiveFormat::SevenZCopy);
+    assert_eq!(sevenz_ir.profile(), SEVENZ_COPY_PORTABLE_V1);
+    let sevenz_evidence = sevenz_ir
+        .sevenz_evidence()
+        .expect("7z Copy container evidence");
+    assert_eq!(sevenz_evidence.version_minor, 4);
+    assert_eq!(sevenz_evidence.folders.len(), 1);
+    assert_eq!(
+        sevenz_evidence.folders[0].substreams[0].declared_crc,
+        Some(0x6541_B403)
+    );
+    assert!(matches!(
+        sevenz_outcome.receipt.identities.layout,
+        TreeRoot::SealrTreeV12 { .. }
+    ));
+    let sevenz_archive = sevenz_outcome
+        .into_verified_archive()
+        .expect("7z Copy container must expose verified authority");
+    assert_eq!(
+        sevenz_archive.retention_status("mission/plan.txt"),
+        RetentionStatus::Retained
+    );
+    assert_eq!(
+        sevenz_archive.retained_member("mission/plan.txt"),
+        Some(b"verify twice, decode once".as_slice())
+    );
+    assert_eq!(
+        sevenz_archive.read_member("mission/plan.txt", 25).unwrap(),
+        b"verify twice, decode once"
+    );
+    assert_eq!(
+        sevenz_archive
+            .read_member("mission/plan.txt", 24)
+            .unwrap_err()
+            .kind(),
+        MemberReadErrorKind::LimitExceeded
+    );
 }
+
+/// 7-Zip 26.02 `7z a -m0=Copy -mhc=off` output holding exactly
+/// `mission/plan.txt` with `verify twice, decode once`.
+const SEVENZ_COPY_FILEONLY_FIXTURE_HEX: &str =
+    "377abcaf271c000435c12a4919000000000000005a00000000000000eaaeb7e6766572696679207477696365\n     2c206465636f6465206f6e63650104060001091900070b01000101000c1900080a0103b44165000005011123\n     006d0069007300730069006f006e002f0070006c0061006e002e0074007800740000001900140a01000000d4\n     bda237dd0115060100200000000000";
 
 /// CPython 3.12.10 `bz2.compress(tar, 9)` over the conformance derived TAR
 /// (bundled libbz2 1.0.8; byte-identical to `bzip2 -9`).

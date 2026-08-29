@@ -143,6 +143,16 @@ impl PayloadPlan {
                 uncompressed_size: member.declared_uncomp_size,
                 integrity: PayloadIntegrity::None,
             },
+            MemberEvidence::SevenZ(sevenz) => Self {
+                source: DomainRange::original(sevenz.payload),
+                codec: PayloadCodec::Raw,
+                compressed_size: sevenz.payload.len,
+                uncompressed_size: member.declared_uncomp_size,
+                integrity: match sevenz.declared_crc {
+                    Some(crc) => PayloadIntegrity::Crc32(crc),
+                    None => PayloadIntegrity::None,
+                },
+            },
         }
     }
 

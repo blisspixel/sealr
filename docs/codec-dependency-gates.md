@@ -67,6 +67,18 @@ The third codec promotion landed on current main as the [bzip2-wrapped portable 
 
 7z is a high-priority format, but the trust boundary starts with its coder graph rather than a convenience API. The first profile is signature-at-zero, single-volume, no SFX, no encryption, no external streams, no alternate streams, no links, and an allowlist of Copy, LZMA, and LZMA2 coders with bounded dictionaries and solid blocks.
 
+### Executed Gate C step one: the raw-header Copy-only container
+
+The first 7z structure landed on current main as the [restricted Copy-only 7z container profile](profiles/7z-copy-portable-v1.md), separating container correctness from decoder complexity exactly as this gate requires. The recorded evidence:
+
+- **Dependency delta: zero packages.** Raw-header parsing is pure structure over the snapshot with the existing `crc32fast`/`sha2` and standard-library UTF-16 decoding. No `sevenz-rust2`, no extractor crate.
+- **Coders**: Copy (id `00`) only — single coder, single stream, no bind pairs, no attributes; a folder's unpack size must equal its pack size. LZMA/LZMA2 member support is the named next step on the already reviewed `lzma-rust2` boundary (whose LZMA1 decoder already compiles under the pinned features — a language decision, not a dependency decision).
+- **The packed-header carve**: stock `7z a -m0=Copy` and py7zr's default both LZMA-compress the header itself (`kEncodedHeader`), so the raw-header-only profile rejects stock output as unsupported with the producer remedies named (`-mhc=off`, `set_encoded_header_mode(False)`), and packed-header admission is deferred to the LZMA review — it introduces a decode step whose output is metadata, an architectural decision that should not ride along silently.
+- **Everything is Sealr-verified**: the start-header CRC, next-header CRC, and every declared pack, folder, and substream digest are plain zlib CRC32s over bytes Sealr can read — nothing is decoder-owned under Copy.
+- **Hostile-count containment**: variable-length integers require minimal encodings, all arithmetic is checked, and every claimed count is bounded by the remaining header bytes before allocation.
+- **Dense covering**: `PackPos` zero, contiguous pack streams, the header flush at end-of-file, and no unreferenced-bytes category at all.
+- **Residual gates**: packed-header admission, LZMA/LZMA2 members with bounded dictionaries, solid multi-coder folders, and encryption denial evidence remain named later steps; multi-volume and SFX stay outside the profile.
+
 [`sevenz-rust2`](https://docs.rs/crate/sevenz-rust2/latest) is not accepted as a core dependency today. Its broad default feature set is unnecessary for the first profile, and its current minimal LZMA path must be shown to avoid the `lzma-rust2` unsafe optimization feature. Acceptable outcomes are an upstream feature correction or a small reviewed fork with an exact source and license pin. The official [7z format](https://github.com/ip7z/7zip/blob/main/DOC/7zFormat.txt) and [method identifiers](https://github.com/ip7z/7zip/blob/main/DOC/Methods.txt) remain the authority.
 
 ## Gate D: separate legal and runtime boundary

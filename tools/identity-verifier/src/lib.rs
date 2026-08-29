@@ -96,6 +96,17 @@ const BZIP2_DECODER_PARAMETERS: &[u8] = b"libbz2-rs-decompress-small=false;memor
 const BZIP2_BLOCK_MAGIC: u64 = 0x3141_5926_5359;
 const BZIP2_EOS_MAGIC: u64 = 0x1772_4538_5090;
 const BZIP2_MAX_BLOCKS: usize = 65536;
+const SEVENZ_MANIFEST_SCHEMA: &str = "sealr.7z-copy-identity-conformance.v1";
+const SEVENZ_PROFILE_SCHEMA: &str = "sealr.profile.7z.copy-portable.v1";
+const SEVENZ_IR_SCHEMA: &str = "sealr.archive-ir.7z-copy.v1";
+const SEVENZ_TREE_ENCODING: &str = "sealrTreeV12";
+const SEVENZ_LAYOUT_LABEL: &str = "sealr.tree.layout.7z-copy.v1";
+const SEVENZ_SIGNATURE: [u8; 6] = [0x37, 0x7A, 0xBC, 0xAF, 0x27, 0x1C];
+const SEVENZ_CROSS_CONTAINER_ROOT: &str =
+    "bc8f6d6f7870aeab647cff08db25471a729bd2a41e095d49d6254c49afc34278";
+const SEVENZ_FILE_ATTRIBUTE_DIRECTORY: u32 = 0x10;
+const SEVENZ_LAYOUT_KIND_FILE: u8 = 0;
+const SEVENZ_LAYOUT_KIND_DIRECTORY: u8 = 1;
 const MAX_DERIVED_TAR_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_PAX_EXTENSION_BYTES: u64 = 64 * 1024;
 const MAX_PAX_EXTENSIONS: usize = 1024;
@@ -929,6 +940,133 @@ struct TarBzip2MultiblockDerivedTar {
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
+struct SevenZManifest {
+    schema: String,
+    archive_ir_schema: String,
+    profile: TarGzipProfileVector,
+    layout_encoding: String,
+    layout_label: String,
+    content_encoding: String,
+    content_label: String,
+    cross_container_content_root: SevenZCrossContainerVector,
+    cases: Vec<SevenZCase>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SevenZCrossContainerVector {
+    case: String,
+    #[serde(rename = "sealrTreeV1")]
+    sealr_tree_v1: String,
+    shared_with: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SevenZCase {
+    id: String,
+    source_bytes_hex: String,
+    source: DigestHex,
+    layout_preimage_hex: String,
+    layout_root: SevenZLayoutRoot,
+    content_root: TarContentRoot,
+    archive_ir: SevenZArchiveIrVector,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SevenZLayoutRoot {
+    #[serde(rename = "sealrTreeV12")]
+    sealr_tree_v12: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SevenZArchiveIrVector {
+    schema: String,
+    profile: String,
+    profile_digest: String,
+    source_digest: DigestHex,
+    format: String,
+    sevenz: SevenZEvidenceVector,
+    members: Vec<SevenZMemberVector>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SevenZEvidenceVector {
+    version_minor: u8,
+    pack_region: ByteRange,
+    next_header: ByteRange,
+    next_header_crc: u32,
+    folders: Vec<SevenZFolderVector>,
+    name_region_bytes: u64,
+    dummy_bytes: u64,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SevenZFolderVector {
+    pack_stream: ByteRange,
+    pack_crc: Option<u32>,
+    unpack_size: u64,
+    folder_crc: Option<u32>,
+    substreams: Vec<SevenZSubStreamVector>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SevenZSubStreamVector {
+    payload: ByteRange,
+    declared_crc: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SevenZMemberVector {
+    raw_name_bytes: Vec<u8>,
+    decoded_name: String,
+    canonical_path: String,
+    components: Vec<String>,
+    kind: MemberKind,
+    declared_uncomp_size: u64,
+    sevenz: SevenZMemberEvidenceVector,
+    actual_uncomp_size: Option<u64>,
+    actual_crc: Option<u32>,
+    content_sha256: Option<String>,
+    verification: MemberVerification,
+    normalization_actions: Vec<NormalizationAction>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SevenZMemberEvidenceVector {
+    payload: ByteRange,
+    declared_crc: Option<u32>,
+    attributes: Option<u32>,
+    mtime: Option<u64>,
+}
+
+#[derive(Debug, Serialize)]
+struct SevenZProfileDefinition {
+    schema: &'static str,
+    status: &'static str,
+    format: &'static str,
+    signature: &'static str,
+    version: &'static str,
+    header: &'static str,
+    coders: &'static str,
+    covering: &'static str,
+    integrity: &'static str,
+    numbers: &'static str,
+    names: &'static str,
+    empty_matrix: &'static str,
+    container_facts: &'static str,
+    denied_features: [&'static str; 10],
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ProfileVector {
     id: String,
     digest: DigestHex,
@@ -1425,6 +1563,7 @@ pub fn verify_manifest_json(bytes: &[u8]) -> Result<VerificationSummary, VerifyE
         TAR_ZSTD_MANIFEST_SCHEMA => verify_tar_zstd_identity_vector_json(bytes),
         TAR_XZ_MANIFEST_SCHEMA => verify_tar_xz_identity_vector_json(bytes),
         TAR_BZIP2_MANIFEST_SCHEMA => verify_tar_bzip2_identity_vector_json(bytes),
+        SEVENZ_MANIFEST_SCHEMA => verify_sevenz_identity_vector_json(bytes),
         schema => Err(VerifyError::new(format!("unsupported schema {schema:?}"))),
     }
 }
@@ -1466,6 +1605,19 @@ pub fn verify_tar_bzip2_identity_vector_json(
     let manifest: TarBzip2Manifest = serde_json::from_slice(bytes)
         .map_err(|error| VerifyError::new(format!("TAR/bzip2 JSON: {error}")))?;
     verify_tar_bzip2_manifest(&manifest)
+}
+
+pub fn verify_sevenz_identity_vector_json(
+    bytes: &[u8],
+) -> Result<VerificationSummary, VerifyError> {
+    if bytes.len() > MAX_MANIFEST_BYTES {
+        return Err(VerifyError::new(format!(
+            "7z manifest exceeds {MAX_MANIFEST_BYTES} bytes"
+        )));
+    }
+    let manifest: SevenZManifest = serde_json::from_slice(bytes)
+        .map_err(|error| VerifyError::new(format!("7z JSON: {error}")))?;
+    verify_sevenz_manifest(&manifest)
 }
 
 pub fn verify_tar_gzip_pax_identity_vector_json(
@@ -4672,6 +4824,1102 @@ fn verify_tar_xz_case(
         return Err(VerifyError::new("wrapped and raw TAR content roots differ"));
     }
     Ok(())
+}
+
+fn sevenz_profile_canonical_bytes() -> Result<Vec<u8>, VerifyError> {
+    let definition = SevenZProfileDefinition {
+        schema: SEVENZ_PROFILE_SCHEMA,
+        status: "supported-preview",
+        format: "7z-copy",
+        signature: "377abcaf271c-at-offset-zero-single-volume",
+        version: "major-0-minor-4",
+        header: "exactly-one-raw-kheader-encoded-header-denied",
+        coders: "copy-only-single-coder-single-stream-no-bind-pairs-no-attributes",
+        covering: "dense-signature-pack-streams-next-header-no-gaps-no-trailing",
+        integrity: "start-next-pack-folder-substream-crc32-all-sealr-verified",
+        numbers: "minimal-variable-length-encodings-required-checked-arithmetic",
+        names: "utf16le-non-external-null-terminated-portable-utf8-path-v1",
+        empty_matrix:
+            "empty-stream-and-empty-file-vectors-authoritative-directory-attribute-must-agree",
+        container_facts: "attributes-and-mtime-evidence-only-never-applied",
+        denied_features: [
+            "encoded-header",
+            "non-copy-coders",
+            "bind-pairs",
+            "archive-properties",
+            "additional-streams",
+            "external-records",
+            "anti-items",
+            "comments-and-start-pos",
+            "multi-volume-and-sfx",
+            "empty-archives",
+        ],
+    };
+    serde_json::to_vec(&definition)
+        .map_err(|error| VerifyError::new(format!("7z-copy profile serialization: {error}")))
+}
+
+fn verify_sevenz_manifest(manifest: &SevenZManifest) -> Result<VerificationSummary, VerifyError> {
+    if manifest.schema != SEVENZ_MANIFEST_SCHEMA
+        || manifest.archive_ir_schema != SEVENZ_IR_SCHEMA
+        || manifest.layout_encoding != SEVENZ_TREE_ENCODING
+        || manifest.layout_label != SEVENZ_LAYOUT_LABEL
+        || manifest.content_encoding != TREE_ENCODING
+        || manifest.content_label != CONTENT_LABEL
+    {
+        return Err(VerifyError::new("unsupported 7z manifest contract"));
+    }
+    const EXPECTED_CASE_IDS: [&str; 3] =
+        ["sevenz-cli-fileonly", "sevenz-cli-dir", "sevenz-cli-multi"];
+    if manifest.cases.len() != EXPECTED_CASE_IDS.len()
+        || manifest
+            .cases
+            .iter()
+            .map(|case| case.id.as_str())
+            .ne(EXPECTED_CASE_IDS)
+    {
+        return Err(VerifyError::new(
+            "7z v1 manifest must contain exactly the three canonical ordered cases",
+        ));
+    }
+    if manifest.profile.id != SEVENZ_PROFILE_SCHEMA {
+        return Err(VerifyError::new("unsupported 7z profile identifier"));
+    }
+    verify_digest(&manifest.profile.digest.sha256, "7z profile digest")?;
+    if sha256_hex(&sevenz_profile_canonical_bytes()?) != manifest.profile.digest.sha256 {
+        return Err(VerifyError::new(
+            "7z profile digest does not match its reconstructed canonical bytes",
+        ));
+    }
+    if manifest.cross_container_content_root.case != EXPECTED_CASE_IDS[0]
+        || manifest.cross_container_content_root.sealr_tree_v1 != SEVENZ_CROSS_CONTAINER_ROOT
+        || manifest.cross_container_content_root.shared_with.is_empty()
+    {
+        return Err(VerifyError::new(
+            "7z cross-container content-root section does not pin the TAR-family root",
+        ));
+    }
+    if manifest.cases[0].content_root.sealr_tree_v1 != SEVENZ_CROSS_CONTAINER_ROOT {
+        return Err(VerifyError::new(
+            "the 7z fileonly case does not share the TAR family's content root",
+        ));
+    }
+
+    let mut source_digests = HashSet::new();
+    let mut layout_roots = HashSet::new();
+    for case in &manifest.cases {
+        verify_sevenz_case(case, manifest)
+            .map_err(|error| error.context(&format!("7z case {}", case.id)))?;
+        source_digests.insert(case.source.sha256.as_str());
+        layout_roots.insert(case.layout_root.sealr_tree_v12.as_str());
+    }
+    if source_digests.len() != manifest.cases.len() || layout_roots.len() != manifest.cases.len() {
+        return Err(VerifyError::new(
+            "7z cases do not prove distinct source and layout identities",
+        ));
+    }
+    let multi = &manifest.cases[2];
+    if multi.archive_ir.sevenz.folders.len() != 2 {
+        return Err(VerifyError::new(
+            "the 7z multi case must exercise two Copy folders",
+        ));
+    }
+    let has_directory = multi
+        .archive_ir
+        .members
+        .iter()
+        .any(|member| matches!(member.kind, MemberKind::Directory));
+    let has_empty_file =
+        multi.archive_ir.members.iter().any(|member| {
+            matches!(member.kind, MemberKind::File) && member.sevenz.payload.len == 0
+        });
+    if !has_directory || !has_empty_file {
+        return Err(VerifyError::new(
+            "the 7z multi case must exercise the full empty-stream/empty-file matrix",
+        ));
+    }
+    if manifest.cases[1].content_root.sealr_tree_v1 == SEVENZ_CROSS_CONTAINER_ROOT
+        || multi.content_root.sealr_tree_v1 == SEVENZ_CROSS_CONTAINER_ROOT
+    {
+        return Err(VerifyError::new(
+            "the 7z dir and multi cases must carry their own content roots",
+        ));
+    }
+
+    Ok(VerificationSummary {
+        profiles: 1,
+        cases: manifest.cases.len(),
+        layout_roots: manifest.cases.len(),
+        content_roots: manifest.cases.len(),
+    })
+}
+
+fn verify_sevenz_case(case: &SevenZCase, manifest: &SevenZManifest) -> Result<(), VerifyError> {
+    let source = decode_hex(&case.source_bytes_hex, "7z source bytes")?;
+    let source_len = u64::try_from(source.len())
+        .map_err(|_| VerifyError::new("7z source length exceeds u64"))?;
+    if source_len > MAX_DERIVED_TAR_BYTES {
+        return Err(VerifyError::new(format!(
+            "7z source exceeds the {MAX_DERIVED_TAR_BYTES}-byte verifier cap"
+        )));
+    }
+    verify_digest(&case.source.sha256, "7z source digest")?;
+    if sha256_hex(&source) != case.source.sha256 {
+        return Err(VerifyError::new(
+            "7z source bytes do not match their digest",
+        ));
+    }
+    let ir = &case.archive_ir;
+    if ir.schema != SEVENZ_IR_SCHEMA
+        || ir.profile != SEVENZ_PROFILE_SCHEMA
+        || ir.profile_digest != manifest.profile.digest.sha256
+        || ir.source_digest.sha256 != case.source.sha256
+        || ir.format != "7z-copy"
+    {
+        return Err(VerifyError::new(
+            "7z IR does not repeat the case identities",
+        ));
+    }
+
+    let parsed = parse_sevenz_copy(&source)?;
+    if parsed.version_minor != ir.sevenz.version_minor
+        || parsed.pack_region != ir.sevenz.pack_region
+        || parsed.next_header != ir.sevenz.next_header
+        || parsed.next_header_crc != ir.sevenz.next_header_crc
+        || parsed.name_region_bytes != ir.sevenz.name_region_bytes
+        || parsed.dummy_bytes != ir.sevenz.dummy_bytes
+    {
+        return Err(VerifyError::new(
+            "7z container geometry disagrees with the recorded evidence",
+        ));
+    }
+    if parsed.folders.len() != ir.sevenz.folders.len() {
+        return Err(VerifyError::new(
+            "7z folder count disagrees with the recorded evidence",
+        ));
+    }
+    for (parsed_folder, folder) in parsed.folders.iter().zip(&ir.sevenz.folders) {
+        if parsed_folder.pack_stream != folder.pack_stream
+            || parsed_folder.pack_crc != folder.pack_crc
+            || parsed_folder.unpack_size != folder.unpack_size
+            || parsed_folder.folder_crc != folder.folder_crc
+            || parsed_folder.substreams.len() != folder.substreams.len()
+        {
+            return Err(VerifyError::new(
+                "a 7z folder disagrees with the recorded evidence",
+            ));
+        }
+        for (parsed_substream, substream) in parsed_folder.substreams.iter().zip(&folder.substreams)
+        {
+            if parsed_substream.0 != substream.payload
+                || parsed_substream.1 != substream.declared_crc
+            {
+                return Err(VerifyError::new(
+                    "a 7z substream disagrees with the recorded evidence",
+                ));
+            }
+        }
+    }
+
+    if parsed.members.len() != ir.members.len() {
+        return Err(VerifyError::new(
+            "7z member count disagrees with the recorded evidence",
+        ));
+    }
+    for (parsed_member, member) in parsed.members.iter().zip(&ir.members) {
+        if parsed_member.raw_name != member.raw_name_bytes
+            || parsed_member.name != member.decoded_name
+            || member.canonical_path != member.components.join("/")
+        {
+            return Err(VerifyError::new(
+                "a 7z member name disagrees with the recorded evidence",
+            ));
+        }
+        let is_dir = matches!(member.kind, MemberKind::Directory);
+        if parsed_member.is_dir != is_dir {
+            return Err(VerifyError::new(
+                "a 7z member kind disagrees with the empty-stream matrix",
+            ));
+        }
+        if let Some(attributes) = parsed_member.attributes {
+            if (attributes & SEVENZ_FILE_ATTRIBUTE_DIRECTORY != 0) != is_dir {
+                return Err(VerifyError::new(
+                    "a 7z directory attribute disagrees with the member kind",
+                ));
+            }
+        }
+        if parsed_member.payload != member.sevenz.payload
+            || parsed_member.declared_crc != member.sevenz.declared_crc
+            || parsed_member.attributes != member.sevenz.attributes
+            || parsed_member.mtime != member.sevenz.mtime
+            || member.declared_uncomp_size != member.sevenz.payload.len
+        {
+            return Err(VerifyError::new(
+                "a 7z member's container evidence disagrees with the re-parse",
+            ));
+        }
+        if !matches!(member.verification, MemberVerification::Verified) {
+            return Err(VerifyError::new("a 7z member is not verified"));
+        }
+        let payload_end = member
+            .sevenz
+            .payload
+            .offset
+            .checked_add(member.sevenz.payload.len)
+            .ok_or_else(|| VerifyError::new("7z member payload overflows u64"))?;
+        if payload_end > source_len {
+            return Err(VerifyError::new("7z member payload exceeds the source"));
+        }
+        let payload = &source[member.sevenz.payload.offset as usize..payload_end as usize];
+        if member.actual_uncomp_size != Some(member.sevenz.payload.len)
+            || member.actual_crc != Some(crc32_ieee_bytes(payload))
+            || member.content_sha256.as_deref() != Some(sha256_hex(payload).as_str())
+        {
+            return Err(VerifyError::new(
+                "a 7z member's measured facts disagree with its payload bytes",
+            ));
+        }
+        if let Some(declared) = member.sevenz.declared_crc {
+            if declared != crc32_ieee_bytes(payload) {
+                return Err(VerifyError::new(
+                    "a 7z member's declared CRC32 disagrees with its payload bytes",
+                ));
+            }
+        }
+        if !member.normalization_actions.is_empty() {
+            return Err(VerifyError::new(
+                "7z v1 vectors carry no normalization actions",
+            ));
+        }
+    }
+
+    let body = sevenz_layout_body(ir)?;
+    let actual_preimage = preimage(SEVENZ_LAYOUT_LABEL, &body);
+    let committed_preimage = decode_hex(&case.layout_preimage_hex, "7z layout preimage")?;
+    if actual_preimage != committed_preimage {
+        return Err(VerifyError::new(
+            "7z layout preimage does not match reconstructed evidence",
+        ));
+    }
+    verify_digest(&case.layout_root.sealr_tree_v12, "7z layout root")?;
+    if sha256_hex(&actual_preimage) != case.layout_root.sealr_tree_v12 {
+        return Err(VerifyError::new("7z layout root mismatch"));
+    }
+    let content_preimage = encode_sevenz_content(&ir.members)?;
+    verify_digest(&case.content_root.sealr_tree_v1, "7z content root")?;
+    if sha256_hex(&content_preimage) != case.content_root.sealr_tree_v1 {
+        return Err(VerifyError::new("7z content root mismatch"));
+    }
+    Ok(())
+}
+
+struct SevenZParsedFolder {
+    pack_stream: ByteRange,
+    pack_crc: Option<u32>,
+    unpack_size: u64,
+    folder_crc: Option<u32>,
+    substreams: Vec<(ByteRange, Option<u32>)>,
+}
+
+struct SevenZParsedMember {
+    raw_name: Vec<u8>,
+    name: String,
+    is_dir: bool,
+    payload: ByteRange,
+    declared_crc: Option<u32>,
+    attributes: Option<u32>,
+    mtime: Option<u64>,
+}
+
+struct SevenZParsedArchive {
+    version_minor: u8,
+    pack_region: ByteRange,
+    next_header: ByteRange,
+    next_header_crc: u32,
+    folders: Vec<SevenZParsedFolder>,
+    name_region_bytes: u64,
+    dummy_bytes: u64,
+    members: Vec<SevenZParsedMember>,
+}
+
+struct SevenZReader<'a> {
+    bytes: &'a [u8],
+    pos: usize,
+}
+
+impl SevenZReader<'_> {
+    fn remaining(&self) -> usize {
+        self.bytes.len() - self.pos
+    }
+
+    fn byte(&mut self, what: &str) -> Result<u8, VerifyError> {
+        if self.pos >= self.bytes.len() {
+            return Err(VerifyError::new(format!("7z header ends inside {what}")));
+        }
+        let value = self.bytes[self.pos];
+        self.pos += 1;
+        Ok(value)
+    }
+
+    fn take(&mut self, len: usize, what: &str) -> Result<&[u8], VerifyError> {
+        if self.remaining() < len {
+            return Err(VerifyError::new(format!("7z header ends inside {what}")));
+        }
+        let slice = &self.bytes[self.pos..self.pos + len];
+        self.pos += len;
+        Ok(slice)
+    }
+
+    /// Read one variable-length NUMBER, requiring the minimal encoding.
+    fn number(&mut self, what: &str) -> Result<u64, VerifyError> {
+        let first = self.byte(what)?;
+        let extra = (first.leading_ones() as usize).min(8);
+        if extra == 0 {
+            return Ok(u64::from(first));
+        }
+        let mask_bits = if extra >= 7 {
+            0
+        } else {
+            u64::from(first & (0x7F >> extra))
+        };
+        let tail = self.take(extra, what)?;
+        let mut low = 0_u64;
+        for (index, byte) in tail.iter().enumerate() {
+            low |= u64::from(*byte) << (8 * index);
+        }
+        let value = if extra == 8 {
+            low
+        } else {
+            (mask_bits << (8 * extra)) | low
+        };
+        if extra != sevenz_minimal_number_extra(value) {
+            return Err(VerifyError::new(format!(
+                "non-minimal 7z number encoding in {what}"
+            )));
+        }
+        Ok(value)
+    }
+
+    fn real_u64(&mut self, what: &str) -> Result<u64, VerifyError> {
+        let bytes = self.take(8, what)?;
+        Ok(u64::from_le_bytes(bytes.try_into().expect("8 bytes")))
+    }
+
+    fn u32_le(&mut self, what: &str) -> Result<u32, VerifyError> {
+        let bytes = self.take(4, what)?;
+        Ok(u32::from_le_bytes(bytes.try_into().expect("4 bytes")))
+    }
+
+    fn bounded_count(&mut self, what: &str) -> Result<usize, VerifyError> {
+        let value = self.number(what)?;
+        if value > self.remaining() as u64 {
+            return Err(VerifyError::new(format!(
+                "7z {what} exceeds the remaining header bytes"
+            )));
+        }
+        Ok(value as usize)
+    }
+
+    /// Read an MSB-first bit vector of exactly `count` items with zero
+    /// padding bits.
+    fn bit_vector(&mut self, count: usize, what: &str) -> Result<Vec<bool>, VerifyError> {
+        let byte_len = count.div_ceil(8);
+        let bytes = self.take(byte_len, what)?;
+        let mut bits = Vec::with_capacity(count);
+        for index in 0..count {
+            bits.push(bytes[index / 8] & (0x80 >> (index % 8)) != 0);
+        }
+        if !count.is_multiple_of(8) && bytes[byte_len - 1] & (0xFF_u8 >> (count % 8)) != 0 {
+            return Err(VerifyError::new(format!(
+                "nonzero 7z bit-vector padding in {what}"
+            )));
+        }
+        Ok(bits)
+    }
+
+    fn defined_vector(&mut self, count: usize, what: &str) -> Result<Vec<bool>, VerifyError> {
+        match self.byte(what)? {
+            0 => self.bit_vector(count, what),
+            1 => Ok(vec![true; count]),
+            other => Err(VerifyError::new(format!(
+                "7z {what} AllAreDefined byte {other:#04x} is not 0 or 1"
+            ))),
+        }
+    }
+
+    fn digests(&mut self, count: usize, what: &str) -> Result<Vec<Option<u32>>, VerifyError> {
+        let defined = self.defined_vector(count, what)?;
+        let mut digests = Vec::with_capacity(count);
+        for flag in defined {
+            digests.push(if flag { Some(self.u32_le(what)?) } else { None });
+        }
+        Ok(digests)
+    }
+}
+
+const fn sevenz_minimal_number_extra(value: u64) -> usize {
+    let mut extra = 0;
+    while extra <= 6 {
+        if value < 1_u64 << (7 + 7 * extra) {
+            return extra;
+        }
+        extra += 1;
+    }
+    if value < 1_u64 << 56 {
+        7
+    } else {
+        8
+    }
+}
+
+/// Independently re-parse one restricted raw-header Copy-only 7z container.
+fn parse_sevenz_copy(source: &[u8]) -> Result<SevenZParsedArchive, VerifyError> {
+    if source.len() < 32 {
+        return Err(VerifyError::new(
+            "7z source is shorter than a signature header",
+        ));
+    }
+    if source[..6] != SEVENZ_SIGNATURE {
+        return Err(VerifyError::new("7z signature magic mismatch"));
+    }
+    if source[6] != 0 || source[7] != 4 {
+        return Err(VerifyError::new(
+            "7z version is outside the restricted profile",
+        ));
+    }
+    let declared_start_crc = u32::from_le_bytes(source[8..12].try_into().expect("4 bytes"));
+    if crc32_ieee_bytes(&source[12..32]) != declared_start_crc {
+        return Err(VerifyError::new("7z start-header CRC32 mismatch"));
+    }
+    let next_offset = u64::from_le_bytes(source[12..20].try_into().expect("8 bytes"));
+    let next_size = u64::from_le_bytes(source[20..28].try_into().expect("8 bytes"));
+    let next_crc = u32::from_le_bytes(source[28..32].try_into().expect("4 bytes"));
+    let header_start = 32_u64
+        .checked_add(next_offset)
+        .ok_or_else(|| VerifyError::new("7z next-header offset overflows u64"))?;
+    let header_end = header_start
+        .checked_add(next_size)
+        .ok_or_else(|| VerifyError::new("7z next-header size overflows u64"))?;
+    if next_size == 0 || header_end != source.len() as u64 {
+        return Err(VerifyError::new(
+            "7z next header does not end exactly at the end of the source",
+        ));
+    }
+    let header_bytes = &source[header_start as usize..header_end as usize];
+    if crc32_ieee_bytes(header_bytes) != next_crc {
+        return Err(VerifyError::new("7z next-header CRC32 mismatch"));
+    }
+
+    let mut reader = SevenZReader {
+        bytes: header_bytes,
+        pos: 0,
+    };
+    if reader.number("header kind")? != 0x01 {
+        return Err(VerifyError::new("7z next header is not a raw kHeader"));
+    }
+
+    let mut pack_sizes: Vec<u64> = Vec::new();
+    let mut pack_crcs: Vec<Option<u32>> = Vec::new();
+    let mut unpack_sizes: Vec<u64> = Vec::new();
+    let mut folder_crcs: Vec<Option<u32>> = Vec::new();
+    let mut substream_counts: Vec<usize> = Vec::new();
+    let mut explicit_sizes: Vec<Vec<u64>> = Vec::new();
+    let mut substream_digest_values: Option<Vec<Option<u32>>> = None;
+    let mut saw_streams = false;
+    let mut num_files = 0_usize;
+    let mut empty_stream: Option<Vec<bool>> = None;
+    let mut empty_file: Option<Vec<bool>> = None;
+    let mut names: Option<Vec<(Vec<u8>, String)>> = None;
+    let mut attributes: Vec<Option<u32>> = Vec::new();
+    let mut mtimes: Vec<Option<u64>> = Vec::new();
+    let mut name_region_bytes = 0_u64;
+    let mut dummy_bytes = 0_u64;
+    let mut saw_files = false;
+
+    loop {
+        let id = reader.number("header property id")?;
+        match id {
+            0x00 => break,
+            0x04 => {
+                if saw_streams {
+                    return Err(VerifyError::new("duplicate 7z main streams info"));
+                }
+                saw_streams = true;
+                if reader.number("streams info")? != 0x06 {
+                    return Err(VerifyError::new(
+                        "7z streams info does not begin with pack info",
+                    ));
+                }
+                if reader.number("pack position")? != 0 {
+                    return Err(VerifyError::new("7z pack position is not zero"));
+                }
+                let num_pack = reader.bounded_count("pack-stream count")?;
+                pack_crcs = vec![None; num_pack];
+                loop {
+                    match reader.number("pack info property")? {
+                        0x00 => break,
+                        0x09 => {
+                            for _ in 0..num_pack {
+                                pack_sizes.push(reader.number("pack size")?);
+                            }
+                        }
+                        0x0A => {
+                            pack_crcs = reader.digests(num_pack, "pack digests")?;
+                        }
+                        other => {
+                            return Err(VerifyError::new(format!(
+                                "7z pack-info property {other:#04x} is outside the profile"
+                            )));
+                        }
+                    }
+                }
+                if pack_sizes.len() != num_pack {
+                    return Err(VerifyError::new("7z pack sizes are missing"));
+                }
+                if reader.number("streams info")? != 0x07 {
+                    return Err(VerifyError::new(
+                        "7z streams info does not continue with coders info",
+                    ));
+                }
+                if reader.number("folder marker")? != 0x0B {
+                    return Err(VerifyError::new(
+                        "7z coders info does not begin with folders",
+                    ));
+                }
+                let num_folders = reader.bounded_count("folder count")?;
+                if reader.byte("folder external flag")? != 0 {
+                    return Err(VerifyError::new(
+                        "external 7z folders are outside the profile",
+                    ));
+                }
+                for _ in 0..num_folders {
+                    if reader.number("coder count")? != 1 {
+                        return Err(VerifyError::new("7z folders must carry exactly one coder"));
+                    }
+                    let flags = reader.byte("coder flags")?;
+                    if flags & 0xF0 != 0 {
+                        return Err(VerifyError::new(
+                            "7z coder flags are outside the Copy-only profile",
+                        ));
+                    }
+                    let id_size = usize::from(flags & 0x0F);
+                    if reader.take(id_size, "codec id")? != [0x00] {
+                        return Err(VerifyError::new(
+                            "7z codec is outside the Copy-only profile",
+                        ));
+                    }
+                }
+                if reader.number("unpack sizes marker")? != 0x0C {
+                    return Err(VerifyError::new("7z coders info is missing unpack sizes"));
+                }
+                for _ in 0..num_folders {
+                    unpack_sizes.push(reader.number("folder unpack size")?);
+                }
+                folder_crcs = vec![None; num_folders];
+                loop {
+                    match reader.number("coders info property")? {
+                        0x00 => break,
+                        0x0A => {
+                            folder_crcs = reader.digests(num_folders, "folder digests")?;
+                        }
+                        other => {
+                            return Err(VerifyError::new(format!(
+                                "7z coders-info property {other:#04x} is outside the profile"
+                            )));
+                        }
+                    }
+                }
+                substream_counts = vec![1; num_folders];
+                let mut streams_id = reader.number("streams info")?;
+                if streams_id == 0x08 {
+                    let mut property = reader.number("substreams property")?;
+                    if property == 0x0D {
+                        substream_counts.clear();
+                        for _ in 0..num_folders {
+                            substream_counts.push(reader.bounded_count("substream count")?);
+                        }
+                        property = reader.number("substreams property")?;
+                    }
+                    if property == 0x09 {
+                        for (folder_index, count) in substream_counts.iter().enumerate() {
+                            let mut sizes = Vec::with_capacity(*count);
+                            let mut consumed = 0_u64;
+                            for _ in 0..count.saturating_sub(1) {
+                                let size = reader.number("substream size")?;
+                                consumed = consumed.checked_add(size).ok_or_else(|| {
+                                    VerifyError::new("7z substream sizes overflow u64")
+                                })?;
+                                sizes.push(size);
+                            }
+                            if *count > 0 {
+                                let last = unpack_sizes[folder_index]
+                                    .checked_sub(consumed)
+                                    .ok_or_else(|| {
+                                        VerifyError::new("7z substream sizes exceed their folder")
+                                    })?;
+                                sizes.push(last);
+                            }
+                            explicit_sizes.push(sizes);
+                        }
+                        property = reader.number("substreams property")?;
+                    }
+                    if property == 0x0A {
+                        let mut unknown = 0_usize;
+                        for (folder_index, count) in substream_counts.iter().enumerate() {
+                            if *count == 1 && folder_crcs[folder_index].is_some() {
+                                continue;
+                            }
+                            unknown += *count;
+                        }
+                        substream_digest_values =
+                            Some(reader.digests(unknown, "substream digests")?);
+                        property = reader.number("substreams property")?;
+                    }
+                    if property != 0x00 {
+                        return Err(VerifyError::new(format!(
+                            "7z substreams property {property:#04x} is outside the profile"
+                        )));
+                    }
+                    streams_id = reader.number("streams info")?;
+                }
+                if streams_id != 0x00 {
+                    return Err(VerifyError::new("7z streams info does not end with kEnd"));
+                }
+            }
+            0x05 => {
+                if saw_files {
+                    return Err(VerifyError::new("duplicate 7z files info"));
+                }
+                saw_files = true;
+                num_files = reader.bounded_count("file count")?;
+                attributes = vec![None; num_files];
+                mtimes = vec![None; num_files];
+                loop {
+                    let property = reader.number("files property id")?;
+                    if property == 0x00 {
+                        break;
+                    }
+                    let size = reader.number("files property size")?;
+                    if size > reader.remaining() as u64 {
+                        return Err(VerifyError::new("7z files property exceeds the header"));
+                    }
+                    let record_end = reader.pos + size as usize;
+                    match property {
+                        0x0E => {
+                            empty_stream =
+                                Some(reader.bit_vector(num_files, "empty-stream vector")?);
+                        }
+                        0x0F => {
+                            let num_empty = empty_stream
+                                .as_ref()
+                                .map(|bits| bits.iter().filter(|bit| **bit).count())
+                                .ok_or_else(|| {
+                                    VerifyError::new(
+                                        "7z empty-file record appears before empty-stream",
+                                    )
+                                })?;
+                            empty_file = Some(reader.bit_vector(num_empty, "empty-file vector")?);
+                        }
+                        0x11 => {
+                            if reader.byte("name external flag")? != 0 {
+                                return Err(VerifyError::new(
+                                    "external 7z names are outside the profile",
+                                ));
+                            }
+                            let region_len = record_end
+                                .checked_sub(reader.pos)
+                                .ok_or_else(|| VerifyError::new("7z name record underflow"))?;
+                            name_region_bytes = region_len as u64;
+                            let region = reader.take(region_len, "name region")?;
+                            names = Some(sevenz_decode_names(region, num_files)?);
+                        }
+                        0x12 | 0x13 => {
+                            let defined = reader.defined_vector(num_files, "time record")?;
+                            if reader.byte("time external flag")? != 0 {
+                                return Err(VerifyError::new(
+                                    "external 7z time records are outside the profile",
+                                ));
+                            }
+                            for flag in defined {
+                                if flag {
+                                    reader.real_u64("time value")?;
+                                }
+                            }
+                        }
+                        0x14 => {
+                            let defined = reader.defined_vector(num_files, "modification times")?;
+                            if reader.byte("time external flag")? != 0 {
+                                return Err(VerifyError::new(
+                                    "external 7z time records are outside the profile",
+                                ));
+                            }
+                            for (index, flag) in defined.iter().enumerate() {
+                                if *flag {
+                                    mtimes[index] = Some(reader.real_u64("time value")?);
+                                }
+                            }
+                        }
+                        0x15 => {
+                            let defined = reader.defined_vector(num_files, "attribute record")?;
+                            if reader.byte("attribute external flag")? != 0 {
+                                return Err(VerifyError::new(
+                                    "external 7z attribute records are outside the profile",
+                                ));
+                            }
+                            for (index, flag) in defined.iter().enumerate() {
+                                if *flag {
+                                    attributes[index] = Some(reader.u32_le("attribute value")?);
+                                }
+                            }
+                        }
+                        0x19 => {
+                            let padding = reader.take(size as usize, "dummy padding")?;
+                            if padding.iter().any(|byte| *byte != 0) {
+                                return Err(VerifyError::new("nonzero 7z dummy padding"));
+                            }
+                            dummy_bytes = dummy_bytes
+                                .checked_add(size)
+                                .ok_or_else(|| VerifyError::new("7z dummy overflow"))?;
+                        }
+                        other => {
+                            return Err(VerifyError::new(format!(
+                                "7z files property {other:#04x} is outside the profile"
+                            )));
+                        }
+                    }
+                    if reader.pos != record_end {
+                        return Err(VerifyError::new(
+                            "a 7z files property was not consumed exactly",
+                        ));
+                    }
+                }
+            }
+            other => {
+                return Err(VerifyError::new(format!(
+                    "7z header property {other:#04x} is outside the profile"
+                )));
+            }
+        }
+    }
+    if reader.pos != header_bytes.len() {
+        return Err(VerifyError::new("trailing bytes inside the 7z next header"));
+    }
+    if !saw_files || num_files == 0 {
+        return Err(VerifyError::new(
+            "7z archives without files are outside the profile",
+        ));
+    }
+    let names = names.ok_or_else(|| VerifyError::new("7z file records carry no names"))?;
+    if names.len() != num_files {
+        return Err(VerifyError::new(
+            "7z name count disagrees with the file count",
+        ));
+    }
+    if pack_sizes.len() != unpack_sizes.len() {
+        return Err(VerifyError::new(
+            "7z pack-stream count disagrees with the folder count",
+        ));
+    }
+
+    // Resolve the dense covering and folder geometry.
+    let mut folders = Vec::with_capacity(unpack_sizes.len());
+    let mut cursor = 32_u64;
+    let mut digest_cursor = 0_usize;
+    for (index, unpack_size) in unpack_sizes.iter().enumerate() {
+        if *unpack_size != pack_sizes[index] {
+            return Err(VerifyError::new(
+                "a Copy folder's unpack size disagrees with its pack size",
+            ));
+        }
+        let pack_stream = ByteRange {
+            offset: cursor,
+            len: pack_sizes[index],
+        };
+        cursor = cursor
+            .checked_add(pack_sizes[index])
+            .ok_or_else(|| VerifyError::new("7z pack sizes overflow u64"))?;
+        let count = substream_counts[index];
+        if count == 0 {
+            return Err(VerifyError::new(
+                "7z folders must carry at least one substream",
+            ));
+        }
+        let sizes = if explicit_sizes.is_empty() {
+            if count != 1 {
+                return Err(VerifyError::new(
+                    "7z substream sizes are missing for a multi-substream folder",
+                ));
+            }
+            vec![*unpack_size]
+        } else {
+            explicit_sizes[index].clone()
+        };
+        let mut substreams = Vec::with_capacity(count);
+        let mut sub_cursor = pack_stream.offset;
+        for size in &sizes {
+            if *size == 0 {
+                return Err(VerifyError::new("7z substreams must not be empty"));
+            }
+            let declared = if count == 1 && folder_crcs[index].is_some() {
+                folder_crcs[index]
+            } else {
+                let declared = match &substream_digest_values {
+                    Some(values) => values.get(digest_cursor).copied().flatten(),
+                    None => None,
+                };
+                digest_cursor += 1;
+                declared
+            };
+            substreams.push((
+                ByteRange {
+                    offset: sub_cursor,
+                    len: *size,
+                },
+                declared,
+            ));
+            sub_cursor = sub_cursor
+                .checked_add(*size)
+                .ok_or_else(|| VerifyError::new("7z substream sizes overflow u64"))?;
+        }
+        if sub_cursor != cursor {
+            return Err(VerifyError::new("7z substreams do not tile their folder"));
+        }
+        if let Some(declared) = pack_crcs[index] {
+            let bytes = &source[pack_stream.offset as usize..sub_cursor as usize];
+            if crc32_ieee_bytes(bytes) != declared {
+                return Err(VerifyError::new("a 7z pack-stream CRC32 mismatch"));
+            }
+        }
+        if let Some(declared) = folder_crcs[index] {
+            let bytes = &source[pack_stream.offset as usize..sub_cursor as usize];
+            if crc32_ieee_bytes(bytes) != declared {
+                return Err(VerifyError::new("a 7z folder CRC32 mismatch"));
+            }
+        }
+        folders.push(SevenZParsedFolder {
+            pack_stream,
+            pack_crc: pack_crcs[index],
+            unpack_size: *unpack_size,
+            folder_crc: folder_crcs[index],
+            substreams,
+        });
+    }
+    if cursor != header_start {
+        return Err(VerifyError::new(
+            "7z pack streams do not end where the next header begins",
+        ));
+    }
+
+    // Map files to members through the empty matrix.
+    let empty_stream = empty_stream.unwrap_or_else(|| vec![false; num_files]);
+    let num_empty = empty_stream.iter().filter(|bit| **bit).count();
+    let empty_file = empty_file.unwrap_or_else(|| vec![false; num_empty]);
+    if empty_file.len() != num_empty {
+        return Err(VerifyError::new(
+            "7z empty-file vector disagrees with the empty-stream count",
+        ));
+    }
+    let total_substreams: usize = folders.iter().map(|folder| folder.substreams.len()).sum();
+    if num_files - num_empty != total_substreams {
+        return Err(VerifyError::new(
+            "7z stream-bearing files disagree with the substream count",
+        ));
+    }
+    let mut substream_iter = folders
+        .iter()
+        .flat_map(|folder| folder.substreams.iter().copied());
+    let mut empty_index = 0_usize;
+    let mut members = Vec::with_capacity(num_files);
+    for (index, (raw_name, name)) in names.into_iter().enumerate() {
+        let (is_dir, payload, declared_crc) = if empty_stream[index] {
+            let is_empty_file = empty_file[empty_index];
+            empty_index += 1;
+            (
+                !is_empty_file,
+                ByteRange {
+                    offset: header_start,
+                    len: 0,
+                },
+                None,
+            )
+        } else {
+            let (payload, declared) = substream_iter
+                .next()
+                .expect("substream counts were matched to stream-bearing files");
+            (false, payload, declared)
+        };
+        members.push(SevenZParsedMember {
+            raw_name,
+            name,
+            is_dir,
+            payload,
+            declared_crc,
+            attributes: attributes[index],
+            mtime: mtimes[index],
+        });
+    }
+
+    Ok(SevenZParsedArchive {
+        version_minor: source[7],
+        pack_region: ByteRange {
+            offset: 32,
+            len: header_start - 32,
+        },
+        next_header: ByteRange {
+            offset: header_start,
+            len: next_size,
+        },
+        next_header_crc: next_crc,
+        folders,
+        name_region_bytes,
+        dummy_bytes,
+        members,
+    })
+}
+
+/// Decode the concatenated null-terminated UTF-16LE name region into exactly
+/// `count` non-empty names, consuming the region completely.
+fn sevenz_decode_names(region: &[u8], count: usize) -> Result<Vec<(Vec<u8>, String)>, VerifyError> {
+    if !region.len().is_multiple_of(2) {
+        return Err(VerifyError::new("7z name region is not an even byte count"));
+    }
+    let mut names = Vec::with_capacity(count);
+    let mut start = 0_usize;
+    let mut cursor = 0_usize;
+    while cursor < region.len() {
+        let unit = u16::from_le_bytes([region[cursor], region[cursor + 1]]);
+        cursor += 2;
+        if unit == 0 {
+            let raw = &region[start..cursor - 2];
+            if raw.is_empty() {
+                return Err(VerifyError::new("7z member names must not be empty"));
+            }
+            let units: Vec<u16> = raw
+                .chunks(2)
+                .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+                .collect();
+            let name: String = char::decode_utf16(units.iter().copied())
+                .collect::<Result<String, _>>()
+                .map_err(|_| VerifyError::new("a 7z member name is not valid UTF-16"))?;
+            names.push((raw.to_vec(), name));
+            start = cursor;
+        }
+    }
+    if names.len() != count || start != region.len() {
+        return Err(VerifyError::new("7z name region is not consumed exactly"));
+    }
+    Ok(names)
+}
+
+fn sevenz_layout_body(ir: &SevenZArchiveIrVector) -> Result<Vec<u8>, VerifyError> {
+    let mut body = Vec::new();
+    body.extend_from_slice(&decode_digest(&ir.profile_digest, "7z profile digest")?);
+    body.extend_from_slice(&decode_digest(
+        &ir.source_digest.sha256,
+        "7z source digest",
+    )?);
+    body.push(ir.sevenz.version_minor);
+    encode_range(&mut body, ir.sevenz.pack_region);
+    encode_range(&mut body, ir.sevenz.next_header);
+    push_u32(&mut body, ir.sevenz.next_header_crc);
+    push_u32(
+        &mut body,
+        u32::try_from(ir.sevenz.folders.len())
+            .map_err(|_| VerifyError::new("7z folder count exceeds u32"))?,
+    );
+    for folder in &ir.sevenz.folders {
+        encode_range(&mut body, folder.pack_stream);
+        push_optional_u32(&mut body, folder.pack_crc);
+        push_u64(&mut body, folder.unpack_size);
+        push_optional_u32(&mut body, folder.folder_crc);
+        push_u32(
+            &mut body,
+            u32::try_from(folder.substreams.len())
+                .map_err(|_| VerifyError::new("7z substream count exceeds u32"))?,
+        );
+        for substream in &folder.substreams {
+            encode_range(&mut body, substream.payload);
+            push_optional_u32(&mut body, substream.declared_crc);
+        }
+    }
+    push_u64(&mut body, ir.sevenz.name_region_bytes);
+    push_u64(&mut body, ir.sevenz.dummy_bytes);
+    push_u32(
+        &mut body,
+        u32::try_from(ir.members.len())
+            .map_err(|_| VerifyError::new("7z member count exceeds u32"))?,
+    );
+    for member in &ir.members {
+        push_bytes(&mut body, &member.raw_name_bytes)?;
+        push_bytes(&mut body, member.canonical_path.as_bytes())?;
+        body.push(match member.kind {
+            MemberKind::File => SEVENZ_LAYOUT_KIND_FILE,
+            MemberKind::Directory => SEVENZ_LAYOUT_KIND_DIRECTORY,
+        });
+        push_u64(&mut body, member.declared_uncomp_size);
+        encode_range(&mut body, member.sevenz.payload);
+        push_optional_u32(&mut body, member.sevenz.declared_crc);
+        push_optional_u32(&mut body, member.sevenz.attributes);
+        push_optional_u64(&mut body, member.sevenz.mtime);
+        push_u32(
+            &mut body,
+            u32::try_from(member.normalization_actions.len())
+                .map_err(|_| VerifyError::new("7z action count exceeds u32"))?,
+        );
+        for action in &member.normalization_actions {
+            match action {
+                NormalizationAction::StripDirectoryTrailingSlash => {
+                    body.push(NORM_STRIP_DIR_SLASH);
+                }
+                NormalizationAction::DropDotComponent { component_index } => {
+                    body.push(NORM_DROP_DOT);
+                    push_u32(&mut body, *component_index);
+                }
+            }
+        }
+    }
+    Ok(body)
+}
+
+fn encode_sevenz_content(members: &[SevenZMemberVector]) -> Result<Vec<u8>, VerifyError> {
+    let mut sorted: Vec<_> = members.iter().collect();
+    sorted.sort_by(|left, right| {
+        left.canonical_path
+            .as_bytes()
+            .cmp(right.canonical_path.as_bytes())
+    });
+    let mut body = Vec::new();
+    push_u32(
+        &mut body,
+        u32::try_from(sorted.len()).map_err(|_| VerifyError::new("member count exceeds u32"))?,
+    );
+    for member in sorted {
+        if !matches!(member.verification, MemberVerification::Verified) {
+            return Err(VerifyError::new(
+                "complete 7z content case contains an unverified member",
+            ));
+        }
+        push_bytes(&mut body, member.canonical_path.as_bytes())?;
+        body.push(match member.kind {
+            MemberKind::File => FILE,
+            MemberKind::Directory => DIRECTORY,
+        });
+        push_u64(
+            &mut body,
+            member
+                .actual_uncomp_size
+                .ok_or_else(|| VerifyError::new("verified 7z member has no actual size"))?,
+        );
+        let digest = decode_digest(
+            member
+                .content_sha256
+                .as_deref()
+                .ok_or_else(|| VerifyError::new("verified 7z member has no content digest"))?,
+            "7z member content digest",
+        )?;
+        body.extend_from_slice(&digest);
+    }
+    Ok(preimage(CONTENT_LABEL, &body))
 }
 
 fn verify_tar_bzip2_manifest(
@@ -8544,6 +9792,8 @@ mod tests {
         include_bytes!("../../../crates/sealr/tests/conformance/tar-xz-identity-v1.json");
     const TAR_BZIP2_VECTORS: &[u8] =
         include_bytes!("../../../crates/sealr/tests/conformance/tar-bzip2-identity-v1.json");
+    const SEVENZ_VECTORS: &[u8] =
+        include_bytes!("../../../crates/sealr/tests/conformance/sevenz-copy-identity-v1.json");
     const TAR_LAYOUT_VECTOR: &[u8] =
         include_bytes!("../../../crates/sealr/tests/conformance/tar-layout-v2.json");
 
@@ -10567,6 +11817,133 @@ mod tests {
         });
         let error = verify_manifest_json(&serde_json::to_vec(&manifest).unwrap()).unwrap_err();
         assert!(error.to_string().contains("without IR carries a tree root"));
+    }
+
+    #[test]
+    fn committed_sevenz_vectors_verify_the_container_and_cross_container_parity() {
+        let expected = VerificationSummary {
+            profiles: 1,
+            cases: 3,
+            layout_roots: 3,
+            content_roots: 3,
+        };
+        assert_eq!(
+            verify_sevenz_identity_vector_json(SEVENZ_VECTORS).unwrap(),
+            expected
+        );
+        assert_eq!(verify_manifest_json(SEVENZ_VECTORS).unwrap(), expected);
+
+        let manifest: SevenZManifest = serde_json::from_slice(SEVENZ_VECTORS).unwrap();
+        let sources: HashSet<_> = manifest
+            .cases
+            .iter()
+            .map(|case| case.source.sha256.as_str())
+            .collect();
+        let layouts: HashSet<_> = manifest
+            .cases
+            .iter()
+            .map(|case| case.layout_root.sealr_tree_v12.as_str())
+            .collect();
+        assert_eq!(sources.len(), manifest.cases.len());
+        assert_eq!(layouts.len(), manifest.cases.len());
+        assert_eq!(
+            manifest.cases[0].content_root.sealr_tree_v1,
+            SEVENZ_CROSS_CONTAINER_ROOT
+        );
+        assert_ne!(
+            manifest.cases[1].content_root.sealr_tree_v1,
+            manifest.cases[0].content_root.sealr_tree_v1
+        );
+        assert_eq!(manifest.cases[2].archive_ir.sevenz.folders.len(), 2);
+    }
+
+    #[test]
+    fn sevenz_profile_digest_is_reconstructed_without_sealr() {
+        assert_eq!(
+            sha256_hex(&sevenz_profile_canonical_bytes().unwrap()),
+            "7b6604ad59b5aecf9ebdfa42d7d48d3df663813798992741dd6d74ea56f60b75"
+        );
+    }
+
+    #[test]
+    fn sevenz_tampered_headers_roots_and_evidence_are_rejected() {
+        // A flipped start-header CRC byte in the source bytes.
+        let mut vector: serde_json::Value = serde_json::from_slice(SEVENZ_VECTORS).unwrap();
+        let hex = vector["cases"][0]["source_bytes_hex"].as_str().unwrap();
+        let mut source = decode_hex(hex, "test source").unwrap();
+        source[8] ^= 0x01;
+        let tampered: String = source.iter().map(|byte| format!("{byte:02x}")).collect();
+        vector["cases"][0]["source_bytes_hex"] = serde_json::json!(tampered);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("do not match their digest"));
+
+        // The same flip with a repaired source digest fails on the CRC itself.
+        let mut vector: serde_json::Value = serde_json::from_slice(SEVENZ_VECTORS).unwrap();
+        vector["cases"][0]["source_bytes_hex"] = serde_json::json!(tampered);
+        vector["cases"][0]["source"]["sha256"] = serde_json::json!(sha256_hex(&source));
+        vector["cases"][0]["archive_ir"]["source_digest"]["sha256"] =
+            serde_json::json!(sha256_hex(&source));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("start-header CRC32 mismatch"));
+
+        // A flipped layout root digit.
+        let mut vector: serde_json::Value = serde_json::from_slice(SEVENZ_VECTORS).unwrap();
+        vector["cases"][0]["layout_root"]["sealrTreeV12"] = serde_json::json!("0".repeat(64));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("layout root mismatch"));
+
+        // A flipped substream CRC.
+        let mut vector: serde_json::Value = serde_json::from_slice(SEVENZ_VECTORS).unwrap();
+        let crc = vector["cases"][0]["archive_ir"]["sevenz"]["folders"][0]["substreams"][0]
+            ["declared_crc"]
+            .as_u64()
+            .unwrap();
+        vector["cases"][0]["archive_ir"]["sevenz"]["folders"][0]["substreams"][0]["declared_crc"] =
+            serde_json::json!(crc ^ 1);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("substream disagrees"));
+
+        // A broken member payload range.
+        let mut vector: serde_json::Value = serde_json::from_slice(SEVENZ_VECTORS).unwrap();
+        vector["cases"][0]["archive_ir"]["members"][0]["sevenz"]["payload"]["len"] =
+            serde_json::json!(24);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("container evidence disagrees"));
+
+        // A flipped cross-container root.
+        let mut vector: serde_json::Value = serde_json::from_slice(SEVENZ_VECTORS).unwrap();
+        vector["cross_container_content_root"]["sealrTreeV1"] = serde_json::json!("0".repeat(64));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("cross-container"));
+
+        // A tampered name byte with repaired digests fails on the header CRC,
+        // and with a repaired header CRC fails on the name evidence.
+        let mut vector: serde_json::Value = serde_json::from_slice(SEVENZ_VECTORS).unwrap();
+        let hex = vector["cases"][0]["source_bytes_hex"].as_str().unwrap();
+        let mut source = decode_hex(hex, "test source").unwrap();
+        let name_offset = source
+            .windows(4)
+            .position(|window| window == b"\x6d\x00\x69\x00")
+            .expect("fixture name present");
+        source[name_offset] = b'n';
+        let next = crc32_ieee_bytes(&source[57..]);
+        source[28..32].copy_from_slice(&next.to_le_bytes());
+        let start = crc32_ieee_bytes(&source[12..32]);
+        source[8..12].copy_from_slice(&start.to_le_bytes());
+        let tampered: String = source.iter().map(|byte| format!("{byte:02x}")).collect();
+        vector["cases"][0]["source_bytes_hex"] = serde_json::json!(tampered);
+        vector["cases"][0]["source"]["sha256"] = serde_json::json!(sha256_hex(&source));
+        vector["cases"][0]["archive_ir"]["source_digest"]["sha256"] =
+            serde_json::json!(sha256_hex(&source));
+        vector["cases"][0]["archive_ir"]["sevenz"]["next_header_crc"] = serde_json::json!(next);
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("name disagrees"));
+
+        // A profile-digest lie.
+        let mut vector: serde_json::Value = serde_json::from_slice(SEVENZ_VECTORS).unwrap();
+        vector["profile"]["digest"]["sha256"] = serde_json::json!("0".repeat(64));
+        let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("profile digest"));
     }
 
     #[test]
