@@ -74,6 +74,7 @@ The project is in initial development. Compatibility may change between preview 
 
 ### Security
 
+- Closed a timestamp-granularity window in the Unix private-snapshot copy, reported by an external playtest against the project's own unit test: the opened-source mutation check compared only device, inode, mode, length, mtime, and ctime, so a same-length in-place mutation landing within one filesystem timestamp granule could evade detection (the test failed 3 of 20 isolated runs on Linux). The snapshot now additionally streams the opened source a second time in full and requires byte agreement with the copied spool, proving the retained bytes equal the source's end-of-ingest content on every platform; detection no longer depends on timestamps, making the test deterministic. The metadata comparison is retained as a fail-fast.
 - Each composition wraps only its frozen raw dialect. A wrapper cannot widen, alias, retry, or fall back between inner languages, and every wrapper failure keeps admission not-evaluated instead of guessing a recovery interpretation.
 - Denied GNU `K` long links, sparse files, GNU base-256 numbers, mixed PAX/GNU state, orphan carriers, links, devices, and concatenation.
 - The zstd window ceiling bounds decoder allocation for hostile frames, `zstd --long` output beyond 8 MiB is rejected exactly as the reference decompressor requires opt-in, and the version floor `ruzstd` 0.9.0 postdates both the RUSTSEC-2024-0400 fix and the first-frame window-cap correction.

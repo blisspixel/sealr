@@ -2,11 +2,8 @@ use std::borrow::Cow;
 use std::error::Error;
 use std::fmt;
 use std::fs::{File, Metadata, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::Path;
-
-#[cfg(any(target_os = "linux", feature = "__internal-worker-lab"))]
-use std::io::{Seek, SeekFrom};
 
 use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
 use cap_std::fs::OpenOptions as CapOpenOptions;
@@ -834,6 +831,25 @@ impl<'a> SourceSnapshot<'a> {
             )
         })?;
         if !after.is_file() || opened_source_state(&after) != before {
+            return Err(Finding::error(
+                FindingCode::SourceIo,
+                "opened source changed while the private snapshot was being copied",
+            ));
+        }
+        // Metadata alone cannot see a same-length in-place mutation that
+        // lands within one filesystem timestamp granule, so the opened source
+        // is streamed a second time in full and must byte-agree with the
+        // copied snapshot. This proves the retained bytes equal the source's
+        // end-of-ingest content, not merely that its metadata looked stable.
+        source.seek(SeekFrom::Start(0)).map_err(|error| {
+            Finding::error(
+                FindingCode::SourceIo,
+                format!("rewind opened source for verification: {error}"),
+            )
+        })?;
+        let (reread_len, reread_sha256) =
+            copy_bounded(&mut source, &mut io::sink(), max_archive_bytes)?;
+        if reread_len != snapshot.len || snapshot.digest.sha256() != Some(reread_sha256.as_str()) {
             return Err(Finding::error(
                 FindingCode::SourceIo,
                 "opened source changed while the private snapshot was being copied",
