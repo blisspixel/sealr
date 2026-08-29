@@ -405,7 +405,10 @@ pub(crate) fn parse_core_metadata(
 ) -> Result<CoreMetadata, WheelFinding> {
     let fields = parse_headers(raw, EvaluationStage::CoreMetadata, limits)?;
     let metadata_version = exactly_one(&fields, "Metadata-Version", EvaluationStage::CoreMetadata)?;
-    if !matches!(metadata_version.as_str(), "2.1" | "2.2" | "2.3" | "2.4") {
+    if !matches!(
+        metadata_version.as_str(),
+        "2.1" | "2.2" | "2.3" | "2.4" | "2.5" | "2.6"
+    ) {
         return Err(WheelFinding::new(
             EvaluationStage::CoreMetadata,
             "wheel.metadata-version-unsupported",
@@ -1121,6 +1124,22 @@ mod tests {
         let finding = parse_core_metadata(malformed, WheelLimits::default()).unwrap_err();
         assert_eq!(finding.stage, EvaluationStage::CoreMetadata);
         assert_eq!(finding.code, "wheel.metadata-version-grammar");
+    }
+
+    #[test]
+    fn the_widened_spec_snapshot_admits_core_metadata_2_5_and_2_6() {
+        for version in ["2.1", "2.2", "2.3", "2.4", "2.5", "2.6"] {
+            let metadata = format!("Metadata-Version: {version}\nName: demo\nVersion: 1.0\n");
+            let parsed = parse_core_metadata(metadata.as_bytes(), WheelLimits::default())
+                .expect("supported Core Metadata versions parse");
+            assert_eq!(parsed.metadata_version, version);
+        }
+        for version in ["2.0", "2.7", "3.0"] {
+            let metadata = format!("Metadata-Version: {version}\nName: demo\nVersion: 1.0\n");
+            let finding =
+                parse_core_metadata(metadata.as_bytes(), WheelLimits::default()).unwrap_err();
+            assert_eq!(finding.code, "wheel.metadata-version-unsupported");
+        }
     }
 
     #[test]

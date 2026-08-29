@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 
 pub const CONSUMER_PROFILE_ID: &str = "sealr.consumer.python-wheel.v1";
 pub const CONSUMER_PROFILE_SCHEMA: &str = "sealr.wheel-consumer-profile.v1";
-pub const SPEC_SNAPSHOT_ID: &str = "pypa-wheel-core-metadata-2026-08-26";
+pub const SPEC_SNAPSHOT_ID: &str = "pypa-wheel-core-metadata-2026-08-28";
 pub const ARTIFACT_ENCODING_ID: &str = "sealrWheelArtifactV1";
 pub const PLAN_ENCODING_ID: &str = "sealrWheelInstallPlanV1";
 pub const REALIZATION_ENCODING_ID: &str = "sealrWheelRealizationV1";
