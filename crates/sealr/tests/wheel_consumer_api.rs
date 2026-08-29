@@ -154,7 +154,7 @@ fn supported_consumer_uses_only_the_verified_capability_after_source_deletion() 
     assert_eq!(artifact.consumer_profile, CONSUMER_PROFILE_ID);
     assert_eq!(
         artifact.consumer_profile_digest,
-        "d10b535baea72217bf12703468b200bdd2557a4a747f57fc211480216d1c7263"
+        "d8c71f98c25db7e7f22f1a265f718ebaf2c50428a8c11de98c3f014f965125ef"
     );
     assert_eq!(artifact.interpretation_profile, ZIP_PORTABLE_UTF8_V1);
     assert!(artifact
@@ -172,11 +172,11 @@ fn supported_consumer_uses_only_the_verified_capability_after_source_deletion() 
     );
     assert_eq!(
         identities.artifact_sha256,
-        "c26d5c8779051b2e995d81ee2e71095205bd6ce371ec051a12d61d9571fce157"
+        "12a0748538344681cd672badfb0a846505b4ca12bf09c7584205508f397c411f"
     );
     assert_eq!(
         identities.install_plan_sha256,
-        "74b7b2162c8cc361bb9db89c68f184a9c064318da7598274404137b973e3c4da"
+        "4924fff05829b7f9d2c9b4d74861cff3750286db6f3e5960653380b2365c959a"
     );
     assert_eq!(
         [

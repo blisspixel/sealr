@@ -1,0 +1,17 @@
+[package]
+name = "sealr-wheel-inventory-v4"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+sealr = { version = "=0.1.0-alpha.11", path = "../../crates/sealr" }
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+
+[[bin]]
+name = "wheel_inventory_v4"
+path = "src/bin/wheel_inventory_v4.rs"

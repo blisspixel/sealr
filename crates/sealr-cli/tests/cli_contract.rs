@@ -438,6 +438,8 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert!(help_text.contains("tar-bzip2-ustar"));
     assert!(help_text.contains("7z-copy"));
     assert!(help_text.contains("--worker-manifest <ABSOLUTE_PATH>"));
+    assert!(help_text.contains("--view <NEW_FILE>"));
+    assert!(help_text.contains("--receipt <NEW_FILE>"));
     assert!(help_text.contains("--version"));
 
     let version = sealr_text(&["--version"]);
@@ -1558,4 +1560,131 @@ fn missing_archive_exits_two_without_a_source_digest() {
     assert_eq!(receipt["admission"]["status"], "not-evaluated");
     assert_eq!(receipt["effect"]["status"], "not-requested");
     assert_eq!(receipt["source_snapshot"], "unavailable");
+}
+
+#[test]
+fn view_and_receipt_files_carry_the_stream_documents_and_silence_the_streams() {
+    let (run, fixtures) = fixture_set("output-files");
+    let view_path = run.path.join("evidence.view.json");
+    let receipt_path = run.path.join("evidence.receipt.json");
+
+    let output = sealr(&[
+        &fixtures.allowed,
+        Path::new("--view"),
+        &view_path,
+        Path::new("--receipt"),
+        &receipt_path,
+    ]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stdout.is_empty(), "stdout must stay silent");
+    assert!(output.stderr.is_empty(), "stderr must stay silent");
+
+    let view_bytes = fs::read(&view_path).expect("view file should exist");
+    let receipt_bytes = fs::read(&receipt_path).expect("receipt file should exist");
+    let view = json(&view_bytes, "view file");
+    let receipt = json(&receipt_bytes, "receipt file");
+    assert_eq!(view["schema"], "sealr.view.v1");
+    assert_eq!(view["verdict"], "allowed");
+    assert_eq!(receipt["schema"], "sealr.receipt.v2");
+    assert_eq!(receipt["verdict"], "allowed");
+    assert_eq!(receipt["source"]["sha256"], ALLOWED_SHA256);
+
+    let streamed = sealr(&[&fixtures.allowed]);
+    assert_eq!(streamed.status.code(), Some(0));
+    assert_eq!(view_bytes, streamed.stdout, "view file must equal stdout");
+    assert_eq!(
+        receipt_bytes, streamed.stderr,
+        "receipt file must equal stderr"
+    );
+}
+
+#[test]
+fn semantic_exit_codes_survive_file_redirection() {
+    let (run, fixtures) = fixture_set("output-files-reject");
+    let view_path = run.path.join("rejected.view.json");
+    let receipt_path = run.path.join("rejected.receipt.json");
+
+    let output = sealr(&[
+        &fixtures.rejected,
+        Path::new("--view"),
+        &view_path,
+        Path::new("--receipt"),
+        &receipt_path,
+    ]);
+
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    assert!(output.stderr.is_empty());
+    let view = json(&fs::read(&view_path).expect("view file"), "view file");
+    let receipt = json(
+        &fs::read(&receipt_path).expect("receipt file"),
+        "receipt file",
+    );
+    assert_eq!(view["verdict"], "rejected");
+    assert_eq!(receipt["verdict"], "rejected");
+    assert_eq!(view["findings"][0]["code"], "path.dotdot");
+}
+
+#[test]
+fn existing_output_files_refuse_before_any_effect_and_are_never_overwritten() {
+    let (run, fixtures) = fixture_set("output-files-existing");
+    let view_path = run.path.join("evidence.view.json");
+    fs::write(&view_path, b"prior evidence\n").expect("pre-existing file");
+    let destination = run.path.join("materialized");
+
+    let output = sealr(&[
+        &fixtures.allowed,
+        Path::new("--dest"),
+        &destination,
+        Path::new("--view"),
+        &view_path,
+    ]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        message.starts_with("sealr: view output file "),
+        "unexpected diagnostic: {message}"
+    );
+    assert_eq!(
+        fs::read(&view_path).expect("pre-existing file remains"),
+        b"prior evidence\n",
+        "an existing output file must never be overwritten"
+    );
+    assert!(
+        !destination.exists(),
+        "output destinations are claimed before any materialization effect"
+    );
+}
+
+#[test]
+fn shared_view_and_receipt_path_is_refused() {
+    let (run, fixtures) = fixture_set("output-files-shared");
+    let shared = run.path.join("evidence.json");
+
+    let output = sealr(&[
+        &fixtures.allowed,
+        Path::new("--view"),
+        &shared,
+        Path::new("--receipt"),
+        &shared,
+    ]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        message.starts_with("sealr: receipt output file "),
+        "unexpected diagnostic: {message}"
+    );
+    assert!(
+        !shared.exists(),
+        "a refused run must leave the filesystem unchanged"
+    );
 }

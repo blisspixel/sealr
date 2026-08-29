@@ -2,18 +2,76 @@
 
 [![CI](https://github.com/blisspixel/sealr/actions/workflows/ci.yml/badge.svg)](https://github.com/blisspixel/sealr/actions/workflows/ci.yml)
 
-> **Goal: one archive, one tree, and evidence for the decision.**
+> **Sealr turns an untrusted archive into one verified, reusable tree capability — or nothing.**
+>
+> One archive. One meaning. One verified tree.
 
-sealr is an early attempt to make archive ingestion easier to reason about. Alpha.11 implements deliberately narrow ZIP32, explicit strict ZIP64, raw portable ustar, strict single-member gzip-wrapped portable ustar, and restricted raw POSIX PAX paths. Every nondefault format is selected explicitly and does not widen or alias the ZIP32 compatibility default. Every supported format builds one versioned interpretation from immutable source domains, verifies accepted members, and either publishes the requested tree without replacement or publishes no destination. An explicit x86_64 Linux mode moves supported ZIP32 payload verification, stage writes, and later non-retained reads into an authenticated worker restricted with Landlock ABI 3 and seccomp, while the supervisor retains structural planning and publication authority. ZIP64, gzip-wrapped ustar, raw ustar, and PAX fail closed at that boundary; unsupported worker selections never fall back to in-process execution. Sealr does not yet provide a general process sandbox or production security claim.
+Different parsers routinely assign different meanings to the same archive bytes, and real attacks exploit exactly that disagreement. Sealr admits an archive through exactly one versioned, fail-closed interpretation, verifies every member, and hands downstream code an opaque `VerifiedArchive` capability plus an evidence receipt. Downstream consumers use the capability and never reopen the archive; the original file can be deleted the moment admission completes. If any byte fails verification, there is no tree at all.
 
 ```text
 Untrusted archive x policy
   -> (Allowed { wrote } | Rejected) x receipt x inspectable view
 ```
 
-The longer-term aim is an archive-to-tree admission boundary whose decision and evidence can be reused by other systems. The current release is a small step toward that aim, not proof that the category or design is finished. Usefulness is not “more unzip.” It is: same bytes and policy produce one tree or no tree on Linux, macOS, and Windows, and the next tool consumes that tree instead of opening the ZIP again. Until a dependent does that, a receipt is just a receipt. The [usefulness test](docs/usefulness.md) is the quality bar.
+## Thirty seconds
 
-> Status: `v0.1.0-alpha.11` is the eleventh development preview of the archive boundary. It is useful for evaluation, development, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. The limitations below are security boundaries, not fine print.
+```text
+git clone https://github.com/blisspixel/sealr.git && cd sealr
+
+# Inspect: view JSON on stdout, receipt JSON on stderr, no files written.
+cargo run --locked -p sealr-cli -- path/to/archive.zip
+
+# Materialize into a new destination below an existing parent — or nothing.
+cargo run --locked -p sealr-cli -- path/to/archive.zip --dest ./out
+
+# Capture both evidence documents as files.
+cargo run --locked -p sealr-cli -- path/to/archive.zip --view v.json --receipt r.json
+```
+
+Exit `0` means admitted and completely verified; `2` means not admitted; `3` means admitted but the destination effect failed. Every path emits the view and the receipt.
+
+## Twenty lines of Rust
+
+A downstream consumer that installs a Python wheel from the capability alone — the source file is gone before evaluation begins:
+
+```rust
+use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelLimits};
+use sealr::{apply_with_options, ApplyOptions, Policy, Request, Source, ZipInterpretationProfile};
+
+fn main() {
+    let policy = Policy::default_v1();
+    let options = ApplyOptions::new()
+        .with_interpretation_profile(ZipInterpretationProfile::PortableUtf8V1);
+    let request = Request {
+        source: Source::Path("demo-1.0-py3-none-any.whl".as_ref()),
+        policy: &policy,
+        dest: None,
+    };
+    let outcome = apply_with_options(request, &options);
+    let archive = outcome.verified_archive().expect("admitted").clone();
+    std::fs::remove_file("demo-1.0-py3-none-any.whl").expect("capability outlives the file");
+    match evaluate_wheel("demo-1.0-py3-none-any.whl", &archive, WheelLimits::default()) {
+        WheelEvaluation::Admitted { plan, identities, .. } => {
+            println!("{} planned entries, artifact {}", plan.entries().len(), identities.artifact_sha256);
+        }
+        other => println!("refused: {other:?}"),
+    }
+}
+```
+
+The complete runnable version — including a hostile `..` container refused before any capability exists and an admitted container whose lying `RECORD` is denied with an exact finding — is `cargo run --locked -p sealr --example wheel_admission`.
+
+## Non-goals
+
+- **Not malware detection.** Admission verdicts are structural and semantic. An admitted archive is one whose bytes carry exactly one meaning under the selected profile, not a safe program.
+- **Not a general process sandbox.** The explicit x86_64 Linux worker is a reduced-authority boundary for selected operations, not host containment.
+- **Not a 7-Zip or libarchive replacement.** Sealr is deliberately narrow: unsupported structure fails closed by design, and general-compatibility extraction is explicitly out of scope.
+- **Not production-grade yet.** There is no external security audit, receipts are unsigned, and the limitations below are security boundaries, not fine print.
+- **Not chasing format breadth.** Parser breadth is currently frozen; the active milestones are downstream usefulness, measured compatibility, and independent review. See the [near-term execution plan](docs/near-term.md).
+
+The longer-term aim is an archive-to-tree admission boundary whose decision and evidence can be reused by other systems. Usefulness is not “more unzip.” It is: same bytes and policy produce one tree or no tree on Linux, macOS, and Windows, and the next tool consumes that tree instead of opening the ZIP again. The [usefulness test](docs/usefulness.md) is the quality bar.
+
+> Status: `v0.1.0-alpha.11` is the eleventh development preview of the archive boundary. It is useful for evaluation, development, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. Alpha.11 implements deliberately narrow ZIP32, explicit strict ZIP64, raw portable ustar, strict single-member gzip-wrapped portable ustar, and restricted raw POSIX PAX paths. Every nondefault format is selected explicitly and does not widen or alias the ZIP32 compatibility default. An explicit x86_64 Linux mode moves supported ZIP32 payload verification, stage writes, and later non-retained reads into an authenticated worker restricted with Landlock ABI 3 and seccomp, while the supervisor retains structural planning and publication authority; unsupported worker selections never fall back to in-process execution.
 
 > Release contents: Alpha.11 adds the explicitly selected, zero-new-dependency `sealr.profile.tar.pax-portable.v1` restricted raw POSIX PAX preview under policy v5. It accepts only bounded local and global `path` and `size` records over exact portable-ustar physical headers, records precedence and provenance in `sealr.archive-ir.tar-pax.v1`, independently audits the source covering and state replay, binds layout through `sealrTreeV5` with label `sealr.tree.layout.tar-pax.v1`, and adds a dedicated nine-seed bounded scheduled fuzz campaign. It preserves Alpha.10 strict ZIP64 and gzip-TAR, Alpha.9 raw ustar, every earlier ZIP and wheel identity, and the Alpha.6 supervised Linux boundary. The [Alpha.11 release notes](docs/releases/v0.1.0-alpha.11.md) define the shipped delta and remaining limitations.
 
@@ -200,13 +258,13 @@ The semantic walkthrough is enforced by CLI integration tests on the native plat
 
 ## What comes next
 
-What is next, and why:
+Parser breadth is deliberately frozen. Twelve explicit container and codec profiles exist on current main; adding a thirteenth is no longer the scarce work. The active milestones are:
 
-1. Admit 7z LZMA/LZMA2 members and packed headers over the landed Copy-first structure, reusing the reviewed lzma-rust2 layer and deciding the packed-header decode shape explicitly. The Copy-only 7z container, and the zstd-, xz-, and bzip2-wrapped ustar profiles, already ship on current main through the executed Gate C and Gate B reviews.
-2. The landed Copy-first structure keeps coder graphs, solid routing, encryption, and volume behavior explicitly gated while the decoder layer arrives.
-3. Add cpio, ar/deb, CAB, RPM, and restricted RAR5 through format-specific threat models, identities, package evidence, and dependency gates. ISO 9660, UDF, and other filesystem images remain a separate program because they expose a different namespace and authority model.
+1. **Downstream usefulness.** The wheel consumer is the first real dependent: it evaluates, plans, and realizes installs from the `VerifiedArchive` capability alone and never reopens the archive. The runnable `wheel_admission` example and the CLI `--view`/`--receipt` evidence-capture flags are the current steps; a stable evidence contract for other systems is the goal.
+2. **Measured compatibility.** Widening the wheel corpus with stratified, individually investigated evidence — Core Metadata 2.1 through 2.6 is now admitted — instead of acceptance percentages.
+3. **Independent review and a measurable TCB.** Bounded PR sizes for the trusted computing base, non-author review for TCB changes, a per-release TCB report, and continuous fuzzing.
 
-Targeted wheel evidence, stable identity and API review, authenticated recovery, durability, and assurance history continue in parallel. Any dependency addition requires high-assurance evidence and a minimal transitive, native, and `unsafe` footprint; an existing reviewed dependency or zero-dependency implementation is preferred.
+The parked 7z LZMA/LZMA2 step (decoder-layer design, transform profiles, and dictionary gates) lives on `feature/7z-lzma-portable-v1` with its research brief and resumes after these milestones. cpio, ar/deb, CAB, RPM, and restricted RAR5 remain tracked in the [format support architecture](docs/format-support.md) with format-specific threat models and dependency gates. Any dependency addition still requires high-assurance evidence and a minimal transitive, native, and `unsafe` footprint.
 
 The landed [private semantic-record assurance](docs/semantic-record.md) includes an immutable 12-case v1 baseline, 12 additive v2 cases with explicit oracle ownership, plan-native inspect and materialize executors, a shared owning plan seam, and a required near-limit completion heap probe. The Linux bootstrap closes no-descendant and permission-mutation authority before source transfer, validates raw ancillary data, and enforces supervisor-owned absolute monotonic deadlines across every authority round. Deterministic stalls and separate 500-iteration bootstrap and writer campaigns prove bounded termination, exact reap, descriptor stability, and checked cleanup. Bounded `SLRBLOB1` memfds carry the canonical semantic plan, completion, and retained-content bundle. The worker binds the plan to the exact file-backed snapshot, invokes no structural parser during execution, and reads only planned payload ranges. After worker exit and reap, the supervisor treats both sealed outputs as untrusted proposals, independently replays the accepted plan against its retained exact source descriptor, and requires byte-for-byte canonical agreement. Public non-retained reads use a fresh restricted worker with no stage or destination authority and preserve the originating inspect or materialize binding. Public supervised materialization gives the worker only the supervisor-created stage root and sealed plan; destination setup, exact post-reap audit, cleanup, and no-replace publication remain supervisor-owned. The [Linux helper packaging contract](docs/helper-packaging.md) fixes release placement, artifact identity, manifest, modes, helper-aware license closure, and extracted-package proof while requiring helper absence from macOS and Windows archives. A required QEMU gate proves typed fail-closed behavior on an actual Landlock ABI 2 kernel. The explicit CLI, wheel-laboratory, and extracted-package-consumer paths now load the exact manifest and use this same boundary without fallback. Protocol v1 remains unchanged.
 

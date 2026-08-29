@@ -84,15 +84,16 @@ The v1 consumer implements these rules:
 1. The outer filename parses and agrees with normalized distribution, version, build, and expanded `WHEEL` tags. The admitted PEP 440 syntax is the case-insensitive canonical subset `[N!]N(.N)*[{a|b|rc}N][.postN][.devN][+L(.L)*]`, where numeric fields are required and local segments are nonempty ASCII alphanumerics separated by dots. The exact `pep440_rs` 0.7.3 parser distinguishes other valid PEP 440 forms as unsupported from malformed versions as denied.
 2. Exactly one matching `.dist-info` directory contains regular-file `METADATA`, `WHEEL`, and `RECORD` members.
 3. `Wheel-Version` support is explicit. A greater unsupported major version is unsupported, not a policy denial.
-4. `Root-Is-Purelib` is present and exact.
-5. Metadata header names are ASCII case-insensitive, duplicate detection occurs after name folding, and header count and line limits are enforced while streaming before fields are retained. `RECORD` uses a strict bounded CSV grammar and has one row per archive file, with only specification-defined exemptions.
-6. Every non-exempt row has an approved secure hash and exact size matching the already verified member. The `RECORD` row itself has empty hash and size fields. Only exact `RECORD.jws` and `RECORD.p7s` siblings under the selected `.dist-info` root may remain outside `RECORD`; a row that lists either file is denied.
-7. `RECORD` paths are canonical archive-relative forward-slash paths. The broader installed-project grammar is not reused as authority for archive lookup or deletion.
-8. Phantom, absolute, parent-relative, duplicate, and normalized-collision rows reject.
-9. `.data` contains only supported scheme keys, and relocation is collision-free after mapping, including exact and portable-folded file-ancestor topology within each target scheme.
-10. Entry-point objects use dotted ASCII Python `module:attribute` references with explicitly parsed legacy extras. Command names and generated target names pass a separate target-path policy. Archive path admission alone does not sanitize generated names.
-11. Deprecated `RECORD` signature files, if admitted at all, are explicit legacy objects and are never treated as verified signatures.
-12. Metadata, row count, line length, field count, tag expansion, and retained semantic bytes have independent checked caps.
+4. `Metadata-Version` support is an explicit pinned list. The `pypa-wheel-core-metadata-2026-08-28` snapshot admits Core Metadata 2.1 through 2.6; any other declared version — earlier, later, or malformed-but-parseable — is unsupported, not denied. Widening this list changes the specification snapshot identifier and therefore the consumer profile digest and downstream artifact identities.
+5. `Root-Is-Purelib` is present and exact.
+6. Metadata header names are ASCII case-insensitive, duplicate detection occurs after name folding, and header count and line limits are enforced while streaming before fields are retained. `RECORD` uses a strict bounded CSV grammar and has one row per archive file, with only specification-defined exemptions.
+7. Every non-exempt row has an approved secure hash and exact size matching the already verified member. The `RECORD` row itself has empty hash and size fields. Only exact `RECORD.jws` and `RECORD.p7s` siblings under the selected `.dist-info` root may remain outside `RECORD`; a row that lists either file is denied.
+8. `RECORD` paths are canonical archive-relative forward-slash paths. The broader installed-project grammar is not reused as authority for archive lookup or deletion.
+9. Phantom, absolute, parent-relative, duplicate, and normalized-collision rows reject.
+10. `.data` contains only supported scheme keys, and relocation is collision-free after mapping, including exact and portable-folded file-ancestor topology within each target scheme.
+11. Entry-point objects use dotted ASCII Python `module:attribute` references with explicitly parsed legacy extras. Command names and generated target names pass a separate target-path policy. Archive path admission alone does not sanitize generated names.
+12. Deprecated `RECORD` signature files, if admitted at all, are explicit legacy objects and are never treated as verified signatures.
+13. Metadata, row count, line length, field count, tag expansion, and retained semantic bytes have independent checked caps.
 
 These rules are a supported prerelease contract. Additive output fields may be introduced through non-exhaustive types, while changes to interpreted meaning, identity encodings, or denial classification require a new versioned profile or encoding.
 
