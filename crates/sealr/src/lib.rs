@@ -5,6 +5,7 @@
 
 mod apply;
 mod bzip2;
+pub mod canonical_json;
 mod covering;
 mod findings;
 #[allow(dead_code)]
