@@ -554,6 +554,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "sealr-attest"
+version = "0.1.0-alpha.11"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
 name = "sealr-cli"
 version = "0.1.0-alpha.11"
 dependencies = [
