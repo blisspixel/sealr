@@ -11,6 +11,7 @@ members = [
     "tools/wheel-lab",
     "tools/wheel-inventory-v4",
     "tools/attest",
+    "tools/wheel-inventory-v5",
 ]
 
 [workspace.package]

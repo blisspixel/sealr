@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
-use std::io::BufReader;
+use std::io::{self, BufReader, Write};
 use std::sync::Arc;
 
 use crate::ir::{ArchiveIR, IrMember, MemberKind, MemberVerification};
@@ -529,11 +529,10 @@ impl VerifiedArchive {
     /// cloned after its retained size is checked. Otherwise, the read uses the
     /// recorded payload range and verifies size, CRC32, and SHA-256 again before
     /// any bytes reach the caller.
-    pub fn read_member(
+    fn verified_regular_member(
         &self,
         canonical_path: &str,
-        max_bytes: u64,
-    ) -> Result<Vec<u8>, MemberReadError> {
+    ) -> Result<(usize, u64), MemberReadError> {
         let member_index = *self
             .inner
             .members_by_path
@@ -560,7 +559,6 @@ impl VerifiedArchive {
                 "capability contains a member that is not fully verified",
             ));
         }
-
         let expected_size = member.actual_uncomp_size.ok_or_else(|| {
             MemberReadError::new(
                 MemberReadErrorKind::IntegrityMismatch,
@@ -568,6 +566,16 @@ impl VerifiedArchive {
                 "verified member is missing its measured size",
             )
         })?;
+        Ok((member_index, expected_size))
+    }
+
+    pub fn read_member(
+        &self,
+        canonical_path: &str,
+        max_bytes: u64,
+    ) -> Result<Vec<u8>, MemberReadError> {
+        let (member_index, expected_size) = self.verified_regular_member(canonical_path)?;
+        let member = &self.inner.ir.members()[member_index];
         if expected_size > max_bytes {
             return Err(MemberReadError::new(
                 MemberReadErrorKind::LimitExceeded,
@@ -645,6 +653,128 @@ impl VerifiedArchive {
                 .read_member(canonical_path, max_bytes)
                 .map_err(|error| error.into_member_read_error(canonical_path)),
         }
+    }
+
+    /// Verified bounded-prefix read.
+    ///
+    /// The member's complete payload is streamed and fully re-verified exactly
+    /// as [`Self::read_member`] verifies it — size, CRC32, and SHA-256 must all
+    /// agree with the recorded evidence — but only the first `prefix_cap`
+    /// bytes are retained and released. A prefix therefore carries the same
+    /// evidence authority as a full read while caller memory stays bounded by
+    /// the prefix instead of the member size, and there is no caller size cap
+    /// to fail: every verified regular file of any size can be classified by
+    /// its prefix. No byte is released on any verification disagreement.
+    ///
+    /// The supervised Linux backend does not yet represent prefix reads in its
+    /// semantic record and returns a typed isolation-unavailable failure
+    /// without fallback, exactly like other not-yet-represented selections.
+    pub fn read_member_prefix(
+        &self,
+        canonical_path: &str,
+        prefix_cap: usize,
+    ) -> Result<Vec<u8>, MemberReadError> {
+        let (member_index, expected_size) = self.verified_regular_member(canonical_path)?;
+        let member = &self.inner.ir.members()[member_index];
+        let retain = usize::try_from(expected_size.min(prefix_cap as u64)).unwrap_or(prefix_cap);
+        if let Some(retained) = self.retained_member(canonical_path) {
+            if retained.len() as u64 != expected_size {
+                return Err(MemberReadError::new(
+                    MemberReadErrorKind::IntegrityMismatch,
+                    canonical_path,
+                    "retained member size disagrees with verified evidence",
+                ));
+            }
+            let mut bytes = Vec::new();
+            bytes.try_reserve_exact(retain).map_err(|error| {
+                MemberReadError::new(
+                    MemberReadErrorKind::AllocationFailed,
+                    canonical_path,
+                    format!("could not reserve {retain} bytes: {error}"),
+                )
+            })?;
+            bytes.extend_from_slice(&retained[..retain]);
+            return Ok(bytes);
+        }
+        match &self.inner.backend {
+            VerifiedArchiveBackend::InProcess {
+                snapshots,
+                payloads,
+            } => {
+                let mut sink = PrefixSink::new(retain).map_err(|error| {
+                    MemberReadError::new(
+                        MemberReadErrorKind::AllocationFailed,
+                        canonical_path,
+                        format!("could not reserve {retain} bytes: {error}"),
+                    )
+                })?;
+                let payload_spec = payloads[member_index];
+                let payload =
+                    planned_payload_reader(snapshots, &payload_spec, &member.decoded_name)
+                        .map_err(|finding| member_read_error(canonical_path, &finding))?;
+                let payload = BufReader::with_capacity(64 * 1024, payload);
+                let (actual, crc, sha256) = verify_payload(
+                    payload,
+                    payload_spec,
+                    self.inner.budget,
+                    expected_size,
+                    &mut sink,
+                )
+                .map_err(|finding| member_read_error(canonical_path, &finding))?;
+
+                if actual != expected_size
+                    || Some(crc) != member.actual_crc
+                    || member.content_sha256.as_deref() != Some(digest_hex(&sha256).as_str())
+                {
+                    return Err(MemberReadError::new(
+                        MemberReadErrorKind::IntegrityMismatch,
+                        canonical_path,
+                        "member bytes disagree with the recorded verified evidence",
+                    ));
+                }
+                Ok(sink.into_retained())
+            }
+            #[cfg(target_os = "linux")]
+            VerifiedArchiveBackend::Supervised(_) => Err(MemberReadError::new(
+                MemberReadErrorKind::IsolationUnavailable,
+                canonical_path,
+                "supervised prefix reads are not represented by the current semantic record",
+            )),
+        }
+    }
+}
+
+/// A bounded sink that retains only the leading bytes of a fully streamed and
+/// verified payload. Everything past the cap is counted and discarded, so the
+/// complete-payload verification in [`verify_payload`] is unaffected.
+struct PrefixSink {
+    retained: Vec<u8>,
+    cap: usize,
+}
+
+impl PrefixSink {
+    fn new(cap: usize) -> Result<Self, std::collections::TryReserveError> {
+        let mut retained = Vec::new();
+        retained.try_reserve_exact(cap)?;
+        Ok(Self { retained, cap })
+    }
+
+    fn into_retained(self) -> Vec<u8> {
+        self.retained
+    }
+}
+
+impl Write for PrefixSink {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        if self.retained.len() < self.cap {
+            let take = (self.cap - self.retained.len()).min(buffer.len());
+            self.retained.extend_from_slice(&buffer[..take]);
+        }
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        Ok(())
     }
 }
 
@@ -794,6 +924,60 @@ mod tests {
             },
             &options,
         )
+    }
+
+    #[test]
+    fn prefix_reads_verify_the_complete_member_and_release_only_the_prefix() {
+        let bytes = make_zip();
+        let outcome = admitted(&bytes);
+        let archive = outcome.verified_archive().unwrap();
+
+        reset_verify_payload_calls();
+        let prefix = archive.read_member_prefix("metadata.txt", 8).unwrap();
+        assert_eq!(prefix, b"verified");
+        assert_eq!(
+            verify_payload_calls(),
+            1,
+            "the complete payload must stream through verification"
+        );
+
+        let full = archive.read_member("metadata.txt", 64).unwrap();
+        assert_eq!(full, b"verified metadata");
+        assert_eq!(&full[..8], prefix.as_slice());
+
+        let generous = archive.read_member_prefix("metadata.txt", 1024).unwrap();
+        assert_eq!(generous, b"verified metadata");
+
+        assert_eq!(
+            archive.read_member_prefix("empty", 8).unwrap_err().kind(),
+            MemberReadErrorKind::NotFile
+        );
+        assert_eq!(
+            archive
+                .read_member_prefix("missing.txt", 8)
+                .unwrap_err()
+                .kind(),
+            MemberReadErrorKind::NotFound
+        );
+    }
+
+    #[test]
+    fn prefix_reads_serve_retained_members_without_another_verification_pass() {
+        let bytes = make_zip();
+        let plan = RetentionPlan::new(17, 17)
+            .with_path("metadata.txt")
+            .unwrap();
+        let outcome = admitted_with_retention(&bytes, plan);
+        let archive = outcome.verified_archive().unwrap();
+
+        reset_verify_payload_calls();
+        let prefix = archive.read_member_prefix("metadata.txt", 8).unwrap();
+        assert_eq!(prefix, b"verified");
+        assert_eq!(
+            verify_payload_calls(),
+            0,
+            "a retained member serves its prefix from the original pass"
+        );
     }
 
     #[test]

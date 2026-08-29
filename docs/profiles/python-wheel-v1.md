@@ -92,8 +92,9 @@ The v1 consumer implements these rules:
 9. Phantom, absolute, parent-relative, duplicate, and normalized-collision rows reject.
 10. `.data` contains only supported scheme keys, and relocation is collision-free after mapping, including exact and portable-folded file-ancestor topology within each target scheme.
 11. Entry-point objects use dotted ASCII Python `module:attribute` references with explicitly parsed legacy extras. Command names and generated target names pass a separate target-path policy. Archive path admission alone does not sanitize generated names.
-12. Deprecated `RECORD` signature files, if admitted at all, are explicit legacy objects and are never treated as verified signatures.
-13. Metadata, row count, line length, field count, tag expansion, and retained semantic bytes have independent checked caps.
+12. Script-scheme members are classified by the `script-prefix-classification.v1` rule: a verified bounded 1,024-byte prefix — streamed through complete size, CRC32, and SHA-256 re-verification of the whole member before any byte is released — decides between the exact `#!python`/`#!pythonw` first-line launcher rewrite and a verbatim copy. Launcher rewriting is a first-line property of the specification, so a native executable of any size is planned as a verbatim copy whose hash and size come from admission evidence, while each script charges only its retained prefix against the plan-inspection aggregate. The supervised Linux backend does not yet represent prefix reads and fails typed rather than diverging.
+13. Deprecated `RECORD` signature files, if admitted at all, are explicit legacy objects and are never treated as verified signatures.
+14. Metadata, row count, line length, field count, tag expansion, and retained semantic bytes have independent checked caps.
 
 These rules are a supported prerelease contract. Additive output fields may be introduced through non-exhaustive types, while changes to interpreted meaning, identity encodings, or denial classification require a new versioned profile or encoding.
 

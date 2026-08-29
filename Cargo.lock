@@ -610,6 +610,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "sealr-wheel-inventory-v5"
+version = "0.1.0-alpha.11"
+dependencies = [
+ "sealr",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "sealr-wheel-lab"
 version = "0.1.0-alpha.11"
 dependencies = [

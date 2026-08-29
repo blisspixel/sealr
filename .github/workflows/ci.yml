@@ -198,6 +198,13 @@ jobs:
           tests/corpus/wheels/report-v4.json
           docs/wheel-compatibility-v4.md
 
+      - name: Verify stratified wheel inventory v5
+        run: >-
+          cargo run --locked -p sealr-wheel-inventory-v5 --bin wheel_inventory_v5 -- verify
+          tests/corpus/wheels/manifest-v5.json
+          tests/corpus/wheels/report-v5.json
+          docs/wheel-compatibility-v5.md
+
       - name: Build optimized workspace
         run: cargo build --locked --release --workspace --all-features
 

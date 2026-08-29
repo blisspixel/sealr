@@ -25,6 +25,7 @@ pub(crate) fn consumer_profile_digest(limits: WheelLimits) -> String {
     encoder.string("portable-relocation-topology.v2");
     encoder.string("python-object-entry-points.v2");
     encoder.string("complete-output-realization.v1");
+    encoder.string("script-prefix-classification.v1");
     for value in [
         limits.max_filename_bytes,
         limits.max_wheel_bytes,
