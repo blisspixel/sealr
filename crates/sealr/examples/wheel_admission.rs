@@ -170,7 +170,10 @@ fn main() {
     else {
         panic!("valid wheel was not admitted: {evaluation:?}");
     };
-    println!("   artifact identity:         {}", identities.artifact_sha256);
+    println!(
+        "   artifact identity:         {}",
+        identities.artifact_sha256
+    );
     println!(
         "   install plan identity:     {}",
         identities.install_plan_sha256
