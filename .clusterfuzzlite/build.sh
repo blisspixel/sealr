@@ -7,9 +7,12 @@ cd "$SRC/sealr"
 
 # The base image's own nightly can lag the workspace's pinned MSRV. Pin the
 # exact nightly the scheduled fuzz campaign uses so both lanes compile the
-# same toolchain.
+# same toolchain. The base image exports RUSTUP_TOOLCHAIN, which overrides
+# `rustup default`, so the variable itself must be replaced.
 rustup toolchain install nightly-2026-08-01 --profile minimal
 rustup default nightly-2026-08-01
+export RUSTUP_TOOLCHAIN=nightly-2026-08-01
+rustc --version
 
 cargo fuzz build -O --fuzz-dir fuzz
 
