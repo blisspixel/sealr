@@ -15,6 +15,7 @@ pub const POLICY_FORMAT_TAR_GZIP_GNU_LONGNAME: &str = "tar-gzip-gnu-longname";
 pub const POLICY_FORMAT_TAR_ZSTD_USTAR: &str = "tar-zstd-ustar";
 pub const POLICY_FORMAT_TAR_XZ_USTAR: &str = "tar-xz-ustar";
 pub const POLICY_FORMAT_TAR_BZIP2_USTAR: &str = "tar-bzip2-ustar";
+pub const POLICY_FORMAT_SEVENZ_COPY: &str = "7z-copy";
 
 /// Pre-release Sealr policy, hashed in this struct's deterministic serialized field order.
 ///
@@ -284,6 +285,30 @@ impl Policy {
         }
     }
 
+    /// Construct the v11 policy, which additionally authorizes the restricted
+    /// Copy-only 7z container.
+    pub fn default_v11() -> Self {
+        Self {
+            schema: "sealr.policy.v11",
+            id: "sealr:policy/default/v11".into(),
+            formats: vec![
+                POLICY_FORMAT_ZIP.into(),
+                POLICY_FORMAT_ZIP64.into(),
+                POLICY_FORMAT_TAR_USTAR.into(),
+                POLICY_FORMAT_TAR_GZIP_USTAR.into(),
+                POLICY_FORMAT_TAR_PAX.into(),
+                POLICY_FORMAT_TAR_GNU_LONGNAME.into(),
+                POLICY_FORMAT_TAR_GZIP_PAX.into(),
+                POLICY_FORMAT_TAR_GZIP_GNU_LONGNAME.into(),
+                POLICY_FORMAT_TAR_ZSTD_USTAR.into(),
+                POLICY_FORMAT_TAR_XZ_USTAR.into(),
+                POLICY_FORMAT_TAR_BZIP2_USTAR.into(),
+                POLICY_FORMAT_SEVENZ_COPY.into(),
+            ],
+            ..Self::default_v10()
+        }
+    }
+
     pub fn digest_hex(&self) -> String {
         let json = serde_json::to_vec(self).expect("policy serializes");
         hex_sha256(&json)
@@ -362,6 +387,13 @@ impl Policy {
                     self.formats
                 )));
             }
+            "sealr.policy.v11" if valid_v11_formats(&self.formats) => {}
+            "sealr.policy.v11" => {
+                return Err(unsupported(format!(
+                    "formats {:?} are not a canonical nonempty subset of [\"zip\", \"zip64\", \"tar-ustar\", \"tar-gzip-ustar\", \"tar-pax\", \"tar-gnu-longname\", \"tar-gzip-pax\", \"tar-gzip-gnu-longname\", \"tar-zstd-ustar\", \"tar-xz-ustar\", \"tar-bzip2-ustar\", \"7z-copy\"]",
+                    self.formats
+                )));
+            }
             "sealr.policy.v10" if valid_v10_formats(&self.formats) => {}
             "sealr.policy.v10" => {
                 return Err(unsupported(format!(
@@ -416,6 +448,7 @@ impl Policy {
                 | "sealr.policy.v8"
                 | "sealr.policy.v9"
                 | "sealr.policy.v10"
+                | "sealr.policy.v11"
         ) && self.max_files > u64::from(u32::MAX)
         {
             return Err(unsupported(format!(
@@ -426,12 +459,12 @@ impl Policy {
         match (self.schema, self.max_derived_archive_bytes) {
             (
                 "sealr.policy.v4" | "sealr.policy.v5" | "sealr.policy.v6" | "sealr.policy.v7"
-                | "sealr.policy.v8" | "sealr.policy.v9" | "sealr.policy.v10",
+                | "sealr.policy.v8" | "sealr.policy.v9" | "sealr.policy.v10" | "sealr.policy.v11",
                 Some(_),
             ) => {}
             (
                 "sealr.policy.v4" | "sealr.policy.v5" | "sealr.policy.v6" | "sealr.policy.v7"
-                | "sealr.policy.v8" | "sealr.policy.v9" | "sealr.policy.v10",
+                | "sealr.policy.v8" | "sealr.policy.v9" | "sealr.policy.v10" | "sealr.policy.v11",
                 None,
             ) => {
                 return Err(unsupported(format!(
@@ -442,7 +475,7 @@ impl Policy {
             (_, None) => {}
             (_, Some(value)) => {
                 return Err(unsupported(format!(
-                    "max_derived_archive_bytes={value} is only supported by sealr.policy.v4 through sealr.policy.v10"
+                    "max_derived_archive_bytes={value} is only supported by sealr.policy.v4 through sealr.policy.v11"
                 )));
             }
         }
@@ -604,6 +637,26 @@ fn valid_v10_formats(formats: &[String]) -> bool {
     )
 }
 
+fn valid_v11_formats(formats: &[String]) -> bool {
+    valid_canonical_subset(
+        formats,
+        &[
+            POLICY_FORMAT_ZIP,
+            POLICY_FORMAT_ZIP64,
+            POLICY_FORMAT_TAR_USTAR,
+            POLICY_FORMAT_TAR_GZIP_USTAR,
+            POLICY_FORMAT_TAR_PAX,
+            POLICY_FORMAT_TAR_GNU_LONGNAME,
+            POLICY_FORMAT_TAR_GZIP_PAX,
+            POLICY_FORMAT_TAR_GZIP_GNU_LONGNAME,
+            POLICY_FORMAT_TAR_ZSTD_USTAR,
+            POLICY_FORMAT_TAR_XZ_USTAR,
+            POLICY_FORMAT_TAR_BZIP2_USTAR,
+            POLICY_FORMAT_SEVENZ_COPY,
+        ],
+    )
+}
+
 fn valid_canonical_subset(formats: &[String], canonical: &[&str]) -> bool {
     if formats.is_empty() {
         return false;
@@ -753,6 +806,20 @@ mod tests {
         r#""encrypted":"deny","atomic":false}"#,
     );
 
+    const DEFAULT_V11_JSON: &str = concat!(
+        r#"{"schema":"sealr.policy.v11","id":"sealr:policy/default/v11","#,
+        r#""formats":["zip","zip64","tar-ustar","tar-gzip-ustar","tar-pax","#,
+        r#""tar-gnu-longname","tar-gzip-pax","tar-gzip-gnu-longname","tar-zstd-ustar","#,
+        r#""tar-xz-ustar","tar-bzip2-ustar","7z-copy"],"#,
+        r#""max_archive_bytes":536870912,"max_derived_archive_bytes":536870912,"#,
+        r#""max_files":10000,"max_member_bytes":1073741824,"#,
+        r#""max_total_bytes":5368709120,"max_ratio":100,"max_path_depth":32,"#,
+        r#""max_metadata_bytes":4194304,"max_dict_bytes":67108864,"symlinks":"deny","#,
+        r#""hardlinks":"deny","overwrite":"refuse","setuid":"strip","nested_depth":1,"#,
+        r#""ambiguity":"deny","case_fold_collision":"deny","magic_vs_extension":"deny","#,
+        r#""encrypted":"deny","atomic":false}"#,
+    );
+
     const DEFAULT_V8_JSON: &str = concat!(
         r#"{"schema":"sealr.policy.v8","id":"sealr:policy/default/v8","#,
         r#""formats":["zip","zip64","tar-ustar","tar-gzip-ustar","tar-pax","#,
@@ -847,6 +914,14 @@ mod tests {
     }
 
     #[test]
+    fn sevenz_policy_digest_is_stable() {
+        assert_eq!(
+            Policy::default_v11().digest_hex(),
+            "afa0aeb04ceca00706b31dfd250216a87f2af0ada6e98d3815873de0d15172fc"
+        );
+    }
+
+    #[test]
     fn default_policy_serializations_are_stable() {
         assert_eq!(
             serde_json::to_string(&Policy::default_v1()).unwrap(),
@@ -887,6 +962,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&Policy::default_v10()).unwrap(),
             DEFAULT_V10_JSON
+        );
+        assert_eq!(
+            serde_json::to_string(&Policy::default_v11()).unwrap(),
+            DEFAULT_V11_JSON
         );
     }
 
@@ -1190,6 +1269,35 @@ mod tests {
     }
 
     #[test]
+    fn sevenz_policy_accepts_every_canonical_nonempty_subset() {
+        let canonical = [
+            POLICY_FORMAT_ZIP,
+            POLICY_FORMAT_ZIP64,
+            POLICY_FORMAT_TAR_USTAR,
+            POLICY_FORMAT_TAR_GZIP_USTAR,
+            POLICY_FORMAT_TAR_PAX,
+            POLICY_FORMAT_TAR_GNU_LONGNAME,
+            POLICY_FORMAT_TAR_GZIP_PAX,
+            POLICY_FORMAT_TAR_GZIP_GNU_LONGNAME,
+            POLICY_FORMAT_TAR_ZSTD_USTAR,
+            POLICY_FORMAT_TAR_XZ_USTAR,
+            POLICY_FORMAT_TAR_BZIP2_USTAR,
+            POLICY_FORMAT_SEVENZ_COPY,
+        ];
+        for mask in 1_u16..(1_u16 << canonical.len()) {
+            let mut policy = Policy::default_v11();
+            policy.formats = canonical
+                .iter()
+                .enumerate()
+                .filter_map(|(index, format)| {
+                    (mask & (1_u16 << index) != 0).then_some((*format).to_owned())
+                })
+                .collect();
+            policy.compile().expect("canonical subset compiles");
+        }
+    }
+
+    #[test]
     fn tar_bzip2_policy_accepts_every_canonical_nonempty_subset() {
         let canonical = [
             POLICY_FORMAT_ZIP,
@@ -1263,6 +1371,7 @@ mod tests {
             Policy::default_v8(),
             Policy::default_v9(),
             Policy::default_v10(),
+            Policy::default_v11(),
         ] {
             policy.max_files = u64::from(u32::MAX) + 1;
             assert_eq!(

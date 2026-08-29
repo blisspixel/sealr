@@ -195,6 +195,22 @@ The bzip2-wrapped ustar profile is the third codec promotion. `Policy::default_v
 | Concatenation and trailing bytes | Exactly one stream must consume the complete source; pbzip2-shaped concatenated streams are unsupported concatenation and everything else is malformed. The concatenation-tolerant `MultiBzDecoder` reader is never used. |
 | Decoder implementation faults | `libbz2-rs-sys` 0.2.5 is the Trifecta Tech c2rust translation audited by Radically Open Security and run under Miri; the C `bzip2-sys` path is structurally excluded through the forbidden-package contract, and a dedicated fuzz campaign exercises the wrapper. |
 
+### 7z container threats
+
+The Copy-only 7z container is the first Gate C structure step. `Policy::default_v11()` must authorize `7z-copy`, and selection is explicit. Its profile digest is `7b6604ad59b5aecf9ebdfa42d7d48d3df663813798992741dd6d74ea56f60b75`.
+
+| Attack | 7z container control |
+|---|---|
+| Header claims vs physical bounds | NextHeaderOffset/Size are range-checked before any read; the header must end exactly at end-of-file; overlaps into pack streams or the signature are malformed. |
+| Overlapping or gapped pack streams; hidden bytes | The covering is dense: `PackPos` must be zero, pack streams tile contiguously, and there is no unreferenced-bytes category anywhere — stricter than ZIP32's comment allowance. |
+| CRC lies | Every container CRC32 — start header, next header, pack, folder, substream — is verified by Sealr itself; member payload lies are caught at member verification with `crc.mismatch` and precise member attribution. |
+| Variable-length-integer abuse | Two encodings of one value are two readings, so non-minimal NUMBER encodings are malformed; all size and count arithmetic is checked; claimed counts are bounded by remaining header bytes before any allocation. |
+| Bit-vector abuse | Vectors are MSB-first with required-zero padding bits and exact `AllAreDefined` accounting. |
+| File-versus-directory confusion | The kEmptyStream/kEmptyFile matrix is authoritative; a `FILE_ATTRIBUTE_DIRECTORY` disagreement is malformed, never silently resolved — closing the two-parsers-disagree seam. |
+| Name tricks | Names must be non-external, null-terminated UTF-16LE, consumed exactly, strictly decoded (unpaired surrogates are malformed), and pass the portable path jail; `kDummy` padding must be all-zero, closing that hidden channel. |
+| Alternate interpretations | `kEncodedHeader`, `kArchiveProperties`, `kAdditionalStreamsInfo`, every external record, `kAnti`, `kComment`, and `kStartPos` are unsupported and never read; non-Copy coders and bind pairs fail closed. |
+| Packed-header bombs | Out of profile v1 entirely; the follow-up must cap decoded header size against `max_metadata_bytes` before decoding. |
+
 ### Wheel consumer threats
 
 Wheel evaluation adds a second semantic layer above the ZIP container. The controls below are supported Alpha.8 preview behavior in `sealr::wheel`; the Alpha.7 laboratory preserves the external installer proof. Their full contract is in [Python wheel consumer profile v1](profiles/python-wheel-v1.md).

@@ -188,6 +188,10 @@ fn supervised_zip_profile(
             SupervisionErrorKind::IsolationUnavailable,
             "bzip2-wrapped TAR requires a future semantic-record worker contract",
         )),
+        ArchiveSelection::SevenZCopy(_) => Err(SupervisionError::new(
+            SupervisionErrorKind::IsolationUnavailable,
+            "the 7z container requires a future semantic-record worker contract",
+        )),
     }
 }
 
@@ -197,9 +201,10 @@ mod selection_tests {
     #[cfg(not(target_os = "linux"))]
     use crate::{Policy, Source};
     use crate::{
-        TarBzip2InterpretationProfile, TarGnuLongNameInterpretationProfile,
-        TarGzipInterpretationProfile, TarInterpretationProfile, TarPaxInterpretationProfile,
-        TarXzInterpretationProfile, TarZstdInterpretationProfile,
+        SevenZInterpretationProfile, TarBzip2InterpretationProfile,
+        TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile,
+        TarInterpretationProfile, TarPaxInterpretationProfile, TarXzInterpretationProfile,
+        TarZstdInterpretationProfile,
     };
 
     #[test]
@@ -261,6 +266,12 @@ mod selection_tests {
         let error = supervised_zip_profile(&tar_bzip2).unwrap_err();
         assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
         assert!(error.to_string().contains("bzip2-wrapped TAR"));
+
+        let sevenz = ApplyOptions::new()
+            .with_sevenz_interpretation_profile(SevenZInterpretationProfile::CopyPortableV1);
+        let error = supervised_zip_profile(&sevenz).unwrap_err();
+        assert_eq!(error.kind(), SupervisionErrorKind::IsolationUnavailable);
+        assert!(error.to_string().contains("7z container"));
     }
 
     #[cfg(not(target_os = "linux"))]
