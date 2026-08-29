@@ -17,7 +17,7 @@ Both documents can be captured as files instead:
 cargo run --locked -p sealr-cli -- path/to/archive.zip --view evidence.view.json --receipt evidence.receipt.json
 ```
 
-`--view` and `--receipt` each name a file that must not yet exist; the redirected stream stays silent and the bytes written are identical to the stream output. Both destinations are claimed before any evaluation or materialization effect, an existing file is never overwritten, and a refused claim exits `1` leaving the filesystem unchanged. Semantic exit codes are unaffected by redirection.
+`--view` and `--receipt` each name a file that must not yet exist; the redirected stream stays silent and the bytes written are identical to the stream output. Adding `--canonical` (valid only together with both file flags) switches the files to the canonical RFC 8785 lineage — `sealr.view.v2` and `sealr.receipt.v3` — where the file bytes are exactly the digested bytes with no trailing newline: `sha256sum` of the view file reproduces the receipt's `view_digest`, and `sha256sum` of the receipt file is the receipt's externally nameable digest. Semantic exit codes are unchanged, and a canonicalization failure discards both files and exits `1`, never silently falling back to the default lineage. See the [evidence encoding contract](evidence-encoding.md). Both destinations are claimed before any evaluation or materialization effect, an existing file is never overwritten, and a refused claim exits `1` leaving the filesystem unchanged. Semantic exit codes are unaffected by redirection.
 
 The same two operations are also explicit subcommands. Each subcommand resolves to the identical pipeline as the flag form, so streams, files, findings, and exit codes are byte-for-byte the same:
 
@@ -249,6 +249,7 @@ Options:
       --view <NEW_FILE>                  Write the view JSON to this exact new file instead of stdout
       --receipt <NEW_FILE>               Write the receipt JSON to this exact new file instead of stderr
       --policy <FILE>                    Validate and use this exact JSON policy document instead of the format's default policy
+      --canonical                        Write the canonical RFC 8785 evidence lineage to the --view and --receipt files, whose bytes are exactly the digested bytes
   -h, --help                             Print help
   -V, --version                          Print version
 ```
