@@ -9,6 +9,7 @@ members = [
     "tools/release-license-closure",
     "tools/worker-bootstrap",
     "tools/wheel-lab",
+    "tools/wheel-inventory-v4",
 ]
 
 [workspace.package]
