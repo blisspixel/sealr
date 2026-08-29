@@ -67,6 +67,7 @@ The project is in initial development. Compatibility may change between preview 
 
 ### Changed
 
+- Recorded three pre-freeze API shape decisions in the API contract: `Request` stays a permanently exhaustive three-field struct with every future input arriving through `ApplyOptions`; `Policy` is now `#[non_exhaustive]` (the supported construction pattern — versioned default constructors plus mutation, or a validated `PolicyDocument` — is unchanged); and `hex_sha256`/`ratio_exceeds` remain deliberate stable root utilities. `RealizationIdentityError` moves from public fields to `code()`/`detail()`/`path()` accessors, matching the other error types; no caller in the workspace read the fields externally.
 - Restructured the README to lead with the semantic-continuity claim — an untrusted archive becomes one verified, reusable tree capability, or nothing — followed by a thirty-second CLI session, a twenty-line downstream consumer, and an explicit non-goals section. The near-term plan and roadmap record that parser breadth is deliberately frozen at twelve profiles while the downstream-usefulness, measured-compatibility, and independent-review milestones land; the parked 7z LZMA/LZMA2 step is named and resumable on its feature branch.
 - Documented that the policy `atomic` field selects durability, not atomicity: staging and native no-replace publication are unconditional, `atomic: true` additionally syncs each completed member (`member-sync`), and the historical field name is kept because the policy schema and digest are an immutable contract.
 

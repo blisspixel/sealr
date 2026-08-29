@@ -9,6 +9,16 @@ UntrustedArchive x Policy
   -> (Allowed { wrote } | Rejected) x Receipt x View
 ```
 
+### Pre-freeze shape decisions
+
+Three decisions recorded ahead of the public API freeze:
+
+- `Request` is deliberately an exhaustive three-field struct — `source`, `policy`, `dest` — and stays that shape permanently. Every future operation input arrives through `ApplyOptions`, which grows additively behind builder methods. Freezing the literal-constructible request is the contract; callers may rely on `Request { source, policy, dest }` construction forever.
+- `Policy` is non-exhaustive. The supported construction pattern is the versioned default constructors plus field mutation (or a validated `PolicyDocument`); the reserved-fields discipline anticipates additive fields, and a literal `Policy` construction outside the crate was never the supported pattern.
+- `hex_sha256` and `ratio_exceeds` remain deliberate root-level utilities: external evidence tooling (including the frozen research laboratory) consumes them, and they are stable, dependency-free, and semantically frozen alongside the digests they reproduce.
+
+Error types expose accessors, not public fields; `RealizationIdentityError` now matches `MemberReadError` and `RetentionPlanError` with `code()`, `detail()`, and `path()`.
+
 Policy: [policy.md](policy.md). Findings: [findings.md](findings.md). Evidence: [attestations.md](attestations.md). Usage: [usage.md](usage.md).
 
 ---

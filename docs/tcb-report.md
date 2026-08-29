@@ -14,7 +14,7 @@ pwsh -NoProfile -File scripts/generate_tcb_report.ps1
 
 | Measurement | Value |
 |---|---|
-| Runtime Rust lines (crates/sealr/src) | 44318 |
+| Runtime Rust lines (crates/sealr/src) | 44336 |
 | In-crate test lines | 18423 |
 | `unsafe` uses in runtime code | 51 |
 | `unsafe` uses in test code | 13 |
@@ -93,7 +93,7 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/materialize/apple.rs` | 33 | 39 | 3 | 0 |
 | `crates/sealr/src/materialize/windows.rs` | 730 | 69 | 35 | 5 |
 | `crates/sealr/src/outcome.rs` | 265 | 78 | 0 | 0 |
-| `crates/sealr/src/policy.rs` | 877 | 798 | 0 | 1 |
+| `crates/sealr/src/policy.rs` | 878 | 798 | 0 | 1 |
 | `crates/sealr/src/quota.rs` | 82 | 51 | 0 | 0 |
 | `crates/sealr/src/ratio.rs` | 34 | 58 | 0 | 0 |
 | `crates/sealr/src/semantic_record.rs` | 4703 | 4011 | 0 | 45 |
@@ -116,7 +116,7 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/wheel/evaluate.rs` | 1081 | 698 | 0 | 2 |
 | `crates/sealr/src/wheel/identity.rs` | 278 | 0 | 0 | 1 |
 | `crates/sealr/src/wheel/mod.rs` | 33 | 0 | 0 | 0 |
-| `crates/sealr/src/wheel/model.rs` | 345 | 0 | 0 | 0 |
+| `crates/sealr/src/wheel/model.rs` | 362 | 0 | 0 | 0 |
 | `crates/sealr/src/wheel/parse.rs` | 977 | 260 | 0 | 4 |
 | `crates/sealr/src/worker_protocol/frame.rs` | 141 | 93 | 0 | 1 |
 | `crates/sealr/src/worker_protocol/helper.rs` | 388 | 110 | 0 | 2 |
