@@ -92,9 +92,15 @@ The narrow GNU long-name-only raw profile landed after Alpha.11 because GNU `L` 
 5. `sealrTreeV12` conformance vectors carry three measured 7-Zip 26.02 raw-header producer cases with complete embedded IR, and pin the first cross-CONTAINER content parity: the single-file case shares the TAR family's `sealrTreeV1` root; the worker refuses the selection without fallback.
 6. Remaining Gate C items stay open by name: LZMA/LZMA2 member admission on the reviewed lzma-rust2 boundary, the packed-header architecture decision, solid multi-coder folders, encryption-denial evidence, and a py7zr raw-header cross-producer fixture.
 
-### Next: 7z LZMA members and packed headers
+### Next: usefulness, measured compatibility, and independent review
 
-Admit LZMA/LZMA2-coded members and packed headers over the landed Copy-first structure under [Gate C](codec-dependency-gates.md#gate-c-complex-container-engine), reusing the reviewed lzma-rust2 boundary, with the packed-header decode-shape decision made explicitly.
+Parser breadth is deliberately frozen after twelve profiles. Adding a thirteenth format is no longer the scarce work; proving that one real downstream system treats the verified capability as authoritative is. The next increments are:
+
+1. **Downstream usefulness.** The wheel consumer evaluates, plans, and realizes installs from the `VerifiedArchive` capability alone and never reopens the archive. The runnable `wheel_admission` example demonstrates the full loop with the source deleted after admission, plus a hostile container refused at admission and a lying `RECORD` denied by the consumer. The CLI `--view` and `--receipt` flags capture both evidence documents as files. A stable, versioned evidence contract that other systems can bind is the exit condition.
+2. **Measured compatibility.** The supported specification snapshot now admits Core Metadata 2.1 through 2.6. Corpus expansion continues with stratified, individually investigated artifacts — never acceptance percentages — under the immutable-report discipline established by v2 and v3.
+3. **Independent review and a measurable TCB.** Bounded PR sizes for trusted-computing-base changes, non-author review for TCB code, a regenerable per-release [TCB report](tcb-report.md), and continuous fuzzing. An external security review is scoped after the evidence surfaces freeze.
+
+The 7z LZMA/LZMA2 member and packed-header step (Gate C step two) is parked, not abandoned: its research brief, transform-profile groundwork, and dictionary gates live on `feature/7z-lzma-portable-v1` and resume after these milestones under [Gate C](codec-dependency-gates.md#gate-c-complex-container-engine) with the reviewed lzma-rust2 boundary.
 
 ### Alpha.9 portable ustar gates
 
@@ -130,7 +136,7 @@ Together, these completed increments freeze what the worker may mean, how read o
 | Alpha.10 | Strict ZIP64 and gzip TAR | Policy v3 and v4 selections, zero new dependencies, ZIP64-native and two-domain evidence, independently reconstructed roots, package paths, bounded fuzz, and fail-closed worker refusal |
 | Alpha.11 | Restricted raw POSIX PAX | Explicit policy v5 selection, two-key closed grammar, exact precedence provenance, independent audit and `sealrTreeV5`, zero new dependencies, fail-closed worker refusal |
 | Current main | GNU long-name TAR, gzip compositions, the zstd, xz, and bzip2 codecs, and 7z Copy | Separate GNU `L`-only raw language under policy v6 with `sealrTreeV6`; distinct gzip compositions under policy v7 with `sealrTreeV7` and `sealrTreeV8`; three executed Gate B codec promotions — zstd (v8, `sealrTreeV9`), xz (v9, `sealrTreeV10`), bzip2 (v10, `sealrTreeV11`) — and the executed Gate C Copy-first 7z container (v11, `sealrTreeV12`, zero new dependencies, first cross-container content parity) |
-| Next | 7z LZMA members and packed headers | The reviewed lzma-rust2 layer over the landed Copy-first structure, with the packed-header decode-shape decision made explicitly |
+| Next | Usefulness, compatibility, and review | A real downstream consumer bound to the capability alone, CLI evidence capture, Core Metadata 2.1-2.6, stratified corpus expansion, TCB measurement and review process; the parked 7z LZMA step resumes afterward |
 
 Version labels are delivery targets, not permission to cut a release with a red gate. If an increment changes identity or interpretation, it receives a new profile or schema identifier and preserves prior identifiers as immutable historical contracts.
 
@@ -327,7 +333,7 @@ The existing `CI` workflow remains the only required promotion authority. Schedu
 Two implementation lanes can proceed in parallel without inventing another meaning:
 
 - **Semantic and consumer lane:** targeted benign Unicode, `.data`, and descriptor-bearing wheel evidence; stable identity and API review; and a separately versioned legacy CP437 profile only where compatibility evidence justifies it.
-- **Systems and format lane:** with GNU long-name raw TAR, both gzip compositions, the zstd, xz, and bzip2 wrappers, and the Copy-first 7z structure landed, admit 7z LZMA members and packed headers next; build local 7z structure with Copy before LZMA; and add cpio, ar/deb, CAB, RPM, and RAR5 through their own gates. ZIP64 and TAR worker-record parity, authenticated abandoned-stage recovery, explicit durability levels, and platform-specific worker research continue in parallel. ISO 9660, UDF, and filesystem images remain a separate program.
+- **Systems and format lane:** with GNU long-name raw TAR, both gzip compositions, the zstd, xz, and bzip2 wrappers, and the Copy-first 7z structure landed, parser breadth is frozen while the usefulness, compatibility, and review milestones land; the parked 7z LZMA members and packed headers resume afterward, and cpio, ar/deb, CAB, RPM, and RAR5 follow through their own gates. ZIP64 and TAR worker-record parity, authenticated abandoned-stage recovery, explicit durability levels, and platform-specific worker research continue in parallel. ISO 9660, UDF, and filesystem images remain a separate program.
 
 Both lanes consume the same identities, findings discipline, conformance bundles, and format-neutral verification and materialization boundary. Each TAR dialect and additional codec remains separately gated; raw portable ustar and restricted raw PAX do not silently authorize GNU or compressed variants.
 
