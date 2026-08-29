@@ -14,13 +14,13 @@ pwsh -NoProfile -File scripts/generate_tcb_report.ps1
 
 | Measurement | Value |
 |---|---|
-| Runtime Rust lines (crates/sealr/src) | 44096 |
-| In-crate test lines | 18189 |
+| Runtime Rust lines (crates/sealr/src) | 44242 |
+| In-crate test lines | 18423 |
 | `unsafe` uses in runtime code | 51 |
 | `unsafe` uses in test code | 13 |
 | `extern "C"` blocks in runtime code | 1 |
 | Panic sites in runtime code (`.unwrap(`, `.expect(`, `panic!(`, `unreachable!(`) | 313 |
-| Panic sites in test code | 1237 |
+| Panic sites in test code | 1252 |
 
 ## Unsafe code
 
@@ -37,9 +37,9 @@ The parsing, verification, and identity path — every module that interprets un
 
 | Pattern | Runtime | Test |
 |---|---|---|
-| `.unwrap(` | 150 | 1094 |
-| `.expect(` | 134 | 99 |
-| `panic!(` | 17 | 41 |
+| `.unwrap(` | 150 | 1101 |
+| `.expect(` | 134 | 103 |
+| `panic!(` | 17 | 45 |
 | `unreachable!(` | 12 | 3 |
 
 Runtime panic sites are not admission verdicts: a panic can never admit an archive, only abort the process. They remain measured here because each one is a denial-of-service question an auditor must be able to enumerate.
@@ -112,9 +112,9 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/tar_gnu.rs` | 863 | 294 | 0 | 9 |
 | `crates/sealr/src/tar_pax.rs` | 1018 | 442 | 0 | 10 |
 | `crates/sealr/src/verification.rs` | 455 | 0 | 0 | 1 |
-| `crates/sealr/src/verified.rs` | 674 | 489 | 0 | 1 |
-| `crates/sealr/src/wheel/evaluate.rs` | 1066 | 518 | 0 | 2 |
-| `crates/sealr/src/wheel/identity.rs` | 277 | 0 | 0 | 1 |
+| `crates/sealr/src/verified.rs` | 804 | 543 | 0 | 1 |
+| `crates/sealr/src/wheel/evaluate.rs` | 1081 | 698 | 0 | 2 |
+| `crates/sealr/src/wheel/identity.rs` | 278 | 0 | 0 | 1 |
 | `crates/sealr/src/wheel/mod.rs` | 33 | 0 | 0 | 0 |
 | `crates/sealr/src/wheel/model.rs` | 345 | 0 | 0 | 0 |
 | `crates/sealr/src/wheel/parse.rs` | 977 | 260 | 0 | 4 |
