@@ -48,6 +48,7 @@ Start with the [README](../README.md) for the published Alpha.11 boundary and a 
 | [Alpha.6 semantic ownership](decisions/0001-alpha6-semantic-ownership.md) | Accepted private record experiment and provisional public capability gates |
 | [Private semantic record](semantic-record.md) | Crate-private split-phase codec and worker executor, hostile validation, current evidence, and remaining gates |
 | [Policy](policy.md) | Current policy schema, compilation, and defaults |
+| [Receipt attestation](attestation.md) | Signing receipts with external DSSE tools and the signer-agnostic statement builder |
 | [Evidence encoding contract](evidence-encoding.md) | The normative declaration-order canonical JSON behind every policy digest and `view_digest` |
 
 Repository vulnerability reporting and supported-version policy are in [SECURITY.md](../SECURITY.md).

@@ -4,7 +4,7 @@
 
 The current receipt is always returned, including on rejection. `sealr.receipt.v2` records source digest availability, interpretation/admission/verification/effect/completeness axes, the invocation-specific view digest, tool and environment fields, materialization lifecycle evidence, the compatibility verdict, and findings.
 
-It is an **EvidenceRecord**, not an attestation. `signed: false` is explicit. It proves neither signer identity nor freshness. `view_digest` is still invocation evidence. Receipts also carry unsigned preview `sealrTreeV1` layout and content-tree identities derived from `ArchiveIR`.
+It is an **EvidenceRecord**, not an attestation. The practical flow for wrapping a receipt file into an externally signed in-toto/DSSE attestation is [receipt attestation](attestation.md). `signed: false` is explicit. It proves neither signer identity nor freshness. `view_digest` is still invocation evidence. Receipts also carry unsigned preview `sealrTreeV1` layout and content-tree identities derived from `ArchiveIR`.
 
 Use **attestation** only for an authenticated claim whose signature, signer identity, and timestamp or freshness policy have been verified.
 

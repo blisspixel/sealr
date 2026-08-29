@@ -10,6 +10,7 @@ members = [
     "tools/worker-bootstrap",
     "tools/wheel-lab",
     "tools/wheel-inventory-v4",
+    "tools/attest",
 ]
 
 [workspace.package]
