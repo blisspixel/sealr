@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::findings::{Finding, FindingCode};
@@ -689,6 +689,187 @@ fn unsupported(detail: String) -> Finding {
     Finding::error(FindingCode::PolicyUnsupported, detail)
 }
 
+/// Largest integer magnitude the canonical evidence domain admits: 2^53 - 1.
+///
+/// This mirrors the bound in the evidence encoding contract so every validated
+/// policy value is exactly representable as an IEEE-754 double in any future
+/// canonical-JSON lineage.
+const MAX_DOUBLE_SAFE_INTEGER: u64 = (1 << 53) - 1;
+
+const KNOWN_POLICY_SCHEMAS: [&str; 11] = [
+    "sealr.policy.v1",
+    "sealr.policy.v2",
+    "sealr.policy.v3",
+    "sealr.policy.v4",
+    "sealr.policy.v5",
+    "sealr.policy.v6",
+    "sealr.policy.v7",
+    "sealr.policy.v8",
+    "sealr.policy.v9",
+    "sealr.policy.v10",
+    "sealr.policy.v11",
+];
+
+fn static_schema(schema: &str) -> Result<&'static str, Finding> {
+    KNOWN_POLICY_SCHEMAS
+        .iter()
+        .find(|known| **known == schema)
+        .copied()
+        .ok_or_else(|| unsupported(format!("policy schema {schema:?} is not a known version")))
+}
+
+fn static_vocabulary(field: &'static str, value: &str) -> Result<&'static str, Finding> {
+    let token = match (field, value) {
+        ("symlinks", "deny")
+        | ("hardlinks", "deny")
+        | ("ambiguity", "deny")
+        | ("case_fold_collision", "deny")
+        | ("magic_vs_extension", "deny")
+        | ("encrypted", "deny") => Some("deny"),
+        ("overwrite", "refuse") => Some("refuse"),
+        ("setuid", "strip") => Some("strip"),
+        _ => None,
+    };
+    token.ok_or_else(|| {
+        unsupported(format!(
+            "policy {field} value {value:?} is outside the supported vocabulary"
+        ))
+    })
+}
+
+/// Caller-authored policy data exactly as parsed from JSON, before any
+/// validation. This is the only deserializable policy shape: unknown fields
+/// are rejected, every field is required except the one field the canonical
+/// encoding makes conditional, and nothing here is usable for admission until
+/// [`PolicyDocument::validate`] proves it.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PolicyDocument {
+    pub schema: String,
+    pub id: String,
+    pub formats: Vec<String>,
+    pub max_archive_bytes: u64,
+    #[serde(default)]
+    pub max_derived_archive_bytes: Option<u64>,
+    pub max_files: u64,
+    pub max_member_bytes: u64,
+    pub max_total_bytes: u64,
+    pub max_ratio: Option<u64>,
+    pub max_path_depth: u32,
+    pub max_metadata_bytes: u64,
+    pub max_dict_bytes: u64,
+    pub symlinks: String,
+    pub hardlinks: String,
+    pub overwrite: String,
+    pub setuid: String,
+    pub nested_depth: u32,
+    pub ambiguity: String,
+    pub case_fold_collision: String,
+    pub magic_vs_extension: String,
+    pub encrypted: String,
+    pub atomic: bool,
+}
+
+impl PolicyDocument {
+    /// Validate the document into a policy whose validity and digest are
+    /// proven, or fail closed with a typed finding.
+    ///
+    /// Validation maps every string field onto the exact supported vocabulary,
+    /// reconstructs the canonical [`Policy`], proves it compiles, and bounds
+    /// every cap to the double-safe integer ceiling. The resulting digest is
+    /// the canonical policy digest: a document that used non-canonical JSON
+    /// spelling (for example an explicit `null` for the conditional field)
+    /// still validates to the same canonical policy and digest.
+    pub fn validate(self) -> Result<ValidatedPolicy, Finding> {
+        let policy = Policy {
+            schema: static_schema(&self.schema)?,
+            id: self.id,
+            formats: self.formats,
+            max_archive_bytes: self.max_archive_bytes,
+            max_derived_archive_bytes: self.max_derived_archive_bytes,
+            max_files: self.max_files,
+            max_member_bytes: self.max_member_bytes,
+            max_total_bytes: self.max_total_bytes,
+            max_ratio: self.max_ratio,
+            max_path_depth: self.max_path_depth,
+            max_metadata_bytes: self.max_metadata_bytes,
+            max_dict_bytes: self.max_dict_bytes,
+            symlinks: static_vocabulary("symlinks", &self.symlinks)?,
+            hardlinks: static_vocabulary("hardlinks", &self.hardlinks)?,
+            overwrite: static_vocabulary("overwrite", &self.overwrite)?,
+            setuid: static_vocabulary("setuid", &self.setuid)?,
+            nested_depth: self.nested_depth,
+            ambiguity: static_vocabulary("ambiguity", &self.ambiguity)?,
+            case_fold_collision: static_vocabulary(
+                "case_fold_collision",
+                &self.case_fold_collision,
+            )?,
+            magic_vs_extension: static_vocabulary("magic_vs_extension", &self.magic_vs_extension)?,
+            encrypted: static_vocabulary("encrypted", &self.encrypted)?,
+            atomic: self.atomic,
+        };
+        ValidatedPolicy::new(policy)
+    }
+}
+
+/// A policy whose compilability and digest are proven at construction.
+///
+/// Nothing prevents digesting an arbitrary [`Policy`]; this type does. A
+/// `ValidatedPolicy` exists only if the wrapped policy compiles and every cap
+/// is within the double-safe integer ceiling, and its memoized digest is the
+/// canonical policy digest.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ValidatedPolicy {
+    policy: Policy,
+    digest: String,
+}
+
+impl ValidatedPolicy {
+    /// Prove `policy` compiles and is canonically representable, or fail
+    /// closed with a typed finding.
+    pub fn new(policy: Policy) -> Result<Self, Finding> {
+        policy.compile()?;
+        for (field, value) in [
+            ("max_archive_bytes", Some(policy.max_archive_bytes)),
+            (
+                "max_derived_archive_bytes",
+                policy.max_derived_archive_bytes,
+            ),
+            ("max_files", Some(policy.max_files)),
+            ("max_member_bytes", Some(policy.max_member_bytes)),
+            ("max_total_bytes", Some(policy.max_total_bytes)),
+            ("max_ratio", policy.max_ratio),
+            ("max_metadata_bytes", Some(policy.max_metadata_bytes)),
+            ("max_dict_bytes", Some(policy.max_dict_bytes)),
+        ] {
+            if let Some(value) = value {
+                if value > MAX_DOUBLE_SAFE_INTEGER {
+                    return Err(unsupported(format!(
+                        "policy {field} value {value} exceeds the 2^53-1 double-safe ceiling"
+                    )));
+                }
+            }
+        }
+        let digest = policy.digest_hex();
+        Ok(Self { policy, digest })
+    }
+
+    /// The proven policy.
+    pub fn policy(&self) -> &Policy {
+        &self.policy
+    }
+
+    /// The memoized canonical policy digest.
+    pub fn digest_hex(&self) -> &str {
+        &self.digest
+    }
+
+    /// Unwrap the proven policy.
+    pub fn into_policy(self) -> Policy {
+        self.policy
+    }
+}
+
 pub fn hex_sha256(bytes: &[u8]) -> String {
     let d = Sha256::digest(bytes);
     d.iter().map(|b| format!("{b:02x}")).collect()
@@ -918,6 +1099,107 @@ mod tests {
         assert_eq!(
             Policy::default_v11().digest_hex(),
             "afa0aeb04ceca00706b31dfd250216a87f2af0ada6e98d3815873de0d15172fc"
+        );
+    }
+
+    #[test]
+    fn every_default_policy_round_trips_through_the_document_to_the_same_bytes() {
+        for policy in [
+            Policy::default_v1(),
+            Policy::default_v2(),
+            Policy::default_v3(),
+            Policy::default_v4(),
+            Policy::default_v5(),
+            Policy::default_v6(),
+            Policy::default_v7(),
+            Policy::default_v8(),
+            Policy::default_v9(),
+            Policy::default_v10(),
+            Policy::default_v11(),
+        ] {
+            let json = serde_json::to_string(&policy).unwrap();
+            let document: PolicyDocument = serde_json::from_str(&json).unwrap();
+            let validated = document.validate().unwrap();
+            assert_eq!(
+                validated.digest_hex(),
+                policy.digest_hex(),
+                "{}: validated digest must equal the pinned digest",
+                policy.id
+            );
+            assert_eq!(
+                serde_json::to_string(validated.policy()).unwrap(),
+                json,
+                "{}: reconstruction must be byte-identical",
+                policy.id
+            );
+        }
+    }
+
+    #[test]
+    fn documents_with_unknown_fields_do_not_deserialize() {
+        let mut value = serde_json::to_value(Policy::default_v1()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("insecure".into(), serde_json::json!(true));
+        let error = serde_json::from_value::<PolicyDocument>(value).unwrap_err();
+        assert!(error.to_string().contains("unknown field"), "{error}");
+    }
+
+    #[test]
+    fn unknown_schemas_and_vocabulary_fail_closed_as_unsupported() {
+        let json = serde_json::to_string(&Policy::default_v1()).unwrap();
+
+        let mut document: PolicyDocument = serde_json::from_str(&json).unwrap();
+        document.schema = "sealr.policy.v99".into();
+        assert_eq!(
+            document.validate().unwrap_err().code,
+            FindingCode::PolicyUnsupported
+        );
+
+        let mut document: PolicyDocument = serde_json::from_str(&json).unwrap();
+        document.symlinks = "allow".into();
+        let finding = document.validate().unwrap_err();
+        assert_eq!(finding.code, FindingCode::PolicyUnsupported);
+        assert!(finding.detail.contains("symlinks"), "{}", finding.detail);
+    }
+
+    #[test]
+    fn caps_above_the_double_safe_ceiling_fail_closed() {
+        let json = serde_json::to_string(&Policy::default_v1()).unwrap();
+        let mut document: PolicyDocument = serde_json::from_str(&json).unwrap();
+        document.max_total_bytes = 1 << 53;
+        let finding = document.validate().unwrap_err();
+        assert_eq!(finding.code, FindingCode::PolicyUnsupported);
+        assert!(finding.detail.contains("double-safe"), "{}", finding.detail);
+    }
+
+    #[test]
+    fn an_explicit_null_conditional_field_validates_to_the_canonical_policy() {
+        let mut value = serde_json::to_value(Policy::default_v1()).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert("max_derived_archive_bytes".into(), serde_json::Value::Null);
+        let document: PolicyDocument = serde_json::from_value(value).unwrap();
+        let validated = document.validate().unwrap();
+        assert_eq!(validated.digest_hex(), Policy::default_v1().digest_hex());
+    }
+
+    #[test]
+    fn an_uncompilable_policy_cannot_become_validated() {
+        let mut policy = Policy::default_v1();
+        policy.max_dict_bytes = 1;
+        assert_eq!(
+            ValidatedPolicy::new(policy).unwrap_err().code,
+            FindingCode::PolicyUnsupported
+        );
+
+        let mut policy = Policy::default_v1();
+        policy.formats = vec!["7z-copy".into()];
+        assert_eq!(
+            ValidatedPolicy::new(policy).unwrap_err().code,
+            FindingCode::PolicyUnsupported
         );
     }
 
