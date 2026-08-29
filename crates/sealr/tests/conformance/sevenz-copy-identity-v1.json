@@ -1,0 +1,610 @@
+{
+  "archive_ir_schema": "sealr.archive-ir.7z-copy.v1",
+  "cases": [
+    {
+      "archive_ir": {
+        "format": "7z-copy",
+        "members": [
+          {
+            "actual_crc": 1698804739,
+            "actual_uncomp_size": 25,
+            "canonical_path": "mission/plan.txt",
+            "components": [
+              "mission",
+              "plan.txt"
+            ],
+            "content_sha256": "16b6eb13361690ddcbd716be3a148ddcece7d801cafdc4aaa319723dbb27df84",
+            "declared_uncomp_size": 25,
+            "decoded_name": "mission/plan.txt",
+            "kind": "file",
+            "normalization_actions": [],
+            "raw_name_bytes": [
+              109,
+              0,
+              105,
+              0,
+              115,
+              0,
+              115,
+              0,
+              105,
+              0,
+              111,
+              0,
+              110,
+              0,
+              47,
+              0,
+              112,
+              0,
+              108,
+              0,
+              97,
+              0,
+              110,
+              0,
+              46,
+              0,
+              116,
+              0,
+              120,
+              0,
+              116,
+              0
+            ],
+            "sevenz": {
+              "attributes": 32,
+              "declared_crc": 1698804739,
+              "mtime": 134324736000000000,
+              "payload": {
+                "len": 25,
+                "offset": 32
+              }
+            },
+            "verification": {
+              "status": "verified"
+            }
+          }
+        ],
+        "profile": "sealr.profile.7z.copy-portable.v1",
+        "profile_digest": "7b6604ad59b5aecf9ebdfa42d7d48d3df663813798992741dd6d74ea56f60b75",
+        "schema": "sealr.archive-ir.7z-copy.v1",
+        "sevenz": {
+          "dummy_bytes": 0,
+          "folders": [
+            {
+              "folder_crc": null,
+              "pack_crc": null,
+              "pack_stream": {
+                "len": 25,
+                "offset": 32
+              },
+              "substreams": [
+                {
+                  "declared_crc": 1698804739,
+                  "payload": {
+                    "len": 25,
+                    "offset": 32
+                  }
+                }
+              ],
+              "unpack_size": 25
+            }
+          ],
+          "name_region_bytes": 34,
+          "next_header": {
+            "len": 90,
+            "offset": 57
+          },
+          "next_header_crc": 3870797546,
+          "pack_region": {
+            "len": 25,
+            "offset": 32
+          },
+          "version_minor": 4
+        },
+        "source_digest": {
+          "sha256": "ebefe20d0dfd944e29a0987e4b182c80595e2a7ec4d1efe3217123e22259c289"
+        }
+      },
+      "content_root": {
+        "sealrTreeV1": "bc8f6d6f7870aeab647cff08db25471a729bd2a41e095d49d6254c49afc34278"
+      },
+      "id": "sevenz-cli-fileonly",
+      "layout_preimage_hex": "7365616c722e747265652e6c61796f75742e377a2d636f70792e763120323830007b6604ad59b5aecf9ebdfa42d7d48d3df663813798992741dd6d74ea56f60b75ebefe20d0dfd944e29a0987e4b182c80595e2a7ec4d1efe3217123e22259c289042000000000000000190000000000000039000000000000005a00000000000000eaaeb7e601000000200000000000000019000000000000000019000000000000000001000000200000000000000019000000000000000103b441652200000000000000000000000000000001000000200000006d0069007300730069006f006e002f0070006c0061006e002e00740078007400100000006d697373696f6e2f706c616e2e747874001900000000000000200000000000000019000000000000000103b441650120000000010000d4bda237dd0100000000",
+      "layout_root": {
+        "sealrTreeV12": "df4c1271279959b9fbd90e56078913779e134f52a69c52d959878ad76bff9a9d"
+      },
+      "source": {
+        "sha256": "ebefe20d0dfd944e29a0987e4b182c80595e2a7ec4d1efe3217123e22259c289"
+      },
+      "source_bytes_hex": "377abcaf271c000435c12a4919000000000000005a00000000000000eaaeb7e67665726966792074776963652c206465636f6465206f6e63650104060001091900070b01000101000c1900080a0103b44165000005011123006d0069007300730069006f006e002f0070006c0061006e002e0074007800740000001900140a01000000d4bda237dd0115060100200000000000"
+    },
+    {
+      "archive_ir": {
+        "format": "7z-copy",
+        "members": [
+          {
+            "actual_crc": 0,
+            "actual_uncomp_size": 0,
+            "canonical_path": "mission",
+            "components": [
+              "mission"
+            ],
+            "content_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "declared_uncomp_size": 0,
+            "decoded_name": "mission",
+            "kind": "directory",
+            "normalization_actions": [],
+            "raw_name_bytes": [
+              109,
+              0,
+              105,
+              0,
+              115,
+              0,
+              115,
+              0,
+              105,
+              0,
+              111,
+              0,
+              110,
+              0
+            ],
+            "sevenz": {
+              "attributes": 16,
+              "declared_crc": null,
+              "mtime": 134324736000000000,
+              "payload": {
+                "len": 0,
+                "offset": 57
+              }
+            },
+            "verification": {
+              "status": "verified"
+            }
+          },
+          {
+            "actual_crc": 1698804739,
+            "actual_uncomp_size": 25,
+            "canonical_path": "mission/plan.txt",
+            "components": [
+              "mission",
+              "plan.txt"
+            ],
+            "content_sha256": "16b6eb13361690ddcbd716be3a148ddcece7d801cafdc4aaa319723dbb27df84",
+            "declared_uncomp_size": 25,
+            "decoded_name": "mission/plan.txt",
+            "kind": "file",
+            "normalization_actions": [],
+            "raw_name_bytes": [
+              109,
+              0,
+              105,
+              0,
+              115,
+              0,
+              115,
+              0,
+              105,
+              0,
+              111,
+              0,
+              110,
+              0,
+              47,
+              0,
+              112,
+              0,
+              108,
+              0,
+              97,
+              0,
+              110,
+              0,
+              46,
+              0,
+              116,
+              0,
+              120,
+              0,
+              116,
+              0
+            ],
+            "sevenz": {
+              "attributes": 32,
+              "declared_crc": 1698804739,
+              "mtime": 134324736000000000,
+              "payload": {
+                "len": 25,
+                "offset": 32
+              }
+            },
+            "verification": {
+              "status": "verified"
+            }
+          }
+        ],
+        "profile": "sealr.profile.7z.copy-portable.v1",
+        "profile_digest": "7b6604ad59b5aecf9ebdfa42d7d48d3df663813798992741dd6d74ea56f60b75",
+        "schema": "sealr.archive-ir.7z-copy.v1",
+        "sevenz": {
+          "dummy_bytes": 11,
+          "folders": [
+            {
+              "folder_crc": null,
+              "pack_crc": null,
+              "pack_stream": {
+                "len": 25,
+                "offset": 32
+              },
+              "substreams": [
+                {
+                  "declared_crc": 1698804739,
+                  "payload": {
+                    "len": 25,
+                    "offset": 32
+                  }
+                }
+              ],
+              "unpack_size": 25
+            }
+          ],
+          "name_region_bytes": 50,
+          "next_header": {
+            "len": 134,
+            "offset": 57
+          },
+          "next_header_crc": 3083539909,
+          "pack_region": {
+            "len": 25,
+            "offset": 32
+          },
+          "version_minor": 4
+        },
+        "source_digest": {
+          "sha256": "6b3130dbd159c99cd5ad537b01162800ff7b52035321686adf1f9daa3bd66794"
+        }
+      },
+      "content_root": {
+        "sealrTreeV1": "dd873d28135492b75c75094f53cc7ecd652d69a0d0cbcc5ee6512ae235501d49"
+      },
+      "id": "sevenz-cli-dir",
+      "layout_preimage_hex": "7365616c722e747265652e6c61796f75742e377a2d636f70792e763120333533007b6604ad59b5aecf9ebdfa42d7d48d3df663813798992741dd6d74ea56f60b756b3130dbd159c99cd5ad537b01162800ff7b52035321686adf1f9daa3bd66794042000000000000000190000000000000039000000000000008600000000000000c515cbb701000000200000000000000019000000000000000019000000000000000001000000200000000000000019000000000000000103b4416532000000000000000b00000000000000020000000e0000006d0069007300730069006f006e00070000006d697373696f6e01000000000000000039000000000000000000000000000000000110000000010000d4bda237dd0100000000200000006d0069007300730069006f006e002f0070006c0061006e002e00740078007400100000006d697373696f6e2f706c616e2e747874001900000000000000200000000000000019000000000000000103b441650120000000010000d4bda237dd0100000000",
+      "layout_root": {
+        "sealrTreeV12": "cfbf42c77accae9f439036a972cbe5b88e0757611093d8498d6e3c3519c98375"
+      },
+      "source": {
+        "sha256": "6b3130dbd159c99cd5ad537b01162800ff7b52035321686adf1f9daa3bd66794"
+      },
+      "source_bytes_hex": "377abcaf271c0004594020be19000000000000008600000000000000c515cbb77665726966792074776963652c206465636f6465206f6e63650104060001091900070b01000101000c1900080a0103b44165000005020e0180190b00000000000000000000001133006d0069007300730069006f006e0000006d0069007300730069006f006e002f0070006c0061006e002e0074007800740000001900141201000000d4bda237dd010000d4bda237dd01150a010010000000200000000000"
+    },
+    {
+      "archive_ir": {
+        "format": "7z-copy",
+        "members": [
+          {
+            "actual_crc": 0,
+            "actual_uncomp_size": 0,
+            "canonical_path": "mission",
+            "components": [
+              "mission"
+            ],
+            "content_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "declared_uncomp_size": 0,
+            "decoded_name": "mission",
+            "kind": "directory",
+            "normalization_actions": [],
+            "raw_name_bytes": [
+              109,
+              0,
+              105,
+              0,
+              115,
+              0,
+              115,
+              0,
+              105,
+              0,
+              111,
+              0,
+              110,
+              0
+            ],
+            "sevenz": {
+              "attributes": 16,
+              "declared_crc": null,
+              "mtime": 134324736000000000,
+              "payload": {
+                "len": 0,
+                "offset": 100
+              }
+            },
+            "verification": {
+              "status": "verified"
+            }
+          },
+          {
+            "actual_crc": 0,
+            "actual_uncomp_size": 0,
+            "canonical_path": "mission/empty.txt",
+            "components": [
+              "mission",
+              "empty.txt"
+            ],
+            "content_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+            "declared_uncomp_size": 0,
+            "decoded_name": "mission/empty.txt",
+            "kind": "file",
+            "normalization_actions": [],
+            "raw_name_bytes": [
+              109,
+              0,
+              105,
+              0,
+              115,
+              0,
+              115,
+              0,
+              105,
+              0,
+              111,
+              0,
+              110,
+              0,
+              47,
+              0,
+              101,
+              0,
+              109,
+              0,
+              112,
+              0,
+              116,
+              0,
+              121,
+              0,
+              46,
+              0,
+              116,
+              0,
+              120,
+              0,
+              116,
+              0
+            ],
+            "sevenz": {
+              "attributes": 32,
+              "declared_crc": null,
+              "mtime": 134324736000000000,
+              "payload": {
+                "len": 0,
+                "offset": 100
+              }
+            },
+            "verification": {
+              "status": "verified"
+            }
+          },
+          {
+            "actual_crc": 1698804739,
+            "actual_uncomp_size": 25,
+            "canonical_path": "mission/plan.txt",
+            "components": [
+              "mission",
+              "plan.txt"
+            ],
+            "content_sha256": "16b6eb13361690ddcbd716be3a148ddcece7d801cafdc4aaa319723dbb27df84",
+            "declared_uncomp_size": 25,
+            "decoded_name": "mission/plan.txt",
+            "kind": "file",
+            "normalization_actions": [],
+            "raw_name_bytes": [
+              109,
+              0,
+              105,
+              0,
+              115,
+              0,
+              115,
+              0,
+              105,
+              0,
+              111,
+              0,
+              110,
+              0,
+              47,
+              0,
+              112,
+              0,
+              108,
+              0,
+              97,
+              0,
+              110,
+              0,
+              46,
+              0,
+              116,
+              0,
+              120,
+              0,
+              116,
+              0
+            ],
+            "sevenz": {
+              "attributes": 32,
+              "declared_crc": 1698804739,
+              "mtime": 134324736000000000,
+              "payload": {
+                "len": 25,
+                "offset": 32
+              }
+            },
+            "verification": {
+              "status": "verified"
+            }
+          },
+          {
+            "actual_crc": 3862379844,
+            "actual_uncomp_size": 43,
+            "canonical_path": "mission/telemetry.log",
+            "components": [
+              "mission",
+              "telemetry.log"
+            ],
+            "content_sha256": "0f4fc425b8949c3af3291d174abff73463e3ac38ac0e603dfcb5145892ef8725",
+            "declared_uncomp_size": 43,
+            "decoded_name": "mission/telemetry.log",
+            "kind": "file",
+            "normalization_actions": [],
+            "raw_name_bytes": [
+              109,
+              0,
+              105,
+              0,
+              115,
+              0,
+              115,
+              0,
+              105,
+              0,
+              111,
+              0,
+              110,
+              0,
+              47,
+              0,
+              116,
+              0,
+              101,
+              0,
+              108,
+              0,
+              101,
+              0,
+              109,
+              0,
+              101,
+              0,
+              116,
+              0,
+              114,
+              0,
+              121,
+              0,
+              46,
+              0,
+              108,
+              0,
+              111,
+              0,
+              103,
+              0
+            ],
+            "sevenz": {
+              "attributes": 32,
+              "declared_crc": 3862379844,
+              "mtime": 134324736000000000,
+              "payload": {
+                "len": 43,
+                "offset": 57
+              }
+            },
+            "verification": {
+              "status": "verified"
+            }
+          }
+        ],
+        "profile": "sealr.profile.7z.copy-portable.v1",
+        "profile_digest": "7b6604ad59b5aecf9ebdfa42d7d48d3df663813798992741dd6d74ea56f60b75",
+        "schema": "sealr.archive-ir.7z-copy.v1",
+        "sevenz": {
+          "dummy_bytes": 0,
+          "folders": [
+            {
+              "folder_crc": null,
+              "pack_crc": null,
+              "pack_stream": {
+                "len": 25,
+                "offset": 32
+              },
+              "substreams": [
+                {
+                  "declared_crc": 1698804739,
+                  "payload": {
+                    "len": 25,
+                    "offset": 32
+                  }
+                }
+              ],
+              "unpack_size": 25
+            },
+            {
+              "folder_crc": null,
+              "pack_crc": null,
+              "pack_stream": {
+                "len": 43,
+                "offset": 57
+              },
+              "substreams": [
+                {
+                  "declared_crc": 3862379844,
+                  "payload": {
+                    "len": 43,
+                    "offset": 57
+                  }
+                }
+              ],
+              "unpack_size": 43
+            }
+          ],
+          "name_region_bytes": 130,
+          "next_header": {
+            "len": 238,
+            "offset": 100
+          },
+          "next_header_crc": 76874919,
+          "pack_region": {
+            "len": 68,
+            "offset": 32
+          },
+          "version_minor": 4
+        },
+        "source_digest": {
+          "sha256": "d867087a94e11ef3cefb0e61e31ea0431e4e0622f8e2a49829819f7b77d5a67c"
+        }
+      },
+      "content_root": {
+        "sealrTreeV1": "de3623573162343335ac1baa10195fc9eec62a02c19458db5d18aa32e3055556"
+      },
+      "id": "sevenz-cli-multi",
+      "layout_preimage_hex": "7365616c722e747265652e6c61796f75742e377a2d636f70792e763120363236007b6604ad59b5aecf9ebdfa42d7d48d3df663813798992741dd6d74ea56f60b75d867087a94e11ef3cefb0e61e31ea0431e4e0622f8e2a49829819f7b77d5a67c04200000000000000044000000000000006400000000000000ee00000000000000a704950402000000200000000000000019000000000000000019000000000000000001000000200000000000000019000000000000000103b4416539000000000000002b00000000000000002b00000000000000000100000039000000000000002b0000000000000001443d37e682000000000000000000000000000000040000000e0000006d0069007300730069006f006e00070000006d697373696f6e01000000000000000064000000000000000000000000000000000110000000010000d4bda237dd0100000000220000006d0069007300730069006f006e002f0065006d007000740079002e00740078007400110000006d697373696f6e2f656d7074792e74787400000000000000000064000000000000000000000000000000000120000000010000d4bda237dd0100000000200000006d0069007300730069006f006e002f0070006c0061006e002e00740078007400100000006d697373696f6e2f706c616e2e747874001900000000000000200000000000000019000000000000000103b441650120000000010000d4bda237dd01000000002a0000006d0069007300730069006f006e002f00740065006c0065006d0065007400720079002e006c006f006700150000006d697373696f6e2f74656c656d657472792e6c6f67002b0000000000000039000000000000002b0000000000000001443d37e60120000000010000d4bda237dd0100000000",
+      "layout_root": {
+        "sealrTreeV12": "6d5209e2d8e7208fec478f6201effea9ca8cb243844ea2ec1fbcd3fcb8d88488"
+      },
+      "source": {
+        "sha256": "d867087a94e11ef3cefb0e61e31ea0431e4e0622f8e2a49829819f7b77d5a67c"
+      },
+      "source_bytes_hex": "377abcaf271c000412338a094400000000000000ee00000000000000a70495047665726966792074776963652c206465636f6465206f6e636574686520626f756e64617279206f776e7320746865206d65616e696e67206f662065766572792062797465010406000209192b00070b02000101000101000c192b00080a0103b44165443d37e6000005040e01c00f0140118083006d0069007300730069006f006e0000006d0069007300730069006f006e002f0065006d007000740079002e0074007800740000006d0069007300730069006f006e002f0070006c0061006e002e0074007800740000006d0069007300730069006f006e002f00740065006c0065006d0065007400720079002e006c006f00670000001900142201000000d4bda237dd010000d4bda237dd010000d4bda237dd010000d4bda237dd0115120100100000002000000020000000200000000000"
+    }
+  ],
+  "content_encoding": "sealrTreeV1",
+  "content_label": "sealr.tree.content.v1",
+  "cross_container_content_root": {
+    "case": "sevenz-cli-fileonly",
+    "sealrTreeV1": "bc8f6d6f7870aeab647cff08db25471a729bd2a41e095d49d6254c49afc34278",
+    "shared_with": "the raw, gzip, zstd, xz, and bzip2 TAR family over the same member set"
+  },
+  "layout_encoding": "sealrTreeV12",
+  "layout_label": "sealr.tree.layout.7z-copy.v1",
+  "profile": {
+    "digest": {
+      "sha256": "7b6604ad59b5aecf9ebdfa42d7d48d3df663813798992741dd6d74ea56f60b75"
+    },
+    "id": "sealr.profile.7z.copy-portable.v1"
+  },
+  "schema": "sealr.7z-copy-identity-conformance.v1"
+}

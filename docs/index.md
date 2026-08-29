@@ -37,6 +37,7 @@ Start with the [README](../README.md) for the published Alpha.11 boundary and a 
 | [Zstd-wrapped portable ustar profile v1](profiles/tar-zstd-ustar-portable-v1.md) | Explicit policy-v8 first promoted codec adapter with the ruzstd Gate B review and `sealrTreeV9` |
 | [Xz-wrapped portable ustar profile v1](profiles/tar-xz-ustar-portable-v1.md) | Explicit policy-v9 second promoted codec adapter with the lzma-rust2 Gate B review and `sealrTreeV10` |
 | [Bzip2-wrapped portable ustar profile v1](profiles/tar-bzip2-ustar-portable-v1.md) | Explicit policy-v10 third promoted codec adapter with the bzip2/libbz2-rs-sys Gate B review and `sealrTreeV11` |
+| [Copy-only 7z container profile v1](profiles/7z-copy-portable-v1.md) | Explicit policy-v11 first Gate C container step with zero new dependencies, `sealrTreeV12`, and the first cross-container content parity |
 | [Python wheel consumer v1](profiles/python-wheel-v1.md) | Supported bounded wheel artifact and scheme-relative plan evaluator |
 | [Differentials](differentials.md) | Single-interpretation rules and the ZipDiff corpus |
 | [Reduced-authority execution](sandbox.md) | Supervisor and worker design |

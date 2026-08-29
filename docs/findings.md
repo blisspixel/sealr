@@ -113,6 +113,7 @@ Unknown error codes must be treated as rejection by consumers.
 | `codec.xz.trailing_input` | One valid XZ stream ended before the source ended. Concatenated streams, stream padding, and every other trailing byte are rejected. |
 | `codec.bzip2.invalid_stream` | The declared bzip2 payload is not one valid stream within the restricted language, the footer or block-CRC chain fold fails, the stream is truncated, or decoder accounting is inconsistent. |
 | `codec.bzip2.trailing_input` | One valid bzip2 stream ended before the source ended. Concatenated streams and every other trailing byte are rejected. |
+| `sevenz.invalid_structure` | The declared 7z container is not one valid archive within the restricted Copy language: header geometry, dense-covering, NUMBER-encoding, bit-vector, folder, substream, name-region, or empty-matrix rules failed. |
 | `crc.mismatch` | Expanded member CRC32 disagrees with the archive. |
 
 ### Gzip wrapper

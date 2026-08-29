@@ -76,6 +76,14 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar.bz2 --format tar-bzip2-us
 
 `--format tar-bzip2-ustar` accepts exactly one restricted bzip2 stream — levels 1 to 9, one to 65,536 blocks, the bit-aligned container independently replayed with a footer shift-scan and a block-CRC chain fold — whose bounded decoded output is exact portable ustar. Bzip1, randomized blocks, empty streams, concatenated streams, and trailing bytes fail closed.
 
+The Copy-only 7z container is a separate current-main in-process preview under policy v11, and the first Gate C structure step:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.7z --format 7z-copy
+```
+
+`--format 7z-copy` accepts exactly one raw-header, single-volume 7z whose every coder is Copy. Stock `7z a` output compresses the header itself and is rejected as unsupported — produce admissible archives with `7z a -m0=Copy -mhc=off` (or py7zr's `set_encoded_header_mode(False)`). Non-Copy coders, packed headers, external records, anti-items, and trailing bytes fail closed.
+
 Strict ZIP64 is a separate current-main in-process preview under policy v3:
 
 ```text
@@ -119,6 +127,12 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar.xz --format tar-xz-ustar 
 cargo run --locked -p sealr-cli -- path/to/archive.tar.bz2 --format tar-bzip2-ustar --dest ./new-output
 ```
 
+For the Copy-only 7z container:
+
+```text
+cargo run --locked -p sealr-cli -- path/to/archive.7z --format 7z-copy --dest ./new-output
+```
+
 For strict ZIP64 in process:
 
 ```text
@@ -146,7 +160,7 @@ establish the complete supervised boundary or the command exits unsuccessfully
 without invoking the in-process payload path. macOS and Windows return
 isolation unavailable if this option is selected.
 
-The authenticated worker currently carries semantic-record v2 ZIP32 plans only. Combining `--format tar-ustar`, `--format tar-gzip-ustar`, `--format tar-pax`, `--format tar-gnu-longname`, `--format tar-gzip-pax`, `--format tar-gzip-gnu-longname`, `--format tar-zstd-ustar`, `--format tar-xz-ustar`, `--format tar-bzip2-ustar`, or `--format zip64` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it refuses before source access, never creates a destination effect, and never falls back to in-process verification. Worker support waits for later semantic records that bind each format-specific evidence model.
+The authenticated worker currently carries semantic-record v2 ZIP32 plans only. Combining `--format tar-ustar`, `--format tar-gzip-ustar`, `--format tar-pax`, `--format tar-gnu-longname`, `--format tar-gzip-pax`, `--format tar-gzip-gnu-longname`, `--format tar-zstd-ustar`, `--format tar-xz-ustar`, `--format tar-bzip2-ustar`, `--format 7z-copy`, or `--format zip64` with `--worker-manifest` returns a typed isolation-unavailable supervision error and exits `1`; it refuses before source access, never creates a destination effect, and never falls back to in-process verification. Worker support waits for later semantic records that bind each format-specific evidence model.
 
 ## Output contract
 
@@ -197,7 +211,7 @@ Arguments:
   <ARCHIVE>  Archive file
 
 Options:
-      --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar, tar-gzip-ustar, tar-pax, tar-gnu-longname, tar-gzip-pax, tar-gzip-gnu-longname, tar-zstd-ustar, tar-xz-ustar, tar-bzip2-ustar]
+      --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar, tar-gzip-ustar, tar-pax, tar-gnu-longname, tar-gzip-pax, tar-gzip-gnu-longname, tar-zstd-ustar, tar-xz-ustar, tar-bzip2-ustar, 7z-copy]
       --dest <DEST>                      Materialize into a new directory below an existing parent
       --worker-manifest <ABSOLUTE_PATH>  Use the exact packaged Linux worker bound by this manifest
   -h, --help                             Print help

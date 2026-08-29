@@ -6,19 +6,21 @@ use std::path::Path;
 use std::fs;
 
 use crate::covering::{
-    audit_bzip2_wrapper_covering, audit_covering, audit_gzip_wrapper_covering, audit_tar_covering,
-    audit_tar_gnu_longname_covering, audit_tar_pax_covering, audit_xz_wrapper_covering,
-    audit_zip64_covering, audit_zstd_wrapper_covering,
+    audit_bzip2_wrapper_covering, audit_covering, audit_gzip_wrapper_covering,
+    audit_sevenz_covering, audit_tar_covering, audit_tar_gnu_longname_covering,
+    audit_tar_pax_covering, audit_xz_wrapper_covering, audit_zip64_covering,
+    audit_zstd_wrapper_covering,
 };
 use crate::findings::{Finding, FindingCode, Severity};
 use crate::identity::OutcomeIdentities;
 use crate::ir::{
     ArchiveFormat, ArchiveIR, Bzip2WrapperEvidence, GnuLongNameCarrierEvidence,
     GzipWrapperEvidence, IrMember, MemberKind, MemberVerification, NormalizationAction,
-    PaxExtensionEvidence, PaxRecordEvidence, TarArchiveCovering, TarBzip2InterpretationProfile,
-    TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
-    TarPaxInterpretationProfile, TarXzInterpretationProfile, TarZstdInterpretationProfile,
-    XzWrapperEvidence, ZipInterpretationProfile, ZstdWrapperEvidence,
+    PaxExtensionEvidence, PaxRecordEvidence, SevenZInterpretationProfile, TarArchiveCovering,
+    TarBzip2InterpretationProfile, TarGnuLongNameInterpretationProfile,
+    TarGzipInterpretationProfile, TarInterpretationProfile, TarPaxInterpretationProfile,
+    TarXzInterpretationProfile, TarZstdInterpretationProfile, XzWrapperEvidence,
+    ZipInterpretationProfile, ZstdWrapperEvidence,
 };
 use crate::jail::{jail_name_for_profile, portable_name_violation, profile_case_fold};
 use crate::materialize::{process_member_to_file, CapabilityMaterializer, MaterializationMeta};
@@ -31,6 +33,7 @@ use crate::policy::{
     POLICY_FORMAT_TAR_GNU_LONGNAME, POLICY_FORMAT_TAR_PAX, POLICY_FORMAT_TAR_USTAR,
 };
 use crate::quota::{QuotaError, QuotaState};
+use crate::sevenz;
 use crate::snapshot::{
     DomainRange, SnapshotDomainId, SnapshotKind, SnapshotSet, SourceSnapshot, TransformGraph,
     TransformProfile,
@@ -86,6 +89,7 @@ pub enum ArchiveSelection {
     TarZstdUstar(TarZstdInterpretationProfile),
     TarXzUstar(TarXzInterpretationProfile),
     TarBzip2Ustar(TarBzip2InterpretationProfile),
+    SevenZCopy(SevenZInterpretationProfile),
 }
 
 impl Default for ArchiveSelection {
@@ -191,7 +195,8 @@ impl ApplyOptions {
             | ArchiveSelection::TarPax(_)
             | ArchiveSelection::TarGnuLongName(_)
             | ArchiveSelection::TarZstdUstar(_)
-            | ArchiveSelection::TarBzip2Ustar(_) => None,
+            | ArchiveSelection::TarBzip2Ustar(_)
+            | ArchiveSelection::SevenZCopy(_) => None,
         }
     }
 
@@ -215,7 +220,32 @@ impl ApplyOptions {
             | ArchiveSelection::TarPax(_)
             | ArchiveSelection::TarGnuLongName(_)
             | ArchiveSelection::TarZstdUstar(_)
-            | ArchiveSelection::TarXzUstar(_) => None,
+            | ArchiveSelection::TarXzUstar(_)
+            | ArchiveSelection::SevenZCopy(_) => None,
+        }
+    }
+
+    /// Select the restricted Copy-only 7z container interpretation explicitly.
+    pub fn with_sevenz_interpretation_profile(
+        mut self,
+        profile: SevenZInterpretationProfile,
+    ) -> Self {
+        self.selection = ArchiveSelection::SevenZCopy(profile);
+        self
+    }
+
+    /// Return the selected 7z container interpretation, when requested.
+    pub fn sevenz_interpretation_profile(&self) -> Option<SevenZInterpretationProfile> {
+        match self.selection {
+            ArchiveSelection::SevenZCopy(profile) => Some(profile),
+            ArchiveSelection::Zip(_)
+            | ArchiveSelection::TarUstar(_)
+            | ArchiveSelection::TarGzipUstar(_)
+            | ArchiveSelection::TarPax(_)
+            | ArchiveSelection::TarGnuLongName(_)
+            | ArchiveSelection::TarZstdUstar(_)
+            | ArchiveSelection::TarXzUstar(_)
+            | ArchiveSelection::TarBzip2Ustar(_) => None,
         }
     }
 
@@ -244,7 +274,8 @@ impl ApplyOptions {
             | ArchiveSelection::TarGnuLongName(_)
             | ArchiveSelection::TarZstdUstar(_)
             | ArchiveSelection::TarXzUstar(_)
-            | ArchiveSelection::TarBzip2Ustar(_) => None,
+            | ArchiveSelection::TarBzip2Ustar(_)
+            | ArchiveSelection::SevenZCopy(_) => None,
         }
     }
 
@@ -258,7 +289,8 @@ impl ApplyOptions {
             | ArchiveSelection::TarGnuLongName(_)
             | ArchiveSelection::TarZstdUstar(_)
             | ArchiveSelection::TarXzUstar(_)
-            | ArchiveSelection::TarBzip2Ustar(_) => None,
+            | ArchiveSelection::TarBzip2Ustar(_)
+            | ArchiveSelection::SevenZCopy(_) => None,
         }
     }
 
@@ -272,7 +304,8 @@ impl ApplyOptions {
             | ArchiveSelection::TarGnuLongName(_)
             | ArchiveSelection::TarZstdUstar(_)
             | ArchiveSelection::TarXzUstar(_)
-            | ArchiveSelection::TarBzip2Ustar(_) => None,
+            | ArchiveSelection::TarBzip2Ustar(_)
+            | ArchiveSelection::SevenZCopy(_) => None,
         }
     }
 
@@ -286,7 +319,8 @@ impl ApplyOptions {
             | ArchiveSelection::TarPax(_)
             | ArchiveSelection::TarGnuLongName(_)
             | ArchiveSelection::TarXzUstar(_)
-            | ArchiveSelection::TarBzip2Ustar(_) => None,
+            | ArchiveSelection::TarBzip2Ustar(_)
+            | ArchiveSelection::SevenZCopy(_) => None,
         }
     }
 
@@ -300,7 +334,8 @@ impl ApplyOptions {
             | ArchiveSelection::TarGnuLongName(_)
             | ArchiveSelection::TarZstdUstar(_)
             | ArchiveSelection::TarXzUstar(_)
-            | ArchiveSelection::TarBzip2Ustar(_) => None,
+            | ArchiveSelection::TarBzip2Ustar(_)
+            | ArchiveSelection::SevenZCopy(_) => None,
         }
     }
 
@@ -316,7 +351,8 @@ impl ApplyOptions {
             | ArchiveSelection::TarPax(_)
             | ArchiveSelection::TarZstdUstar(_)
             | ArchiveSelection::TarXzUstar(_)
-            | ArchiveSelection::TarBzip2Ustar(_) => None,
+            | ArchiveSelection::TarBzip2Ustar(_)
+            | ArchiveSelection::SevenZCopy(_) => None,
         }
     }
 
@@ -336,6 +372,7 @@ impl ApplyOptions {
             ArchiveSelection::TarZstdUstar(profile) => profile.archive_format(),
             ArchiveSelection::TarXzUstar(profile) => profile.archive_format(),
             ArchiveSelection::TarBzip2Ustar(profile) => profile.archive_format(),
+            ArchiveSelection::SevenZCopy(profile) => profile.archive_format(),
         }
     }
 }
@@ -518,6 +555,9 @@ pub fn apply_with_options(req: Request<'_>, options: &ApplyOptions) -> Outcome {
         }
         ArchiveSelection::TarBzip2Ustar(profile) => {
             return apply_tar_bzip2_with_options(&req, options, profile);
+        }
+        ArchiveSelection::SevenZCopy(profile) => {
+            return apply_sevenz_with_options(&req, options, profile);
         }
         ArchiveSelection::Zip(_) => {}
     }
@@ -1686,6 +1726,303 @@ fn bzip2_failure_axes(error: &bzip2::Bzip2Error) -> SemanticAxes {
         ),
     };
     SemanticAxes::structure_stop(interpretation, admission, finding)
+}
+
+fn apply_sevenz_with_options(
+    req: &Request<'_>,
+    options: &ApplyOptions,
+    profile: SevenZInterpretationProfile,
+) -> Outcome {
+    let policy = req.policy;
+    let initial_materialization =
+        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
+    let controls = match policy.compile_for_format(profile.policy_format()) {
+        Ok(controls) => controls,
+        Err(finding) => {
+            return reject_only(
+                (None, SourceDigest::unavailable(), policy.clone()),
+                vec![finding.clone()],
+                None,
+                initial_materialization,
+                SemanticAxes::policy_compile_failed(&finding),
+                SnapshotKind::Unavailable,
+                OutcomeIdentities::unavailable_for_sevenz(SourceDigest::unavailable(), profile),
+            );
+        }
+    };
+    let snapshot = match read_source(&req.source, controls.budget) {
+        Ok(snapshot) => snapshot,
+        Err(failure) => {
+            let admission = if failure.finding.code == FindingCode::QuotaArchive {
+                AdmissionStatus::Denied
+            } else {
+                AdmissionStatus::NotEvaluated
+            };
+            let digest = failure.digest.clone();
+            return reject_only(
+                (failure.path, failure.digest, policy.clone()),
+                vec![failure.finding.clone()],
+                None,
+                initial_materialization,
+                SemanticAxes::source_failure(&failure.finding, admission),
+                failure.snapshot_kind,
+                OutcomeIdentities::unavailable_for_sevenz(digest, profile),
+            );
+        }
+    };
+    let source_digest = snapshot.digest().clone();
+    let identities_base = OutcomeIdentities::unavailable_for_sevenz(source_digest.clone(), profile);
+    let budget = controls.budget;
+    let observed_magic = if sevenz::recognizes_sevenz(&snapshot) {
+        "7z"
+    } else {
+        "unknown"
+    };
+    let parsed = match sevenz::parse_copy_portable_v1(
+        &snapshot,
+        budget.max_files,
+        budget.max_metadata_bytes,
+    ) {
+        Ok(parsed) => parsed,
+        Err(finding) => {
+            let axes = parse_failure_axes(&finding);
+            return finish(
+                (snapshot.path_owned(), source_digest, snapshot.kind()),
+                observed_magic,
+                policy,
+                vec![finding],
+                Vec::new(),
+                initial_materialization,
+                axes,
+                identities_base,
+            );
+        }
+    };
+    if parsed.members.len() as u64 > budget.max_files {
+        let finding = Finding::error(
+            FindingCode::QuotaFiles,
+            format!("{} entries", parsed.members.len()),
+        );
+        return finish(
+            (snapshot.path_owned(), source_digest, snapshot.kind()),
+            "7z",
+            policy,
+            vec![finding.clone()],
+            Vec::new(),
+            initial_materialization,
+            SemanticAxes::structure_stop(
+                InterpretationStatus::Interpreted,
+                AdmissionStatus::Denied,
+                &finding,
+            ),
+            identities_base,
+        );
+    }
+
+    let evidence = crate::ir::SevenZArchiveEvidence {
+        version_minor: parsed.version_minor,
+        pack_region: parsed.pack_region,
+        next_header: parsed.next_header,
+        next_header_crc: parsed.next_header_crc,
+        folders: parsed
+            .folders
+            .iter()
+            .map(|folder| crate::ir::SevenZFolderEvidence {
+                pack_stream: folder.pack_stream,
+                pack_crc: folder.pack_crc,
+                unpack_size: folder.unpack_size,
+                folder_crc: folder.folder_crc,
+                substreams: folder
+                    .substreams
+                    .iter()
+                    .map(|substream| crate::ir::SevenZSubStreamEvidence {
+                        payload: substream.payload,
+                        declared_crc: substream.declared_crc,
+                    })
+                    .collect(),
+            })
+            .collect(),
+        name_region_bytes: parsed.name_region_bytes,
+        dummy_bytes: parsed.dummy_bytes,
+    };
+
+    let mut findings = Vec::new();
+    let mut planned = Vec::new();
+    let mut dest_seen: BTreeMap<String, bool> = BTreeMap::new();
+    let mut fold_seen: BTreeMap<String, bool> = BTreeMap::new();
+    let mut declared_total = QuotaState::new(budget.max_total_bytes);
+    for member in parsed.members {
+        if member.size > budget.max_member_bytes {
+            findings.push(
+                Finding::error(FindingCode::QuotaMember, "declared member too large")
+                    .on(&member.name),
+            );
+            continue;
+        }
+        if let Some(max_ratio) = budget.max_ratio {
+            if ratio_exceeds(member.size, member.size, max_ratio) {
+                findings.push(
+                    Finding::error(
+                        FindingCode::QuotaRatio,
+                        format!(
+                            "declared {}:{} exceeds {max_ratio}:1",
+                            member.size, member.size
+                        ),
+                    )
+                    .on(&member.name),
+                );
+                continue;
+            }
+        }
+        match declared_total.consume(member.size) {
+            Ok(_) => {}
+            Err(QuotaError::Overflow) => {
+                findings.push(Finding::error(
+                    FindingCode::QuotaOverflow,
+                    "declared uncompressed total overflowed u64",
+                ));
+                break;
+            }
+            Err(QuotaError::Exceeded { .. }) => {
+                findings.push(Finding::error(
+                    FindingCode::QuotaTotal,
+                    "declared total too large",
+                ));
+                break;
+            }
+        }
+
+        let mut actions = Vec::new();
+        let jailed_name = if member.is_dir {
+            match member.name.strip_suffix('/') {
+                Some(name) => {
+                    actions.push(NormalizationAction::StripDirectoryTrailingSlash);
+                    name
+                }
+                None => member.name.as_str(),
+            }
+        } else {
+            &member.name
+        };
+        match jail_name_for_profile(
+            jailed_name,
+            budget.max_path_depth,
+            ZipInterpretationProfile::PortableUtf8V1,
+        ) {
+            Ok(jailed) => {
+                if let Some(detail) = portable_name_violation(&jailed) {
+                    findings.push(
+                        Finding::error(FindingCode::PathInvalidChar, detail).on(&member.name),
+                    );
+                    continue;
+                }
+                actions.extend(jailed.actions);
+                let parts = jailed.components;
+                let joined = parts.join("/");
+                let fold = profile_case_fold(&joined, ZipInterpretationProfile::PortableUtf8V1);
+                if dest_seen.contains_key(&joined) {
+                    findings.push(
+                        Finding::error(FindingCode::PathConflict, "duplicate destination path")
+                            .on(&member.name),
+                    );
+                    continue;
+                }
+                if fold_seen.contains_key(&fold) {
+                    findings.push(
+                        Finding::error(FindingCode::PathCaseFold, "case-fold collision")
+                            .on(&member.name),
+                    );
+                    continue;
+                }
+                if let Some(conflict) = path_conflict(&dest_seen, &joined, member.is_dir) {
+                    findings.push(
+                        Finding::error(
+                            FindingCode::PathConflict,
+                            format!("file/directory conflict with {conflict}"),
+                        )
+                        .on(&member.name),
+                    );
+                    continue;
+                }
+                if let Some(conflict) = path_conflict(&fold_seen, &fold, member.is_dir) {
+                    findings.push(
+                        Finding::error(
+                            FindingCode::PathCaseFold,
+                            format!("case-fold topology conflict with {conflict}"),
+                        )
+                        .on(&member.name),
+                    );
+                    continue;
+                }
+                dest_seen.insert(joined, member.is_dir);
+                fold_seen.insert(fold, member.is_dir);
+                planned.push((member, parts, actions));
+            }
+            Err(finding) => findings.push(finding),
+        }
+    }
+
+    if findings
+        .iter()
+        .any(|finding| finding.severity == Severity::Error)
+    {
+        let cause = first_error(&findings);
+        return finish(
+            (snapshot.path_owned(), source_digest, snapshot.kind()),
+            "7z",
+            policy,
+            findings,
+            Vec::new(),
+            initial_materialization,
+            SemanticAxes::denied_at_admission(&cause),
+            identities_base,
+        );
+    }
+
+    let members = planned
+        .into_iter()
+        .map(|(member, components, actions)| {
+            IrMember::from_sevenz_planned(member, components, actions)
+        })
+        .collect();
+    let ir = ArchiveIR::with_sevenz(profile, source_digest.clone(), evidence, members);
+    let payloads = ir.members().iter().map(PayloadPlan::from_ir).collect();
+    if let Err(finding) = audit_sevenz_covering(&snapshot, &ir) {
+        findings.push(finding);
+        let cause = first_error(&findings);
+        let axes = SemanticAxes::structure_stop(
+            InterpretationStatus::Malformed,
+            AdmissionStatus::Denied,
+            &cause,
+        );
+        let outcome = finish(
+            (snapshot.path_owned(), source_digest, snapshot.kind()),
+            "7z",
+            policy,
+            findings,
+            Vec::new(),
+            initial_materialization,
+            axes,
+            identities_base,
+        );
+        return with_ir(outcome, ir);
+    }
+    let ready = ReadyArchive {
+        snapshots: SnapshotSet::from_original(snapshot),
+        transforms: TransformGraph::empty(),
+        ir,
+        payloads,
+        findings,
+        budget,
+        member_sync: controls.effect.member_sync,
+        source_digest,
+        identities_base,
+        magic: "7z",
+    };
+    match execute_ready_archive(req, options, ready, initial_materialization) {
+        Ok(outcome) => outcome,
+        Err(_) => unreachable!("ready 7z execution does not reacquire the source"),
+    }
 }
 
 enum TarPlanProfile {
@@ -3343,6 +3680,15 @@ fn validate_ready_archive(
             audit_tar_bzip2_composite(snapshots, transforms, ir)?;
             Ok(ReadyArchiveAuthority { _private: () })
         }
+        ArchiveFormat::SevenZCopy => {
+            if !transforms.validates(snapshots) || snapshots.len() != 1 || !transforms.is_empty() {
+                return Err(ready_inconsistent(
+                    "raw archive unexpectedly contains a derived transform graph",
+                ));
+            }
+            audit_sevenz_covering(snapshots.original(), ir)?;
+            Ok(ReadyArchiveAuthority { _private: () })
+        }
     }
 }
 
@@ -3412,7 +3758,8 @@ fn audit_tar_gzip_composite(
         | ArchiveFormat::TarGnuLongName
         | ArchiveFormat::TarZstdUstar
         | ArchiveFormat::TarXzUstar
-        | ArchiveFormat::TarBzip2Ustar => {
+        | ArchiveFormat::TarBzip2Ustar
+        | ArchiveFormat::SevenZCopy => {
             return Err(ready_inconsistent(
                 "composite gzip audit received a non-gzip archive format",
             ));
@@ -4287,6 +4634,9 @@ pub(crate) fn member_view(member: &IrMember) -> MemberView {
         }
         crate::ir::MemberEvidence::TarGnuLongName(tar)
         | crate::ir::MemberEvidence::TarGzipGnuLongName(tar) => ("raw", tar.tar.payload.len, 0),
+        crate::ir::MemberEvidence::SevenZ(sevenz) => {
+            ("copy", sevenz.payload.len, sevenz.declared_crc.unwrap_or(0))
+        }
     };
     MemberView {
         path: member.canonical_path.clone(),

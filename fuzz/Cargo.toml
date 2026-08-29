@@ -104,4 +104,11 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "sevenz_copy_portable_v1"
+path = "fuzz_targets/sevenz_copy_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]

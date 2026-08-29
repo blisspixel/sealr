@@ -29,6 +29,8 @@ $tarXzManifestPath = Join-Path $workspace 'fuzz/tar-xz-seed-manifest.json'
 $tarXzManifest = Get-Content -Raw -LiteralPath $tarXzManifestPath | ConvertFrom-Json
 $tarBzip2ManifestPath = Join-Path $workspace 'fuzz/tar-bzip2-seed-manifest.json'
 $tarBzip2Manifest = Get-Content -Raw -LiteralPath $tarBzip2ManifestPath | ConvertFrom-Json
+$sevenzManifestPath = Join-Path $workspace 'fuzz/sevenz-seed-manifest.json'
+$sevenzManifest = Get-Content -Raw -LiteralPath $sevenzManifestPath | ConvertFrom-Json
 $zip64ManifestPath = Join-Path $workspace 'fuzz/zip64-seed-manifest.json'
 $zip64Manifest = Get-Content -Raw -LiteralPath $zip64ManifestPath | ConvertFrom-Json
 
@@ -123,6 +125,14 @@ if ($tarBzip2Manifest.schema -ne 'sealr.tar-bzip2-fuzz-seeds.v1' -or
     $tarBzip2Manifest.sanitizer -ne 'address') {
     throw 'TAR/bzip2 fuzz manifest identity or pinned tools changed unexpectedly'
 }
+if ($sevenzManifest.schema -ne 'sealr.sevenz-copy-fuzz-seeds.v1' -or
+    $sevenzManifest.target -ne 'sevenz_copy_portable_v1' -or
+    $sevenzManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $sevenzManifest.cargoFuzzVersion -ne '0.13.2' -or
+    $sevenzManifest.libfuzzerSysVersion -ne '0.4.13' -or
+    $sevenzManifest.sanitizer -ne 'address') {
+    throw '7z Copy fuzz manifest identity or pinned tools changed unexpectedly'
+}
 if ($zip64Manifest.schema -ne 'sealr.zip64-fuzz-seeds.v1' -or
     $zip64Manifest.target -ne 'zip64_strict_ascii_v1' -or
     $zip64Manifest.toolchain -ne 'nightly-2026-08-01' -or
@@ -202,6 +212,9 @@ foreach ($name in $expectedTarGzipBounds.Keys) {
     if ($tarBzip2Manifest.bounds.$name -ne $expectedTarGzipBounds[$name]) {
         throw "TAR/bzip2 fuzz bound $name changed unexpectedly"
     }
+    if ($sevenzManifest.bounds.$name -ne $expectedTarGzipBounds[$name]) {
+        throw "7z Copy fuzz bound $name changed unexpectedly"
+    }
 }
 $expectedZip64Bounds = [ordered]@{
     maxInputBytes = 1048576
@@ -274,6 +287,11 @@ if ($tarBzip2Manifest.failureArtifact.directoryName -ne 'sealr-tar-bzip2-fuzz-ar
     $tarBzip2Manifest.failureArtifact.uploadOn -ne 'failure' -or
     $tarBzip2Manifest.failureArtifact.retentionDays -ne 7) {
     throw 'TAR/bzip2 fuzz failure artifact policy changed unexpectedly'
+}
+if ($sevenzManifest.failureArtifact.directoryName -ne 'sealr-sevenz-copy-fuzz-artifacts' -or
+    $sevenzManifest.failureArtifact.uploadOn -ne 'failure' -or
+    $sevenzManifest.failureArtifact.retentionDays -ne 7) {
+    throw '7z Copy fuzz failure artifact policy changed unexpectedly'
 }
 if ($zip64Manifest.failureArtifact.directoryName -ne 'sealr-zip64-fuzz-artifacts' -or
     $zip64Manifest.failureArtifact.uploadOn -ne 'failure' -or
@@ -912,6 +930,80 @@ function Assert-TarBzip2ManifestContract {
 
 Assert-TarBzip2ManifestContract -Candidate $tarBzip2Manifest
 
+function Assert-SevenZManifestContract {
+    param([Parameter(Mandatory)] [object] $Candidate)
+
+    $rootProperties = @($Candidate.PSObject.Properties.Name | Sort-Object)
+    $expectedRootProperties = @(
+        'bounds', 'cargoFuzzVersion', 'dictionary', 'failureArtifact', 'generator', 'generatorSource',
+        'libfuzzerSysVersion', 'sanitizer', 'schema', 'seeds', 'target', 'targetSource',
+        'toolchain'
+    ) | Sort-Object
+    if (($rootProperties -join "`n") -cne ($expectedRootProperties -join "`n") -or
+        $Candidate.schema -cne 'sealr.sevenz-copy-fuzz-seeds.v1' -or
+        $Candidate.target -cne 'sevenz_copy_portable_v1' -or
+        $Candidate.toolchain -cne 'nightly-2026-08-01' -or
+        $Candidate.cargoFuzzVersion -cne '0.13.2' -or
+        $Candidate.libfuzzerSysVersion -cne '0.4.13' -or
+        $Candidate.sanitizer -cne 'address' -or
+        $Candidate.generator -cne 'fuzz/generate_sevenz_fuzz_seeds.ps1') {
+        throw '7z Copy fuzz manifest root contract changed'
+    }
+    $boundProperties = @($Candidate.bounds.PSObject.Properties.Name | Sort-Object)
+    if (($boundProperties -join "`n") -cne ((@($expectedTarGzipBounds.Keys) | Sort-Object) -join "`n")) {
+        throw '7z Copy fuzz manifest bound set changed'
+    }
+    foreach ($name in $expectedTarGzipBounds.Keys) {
+        if ($Candidate.bounds.$name -ne $expectedTarGzipBounds[$name]) {
+            throw "7z Copy fuzz manifest weakened bound: $name"
+        }
+    }
+    if ((@($Candidate.failureArtifact.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('directoryName', 'retentionDays', 'uploadOn') | Sort-Object) -join "`n") -or
+        $Candidate.failureArtifact.directoryName -cne 'sealr-sevenz-copy-fuzz-artifacts' -or
+        $Candidate.failureArtifact.uploadOn -cne 'failure' -or
+        $Candidate.failureArtifact.retentionDays -ne 7) {
+        throw '7z Copy fuzz manifest artifact contract changed'
+    }
+    if ((@($Candidate.dictionary.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.dictionary.path -cne 'fuzz/dictionaries/sevenz_copy_portable_v1_dictionary' -or
+        $Candidate.dictionary.bytes -ne 484 -or
+        $Candidate.dictionary.sha256 -cne 'c7cfbd9a8cabb7c2c77e79f0a2b9d6434ff89296127617a6429f0957c7149c10') {
+        throw '7z Copy fuzz manifest dictionary contract changed'
+    }
+    if ((@($Candidate.targetSource.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.targetSource.path -cne 'fuzz/fuzz_targets/sevenz_copy_portable_v1.rs' -or
+        $Candidate.targetSource.bytes -ne 2736 -or
+        $Candidate.targetSource.sha256 -cne '74d2b3513566584d51e7c6c683f78e7946ef237a13c1cbd643c9ca1673e7227a') {
+        throw '7z Copy fuzz manifest target binding changed'
+    }
+    if ((@($Candidate.generatorSource.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+            ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
+        $Candidate.generatorSource.path -cne 'fuzz/generate_sevenz_fuzz_seeds.ps1' -or
+        $Candidate.generatorSource.bytes -ne 7335 -or
+        $Candidate.generatorSource.sha256 -cne 'ab6bdaf54596291b1fc139d01cfcc9ba2498695213e9a657d27c698123625db5') {
+        throw '7z Copy fuzz manifest generator binding changed'
+    }
+    $seeds = @($Candidate.seeds)
+    $seedPaths = @($seeds.path)
+    if ($seeds.Count -ne 12 -or
+        @($seedPaths | Select-Object -Unique).Count -ne 12 -or
+        ($seedPaths -join "`n") -cne (($seedPaths | Sort-Object) -join "`n")) {
+        throw '7z Copy fuzz manifest seed set is not exact, unique, and sorted'
+    }
+    foreach ($seed in $seeds) {
+        if ((@($seed.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
+                ((@('bytes', 'generated', 'path', 'sha256') | Sort-Object) -join "`n") -or
+            $seed.generated -isnot [bool] -or -not $seed.generated) {
+            throw '7z Copy fuzz manifest seed entry contract changed'
+        }
+    }
+}
+
+Assert-SevenZManifestContract -Candidate $sevenzManifest
+
 Assert-ManifestFile -Entry $manifest.dictionary
 foreach ($seed in $manifest.seeds) {
     Assert-ManifestFile -Entry $seed
@@ -974,6 +1066,12 @@ Assert-ManifestFile -Entry $tarBzip2Manifest.dictionary
 Assert-ManifestFile -Entry $tarBzip2Manifest.targetSource
 Assert-ManifestFile -Entry $tarBzip2Manifest.generatorSource
 foreach ($seed in $tarBzip2Manifest.seeds) {
+    Assert-ManifestFile -Entry $seed
+}
+Assert-ManifestFile -Entry $sevenzManifest.dictionary
+Assert-ManifestFile -Entry $sevenzManifest.targetSource
+Assert-ManifestFile -Entry $sevenzManifest.generatorSource
+foreach ($seed in $sevenzManifest.seeds) {
     Assert-ManifestFile -Entry $seed
 }
 Assert-ManifestFile -Entry $zip64Manifest.dictionary
@@ -1112,6 +1210,17 @@ $declaredTarBzip2Seeds = @($tarBzip2Manifest.seeds.path | Sort-Object)
 if ($actualTarBzip2Seeds.Count -ne $declaredTarBzip2Seeds.Count -or
     @(Compare-Object $actualTarBzip2Seeds $declaredTarBzip2Seeds).Count -ne 0) {
     throw 'TAR/bzip2 fuzz corpus and seed manifest contain different paths'
+}
+$sevenzCorpusRoot = Join-Path $workspace 'fuzz/corpus/sevenz_copy_portable_v1'
+$actualSevenzSeeds = @(
+    Get-ChildItem -LiteralPath $sevenzCorpusRoot -File |
+        ForEach-Object { [IO.Path]::GetRelativePath($workspace, $_.FullName).Replace('\', '/') } |
+        Sort-Object
+)
+$declaredSevenzSeeds = @($sevenzManifest.seeds.path | Sort-Object)
+if ($actualSevenzSeeds.Count -ne $declaredSevenzSeeds.Count -or
+    @(Compare-Object $actualSevenzSeeds $declaredSevenzSeeds).Count -ne 0) {
+    throw '7z Copy fuzz corpus and seed manifest contain different paths'
 }
 $zip64CorpusRoot = Join-Path $workspace 'fuzz/corpus/zip64_strict_ascii_v1'
 $actualZip64Seeds = @(
@@ -1694,6 +1803,87 @@ try {
         Remove-Item -LiteralPath $resolvedTarBzip2GenerationRoot -Recurse -Force
     }
 }
+if ([string]$sevenzManifest.generator -cne 'fuzz/generate_sevenz_fuzz_seeds.ps1') {
+    throw '7z Copy fuzz seed generator path changed unexpectedly'
+}
+$generatedSevenzSeeds = @(
+    $sevenzManifest.seeds | Where-Object { $_.generated -is [bool] -and $_.generated }
+)
+if ($generatedSevenzSeeds.Count -ne 12 -or
+    @($sevenzManifest.seeds | Where-Object { $_.generated -isnot [bool] }).Count -ne 0 -or
+    @($sevenzManifest.seeds | Where-Object { $_.generated -is [bool] -and -not $_.generated }).Count -ne 0) {
+    throw '7z Copy fuzz seeds must classify exactly 12 generated entries'
+}
+$requiredSevenzSeeds = @(
+    'invalid-magic'
+    'invalid-next-crc'
+    'invalid-payload-crc-lie'
+    'invalid-start-crc'
+    'invalid-trailing-byte'
+    'invalid-truncated'
+    'unsupported-encoded-header'
+    'unsupported-major-version'
+    'unsupported-minor-version'
+    'valid-cli-dir-and-empty-matrix'
+    'valid-cli-fileonly'
+    'valid-cli-multi-two-folders'
+)
+$actualSevenzSeedNames = @(
+    $sevenzManifest.seeds.path |
+        ForEach-Object { [IO.Path]::GetFileName([string]$_) }
+)
+foreach ($requiredSeed in $requiredSevenzSeeds) {
+    if (@($actualSevenzSeedNames | Where-Object { $_ -ceq $requiredSeed }).Count -ne 1) {
+        throw "7z Copy corpus must contain exactly one required seed: $requiredSeed"
+    }
+}
+$sevenzGenerator = Join-Path $workspace ([string]$sevenzManifest.generator)
+$sevenzGenerationRoot = Join-Path (
+    [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+        [IO.Path]::DirectorySeparatorChar,
+        [IO.Path]::AltDirectorySeparatorChar
+    )
+) ("sealr-sevenz-copy-fuzz-seeds-{0}" -f [Guid]::NewGuid().ToString('N'))
+try {
+    & $sevenzGenerator -OutputDirectory $sevenzGenerationRoot
+    $actualGeneratedSevenzNames = @(
+        Get-ChildItem -LiteralPath $sevenzGenerationRoot -File |
+            ForEach-Object Name |
+            Sort-Object
+    )
+    $expectedGeneratedSevenzNames = @(
+        $generatedSevenzSeeds.path |
+            ForEach-Object { [IO.Path]::GetFileName([string]$_) } |
+            Sort-Object
+    )
+    if ($actualGeneratedSevenzNames.Count -ne $expectedGeneratedSevenzNames.Count -or
+        @(Compare-Object $actualGeneratedSevenzNames $expectedGeneratedSevenzNames).Count -ne 0) {
+        throw '7z Copy fuzz seed generator produced a different exact file set'
+    }
+    foreach ($entry in $generatedSevenzSeeds) {
+        $generatedPath = Join-Path $sevenzGenerationRoot ([IO.Path]::GetFileName([string]$entry.path))
+        $generatedFile = Get-Item -LiteralPath $generatedPath
+        $generatedHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $generatedPath).Hash.ToLowerInvariant()
+        if ($generatedFile.Length -ne $entry.bytes -or $generatedHash -cne [string]$entry.sha256) {
+            throw "7z Copy fuzz seed generator did not reproduce $($entry.path)"
+        }
+    }
+} finally {
+    if (Test-Path -LiteralPath $sevenzGenerationRoot) {
+        $resolvedSevenzGenerationRoot = [IO.Path]::GetFullPath($sevenzGenerationRoot)
+        $generationParent = [IO.Path]::GetDirectoryName($resolvedSevenzGenerationRoot)
+        $generationLeaf = [IO.Path]::GetFileName($resolvedSevenzGenerationRoot)
+        $expectedTemporaryParent = [IO.Path]::GetFullPath([IO.Path]::GetTempPath()).TrimEnd(
+            [IO.Path]::DirectorySeparatorChar,
+            [IO.Path]::AltDirectorySeparatorChar
+        )
+        if ($generationParent -cne $expectedTemporaryParent -or
+            $generationLeaf -notmatch '^sealr-sevenz-copy-fuzz-seeds-[0-9a-f]{32}$') {
+            throw "refusing to remove unexpected 7z Copy fuzz generation path: $resolvedSevenzGenerationRoot"
+        }
+        Remove-Item -LiteralPath $resolvedSevenzGenerationRoot -Recurse -Force
+    }
+}
 if ([string]$zip64Manifest.generator -cne 'fuzz/generate_zip64_fuzz_seeds.ps1') {
     throw 'ZIP64 fuzz seed generator path changed unexpectedly'
 }
@@ -2021,6 +2211,9 @@ $tarXzTarget = Get-Content -Raw -LiteralPath (
 $tarBzip2Target = Get-Content -Raw -LiteralPath (
     Join-Path $workspace 'fuzz/fuzz_targets/tar_bzip2_ustar_portable_v1.rs'
 )
+$sevenzTarget = Get-Content -Raw -LiteralPath (
+    Join-Path $workspace 'fuzz/fuzz_targets/sevenz_copy_portable_v1.rs'
+)
 $zip64Target = Get-Content -Raw -LiteralPath (
     Join-Path $workspace 'fuzz/fuzz_targets/zip64_strict_ascii_v1.rs'
 )
@@ -2256,6 +2449,7 @@ function Assert-FuzzMetadataBinding {
         'gzip_rfc1952_single_member_v1'
         'protocol_decoders'
         'semantic_records'
+        'sevenz_copy_portable_v1'
         'tar_bzip2_ustar_portable_v1'
         'tar_gnu_longname_portable_v1'
         'tar_gzip_gnu_longname_portable_v1'
@@ -2268,7 +2462,7 @@ function Assert-FuzzMetadataBinding {
         'zip64_strict_ascii_v1'
     )
     if (($targetNames -join "`n") -cne ($expectedTargetNames -join "`n")) {
-        throw 'Cargo metadata must contain exactly the gzip, protocol, semantic, TAR, PAX, GNU long-name TAR, TAR/gzip, TAR/gzip PAX, TAR/gzip GNU long-name, TAR/zstd, TAR/xz, TAR/bzip2, and ZIP64 fuzz targets'
+        throw 'Cargo metadata must contain exactly the gzip, protocol, semantic, TAR, PAX, GNU long-name TAR, TAR/gzip, TAR/gzip PAX, TAR/gzip GNU long-name, TAR/zstd, TAR/xz, TAR/bzip2, 7z Copy, and ZIP64 fuzz targets'
     }
     $manifestDirectory = Split-Path ([IO.Path]::GetFullPath($ManifestPath)) -Parent
     foreach ($targetContract in @(
@@ -2319,6 +2513,10 @@ function Assert-FuzzMetadataBinding {
         @{
             Name = 'tar_bzip2_ustar_portable_v1'
             RelativePath = 'fuzz_targets/tar_bzip2_ustar_portable_v1.rs'
+        }
+        @{
+            Name = 'sevenz_copy_portable_v1'
+            RelativePath = 'fuzz_targets/sevenz_copy_portable_v1.rs'
         }
         @{
             Name = 'zip64_strict_ascii_v1'
@@ -2830,6 +3028,51 @@ function Assert-TarBzip2FuzzTargetSource {
     }
 }
 
+function Assert-SevenZFuzzTargetSource {
+    param([Parameter(Mandatory)] [string] $TargetSource)
+
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes($TargetSource)
+    $digest = [Convert]::ToHexString(
+        [Security.Cryptography.SHA256]::HashData($bytes)
+    ).ToLowerInvariant()
+    if ($bytes.Length -ne $sevenzManifest.targetSource.bytes -or
+        $digest -cne [string]$sevenzManifest.targetSource.sha256) {
+        throw '7z Copy fuzz target source differs from its digest-pinned contract'
+    }
+    foreach ($contract in @(
+        @{ Token = 'fuzz_target!(|input: &[u8]| {'; Count = 1 }
+        @{ Token = 'apply_with_options('; Count = 1 }
+        @{ Token = 'Policy::default_v11()'; Count = 1 }
+        @{ Token = 'policy.max_archive_bytes = MAX_INPUT_BYTES as u64;'; Count = 1 }
+        @{ Token = 'policy.max_derived_archive_bytes = Some(131_072);'; Count = 1 }
+        @{ Token = 'policy.max_metadata_bytes = 32_768;'; Count = 1 }
+        @{ Token = 'policy.max_files = 64;'; Count = 1 }
+        @{ Token = 'policy.max_member_bytes = 32_768;'; Count = 1 }
+        @{ Token = 'policy.max_total_bytes = 65_536;'; Count = 1 }
+        @{ Token = 'policy.max_path_depth = 16;'; Count = 1 }
+        @{ Token = 'policy.max_ratio = Some(32);'; Count = 1 }
+        @{ Token = '.with_sevenz_interpretation_profile(SevenZInterpretationProfile::CopyPortableV1)'; Count = 1 }
+        @{ Token = 'dest: None,'; Count = 1 }
+        @{ Token = 'let first = inspect();'; Count = 1 }
+        @{ Token = 'let second = inspect();'; Count = 1 }
+        @{ Token = 'format!("{:?}", first.archive_ir())'; Count = 1 }
+        @{ Token = 'assert_eq!(ir.format(), ArchiveFormat::SevenZCopy);'; Count = 1 }
+    )) {
+        $count = [regex]::Matches(
+            $TargetSource,
+            [regex]::Escape([string]$contract.Token)
+        ).Count
+        if ($count -ne [int]$contract.Count) {
+            throw "7z Copy fuzz target must contain exactly $($contract.Count) live contract token(s): $($contract.Token)"
+        }
+    }
+    foreach ($forbidden in @('dest: Some(', '__fuzz_', 'unsafe {')) {
+        if ($TargetSource.Contains($forbidden, [StringComparison]::Ordinal)) {
+            throw "7z Copy public fuzz target contains forbidden source: $forbidden"
+        }
+    }
+}
+
 function Assert-Zip64FuzzTargetSource {
     param([Parameter(Mandatory)] [string] $TargetSource)
 
@@ -2976,6 +3219,13 @@ function Assert-FuzzCargoManifestContract {
         'doc = false'
         'bench = false'
         ''
+        '[[bin]]'
+        'name = "sevenz_copy_portable_v1"'
+        'path = "fuzz_targets/sevenz_copy_portable_v1.rs"'
+        'test = false'
+        'doc = false'
+        'bench = false'
+        ''
         '[workspace]'
     ) -join "`n"
     if ((Normalize-WorkflowBlock $CargoManifest) -cne $expectedManifest) {
@@ -3013,6 +3263,7 @@ Assert-TarGzipGnuLongNameFuzzTargetSource -TargetSource $tarGzipGnuLongNameTarge
 Assert-TarZstdFuzzTargetSource -TargetSource $tarZstdTarget
 Assert-TarXzFuzzTargetSource -TargetSource $tarXzTarget
 Assert-TarBzip2FuzzTargetSource -TargetSource $tarBzip2Target
+Assert-SevenZFuzzTargetSource -TargetSource $sevenzTarget
 Assert-Zip64FuzzTargetSource -TargetSource $zip64Target
 Assert-FuzzCargoManifestContract -CargoManifest $fuzzCargo
 
@@ -3261,6 +3512,13 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = 'sevenz_copy_portable_v1'
+path = 'fuzz_targets/sevenz_copy_portable_v1.rs'
+test = false
+doc = false
+bench = false
+
 [workspace]
 '@
     [IO.File]::WriteAllText(
@@ -3330,6 +3588,11 @@ bench = false
     )
     [IO.File]::WriteAllText(
         (Join-Path $temporaryFixture 'fuzz_targets/tar_bzip2_ustar_portable_v1.rs'),
+        "fn main() {}`n",
+        [Text.UTF8Encoding]::new($false)
+    )
+    [IO.File]::WriteAllText(
+        (Join-Path $temporaryFixture 'fuzz_targets/sevenz_copy_portable_v1.rs'),
         "fn main() {}`n",
         [Text.UTF8Encoding]::new($false)
     )
@@ -3466,6 +3729,13 @@ test = false
 doc = false
 bench = false
 
+[[bin]]
+name = "sevenz_copy_portable_v1"
+path = "fuzz_targets/sevenz_copy_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
 [workspace]
 "@
     [IO.File]::WriteAllText(
@@ -3556,6 +3826,7 @@ $tarGzipGnuLongNameJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_g
 $tarZstdJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_zstd_ustar'
 $tarXzJob = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_xz_ustar'
 $tarBzip2Job = Get-WorkflowJobBlock -Content $workflow -JobName 'tar_bzip2_ustar'
+$sevenzJob = Get-WorkflowJobBlock -Content $workflow -JobName 'sevenz_copy'
 Assert-FuzzJobContract `
     -JobBlock $protocolJob `
     -JobManifest $manifest `
@@ -3647,6 +3918,13 @@ Assert-FuzzJobContract `
     -JobDisplayName 'Bounded bzip2-wrapped portable ustar TAR' `
     -FuzzStepName 'Fuzz bounded bzip2-wrapped portable ustar TAR' `
     -ReproducerName 'tar-bzip2-ustar-reproducer'
+Assert-FuzzJobContract `
+    -JobBlock $sevenzJob `
+    -JobManifest $sevenzManifest `
+    -JobName 'sevenz_copy' `
+    -JobDisplayName 'Bounded Copy-only 7z container' `
+    -FuzzStepName 'Fuzz bounded Copy-only 7z container' `
+    -ReproducerName 'sevenz-copy-reproducer'
 
 function Assert-FuzzWorkflowContract {
     param(
@@ -3663,7 +3941,8 @@ function Assert-FuzzWorkflowContract {
         [Parameter(Mandatory)] [string] $ExpectedTarGzipGnuLongNameJob,
         [Parameter(Mandatory)] [string] $ExpectedTarZstdJob,
         [Parameter(Mandatory)] [string] $ExpectedTarXzJob,
-        [Parameter(Mandatory)] [string] $ExpectedTarBzip2Job
+        [Parameter(Mandatory)] [string] $ExpectedTarBzip2Job,
+        [Parameter(Mandatory)] [string] $ExpectedSevenzJob
     )
 
     $expectedHeader = @(
@@ -3696,7 +3975,8 @@ function Assert-FuzzWorkflowContract {
         (Normalize-WorkflowBlock $ExpectedTarGzipGnuLongNameJob) + "`n`n" +
         (Normalize-WorkflowBlock $ExpectedTarZstdJob) + "`n`n" +
         (Normalize-WorkflowBlock $ExpectedTarXzJob) + "`n`n" +
-        (Normalize-WorkflowBlock $ExpectedTarBzip2Job)
+        (Normalize-WorkflowBlock $ExpectedTarBzip2Job) + "`n`n" +
+        (Normalize-WorkflowBlock $ExpectedSevenzJob)
     if ((Normalize-WorkflowBlock $CandidateWorkflow) -cne $expectedWorkflow) {
         throw 'Scheduled fuzz workflow must exactly match its trigger, authority, concurrency, and job contracts'
     }
@@ -3716,7 +3996,8 @@ Assert-FuzzWorkflowContract `
     -ExpectedTarGzipGnuLongNameJob $tarGzipGnuLongNameJob `
     -ExpectedTarZstdJob $tarZstdJob `
     -ExpectedTarXzJob $tarXzJob `
-    -ExpectedTarBzip2Job $tarBzip2Job
+    -ExpectedTarBzip2Job $tarBzip2Job `
+    -ExpectedSevenzJob $sevenzJob
 $manualOnlyWorkflow = [regex]::Replace(
     $workflow,
     '(?m)^  schedule:\r?\n    - cron: "31 8 \* \* 1"\r?\n',
@@ -3742,7 +4023,8 @@ try {
         -ExpectedTarGzipGnuLongNameJob $tarGzipGnuLongNameJob `
         -ExpectedTarZstdJob $tarZstdJob `
         -ExpectedTarXzJob $tarXzJob `
-        -ExpectedTarBzip2Job $tarBzip2Job
+        -ExpectedTarBzip2Job $tarBzip2Job `
+        -ExpectedSevenzJob $sevenzJob
 } catch {
     $manualOnlyRejected = $true
 }
@@ -4663,6 +4945,85 @@ Assert-TarBzip2JobMutationRejected `
     -MutatedJob $inertArtifactTarBzip2Job `
     -Label 'inert artifact evidence with a drifted upload path'
 
+function Assert-SevenZJobMutationRejected {
+    param(
+        [Parameter(Mandatory)] [string] $MutatedJob,
+        [Parameter(Mandatory)] [string] $Label
+    )
+
+    if ($MutatedJob -ceq $sevenzJob) {
+        throw "7z Copy fuzz verifier regression could not construct its $Label fixture"
+    }
+    try {
+        Assert-FuzzJobContract `
+            -JobBlock $MutatedJob `
+            -JobManifest $sevenzManifest `
+            -JobName 'sevenz_copy' `
+            -JobDisplayName 'Bounded Copy-only 7z container' `
+            -FuzzStepName 'Fuzz bounded Copy-only 7z container' `
+            -ReproducerName 'sevenz-copy-reproducer'
+    } catch {
+        return
+    }
+    throw "7z Copy fuzz verifier accepted its $Label fixture"
+}
+
+$expectedSevenzMaxLen = '-max_len={0} \' -f $sevenzManifest.bounds.maxInputBytes
+$weakenedSevenzJob = $sevenzJob.Replace(
+    $expectedSevenzMaxLen,
+    '-max_len=524288 \'
+)
+Assert-SevenZJobMutationRejected `
+    -MutatedJob $weakenedSevenzJob `
+    -Label 'weakened input bound masked by other job tokens'
+
+$duplicateSevenzJob = $sevenzJob.Replace(
+    $expectedSevenzMaxLen,
+    "$expectedSevenzMaxLen`n            -max_len=524288 \"
+)
+Assert-SevenZJobMutationRejected `
+    -MutatedJob $duplicateSevenzJob `
+    -Label 'duplicate last-wins input bound'
+
+$inactiveSevenzJob = $sevenzJob.Replace(
+    '          set -euo pipefail',
+    "          if false; then`n          set -euo pipefail"
+).Replace(
+    '            -print_final_stats=1',
+    "            -print_final_stats=1`n          fi`n          true"
+)
+Assert-SevenZJobMutationRejected `
+    -MutatedJob $inactiveSevenzJob `
+    -Label 'inactive command followed by a successful no-op'
+
+$secondCommandSevenzJob = $sevenzJob.Replace(
+    '            -print_final_stats=1',
+    "            -print_final_stats=1`n          true"
+)
+Assert-SevenZJobMutationRejected `
+    -MutatedJob $secondCommandSevenzJob `
+    -Label 'second fuzz-step command'
+
+$weakenedSevenzSanitizer = $sevenzJob.Replace(
+    '            --sanitizer address \',
+    '            --sanitizer none \'
+)
+Assert-SevenZJobMutationRejected `
+    -MutatedJob $weakenedSevenzSanitizer `
+    -Label 'weakened sanitizer'
+
+$expectedSevenzArtifactPath = '          path: ${{ runner.temp }}/sealr-sevenz-copy-fuzz-artifacts/'
+$inertArtifactSevenzJob = $sevenzJob.Replace(
+    $expectedSevenzArtifactPath,
+    '          path: ${{ runner.temp }}/wrong-artifacts/'
+).Replace(
+    '        with:',
+    "        env:`n          INERT_MANIFEST_EVIDENCE: |`n            $($expectedSevenzArtifactPath.Trim())`n        with:"
+)
+Assert-SevenZJobMutationRejected `
+    -MutatedJob $inertArtifactSevenzJob `
+    -Label 'inert artifact evidence with a drifted upload path'
+
 foreach ($required in @(
     'Require exact protected main fuzz evidence',
     'actions/workflows/fuzz.yml/runs',
@@ -4678,7 +5039,8 @@ foreach ($required in @(
     'Bounded gzip-wrapped GNU long-name TAR',
     'Bounded zstd-wrapped portable ustar TAR',
     'Bounded xz-wrapped portable ustar TAR',
-    'Bounded bzip2-wrapped portable ustar TAR'
+    'Bounded bzip2-wrapped portable ustar TAR',
+    'Bounded Copy-only 7z container'
 )) {
     if (-not $releaseWorkflow.Contains($required, [StringComparison]::Ordinal)) {
         throw "Release workflow is missing exact fuzz evidence: $required"
@@ -4700,6 +5062,7 @@ foreach ($required in @(
     "'Bounded zstd-wrapped portable ustar TAR'",
     "'Bounded xz-wrapped portable ustar TAR'",
     "'Bounded bzip2-wrapped portable ustar TAR'",
+    "'Bounded Copy-only 7z container'",
     'Get-ExactFuzzState',
     'fuzz_run_id'
 )) {
@@ -4708,4 +5071,4 @@ foreach ($required in @(
     }
 }
 
-Write-Host "Fuzz seed verification passed: $($actualSeeds.Count) protocol, $($actualSemanticSeeds.Count) semantic, $($actualTarSeeds.Count) TAR, $($actualTarPaxSeeds.Count) TAR PAX, $($actualTarGnuLongNameSeeds.Count) TAR GNU long-name, $($actualGzipSeeds.Count) gzip, $($actualTarGzipSeeds.Count) TAR/gzip, $($actualTarGzipPaxSeeds.Count) TAR/gzip PAX, $($actualTarGzipGnuLongNameSeeds.Count) TAR/gzip GNU long-name, $($actualTarZstdSeeds.Count) TAR/zstd, $($actualTarXzSeeds.Count) TAR/xz, $($actualTarBzip2Seeds.Count) TAR/bzip2, and $($actualZip64Seeds.Count) ZIP64 seeds, pinned nightly and tool versions."
+Write-Host "Fuzz seed verification passed: $($actualSeeds.Count) protocol, $($actualSemanticSeeds.Count) semantic, $($actualTarSeeds.Count) TAR, $($actualTarPaxSeeds.Count) TAR PAX, $($actualTarGnuLongNameSeeds.Count) TAR GNU long-name, $($actualGzipSeeds.Count) gzip, $($actualTarGzipSeeds.Count) TAR/gzip, $($actualTarGzipPaxSeeds.Count) TAR/gzip PAX, $($actualTarGzipGnuLongNameSeeds.Count) TAR/gzip GNU long-name, $($actualTarZstdSeeds.Count) TAR/zstd, $($actualTarXzSeeds.Count) TAR/xz, $($actualTarBzip2Seeds.Count) TAR/bzip2, $($actualSevenzSeeds.Count) 7z Copy, and $($actualZip64Seeds.Count) ZIP64 seeds, pinned nightly and tool versions."
