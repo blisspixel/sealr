@@ -22,6 +22,7 @@ pub const POLICY_FORMAT_SEVENZ_COPY: &str = "7z-copy";
 /// This is the caller constructor and receipt-hashed object. Runtime enforcement
 /// uses [`Policy::compile`] output, not these fields directly.
 #[derive(Clone, Debug, PartialEq, Serialize)]
+#[non_exhaustive]
 pub struct Policy {
     pub schema: &'static str,
     pub id: String,

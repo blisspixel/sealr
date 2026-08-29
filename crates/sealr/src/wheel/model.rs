@@ -299,9 +299,26 @@ impl RealizedOutput {
 #[serde(deny_unknown_fields)]
 #[non_exhaustive]
 pub struct RealizationIdentityError {
-    pub code: String,
-    pub detail: String,
-    pub path: Option<String>,
+    pub(crate) code: String,
+    pub(crate) detail: String,
+    pub(crate) path: Option<String>,
+}
+
+impl RealizationIdentityError {
+    /// The registered wheel finding code naming the refusal.
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+
+    /// Human-readable refusal detail.
+    pub fn detail(&self) -> &str {
+        &self.detail
+    }
+
+    /// The output path the refusal names, when one is specific.
+    pub fn path(&self) -> Option<&str> {
+        self.path.as_deref()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
