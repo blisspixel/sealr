@@ -21,7 +21,7 @@ The package contract at `tests/package-contract/sealr.json` pins:
 - the Apache-2.0 SPDX expression;
 - a package-root `README.md` and `LICENSE` whose bytes match the repository sources.
 
-Required CI packages and verifies the crate, extracts the exact `.crate`, and builds two separately locked downstream consumers against that extraction. The general consumer exercises supervised ZIP, every current in-process format selection through Copy-only 7z, retained and later member reads after source removal, and the public wheel evaluator. The Linux POSIX PyPA consumer independently verifies canonical evidence, removes the source, stages bounded member bytes only through `VerifiedArchive`, and completes real installer 1.0.1 filesystem effects for a controlled fixture and the exact hash-pinned upstream wheel. It has no dependency on another Sealr workspace crate or internal feature. The check fails if another workspace crate becomes publishable or any packaged path changes without a reviewed contract update.
+Required CI packages and verifies the crate, extracts the exact `.crate`, and builds two separately locked downstream consumers plus the packaged [copyable PyPA handoff](../crates/sealr/examples/pypa_installer_handoff/README.md) against that extraction. The general consumer exercises supervised ZIP, every current in-process format selection through Copy-only 7z, retained and later member reads after source removal, and the public wheel evaluator. The Linux POSIX PyPA consumer independently verifies canonical evidence, removes the source, stages bounded member bytes only through `VerifiedArchive`, and completes real installer 1.0.1 filesystem effects for a controlled fixture and the exact hash-pinned upstream wheel. The handoff is built once as an example inside the extracted package, then copied into an isolated project whose manifest still resolves `sealr` only to that extraction. CI rejects any internal Sealr feature in the copied graph. The package contract pins the handoff's `main.rs`, `stage.rs`, `wheel_source.py`, `README.md`, exact Python requirements, and standalone Cargo manifest template. The check fails if another workspace crate becomes publishable or any packaged path changes without a reviewed contract update.
 
 ### Public API review
 
@@ -29,6 +29,7 @@ The supported source surface is the documented public `sealr` API exercised by:
 
 - `crates/sealr/tests/public_api.rs`;
 - the extracted `tests/packaged-consumer` project;
+- the copied `examples/pypa_installer_handoff` project;
 - Rustdoc with warnings denied.
 
 That surface includes the one-operation compatibility API, explicit interpretation-profile selection, outcome and evidence types, the opaque `VerifiedArchive`, bounded retention and member reads, immutable member container facts, and explicit fail-closed Linux supervision types.
@@ -70,7 +71,7 @@ The exact runners are `ubuntu-24.04`, `macos-15`, and `windows-2022`. The releas
 
 Every extracted native CLI is exercised through portable ustar inspect and materialization against the same independently produced fixture, with exact source, layout, content, and output bytes. The extracted CLI also emits admitted and rejected canonical evidence that the extracted `sealr-identity-verifier` checks against the observed source. View, receipt, source, and pair-substitution mutations must all fail closed. Linux additionally proves that selecting portable ustar with the packaged authenticated worker returns typed isolation unavailability, creates no destination or stage, and does not fall back to in-process execution.
 
-All three archives contain `sealr-identity-verifier` or its `.exe` form beside `sealr`. It remains a separate executable with no dependency on the Sealr crate. The Linux archive also contains the authenticated static helper and its fixed manifest. The helper is absent from macOS and Windows archives. A separate pinned-kernel QEMU gate proves that explicit Linux supervision fails before source transfer on Landlock ABI 2, while required Linux tests exercise successful ABI 3 setup on the declared release host.
+All three archives contain `sealr-identity-verifier` or its `.exe` form beside `sealr`. It remains a separate executable with no dependency on the Sealr crate. The Linux archive also contains the authenticated static helper and its fixed manifest. The helper is absent from macOS and Windows archives. Required Linux CI extracts that native package and runs the copied `WheelSource` handoff twice against its helper manifest and verifier: once from supervised inspect and once from supervised materialization. The source wheel is removed before Python begins in both cases. A separate pinned-kernel QEMU gate proves that explicit Linux supervision fails before source transfer on Landlock ABI 2, while required Linux tests exercise successful ABI 3 setup on the declared release host.
 
 ## Release evidence
 

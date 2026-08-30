@@ -2,7 +2,17 @@
 
 Policy is an input to `apply()` and is bound into every receipt by id and SHA-256 digest. Caps and behavioral choices must not live only in command-line state.
 
-The implemented pre-release schemas are `sealr.policy.v1` through `sealr.policy.v11`. The Rust API constructs `Policy` directly. `apply()` compiles that constructor into typed supported controls before reading archive bytes. Loading arbitrary JSON policy documents, rejecting unknown serde fields, derived policy ids, and RFC 8785 canonical hashing are planned but not implemented.
+The implemented pre-release schemas are `sealr.policy.v1` through
+`sealr.policy.v11`. Rust callers may use the versioned `Policy` constructors or
+deserialize the closed `PolicyDocument` shape and call `validate()`.
+`PolicyDocument` rejects unknown fields, unsupported schemas and vocabulary,
+noncanonical format sets, and caps above the double-safe integer ceiling before
+producing a `ValidatedPolicy`. The CLI `--policy` path applies that same
+validation before archive access. The validated policy retains the caller's
+explicit id and memoizes the digest of Sealr's deterministic declaration-order
+serialization. That digest is not yet an RFC 8785 cross-encoder policy promise,
+and a broader external policy language beyond this exact public shape is not
+implemented.
 
 There is no insecure mode.
 

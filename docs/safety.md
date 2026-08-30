@@ -126,7 +126,14 @@ Root, administrators, SYSTEM, principals matching the effective token's default-
 
 ## 7z
 
-7z is not implemented. Sealr MUST NOT shell out to another extractor and then imply that its own interpretation, jail, quotas, or evidence covered the result. A future 7z profile requires a maintained native parser strategy and the same semantic, capability, worker, corpus, and evidence gates, or it does not ship.
+Sealr implements only the explicitly selected restricted Copy-only 7z profile:
+one raw-header, single-volume container whose coders are all Copy. General 7z,
+packed headers, LZMA-family coders, encryption, and the rest of the format are
+not implemented. Sealr MUST NOT shell out to another extractor and then imply
+that its own interpretation, jail, quotas, or evidence covered the result. Any
+additional 7z profile requires a maintained native parser strategy and the
+same semantic, capability, worker, corpus, and evidence gates, or it does not
+ship.
 
 ## szips parity
 
