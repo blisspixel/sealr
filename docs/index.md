@@ -1,6 +1,6 @@
 # Documentation
 
-Start with the [README](../README.md) for the latest published Alpha.12 boundary, clearly marked current-main additions, and a short walkthrough. This index separates current contracts from plans and research notes.
+Start with the [README](../README.md) for the latest published Alpha.13 boundary, clearly marked current-main additions, and a short walkthrough. This index separates current contracts from plans and research notes.
 
 ## Start and integrate
 
@@ -10,7 +10,7 @@ Start with the [README](../README.md) for the latest published Alpha.12 boundary
 | [API contract](api.md) | Current Rust and JSON surface, plus clearly marked target notation |
 | [Copyable PyPA `WheelSource` handoff](../crates/sealr/examples/pypa_installer_handoff/README.md) | Public-API-only supervised admission, reduced digest-bound manifest, source deletion, real installer effects, and Rust-owned result audit |
 | [Exact Poetry 2.4.2 repository fixture](../tests/poetry-consumer/README.md) | Hash-pinned private update seam, PREPARED ordering, abort safety, stock parity, and realization audit |
-| [Current release notes](releases/v0.1.0-alpha.12.md) | Alpha.12 contents and limitations |
+| [Current release notes](releases/v0.1.0-alpha.13.md) | Alpha.13 contents and limitations |
 | [Release verification](release-verification.md) | Verify checksums, provenance, tag, and immutable release state |
 | [Distribution contract](distribution-contract.md) | Exact source-package scope, compatibility policy, and native archive floors |
 
@@ -74,7 +74,7 @@ Repository vulnerability reporting and supported-version policy are in [SECURITY
 | Document | Purpose |
 |---|---|
 | [Roadmap](../ROADMAP.md) | Long-range capability order and release gates |
-| [Near-term execution plan](near-term.md) | Release-sized work packages through Alpha.12 and the next acceptance gates |
+| [Near-term execution plan](near-term.md) | Release-sized work packages through Alpha.13 and the next acceptance gates |
 | [Vision](vision.md) | Durable category and priorities |
 | [Usefulness test](usefulness.md) | Proof that a downstream consumer stops reparsing |
 | [Same digest is not same tree](same-digest-different-tree.md) | The archive-confusion lesson as a runnable capability-path demonstration |
