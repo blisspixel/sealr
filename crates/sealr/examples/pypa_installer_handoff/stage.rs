@@ -18,9 +18,14 @@ pub const INSTALLER_WHEEL_SHA256: &str =
     "011d045df8b954ced7dde3a7e42ae4418da40ecda7990f2d11d5ed7c146fd98b";
 pub const TARGET_MODEL: &str = "pypa-installer-1.0.1-linux-posix";
 pub const INSTALLER_POLICY: &str = "separate-roots-no-bytecode-no-overwrite-v1";
+pub const POETRY_TARGET_MODEL: &str = "poetry-2.4.2-installer-1.0.1-linux-posix";
+pub const POETRY_INSTALLER_POLICY: &str =
+    "poetry-2.4.2-cpython-3.12-venv-no-bytecode-no-overwrite-v1";
+pub const POETRY_INSTALLER_METADATA: &str = "Poetry 2.4.2";
 pub const PYTHON_INTERPRETER: &str = "/usr/bin/python3";
 
 const MANIFEST_SCHEMA: &str = "sealr.pypa-wheel-source.v1";
+const POETRY_MANIFEST_SCHEMA: &str = "sealr.pypa-wheel-source.v2";
 const ADAPTER_ID: &str = "pypa-installer-1.0.1-wheel-source";
 const REPORT_SCHEMA: &str = "sealr.pypa-wheel-source-report.v1";
 const MAX_MEMBER_BYTES: u64 = 16 * 1024 * 1024;
@@ -43,10 +48,62 @@ struct HandoffManifest<'a> {
     version: &'a str,
     dist_info_dir: &'a str,
     data_dir: &'a str,
-    interpreter: &'static str,
+    interpreter: String,
     target_model: &'static str,
     installer_policy: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    additional_installer: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    destination_model: Option<&'static str>,
     members: Vec<HandoffMember>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HandoffTarget {
+    Copyable,
+    Poetry242Update,
+}
+
+pub struct PreparationTarget<'a> {
+    pub handoff: HandoffTarget,
+    pub interpreter: &'a Path,
+}
+
+impl HandoffTarget {
+    pub fn target_model(self) -> &'static str {
+        match self {
+            Self::Copyable => TARGET_MODEL,
+            Self::Poetry242Update => POETRY_TARGET_MODEL,
+        }
+    }
+
+    pub fn installer_policy(self) -> &'static str {
+        match self {
+            Self::Copyable => INSTALLER_POLICY,
+            Self::Poetry242Update => POETRY_INSTALLER_POLICY,
+        }
+    }
+
+    fn additional_installer(self) -> Option<&'static str> {
+        match self {
+            Self::Copyable => None,
+            Self::Poetry242Update => Some(POETRY_INSTALLER_METADATA),
+        }
+    }
+
+    fn manifest_schema(self) -> &'static str {
+        match self {
+            Self::Copyable => MANIFEST_SCHEMA,
+            Self::Poetry242Update => POETRY_MANIFEST_SCHEMA,
+        }
+    }
+
+    fn destination_model(self) -> Option<&'static str> {
+        match self {
+            Self::Copyable => None,
+            Self::Poetry242Update => Some("poetry-2.4.2-cpython-3.12-venv-v1"),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -128,6 +185,7 @@ pub struct PreparedWheelSource<'a> {
     manifest_sha256: String,
     receipt_sha256: String,
     member_count: usize,
+    target: HandoffTarget,
 }
 
 pub struct InstallationResult {
@@ -142,6 +200,7 @@ pub fn prepare_wheel_source<'a>(
     plan: &WheelInstallPlan,
     identities: &WheelIdentities,
     receipt_sha256: &str,
+    target: PreparationTarget<'_>,
 ) -> Result<PreparedWheelSource<'a>, Box<dyn std::error::Error>> {
     validate_digest(receipt_sha256, "canonical receipt SHA-256")?;
     validate_digest(&identities.artifact_sha256, "artifact SHA-256")?;
@@ -248,7 +307,7 @@ pub fn prepare_wheel_source<'a>(
         )
     });
     let manifest = HandoffManifest {
-        schema: MANIFEST_SCHEMA,
+        schema: target.handoff.manifest_schema(),
         adapter: ADAPTER_ID,
         installer_version: INSTALLER_VERSION,
         installer_wheel_sha256: INSTALLER_WHEEL_SHA256,
@@ -259,9 +318,15 @@ pub fn prepare_wheel_source<'a>(
         version: &artifact.filename.version,
         dist_info_dir: &artifact.dist_info_root,
         data_dir: &effective_data_dir,
-        interpreter: PYTHON_INTERPRETER,
-        target_model: TARGET_MODEL,
-        installer_policy: INSTALLER_POLICY,
+        interpreter: target
+            .interpreter
+            .to_str()
+            .ok_or("target interpreter path must be UTF-8")?
+            .to_owned(),
+        target_model: target.handoff.target_model(),
+        installer_policy: target.handoff.installer_policy(),
+        additional_installer: target.handoff.additional_installer(),
+        destination_model: target.handoff.destination_model(),
         members,
     };
     let mut bytes = serde_json::to_vec(&manifest)?;
@@ -279,10 +344,49 @@ pub fn prepare_wheel_source<'a>(
         manifest_sha256,
         receipt_sha256: receipt_sha256.to_owned(),
         member_count: manifest.members.len(),
+        target: target.handoff,
     })
 }
 
 impl PreparedWheelSource<'_> {
+    pub fn preflight(
+        &self,
+        python: &Path,
+        installer_root: &Path,
+        output_root: &Path,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if !matches!(self.target, HandoffTarget::Poetry242Update) {
+            return Err("preflight is reserved for the Poetry 2.4.2 target".into());
+        }
+        self.validate_invocation(python, installer_root, output_root)?;
+        let bridge_path = self.ensure_bridge()?;
+        let report_path = self.root.path().join("preflight-report-unused.json");
+        let mut command = Command::new(python);
+        configure_process_group(&mut command);
+        let mut child = command
+            .arg("-I")
+            .arg(&bridge_path)
+            .arg(&self.manifest_path)
+            .arg(&self.manifest_sha256)
+            .arg(&self.receipt_sha256)
+            .arg(installer_root)
+            .arg(output_root)
+            .arg(&report_path)
+            .arg("--preflight-only")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::inherit())
+            .spawn()?;
+        let status = wait_for_child(&mut child, "WheelSource preflight bridge")?;
+        if !status.success() {
+            return Err(format!("WheelSource preflight bridge failed with {status}").into());
+        }
+        if report_path.exists() || fs::symlink_metadata(report_path).is_ok() {
+            return Err("WheelSource preflight unexpectedly wrote a report".into());
+        }
+        Ok(())
+    }
+
     pub fn install(
         self,
         python: &Path,
@@ -291,15 +395,8 @@ impl PreparedWheelSource<'_> {
         plan: &WheelInstallPlan,
         artifact: &WheelArtifactIR,
     ) -> Result<InstallationResult, Box<dyn std::error::Error>> {
-        if python != Path::new(PYTHON_INTERPRETER) {
-            return Err(format!("Python must be exactly {PYTHON_INTERPRETER}").into());
-        }
-        require_real_directory(installer_root, "installer root")?;
-        if output_root.exists() || fs::symlink_metadata(output_root).is_ok() {
-            return Err("output root must not already exist".into());
-        }
-        let bridge_path = self.root.path().join("wheel_source.py");
-        write_new(&bridge_path, include_bytes!("wheel_source.py"))?;
+        self.validate_invocation(python, installer_root, output_root)?;
+        let bridge_path = self.ensure_bridge()?;
         let report_path = self.root.path().join("report.json");
 
         let mut command = Command::new(python);
@@ -314,7 +411,7 @@ impl PreparedWheelSource<'_> {
             .arg(output_root)
             .arg(&report_path)
             .stdin(Stdio::null())
-            .stdout(Stdio::inherit())
+            .stdout(Stdio::null())
             .stderr(Stdio::inherit())
             .spawn()?;
         let status = wait_for_child(&mut child, "WheelSource bridge")?;
@@ -344,14 +441,19 @@ impl PreparedWheelSource<'_> {
             .into());
         }
 
-        let mut observed = enumerate_installation(output_root)?;
         let mut reported = report.installed_files;
-        observed.sort();
         reported.sort();
+        let mut observed = match self.target {
+            HandoffTarget::Copyable => enumerate_installation(output_root)?,
+            HandoffTarget::Poetry242Update => {
+                verify_poetry_outputs(output_root, artifact, &reported)?
+            }
+        };
+        observed.sort();
         if observed != reported {
-            return Err("independent output enumeration disagrees with the bridge report".into());
+            return Err("independent output verification disagrees with the bridge report".into());
         }
-        validate_installed_targets(artifact, plan, &observed)?;
+        validate_installed_targets(artifact, plan, &observed, self.target)?;
         let outputs = observed
             .iter()
             .map(|file| {
@@ -363,11 +465,53 @@ impl PreparedWheelSource<'_> {
                 ))
             })
             .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
-        let realization_sha256 = realize_identity(plan, TARGET_MODEL, INSTALLER_POLICY, &outputs)?;
+        let realization_sha256 = realize_identity(
+            plan,
+            self.target.target_model(),
+            self.target.installer_policy(),
+            &outputs,
+        )?;
         Ok(InstallationResult {
             files: observed,
             realization_sha256,
         })
+    }
+
+    fn validate_invocation(
+        &self,
+        python: &Path,
+        installer_root: &Path,
+        output_root: &Path,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if python != Path::new(PYTHON_INTERPRETER) {
+            return Err(format!("Python must be exactly {PYTHON_INTERPRETER}").into());
+        }
+        require_real_directory(installer_root, "installer root")?;
+        if matches!(self.target, HandoffTarget::Poetry242Update) {
+            validate_existing_poetry_venv(output_root)?;
+        } else if output_root.exists() || fs::symlink_metadata(output_root).is_ok() {
+            return Err("output root must not already exist".into());
+        }
+        Ok(())
+    }
+
+    fn ensure_bridge(&self) -> Result<PathBuf, Box<dyn std::error::Error>> {
+        let path = self.root.path().join("wheel_source.py");
+        match fs::symlink_metadata(&path) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink()
+                    || !metadata.is_file()
+                    || fs::read(&path)? != include_bytes!("wheel_source.py")
+                {
+                    return Err("staged WheelSource bridge changed after creation".into());
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                write_new(&path, include_bytes!("wheel_source.py"))?;
+            }
+            Err(error) => return Err(error.into()),
+        }
+        Ok(path)
     }
 }
 
@@ -390,13 +534,12 @@ fn validate_installed_targets(
     artifact: &WheelArtifactIR,
     plan: &WheelInstallPlan,
     installed: &[InstalledFile],
+    target: HandoffTarget,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut expected = BTreeMap::new();
     for entry in plan.entries() {
-        let key = (
-            scheme_name(&entry.scheme)?.to_owned(),
-            entry.relative_path.clone(),
-        );
+        let scheme = scheme_name(&entry.scheme)?.to_owned();
+        let key = (scheme, entry.relative_path.clone());
         if expected
             .insert(key, expected_executable(&entry.executable)?)
             .is_some()
@@ -416,6 +559,15 @@ fn validate_installed_targets(
         ),
         false,
     );
+    if target.additional_installer().is_some() {
+        expected.insert(
+            (
+                record_scheme.to_owned(),
+                format!("{}/INSTALLER", artifact.dist_info_root),
+            ),
+            false,
+        );
+    }
 
     let mut actual = BTreeSet::new();
     for file in installed {
@@ -542,6 +694,74 @@ fn enumerate_installation(root: &Path) -> Result<Vec<InstalledFile>, Box<dyn std
     Ok(outputs)
 }
 
+fn verify_poetry_outputs(
+    root: &Path,
+    artifact: &WheelArtifactIR,
+    reported: &[InstalledFile],
+) -> Result<Vec<InstalledFile>, Box<dyn std::error::Error>> {
+    validate_existing_poetry_venv(root)?;
+    let mut physical_targets = BTreeSet::new();
+    for file in reported {
+        let relative = Path::new(&file.relative_path);
+        if relative.as_os_str().is_empty()
+            || relative.is_absolute()
+            || relative
+                .components()
+                .any(|component| !matches!(component, std::path::Component::Normal(_)))
+        {
+            return Err("Poetry output report contains a non-canonical relative path".into());
+        }
+        let scheme_root = match file.scheme.as_str() {
+            "purelib" | "platlib" => root.join("lib/python3.12/site-packages"),
+            "scripts" => root.join("bin"),
+            "headers" => root
+                .join("include/site/python3.12")
+                .join(&artifact.filename.distribution),
+            "data" => root.to_owned(),
+            value => return Err(format!("unknown Poetry install scheme: {value}").into()),
+        };
+        let path = scheme_root.join(relative);
+        if !physical_targets.insert(path.clone()) {
+            return Err("Poetry outputs alias the same physical target".into());
+        }
+        require_no_symlink_ancestors(&scheme_root, &path)?;
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            return Err(format!("Poetry output is not a regular file: {}", path.display()).into());
+        }
+        require_single_link(&metadata, &path)?;
+        if metadata.len() != file.size {
+            return Err(format!("Poetry output size disagrees: {}", path.display()).into());
+        }
+        let bytes = fs::read(&path)?;
+        if hex_sha256(&bytes) != file.sha256 {
+            return Err(format!("Poetry output digest disagrees: {}", path.display()).into());
+        }
+        if is_executable(&metadata) != file.executable {
+            return Err(format!("Poetry output mode disagrees: {}", path.display()).into());
+        }
+    }
+    Ok(reported.to_vec())
+}
+
+fn require_no_symlink_ancestors(
+    scheme_root: &Path,
+    target: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let parent = target.parent().ok_or("Poetry output has no parent")?;
+    let relative = parent.strip_prefix(scheme_root)?;
+    let mut current = scheme_root.to_owned();
+    require_real_directory(&current, "Poetry scheme root")?;
+    for component in relative.components() {
+        let std::path::Component::Normal(component) = component else {
+            return Err("Poetry output ancestor is not canonical".into());
+        };
+        current.push(component);
+        require_real_directory(&current, "Poetry output ancestor")?;
+    }
+    Ok(())
+}
+
 fn validate_scheme_roots(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let expected = ["purelib", "platlib", "scripts", "headers", "data"]
         .into_iter()
@@ -569,6 +789,23 @@ fn validate_scheme_roots(root: &Path) -> Result<(), Box<dyn std::error::Error>> 
     }
     if observed != expected {
         return Err("installer output root disagrees with the five exact scheme roots".into());
+    }
+    Ok(())
+}
+
+pub fn validate_existing_poetry_venv(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    require_real_directory(root, "Poetry virtual environment root")?;
+    require_real_directory(
+        &root.join("bin"),
+        "Poetry virtual environment bin directory",
+    )?;
+    require_real_directory(
+        &root.join("lib/python3.12/site-packages"),
+        "Poetry virtual environment site-packages",
+    )?;
+    let python = fs::symlink_metadata(root.join("bin/python"))?;
+    if !python.is_file() && !python.file_type().is_symlink() {
+        return Err("Poetry virtual environment interpreter is not a file or link".into());
     }
     Ok(())
 }

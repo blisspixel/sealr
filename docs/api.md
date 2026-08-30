@@ -119,6 +119,10 @@ The reduced manifest carries only the bridge and installer policy identifiers, c
 
 Required CI packages the example, builds it inside Cargo's extracted `.crate`, copies it into an isolated project that still resolves `sealr` to the same extraction, rejects internal features, and runs both supervised inspect and materialize origins against the helper manifest and verifier extracted from the Linux native package. This proves a repository-owned handoff shape, not external adoption or production filesystem safety.
 
+The same packaged bridge has a repository-only target mode for the exact Poetry 2.4.2 fixture. It adds no Sealr API. Poetry performs its own lock-hash validation before invoking the injected executor. The executor emits PREPARED only after admission, independent evidence verification, evaluation, bounded staging, private-source deletion, exact CPython 3.12 target validation, and target-read-only preflight, and before update uninstall or target writes. Installation resumes only after a digest-bound permit. The final record echoes that context, and Rust audits exact outputs and modes before accepting the realization identity.
+
+This private target mode is evidence for one exact Poetry version and platform seam. It is not a public Poetry extension API, general Poetry support, an sdist or build path, rollback, transactionality, concurrency safety, external adoption, or production readiness.
+
 No second function that “recovers” a broken zip.
 
 ---
