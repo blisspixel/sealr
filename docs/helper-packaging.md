@@ -6,7 +6,7 @@ This contract packages the authenticated helper consumed by the explicit Linux s
 
 ## Exact archive shape
 
-The Linux archive contains exactly these seven files beneath its single versioned root:
+The Linux archive contains exactly these eight files beneath its single versioned root:
 
 ```text
 CHANGELOG.md
@@ -14,11 +14,12 @@ LICENSE
 README.md
 THIRD_PARTY_LICENSES.txt
 sealr
+sealr-identity-verifier
 libexec/sealr/sealr-worker
 libexec/sealr/sealr-worker.manifest
 ```
 
-The CLI and helper have mode `0755`. Documentation, licenses, and the manifest have mode `0644`; both `libexec` directories have mode `0755`. The macOS and Windows archives retain their exact five-file contracts and contain no `libexec` directory.
+The CLI, identity verifier, and helper have mode `0755`. Documentation, licenses, and the manifest have mode `0644`; both `libexec` directories have mode `0755`. The macOS and Windows archives have exact six-file contracts containing the two root executables, documentation, licenses, and no `libexec` directory.
 
 ## Artifact identity
 
@@ -41,11 +42,13 @@ The helper is built as a static `x86_64-unknown-linux-musl` ELF and must have no
 
 ## License closure
 
-The committed Linux `THIRD_PARTY_LICENSES.txt` is generated from an exact private dependency anchor containing the native CLI graph plus the production-only helper graph with default lab features disabled. The generator therefore includes helper runtime dependencies while excluding repository fault-lab dependencies. macOS and Windows continue to use the CLI-only target graph.
+Every committed `THIRD_PARTY_LICENSES.txt` is generated from an exact private dependency anchor containing the native CLI and independent-verifier graphs. Linux adds the production-only helper graph with default lab features disabled. The generator therefore includes every shipped runtime dependency while excluding repository fault-lab dependencies. The verifier currently adds no dependency family beyond the CLI graph.
 
 ## Required verification
 
 Required CI builds each native package with the same scripts used by the tag workflow, inspects entry names before extraction, rejects absolute paths, traversal, backslashes, duplicates, links, and extra files or directories, and extracts beneath a path containing spaces. It then checks the exact target license hash, CLI version and help, and Unix modes.
+
+All targets also check the extracted verifier's version, help, misuse exit, admitted and rejected canonical-evidence success, observed-source binding, and refusal of view, receipt, source, and pair-substitution mutations. These tests invoke no repository verifier binary.
 
 Linux additionally requires:
 
@@ -60,3 +63,5 @@ The release workflow calls the same package and verification scripts before uplo
 ## Nonclaims
 
 The package contract does not activate a worker implicitly. `LinuxWorker::load_from_manifest` bounds and validates the fixed manifest, release version, helper target, bootstrap ABI, byte length, and lowercase SHA-256, selects only its sibling helper, and then applies the same sealed-executable authentication as `LinuxWorker::load`. Successful `apply_supervised` calls construct worker-backed `VerifiedArchive` state for inspect or materialize while keeping destination publication authority in the supervisor. `sealr --worker-manifest ABSOLUTE_PATH`, corpus execution in the wheel laboratory, and the extracted-package consumer all select that same boundary and fail closed without an in-process fallback. macOS and Windows containment remain separate future work.
+
+The identity verifier cannot authenticate the release archive that contains it. Users authenticate the download with `SHA256SUMS` and GitHub build provenance first. The verifier then checks unsigned canonical evidence, including coherent rejection evidence. It does not execute codecs, reinterpret the live archive, reconstruct the live format-specific layout root, verify a signature, or turn the evidence into an attestation.

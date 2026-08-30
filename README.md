@@ -183,7 +183,7 @@ The repository pins Rust 1.98.0 in `rust-toolchain.toml`; rustup selects it auto
 
 The crate's current minimum supported Rust version is 1.98, declared through `rust-version`. CI selects exactly 1.98.0. Preview releases may raise this minimum only as a documented compatibility change; patch releases within a stable 1.x line will not.
 
-Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.11` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.11). Runnable checksum and provenance commands are in [release verification](https://github.com/blisspixel/sealr/blob/main/docs/release-verification.md). The native archive extracts a single `sealr` binary; run it directly:
+Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.11` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.11). Runnable checksum and provenance commands are in [release verification](https://github.com/blisspixel/sealr/blob/main/docs/release-verification.md). Alpha.11 extracts the `sealr` CLI. Native archives built from current main also contain the independent `sealr-identity-verifier` companion; that two-executable contract becomes downloadable with the next prerelease.
 
 ```text
 # After checksumming and extracting the native archive:
@@ -192,7 +192,14 @@ Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0
 
 # Materialize into a new destination below an existing parent.
 ./sealr path/to/archive.zip --dest ./out
+
+# Current main and the next prerelease can emit and independently check exact evidence.
+./sealr path/to/archive.zip --view view.json --receipt receipt.json --canonical
+./sealr-identity-verifier evidence \
+  --view view.json --receipt receipt.json --source path/to/archive.zip
 ```
+
+Authenticate the downloaded native archive before trusting either executable. Verifier exit `0` means the unsigned evidence is internally coherent and, when `--source` is present, bound to those observed source bytes. Coherent rejection evidence also verifies successfully. The companion does not reinterpret the archive, execute codecs, reconstruct the live layout root, authenticate a signer, or authenticate the release archive that contains it.
 
 **After admission, do not reopen the archive.** Consume the materialized `--dest` tree, or a `VerifiedArchive` from the library, and never parse the original bytes again. The original archive is not an authority — a second parser is exactly where two tools' interpretations of the same bytes can diverge, which is the failure this project exists to prevent. Materializing to `--dest` and then reading that tree is the contract; materializing and continuing to trust the original ZIP is just unzip with extra steps.
 
@@ -286,7 +293,7 @@ The semantic walkthrough is enforced by CLI integration tests on the native plat
 
 Parser breadth is deliberately frozen. Twelve explicit container and codec profiles exist on current main; adding a thirteenth is no longer the scarce work. The active milestones are:
 
-1. **Downstream usefulness.** The wheel consumer evaluates, plans, and realizes installs from the `VerifiedArchive` capability alone and never reopens the archive. The runnable examples, canonical v3 evidence, independent verifier, verified in-toto statement builder, and packaged PyPA 1.0.1 conformance kit now provide the repository proof. The next decisive result is an external publisher, registry, build backend, or installer that adopts that capability and evidence as authoritative.
+1. **Downstream usefulness.** The wheel consumer evaluates, plans, and realizes installs from the `VerifiedArchive` capability alone and never reopens the archive. The runnable examples, canonical v3 evidence, native-delivered independent verifier, verified in-toto statement builder, and packaged PyPA 1.0.1 conformance kit now provide the repository proof. The next decisive result is an external publisher, registry, build backend, or installer that adopts that capability and evidence as authoritative.
 2. **Measured compatibility.** Widening the wheel corpus with stratified, individually investigated evidence — Core Metadata 2.1 through 2.6 is now admitted — instead of acceptance percentages.
 3. **Independent review and a measurable TCB.** Bounded PR sizes for the trusted computing base, non-author review for TCB changes, a per-release TCB report, and continuous fuzzing.
 

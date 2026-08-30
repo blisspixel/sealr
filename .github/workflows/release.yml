@@ -306,8 +306,8 @@ jobs:
       - name: Run optimized tests
         run: cargo test --locked --release --workspace --all-features
 
-      - name: Build release binary
-        run: cargo build --locked --release -p sealr-cli
+      - name: Build release binaries
+        run: cargo build --locked --release -p sealr-cli -p sealr-identity-verifier
 
       - name: Build production Linux helper and package verifier
         if: runner.os == 'Linux'
@@ -334,10 +334,12 @@ jobs:
           }
           $targetTriple = $targetLine.Line.Substring(6).Trim()
           $extension = if ($IsWindows) { 'zip' } else { 'tar.gz' }
+          $verifierName = if ($IsWindows) { 'sealr-identity-verifier.exe' } else { 'sealr-identity-verifier' }
           $archivePath = Join-Path $PWD "dist/sealr-$env:RELEASE_VERSION-$targetTriple.$extension"
           $packageArguments = @{
             Version = $env:RELEASE_VERSION
             TargetTriple = $targetTriple
+            IdentityVerifierBinary = Join-Path $PWD "target/release/$verifierName"
             OutputDirectory = 'dist'
           }
           $verifyArguments = @{

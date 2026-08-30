@@ -1,7 +1,7 @@
 THIRD-PARTY SOFTWARE LICENSES
 
 This file lists the locked normal and build dependency closure used to produce
-the corresponding sealr release executable. The sealr license is provided
+the corresponding sealr release executables. The sealr license is provided
 separately in LICENSE.
 
 COMPONENTS

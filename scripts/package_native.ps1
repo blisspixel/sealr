@@ -4,6 +4,7 @@ param(
     [string]$Version,
     [string]$TargetTriple,
     [string]$CliBinary,
+    [string]$IdentityVerifierBinary,
     [string]$HelperBinary,
     [string]$OutputDirectory
 )
@@ -56,11 +57,23 @@ if ($TargetTriple -notin $supportedTargets) {
     throw "unsupported native release target: $TargetTriple"
 }
 
-$binaryName = if ($TargetTriple -eq 'x86_64-pc-windows-msvc') { 'sealr.exe' } else { 'sealr' }
+$isWindowsTarget = $TargetTriple -eq 'x86_64-pc-windows-msvc'
+$binaryName = if ($isWindowsTarget) { 'sealr.exe' } else { 'sealr' }
+$identityVerifierName = if ($isWindowsTarget) {
+    'sealr-identity-verifier.exe'
+} else {
+    'sealr-identity-verifier'
+}
 if ([string]::IsNullOrWhiteSpace($CliBinary)) {
     $CliBinary = Join-Path $workspace "target/release/$binaryName"
 }
 $resolvedCli = Resolve-RequiredFile -Path $CliBinary -Role 'release CLI binary'
+if ([string]::IsNullOrWhiteSpace($IdentityVerifierBinary)) {
+    $IdentityVerifierBinary = Join-Path $workspace "target/release/$identityVerifierName"
+}
+$resolvedIdentityVerifier = Resolve-RequiredFile `
+    -Path $IdentityVerifierBinary `
+    -Role 'release identity verifier binary'
 
 $isLinuxTarget = $TargetTriple -eq $linuxTarget
 $resolvedHelper = $null
@@ -90,6 +103,9 @@ $packageRoot = Join-Path $packageParent $archiveBase
 
 try {
     Copy-Item -LiteralPath $resolvedCli -Destination (Join-Path $packageRoot $binaryName)
+    Copy-Item `
+        -LiteralPath $resolvedIdentityVerifier `
+        -Destination (Join-Path $packageRoot $identityVerifierName)
     foreach ($name in @('README.md', 'CHANGELOG.md', 'LICENSE')) {
         $source = Resolve-RequiredFile -Path (Join-Path $workspace $name) -Role "release file $name"
         Copy-Item -LiteralPath $source -Destination (Join-Path $packageRoot $name)
@@ -122,10 +138,12 @@ try {
         Write-LfUtf8 -Path (Join-Path $helperDirectory 'sealr-worker.manifest') -Text $manifestText
     }
 
-    if ($TargetTriple -ne 'x86_64-pc-windows-msvc') {
-        chmod 755 (Join-Path $packageRoot $binaryName)
-        if ($LASTEXITCODE -ne 0) {
-            throw "chmod failed for $binaryName with exit code $LASTEXITCODE"
+    if (-not $isWindowsTarget) {
+        foreach ($executable in @($binaryName, $identityVerifierName)) {
+            chmod 755 (Join-Path $packageRoot $executable)
+            if ($LASTEXITCODE -ne 0) {
+                throw "chmod failed for $executable with exit code $LASTEXITCODE"
+            }
         }
         if ($isLinuxTarget) {
             chmod 755 (Join-Path $packageRoot 'libexec/sealr/sealr-worker')
@@ -134,7 +152,7 @@ try {
             }
         }
         foreach ($file in Get-ChildItem -LiteralPath $packageRoot -Recurse -File) {
-            if ($file.Name -notin @($binaryName, 'sealr-worker')) {
+            if ($file.Name -notin @($binaryName, $identityVerifierName, 'sealr-worker')) {
                 chmod 644 $file.FullName
                 if ($LASTEXITCODE -ne 0) {
                     throw "chmod failed for $($file.FullName) with exit code $LASTEXITCODE"
@@ -149,7 +167,7 @@ try {
         }
     }
 
-    if ($TargetTriple -eq 'x86_64-pc-windows-msvc') {
+    if ($isWindowsTarget) {
         $archivePath = Join-Path $outputRoot "$archiveBase.zip"
         if (Test-Path -LiteralPath $archivePath) {
             Remove-Item -LiteralPath $archivePath -Force
