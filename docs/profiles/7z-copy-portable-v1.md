@@ -1,6 +1,6 @@
 # Restricted Copy-only 7z container profile v1
 
-> Status: supported in-process preview on current main. This is the first Gate C container profile — 7z structure separated deliberately from decoder complexity — and the first profile to prove cross-container content parity. Authenticated worker execution fails closed until a later semantic record.
+> Status: supported in-process preview released in Alpha.12. This is the first Gate C container profile, separating 7z structure deliberately from decoder complexity, and the first profile to prove cross-container content parity. Authenticated worker execution fails closed until a later semantic record.
 
 Profile ID: `sealr.profile.7z.copy-portable.v1`
 

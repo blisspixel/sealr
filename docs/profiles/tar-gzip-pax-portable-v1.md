@@ -1,6 +1,6 @@
 # Strict gzip-wrapped restricted PAX profile v1
 
-> Status: supported in-process preview on current main. Authenticated worker execution fails closed until a later semantic record can bind both snapshot domains, their transform, and the PAX override state.
+> Status: supported in-process preview released in Alpha.12. Authenticated worker execution fails closed until a later semantic record can bind both snapshot domains, their transform, and the PAX override state.
 
 Profile ID: `sealr.profile.tar-gzip.pax-portable.v1`
 

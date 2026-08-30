@@ -1,6 +1,6 @@
 # Near-term execution plan
 
-> Status: active plan after the Alpha.11 restricted raw POSIX PAX increment, the restricted GNU long-name profile, the gzip-wrapped PAX and GNU compositions, the first three promoted codecs (zstd-, xz-, and bzip2-wrapped ustar), the first Gate C container step (Copy-only 7z), and the canonical evidence verifier on current main. This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
+> Status: active plan after Alpha.12 released canonical evidence, native independent verification, the adopter-ready PyPA conformance path, restricted GNU long-name TAR, the gzip-wrapped PAX and GNU compositions, the first three promoted codecs (zstd-, xz-, and bzip2-wrapped ustar), and the first Gate C container step (Copy-only 7z). This page turns the long-range [roadmap](../ROADMAP.md) into release-sized work and records completed gates where they constrain the next increment.
 
 The next work should produce thin, independently reviewable trust increments. Each increment must finish with a useful artifact, explicit evidence, and a bounded claim. Work that merely makes the codebase larger does not count as progress.
 
@@ -22,11 +22,11 @@ Wheel         research proof [done]   -> supported evaluator [done] -> targeted 
 
 The assurance and wheel lanes may add test, corpus, and research tooling. They do not add a fallback parser or silently widen the shipped profile. The exact Kani, mutation, coverage, and promotion contracts are recorded in [assurance discovery and promotion](assurance-promotion.md).
 
-## Immediate post-Alpha.11 sequence
+## Immediate post-Alpha.12 sequence
 
 Alpha.6 shipped the public fail-closed Linux supervisor and capability boundary. Alpha.7 closed the repository-only wheel research proof. Alpha.8 added the supported portable UTF-8 profile and public capability-only wheel evaluator. Alpha.9 released strict portable POSIX ustar with zero new runtime dependencies. Alpha.10 released strict ZIP64 under policy v3 and strict single-member gzip-wrapped portable ustar under policy v4. Alpha.11 released `sealr.profile.tar.pax-portable.v1` under policy v5 with a fixed two-key extension language, exact global and local precedence, provenance, independent source-covering replay, `sealr.archive-ir.tar-pax.v1`, and `sealrTreeV5`, again with zero new runtime dependencies. ZIP32 and raw ustar do not alias to these profiles, and the authenticated worker refuses every unsupported selection without fallback.
 
-The narrow GNU long-name-only raw profile landed after Alpha.11 because GNU `L` carrier state is common but semantically different from PAX. Keeping it separate prevents producer-specific precedence, long-link, sparse, and base-256 behavior from leaking into the Alpha.11 language. With GNU raw conformance frozen, current main composes PAX and GNU separately with the existing exact gzip transform under policy v7, publishing `sealrTreeV7` and `sealrTreeV8` while preserving the format-neutral content root. Zstd, XZ/LZMA2, and bzip2 entered under the codec dependency gate one at a time, and the local 7z interpreter's Copy-first structure landed under Gate C. Parser breadth is now frozen while usefulness, measured compatibility, and independent review land. The 7z LZMA member and packed-header steps resume afterward. The cpio, ar/deb, CAB, RPM, and RAR5 programs remain separately gated. ISO 9660, UDF, and filesystem images are a separate program. Targeted benign wheel coverage, stable identity and API review, assurance history, worker-record parity, authenticated recovery, and durability continue in parallel.
+The narrow GNU long-name-only raw profile landed after Alpha.11 because GNU `L` carrier state is common but semantically different from PAX. Keeping it separate prevents producer-specific precedence, long-link, sparse, and base-256 behavior from leaking into the Alpha.11 language. Alpha.12 releases that profile, both exact gzip compositions, the zstd, XZ/LZMA2, and bzip2 Gate B promotions, and the local 7z interpreter's Copy-first Gate C structure. Parser breadth is now frozen while usefulness, measured compatibility, and independent review land. The 7z LZMA member and packed-header steps resume afterward. The cpio, ar/deb, CAB, RPM, and RAR5 programs remain separately gated. ISO 9660, UDF, and filesystem images are a separate program. Targeted benign wheel coverage, stable identity and API review, assurance history, worker-record parity, authenticated recovery, and durability continue in parallel.
 
 ### Alpha.11 restricted PAX gates: complete
 
@@ -40,7 +40,7 @@ The narrow GNU long-name-only raw profile landed after Alpha.11 because GNU `L` 
 8. Worker selection refuses before source access and without fallback until a later semantic record binds PAX evidence.
 9. A separate scheduled Linux AddressSanitizer target starts from nine digest-pinned deterministic seeds under exact input, time, memory, and job bounds. It is discovery evidence, not a coverage proof.
 
-### GNU long-name gates: complete on current main
+### GNU long-name gates: released in Alpha.12
 
 1. `sealr.profile.tar.gnu-longname-portable.v1` is a separate raw profile that does not widen, detect, retry, or alias portable ustar or PAX. Its canonical profile digest is `08fe2698806da997bc42e7e13a45cbf412a4a7056dec39c62456202680b91fa4`; the policy v6 digest is `aefc8a1baa113d7face30857ef64fe8f47c647fae863a72810b80380f8fd4178`.
 2. Exact GNU magic plus one `L` long-name carrier consumed by exactly one following ordinary member.
@@ -48,7 +48,7 @@ The narrow GNU long-name-only raw profile landed after Alpha.11 because GNU `L` 
 4. A distinct interpretation, `sealr.archive-ir.tar-gnu-longname.v1`, independent covering audit, `sealrTreeV6`, producer corpus, field-family mutations, public package coverage, fail-closed worker refusal, and a 16-seed bounded fuzz surface landed together.
 5. Zero new runtime dependencies; the existing raw-payload execution core is reused.
 
-### Gzip-composition gates: complete on current main
+### Gzip-composition gates: released in Alpha.12
 
 1. Each frozen raw dialect composes with the exact gzip transform only after its raw conformance is immutable. `sealr.profile.tar-gzip.pax-portable.v1` has digest `6cc91b2b8563b5b070b44bf357a5c62e5d9dda0aedc374d7a08cd80da9c5434f`; `sealr.profile.tar-gzip.gnu-longname-portable.v1` has digest `622943e9629c4acc7cfeb446eb9f2d16bb245db589c1a200e885a9d69a02295a`. Both bind the frozen wrapper transform digests and the exact inner profile digest.
 2. Policy v7 (`sealr:policy/default/v7`, digest `92d576984b718e8a02bc6044090f8e2b335dbd1abd136d53e5b02d0ffbd978ef`) authorizes the separate `tar-gzip-pax` and `tar-gzip-gnu-longname` formats, and each composition compiles policy for its own format string.
@@ -56,7 +56,7 @@ The narrow GNU long-name-only raw profile landed after Alpha.11 because GNU `L` 
 4. The ready boundary's composite audit requires exactly two snapshots, one exact full-source transform record, the independent wrapper covering over domain zero, the frozen inner dialect covering and state replay over the derived domain, and complete cross-layer identity binding before any destination stage exists.
 5. Conformance vectors replayed through the public production path bind wrapper evidence, derived bytes, inner evidence, layout preimages, and the shared content root; the authenticated worker refuses both compositions without fallback; and zero new runtime dependencies were added.
 
-### Zstd codec-promotion gates: complete on current main
+### Zstd codec-promotion gates: released in Alpha.12
 
 1. The [executed ruzstd Gate B review](codec-dependency-gates.md#executed-gate-b-promotion-ruzstd-for-the-zstd-tar-wrapper) added exactly two runtime packages (`ruzstd` 0.9.0, `twox-hash` 2.1.4) with no build scripts, no `links` packages, MIT licenses, and updated per-target dependency-contract digests.
 2. `sealr.profile.tar-zstd.ustar-portable.v1` (digest `c7d2e708f2f5258eddfb99fbf13661bd2f671a2daa4a45bc1d9603d30d472ae7`) binds the new `sealr.transform.zstd.rfc8878-single-frame.v1` transform digests and the frozen inner ustar digest; policy v8 (digest `d0cfdf4d40e3a88c8e80170494b23e91761802304265e41ce19cb616fa8a1c42`) authorizes the separate `tar-zstd-ustar` format.
@@ -65,7 +65,7 @@ The narrow GNU long-name-only raw profile landed after Alpha.11 because GNU `L` 
 5. `sealrTreeV9` conformance vectors carry pinned Zstandard CLI 1.5.7 producer bytes replayed through the public path, raw and cross-wrapper content parity is asserted, and the worker refuses the selection without fallback.
 6. Remaining zstd assurance items stay open by name: targeted review and Miri over ruzstd's unsafe ring buffer, measured decoder memory ceilings at the window cap, broader producer fixtures (Arch/dpkg/RPM payloads), and ZIP method 93 reuse of the adapter.
 
-### Xz codec-promotion gates: complete on current main
+### Xz codec-promotion gates: released in Alpha.12
 
 1. The [executed lzma-rust2 Gate B review](codec-dependency-gates.md#executed-gate-b-promotion-lzma-rust2-for-the-xz-tar-wrapper) added exactly one runtime package (`lzma-rust2` 0.20.0, `std`+`xz` features only) with no build script, no `links` key, an Apache-2.0 license, `forbid(unsafe_code)` under the selected features, and updated per-target dependency-contract digests.
 2. `sealr.profile.tar-xz.ustar-portable.v1` (digest `16ec815ab3b2c3c5f877ec04e592d1dd1a6ec41f2c7d843dd7aa2bc6b50cfd05`) binds the new `sealr.transform.xz.xzfmt-single-stream.v1` transform digests and the frozen inner ustar digest; policy v9 (digest `c512895c09453f16c07ebeae94712099191b197ba9edaae384dba0fe7bb8b39e`) authorizes the separate `tar-xz-ustar` format.
@@ -74,7 +74,7 @@ The narrow GNU long-name-only raw profile landed after Alpha.11 because GNU `L` 
 5. `sealrTreeV10` conformance vectors carry pinned XZ Utils 5.8.1 producer bytes (CRC64, multi-block, SHA-256, CRC32) replayed through the public path, raw and cross-wrapper content parity is asserted against both the gzip and zstd manifests, and the worker refuses the selection without fallback.
 6. Remaining xz assurance items stay open by name: measured decoder memory ceilings at the dictionary cap, broader producer fixtures (dpkg/RPM xz payloads), 7z LZMA/LZMA2 reuse of the adapter, and CI feature-graph enforcement that the `optimization` feature stays excluded.
 
-### Bzip2 codec-promotion gates: complete on current main
+### Bzip2 codec-promotion gates: released in Alpha.12
 
 1. The [executed bzip2/libbz2-rs-sys Gate B review](codec-dependency-gates.md#executed-gate-b-promotion-bzip2libbz2-rs-sys-for-the-bzip2-tar-wrapper) added exactly two runtime packages (`bzip2` 0.6.1, `libbz2-rs-sys` 0.2.5 — the Radically-Open-Security-audited, Miri-run pure-Rust translation) with no build scripts, no `links` keys, the deliberately widened `bzip2-1.0.6` license allowlist entry, `bzip2-sys` added to the forbidden-package list, and updated per-target dependency-contract digests.
 2. `sealr.profile.tar-bzip2.ustar-portable.v1` (digest `f6711c0c98cff6e3a2c6b266d159413ef891c202b4898b4e1665081dce0f29ee`) binds the new `sealr.transform.bzip2.bzip2fmt-single-stream.v1` transform digests and the frozen inner ustar digest; policy v10 (digest `eada8150e14c0f05dcb25b6c9a90b87d3821fbb5f754192aceaea6d942e9f374`) authorizes the separate `tar-bzip2-ustar` format.
@@ -83,7 +83,7 @@ The narrow GNU long-name-only raw profile landed after Alpha.11 because GNU `L` 
 5. `sealrTreeV11` conformance vectors carry pinned deterministic producer bytes at levels 9 and 1 plus a three-block multi-block section over its own committed derived TAR, raw and five-way cross-wrapper content parity is asserted, and the worker refuses the selection without fallback.
 6. Remaining bzip2 assurance items stay open by name: exact `unsafe` inventory of libbz2-rs-sys at the pinned version, decode wall-time at the derived-cap frontier under RLE1's ~51:1 in-block expansion, padding-bit posture against ancient producers, and deb/RPM payload plus ZIP method 12 reuse of the adapter.
 
-### 7z Copy-first gates: complete on current main
+### 7z Copy-first gates: released in Alpha.12
 
 1. The [executed Gate C first step](codec-dependency-gates.md#executed-gate-c-step-one-the-raw-header-copy-only-container) landed `sealr.profile.7z.copy-portable.v1` (digest `7b6604ad59b5aecf9ebdfa42d7d48d3df663813798992741dd6d74ea56f60b75`) with ZERO new runtime dependencies; policy v11 (digest `afa0aeb04ceca00706b31dfd250216a87f2af0ada6e98d3815873de0d15172fc`) authorizes the separate `7z-copy` format.
 2. The restricted language admits exactly one raw-header, single-volume 7z whose every coder is Copy — no bind pairs, no coder attributes, no external records, no anti-items — with minimal variable-length integer encodings, MSB-first bit vectors with zero padding, checked arithmetic, hostile counts bounded by remaining header bytes before allocation, and a dense covering with no unreferenced-bytes category at all.
@@ -94,7 +94,7 @@ The narrow GNU long-name-only raw profile landed after Alpha.11 because GNU `L` 
 
 ### Next: usefulness, measured compatibility, and independent review
 
-Parser breadth is deliberately frozen after twelve profiles. Adding a thirteenth format is no longer the scarce work; proving that one real downstream system treats the verified capability as authoritative is. The next increments are:
+Parser breadth is deliberately frozen after twelve explicit container and codec selections. Adding another format is no longer the scarce work; proving that one real downstream system treats the verified capability as authoritative is. The next increments are:
 
 1. **Downstream usefulness.** The wheel consumer evaluates, plans, and realizes installs from the `VerifiedArchive` capability alone and never reopens the archive. The runnable `wheel_admission` and `same_digest_different_tree` examples, byte-exact canonical evidence, native-delivered independent verifier, verified statement builder, and packaged PyPA installer 1.0.1 conformance kit close the repository proof. The kit covers a controlled semantic fixture and the real hash-pinned upstream wheel, but it remains repository-owned. The exit condition is one external publisher, registry, build backend, or installer that binds this capability and evidence as its authoritative decision.
 2. **Measured compatibility.** The supported specification snapshot now admits Core Metadata 2.1 through 2.6. Corpus expansion continues with stratified, individually investigated artifacts — never acceptance percentages — under the immutable-report discipline established by v2 and v3.
@@ -135,7 +135,7 @@ Together, these completed increments freeze what the worker may mean, how read o
 | Alpha.9 | Portable ustar and multi-format core | Explicit selection and policy authorization, zero-dependency raw ustar, TAR-native evidence, independent roots, producer corpus, package and fuzz gates |
 | Alpha.10 | Strict ZIP64 and gzip TAR | Policy v3 and v4 selections, zero new dependencies, ZIP64-native and two-domain evidence, independently reconstructed roots, package paths, bounded fuzz, and fail-closed worker refusal |
 | Alpha.11 | Restricted raw POSIX PAX | Explicit policy v5 selection, two-key closed grammar, exact precedence provenance, independent audit and `sealrTreeV5`, zero new dependencies, fail-closed worker refusal |
-| Current main | GNU long-name TAR, gzip compositions, the zstd, xz, and bzip2 codecs, and 7z Copy | Separate GNU `L`-only raw language under policy v6 with `sealrTreeV6`; distinct gzip compositions under policy v7 with `sealrTreeV7` and `sealrTreeV8`; three executed Gate B codec promotions — zstd (v8, `sealrTreeV9`), xz (v9, `sealrTreeV10`), bzip2 (v10, `sealrTreeV11`) — and the executed Gate C Copy-first 7z container (v11, `sealrTreeV12`, zero new dependencies, first cross-container content parity) |
+| Alpha.12 | Canonical evidence, independent verification, adopter-ready wheel handoff, and seven explicit format additions | Native-delivered verifier and extracted-only tamper gates; packaged PyPA installer conformance; GNU `L`-only raw language under policy v6 with `sealrTreeV6`; distinct gzip compositions under policy v7 with `sealrTreeV7` and `sealrTreeV8`; three executed Gate B codec promotions under policies v8 through v10; and the Gate C Copy-first 7z container under policy v11 with `sealrTreeV12` |
 | Next | Usefulness, compatibility, and review | An external adopter bound to the capability and independently verified canonical evidence, Core Metadata 2.1-2.6, stratified corpus expansion, TCB measurement and review process; the parked 7z LZMA step resumes afterward |
 
 Version labels are delivery targets, not permission to cut a release with a red gate. If an increment changes identity or interpretation, it receives a new profile or schema identifier and preserves prior identifiers as immutable historical contracts.
@@ -178,7 +178,7 @@ The first two capability increments are now implemented on main. `VerifiedArchiv
 
 ### Alpha.4 exit gate
 
-**Status: complete on current main.** The next release may be cut only after the release-candidate and exact-main gates pass.
+**Status: released through Alpha.12.** Every later release still requires the release-candidate and exact-main gates.
 
 - The new profile has no unspecified flag or extra-field behavior.
 - Every material wheel rejection cluster above the documented review threshold is investigated.

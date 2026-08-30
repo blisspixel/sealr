@@ -1,6 +1,6 @@
 # Why this is practical now
 
-Reviewed 2026-08-28.
+Reviewed 2026-08-30.
 
 The problem is old: archives encode content and filesystem topology, and extraction bugs repeatedly cross trust boundaries. What changed is that several pieces needed for a measurable boundary now exist together.
 
@@ -36,7 +36,7 @@ The [Rust Fuzz Book](https://rust-fuzz.github.io/book/) documents cargo-fuzz and
 
 Source digests, policy digests, structured findings, and a view digest can be returned for both allow and reject. in-toto, DSSE, Sigstore, SBOM formats, and GitHub artifact attestations provide established envelopes and signing workflows once sealr's unsigned receipt bytes are stable.
 
-Separate outcome axes, named immutable snapshot domains, typed policy compilation, format-specific IRs, and preview tree identities now exist. Alpha.11 adds `sealr.archive-ir.tar-pax.v1` and `sealrTreeV5` for restricted raw POSIX PAX while preserving the format-neutral content identity. Inspect and materialize consume one IR. Current main also wraps a completely verified IR and its exact snapshot in an opaque `VerifiedArchive`, allowing bounded canonical-member reads without reopening the source or running another structural parser. Explicit exact paths can be retained under independent bounds during the original verification stream. A separate identity verifier checks every committed profile and tree family through Copy-only 7z without depending on Sealr or executing codecs. It also verifies live RFC 8785 view v2 and receipt v3 pairs against an observed source, every registered interpretation profile, known default-policy identities, outcome consistency, and an independently reconstructed format-neutral content root. External adoption, stable lock semantics, and authenticated-envelope verification follow. The supervised worker consumes the ZIP32 tree contract and refuses unsupported selections without fallback.
+Separate outcome axes, named immutable snapshot domains, typed policy compilation, format-specific IRs, and preview tree identities now exist. Alpha.11 added `sealr.archive-ir.tar-pax.v1` and `sealrTreeV5` for restricted raw POSIX PAX while preserving the format-neutral content identity. Alpha.12 releases the additional profile and tree families through Copy-only 7z. Inspect and materialize consume one IR. The Alpha.12 API also wraps a completely verified IR and its exact snapshot in an opaque `VerifiedArchive`, allowing bounded canonical-member reads without reopening the source or running another structural parser. Explicit exact paths can be retained under independent bounds during the original verification stream. A separate identity verifier checks every committed profile and tree family through Copy-only 7z without depending on Sealr or executing codecs. It also verifies live RFC 8785 view v2 and receipt v3 pairs against an observed source, every registered interpretation profile, known default-policy identities, outcome consistency, and an independently reconstructed format-neutral content root. External adoption, stable lock semantics, and authenticated-envelope verification follow. The supervised worker consumes the ZIP32 tree contract and refuses unsupported selections without fallback.
 
 ## Acceleration is optional
 
@@ -58,4 +58,4 @@ The pieces now line up:
 | Bounded proofs | Kani on path and quota properties |
 | Auditable result | Versioned view and receipt |
 
-The roadmap therefore expands format breadth only through narrow profiles on the same boundary. Restricted raw PAX adds no dependency; next is a separate GNU long-name-only profile, then gzip composition, then one independently reviewed codec at a time. This order is not a reason to grow the trusted computing base casually. Usefulness is a dependent that consumes the admitted tree, not a larger CLI. See [usefulness.md](usefulness.md) and [ROADMAP.md](../ROADMAP.md).
+The roadmap expands format breadth only through narrow profiles on the same boundary. Alpha.12 completes the planned GNU long-name, gzip-composition, promoted-codec, and Copy-only 7z steps, so parser breadth is now frozen. The next decisive proof is an independently maintained dependent that consumes the admitted capability and does not reopen the archive, alongside measured compatibility and independent review. See [usefulness.md](usefulness.md) and [ROADMAP.md](../ROADMAP.md).
