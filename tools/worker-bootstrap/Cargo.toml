@@ -25,6 +25,7 @@ path = "src/bin/sealr-worker.rs"
 doc = false
 
 [dependencies]
+crc32fast.workspace = true
 getrandom = { workspace = true, optional = true }
 sha2.workspace = true
 thiserror.workspace = true
