@@ -14,4 +14,4 @@ LICENSE text eol=lf
 *.hbs text eol=lf
 *.json text eol=lf
 fuzz/corpus/** binary
-fuzz/dictionaries/** binary
+fuzz/dictionaries/** text eol=lf
