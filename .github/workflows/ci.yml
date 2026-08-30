@@ -208,7 +208,7 @@ jobs:
             --manifest-path tests/pypa-installer-consumer/Cargo.toml |
             jq --raw-output '.packages[] | select(.name == "sealr") | .manifest_path')"
           test "${manifest}" = \
-            "${PWD}/target/package/sealr-0.1.0-alpha.11/Cargo.toml"
+            "${PWD}/target/package/sealr-0.1.0-alpha.12/Cargo.toml"
 
       - name: Run packaged PyPA adopter conformance
         shell: bash

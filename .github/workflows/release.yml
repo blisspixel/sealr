@@ -14,7 +14,7 @@ concurrency:
 
 env:
   MACOSX_DEPLOYMENT_TARGET: "15.0"
-  RELEASE_VERSION: 0.1.0-alpha.11
+  RELEASE_VERSION: 0.1.0-alpha.12
   RUST_VERSION: 1.98.0
 
 jobs:
@@ -436,7 +436,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          release_title="sealr ${RELEASE_VERSION}: restricted POSIX PAX"
+          release_title="sealr ${RELEASE_VERSION}: canonical evidence and independent verification"
           notes_file="docs/releases/v${RELEASE_VERSION}.md"
           if [[ ! -f "${notes_file}" ]]; then
             echo "::error::missing release notes: ${notes_file}"

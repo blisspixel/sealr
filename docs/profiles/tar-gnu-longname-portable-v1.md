@@ -1,6 +1,6 @@
 # Restricted raw GNU long-name TAR profile v1
 
-> Status: supported in-process preview. This is a restricted GNU TAR long-name language, not a claim of general GNU TAR compatibility. Authenticated worker execution fails closed until a later semantic record can represent GNU carrier evidence.
+> Status: supported in-process preview released in Alpha.12. This is a restricted GNU TAR long-name language, not a claim of general GNU TAR compatibility. Authenticated worker execution fails closed until a later semantic record can represent GNU carrier evidence.
 
 Profile ID: `sealr.profile.tar.gnu-longname-portable.v1`
 

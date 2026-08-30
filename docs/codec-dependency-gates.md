@@ -19,9 +19,9 @@ These layers reuse existing primitives or need only bounded structural parsing:
 
 | Format need | Candidate | Initial feature and language boundary | Promotion blocker |
 |---|---|---|---|
-| zstd TAR and deb/RPM payloads | [`ruzstd`](https://docs.rs/crate/ruzstd/latest) | One standard frame, no dictionary, skippable frame, or concatenation; cap the frame window before allocation | **Promoted on current main** as `sealr.profile.tar-zstd.ustar-portable.v1` under policy v8; see the executed evidence below |
-| XZ and 7z LZMA/LZMA2 | [`lzma-rust2`](https://docs.rs/crate/lzma-rust2/latest) | Disable default features; keep the `optimization` feature off; one XZ stream with LZMA2 only before legacy LZMA_Alone | **Promoted on current main** as `sealr.profile.tar-xz.ustar-portable.v1` under policy v9; see the executed evidence below. 7z LZMA reuse is a separate later gate |
-| bzip2 TAR and package payloads | [`bzip2`](https://docs.rs/crate/bzip2/latest) | Rust backend only; forbid the optional C `bzip2-sys` path; one stream with exact EOF | **Promoted on current main** as `sealr.profile.tar-bzip2.ustar-portable.v1` under policy v10; see the executed evidence below |
+| zstd TAR and deb/RPM payloads | [`ruzstd`](https://docs.rs/crate/ruzstd/latest) | One standard frame, no dictionary, skippable frame, or concatenation; cap the frame window before allocation | **Promoted in Alpha.12** as `sealr.profile.tar-zstd.ustar-portable.v1` under policy v8; see the executed evidence below |
+| XZ and 7z LZMA/LZMA2 | [`lzma-rust2`](https://docs.rs/crate/lzma-rust2/latest) | Disable default features; keep the `optimization` feature off; one XZ stream with LZMA2 only before legacy LZMA_Alone | **Promoted in Alpha.12** as `sealr.profile.tar-xz.ustar-portable.v1` under policy v9; see the executed evidence below. 7z LZMA reuse is a separate later gate |
+| bzip2 TAR and package payloads | [`bzip2`](https://docs.rs/crate/bzip2/latest) | Rust backend only; forbid the optional C `bzip2-sys` path; one stream with exact EOF | **Promoted in Alpha.12** as `sealr.profile.tar-bzip2.ustar-portable.v1` under policy v10; see the executed evidence below |
 | LZ4 TAR | [`lz4_flex`](https://docs.rs/lz4_flex/latest/lz4_flex/) | Safe checked decoding; one standard frame with independent blocks; no dictionary, legacy, skippable, or concatenated frames | Header, block, content checksum, allocation, and feature review |
 | CAB LZX | [`lzxd`](https://docs.rs/crate/lzxd/latest) | One-cabinet LZX after Store and MSZIP; cap window and folder state before allocation | Microsoft CAB/LZX vectors, folder reset semantics, and exact CFDATA consumption |
 
@@ -29,7 +29,7 @@ Candidate status is not approval. Each promotion updates the machine-readable de
 
 ### Executed Gate B promotion: ruzstd for the zstd TAR wrapper
 
-The first codec promotion landed on current main as the [zstd-wrapped portable ustar profile](profiles/tar-zstd-ustar-portable-v1.md). The recorded evidence:
+The first codec promotion shipped in Alpha.12 as the [zstd-wrapped portable ustar profile](profiles/tar-zstd-ustar-portable-v1.md). The recorded evidence:
 
 - **Dependency delta**: exactly two runtime packages on every release target — `ruzstd =0.9.0` (`default-features = false, features = ["hash", "std"]`, so `dict_builder` and its `fastrand` dependency never enter the graph) and `twox-hash =2.1.4` (`xxhash64` only, zero required transitive packages). The pinned per-target [dependency contract](../tests/dependency-contract/sealr-runtime.json) records the +2 counts and new graph digests for `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`, and `x86_64-pc-windows-msvc`. Neither package has a build script or a `links` key; both are MIT and pass cargo-deny.
 - **Version floor**: 0.9.0 postdates both the RUSTSEC-2024-0400 ring-buffer fix (patched in 0.7.3) and the 0.8.3 correction that applies the window cap to the first frame of a stream. The workspace pins the exact version.
@@ -40,7 +40,7 @@ The first codec promotion landed on current main as the [zstd-wrapped portable u
 
 ### Executed Gate B promotion: lzma-rust2 for the xz TAR wrapper
 
-The second codec promotion landed on current main as the [xz-wrapped portable ustar profile](profiles/tar-xz-ustar-portable-v1.md). The recorded evidence:
+The second codec promotion shipped in Alpha.12 as the [xz-wrapped portable ustar profile](profiles/tar-xz-ustar-portable-v1.md). The recorded evidence:
 
 - **Dependency delta**: exactly one runtime package on every release target — `lzma-rust2 =0.20.0` with `default-features = false, features = ["std", "xz"]`, zero required transitive packages, no build script, no `links` key, Apache-2.0, passing cargo-deny. The pinned per-target [dependency contract](../tests/dependency-contract/sealr-runtime.json) records the +1 counts and new graph digests for `x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`, and `x86_64-pc-windows-msvc`.
 - **Unsafe boundary**: the crate declares `#![cfg_attr(not(feature = "optimization"), forbid(unsafe_code))]`; with the selected features, `optimization` stays off (verified through `cargo tree -e features`), so the decoder compiles under `forbid(unsafe_code)` on every target.
@@ -52,7 +52,7 @@ The second codec promotion landed on current main as the [xz-wrapped portable us
 
 ### Executed Gate B promotion: bzip2/libbz2-rs-sys for the bzip2 TAR wrapper
 
-The third codec promotion landed on current main as the [bzip2-wrapped portable ustar profile](profiles/tar-bzip2-ustar-portable-v1.md). The recorded evidence:
+The third codec promotion shipped in Alpha.12 as the [bzip2-wrapped portable ustar profile](profiles/tar-bzip2-ustar-portable-v1.md). The recorded evidence:
 
 - **Dependency delta**: exactly two runtime packages on every release target — `bzip2 =0.6.1` (Rust backend default since 0.6.0) and `libbz2-rs-sys =0.2.5` (`default-features = false, features = ["rust-allocator"]`, so `libc` stays out) — with no build scripts and no `links` keys. The C path (`bzip2-sys`, `cc`) exists only behind a non-default feature; the dependency contract adds `bzip2-sys` to `forbidden_packages` so feature unification can never smuggle it in. The pinned per-target [dependency contract](../tests/dependency-contract/sealr-runtime.json) records the +2 counts and new graph digests for all three release floors.
 - **License widening**: `libbz2-rs-sys` carries the SPDX `bzip2-1.0.6` license, which was not in the cargo-deny allowlist. The promotion adds it deliberately with a named comment — the first allowlist widening since the gates were written — and extends the third-party license bundles and their pinned counts.
@@ -69,7 +69,7 @@ The third codec promotion landed on current main as the [bzip2-wrapped portable 
 
 ### Executed Gate C step one: the raw-header Copy-only container
 
-The first 7z structure landed on current main as the [restricted Copy-only 7z container profile](profiles/7z-copy-portable-v1.md), separating container correctness from decoder complexity exactly as this gate requires. The recorded evidence:
+The first 7z structure shipped in Alpha.12 as the [restricted Copy-only 7z container profile](profiles/7z-copy-portable-v1.md), separating container correctness from decoder complexity exactly as this gate requires. The recorded evidence:
 
 - **Dependency delta: zero packages.** Raw-header parsing is pure structure over the snapshot with the existing `crc32fast`/`sha2` and standard-library UTF-16 decoding. No `sevenz-rust2`, no extractor crate.
 - **Coders**: Copy (id `00`) only — single coder, single stream, no bind pairs, no attributes; a folder's unpack size must equal its pack size. LZMA/LZMA2 member support is the named next step on the already reviewed `lzma-rust2` boundary (whose LZMA1 decoder already compiles under the pinned features — a language decision, not a dependency decision).

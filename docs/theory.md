@@ -1,6 +1,6 @@
 # Interpretation theory
 
-> Status: research notes. This page names the mathematical object Sealr is aiming at. It is not a proof, not a qualification claim, and not a complete description of Alpha.11. Implemented predicates and the ideal function are distinguished throughout. The current executable contract is the [README](../README.md), [invariants](invariants.md), and [semantic model](semantic-model.md).
+> Status: research notes. This page names the mathematical object Sealr is aiming at. It is not a proof, not a qualification claim, and not a complete description of Alpha.12. Implemented predicates and the ideal function are distinguished throughout. The current executable contract is the [README](../README.md), [invariants](invariants.md), and [semantic model](semantic-model.md).
 
 Sealr is trying to give untrusted archive bytes a denotation: **at most one canonical IR per versioned profile, or no IR.** Git, Nix, and in-toto already know how to hash a tree you have. ZipDiff showed that ZIP, as deployed, does not uniquely produce one. The work is the missing compiler in the middle.
 
@@ -122,7 +122,7 @@ A failed rename is `Interpreted + Admitted + Complete + Failed`, not a different
 
 ## Implemented versus ideal
 
-| Object | Ideal | Alpha.11 preview |
+| Object | Ideal | Alpha.12 preview |
 |---|---|---|
 | \(I_\pi\) | Partial function of \((b,\pi)\) only | Parsers also see resource budgets; supported ZIP Unicode and restricted PAX paths are explicit profiles |
 | Unique covering | At most one admitted partition of \([0,n)\) | Local-prefix partition + CD land + last exact-suffix EOCD |
@@ -132,8 +132,8 @@ A failed rename is `Interpreted + Admitted + Complete + Failed`, not a different
 | Codec | Exact consumption as part of \(I_\pi\) | Deflate `total_in == payload.len()`; Store copies the slice |
 | Snapshot | Immutable for the job | Path input is copied and hashed once into a private file-backed snapshot; caller bytes remain memory-backed |
 | Execution authority | Effects separated from interpretation | Default path runs in process; explicit x86_64 Linux worker confines payload verification, stage writes, and later non-retained reads while the supervisor retains planning and publication |
-| Tree roots | Frozen encoding plus independent vectors | Preview `sealrTreeV1` through `sealrTreeV5`, with format-neutral content remaining `sealrTreeV1` |
-| Covering certificate | Independently checkable source partition | Format-specific IR ranges plus independent ZIP, TAR, gzip-transform, ZIP64, and PAX covering audits |
+| Tree roots | Frozen encoding plus independent vectors | Preview `sealrTreeV1` through `sealrTreeV12`, with format-neutral content remaining `sealrTreeV1` |
+| Covering certificate | Independently checkable source partition | Format-specific IR ranges plus independent ZIP, TAR dialect, wrapper-transform, codec-container, and 7z covering audits |
 | Formal proofs | Lemmas below | None yet |
 
 ## Named conjectures

@@ -13,7 +13,7 @@ Before creating a tag:
 1. Update the workspace version, lockfile, changelog, release notes, workflow `RELEASE_VERSION`, and promotion-script constants together.
 2. Confirm the local checkout, `origin/main`, and intended release commit are identical and clean.
 3. Confirm every protected `main` check passed on that exact commit.
-4. Dispatch the fuzz workflow for that exact commit and require the bounded worker-protocol, semantic-record, raw portable ustar, RFC 1952 gzip, public gzip-TAR, and strict ZIP64 jobs to pass.
+4. Dispatch the fuzz workflow for that exact commit and require all fourteen named bounded jobs in the release workflow to pass.
 5. Confirm there are no open release-blocking pull requests or security advisories.
 6. Confirm every action in the release workflow is pinned to a reviewed full commit hash.
 7. Run the walkthrough, asset verification, ordinary CI gates, and actionlint from a clean checkout.
@@ -57,13 +57,13 @@ This tool is used only to build release notices. It is not a sealr runtime depen
 
 ## Stage the draft
 
-Create an annotated tag at the verified commit and push only that tag. For `0.1.0-alpha.11`, the tag is `v0.1.0-alpha.11`.
+Create an annotated tag at the verified commit and push only that tag. For `0.1.0-alpha.12`, the tag is `v0.1.0-alpha.12`.
 
 The tag workflow:
 
 1. verifies the annotated tag, workspace version, clean checkout, and identity with current `main`;
-2. waits for the exact protected `main` CI run at that commit, requires all six promotion jobs to succeed, and verifies the stable `Required CI` branch-protection check;
-3. requires all six successful bounded fuzz campaigns on that exact commit;
+2. waits for the exact `main` CI run at that commit and requires all six promotion jobs to succeed; the later promotion script separately verifies the stable `Required CI` branch-protection check and live protection rules;
+3. requires all fourteen successful bounded fuzz campaigns on that exact commit;
 4. tests optimized workspace builds on standard Ubuntu, Windows, and macOS runners;
 5. builds and packages the native CLI and independent evidence verifier with README, changelog, the Apache-2.0 project license, and the verified target-specific third-party license bundle, including upstream root notice and copyright files;
 6. extracts every package, checks both executables' version and help output, and proves canonical producer-verifier success plus tamper refusal;

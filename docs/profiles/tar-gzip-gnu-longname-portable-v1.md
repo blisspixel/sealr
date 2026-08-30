@@ -1,6 +1,6 @@
 # Strict gzip-wrapped GNU long-name profile v1
 
-> Status: supported in-process preview on current main. Authenticated worker execution fails closed until a later semantic record can bind both snapshot domains, their transform, and the carrier state.
+> Status: supported in-process preview released in Alpha.12. Authenticated worker execution fails closed until a later semantic record can bind both snapshot domains, their transform, and the carrier state.
 
 Profile ID: `sealr.profile.tar-gzip.gnu-longname-portable.v1`
 

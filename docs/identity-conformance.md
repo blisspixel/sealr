@@ -1,6 +1,6 @@
 # Identity conformance and independent verification
 
-> Status: introduced in Alpha.4, extended through Alpha.8 with the repository-only wheel and supported portable UTF-8 profiles, extended in Alpha.9 with portable ustar, extended in Alpha.10 with strict ZIP64 `sealrTreeV3` plus strict gzip-wrapped ustar `sealrTreeV4`, extended in Alpha.11 with restricted raw PAX `sealrTreeV5`, and extended on current main through the Copy-only 7z container `sealrTreeV12` profile plus live RFC 8785 evidence verification. The vectors and verifier protect preview identities and canonical claim bindings. They do not make any profile stable or turn unsigned evidence into an attestation.
+> Status: introduced in Alpha.4, extended through Alpha.8 with the repository-only wheel and supported portable UTF-8 profiles, extended in Alpha.9 with portable ustar, extended in Alpha.10 with strict ZIP64 `sealrTreeV3` plus strict gzip-wrapped ustar `sealrTreeV4`, extended in Alpha.11 with restricted raw PAX `sealrTreeV5`, and extended in Alpha.12 through the Copy-only 7z container `sealrTreeV12` profile plus live RFC 8785 evidence verification. The vectors and verifier protect preview identities and canonical claim bindings. They do not make any profile stable or turn unsigned evidence into an attestation.
 
 Sealr now publishes a small, versioned identity-conformance bundle and checks it two ways:
 
@@ -40,7 +40,7 @@ cargo run --locked -p sealr-identity-verifier -- evidence \
 
 `--source` is optional so unavailable-source evidence can still be structurally checked. Supplying it is required when a caller wants the verifier to bind the receipt to observed archive bytes. A successful result names the exact view and receipt SHA-256 values and states whether source and content roots were checked. It also states that the layout root remains a producer claim.
 
-Native archives built from current main carry the same verifier beside the CLI, so the second command becomes `./sealr-identity-verifier evidence ...` after the release archive has been authenticated. Required CI proves this extracted-only flow on Linux, macOS, and Windows for both admitted and rejected evidence, then separately mutates the view, receipt, source, and pair. Because the producer and verifier share one release archive and workflow, this is implementation-independent evidence checking but not supply-chain independence.
+Alpha.12 native archives carry the same verifier beside the CLI, so the second command becomes `./sealr-identity-verifier evidence ...` after the release archive has been authenticated. Required CI proves this extracted-only flow on Linux, macOS, and Windows for both admitted and rejected evidence, then separately mutates the view, receipt, source, and pair. Because the producer and verifier share one release archive and workflow, this is implementation-independent evidence checking but not supply-chain independence.
 
 ## Manifest contract
 

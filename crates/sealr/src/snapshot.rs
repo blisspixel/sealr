@@ -838,9 +838,10 @@ impl<'a> SourceSnapshot<'a> {
         }
         // Metadata alone cannot see a same-length in-place mutation that
         // lands within one filesystem timestamp granule, so the opened source
-        // is streamed a second time in full and must byte-agree with the
-        // copied snapshot. This proves the retained bytes equal the source's
-        // end-of-ingest content, not merely that its metadata looked stable.
+        // is streamed a second time in full. Its length and SHA-256 must match
+        // the copied snapshot. This detects persistent content drift observed
+        // by the second pass without relying only on timestamp resolution. It
+        // does not make the caller-owned source immutable after that pass.
         source.seek(SeekFrom::Start(0)).map_err(|error| {
             Finding::error(
                 FindingCode::SourceIo,
