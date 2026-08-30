@@ -23,7 +23,7 @@ jobs:
   quality:
     name: Format, lint, test, and docs
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -396,6 +396,86 @@ jobs:
           test ! -e "${runtime}/controlled-inspect-input/demo-1.0-py3-none-any.whl"
           test ! -e "${runtime}/controlled-materialize-input/demo-1.0-py3-none-any.whl"
           test -d "${runtime}/controlled-raw-tree"
+
+      - name: Run exact Poetry 2.4.2 repository fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          runtime="${SEALR_HANDOFF_RUNTIME}"
+          wheelhouse="${runtime}/poetry-wheelhouse"
+          controller="${runtime}/poetry-controller"
+          fixture_runtime="/tmp/sealr-poetry-2.4.2-fixture"
+          test ! -e "${fixture_runtime}"
+          mkdir --parents "${wheelhouse}" "${fixture_runtime}"
+          python3 -m pip download \
+            --disable-pip-version-check \
+            --no-deps \
+            --only-binary=:all: \
+            --require-hashes \
+            --requirement tests/poetry-consumer/requirements.txt \
+            --requirement tests/poetry-consumer/pip-requirement.txt \
+            --dest "${wheelhouse}"
+          python3 -m venv --without-pip "${controller}"
+          python3 -m pip --python "${controller}/bin/python" install \
+            --disable-pip-version-check \
+            --no-index \
+            --no-deps \
+            --no-compile \
+            "${wheelhouse}"/*.whl
+          "${controller}/bin/python" -I -m pip check
+          version="$(cargo metadata --locked --no-deps --format-version 1 |
+            jq --raw-output '.packages[] | select(.name == "sealr") | .version')"
+          native="${RUNNER_TEMP}/sealr-native-handoff/sealr-${version}-x86_64-unknown-linux-gnu"
+          handoff="${RUNNER_TEMP}/sealr-pypa-installer-handoff/target/release/sealr-pypa-installer-handoff"
+          report="$("${controller}/bin/python" -I \
+            tests/poetry-consumer/poetry_driver.py \
+            --handoff "${handoff}" \
+            --bridge \
+              "${PWD}/target/package/sealr-${version}/examples/pypa_installer_handoff/wheel_source.py" \
+            --worker-manifest "${native}/libexec/sealr/sealr-worker.manifest" \
+            --verifier "${native}/sealr-identity-verifier" \
+            --installer-root "${runtime}/installer-extracted" \
+            --wheelhouse "${wheelhouse}" \
+            --wheelhouse-manifest "${PWD}/tests/poetry-consumer/wheelhouse.json" \
+            --requirements "${PWD}/tests/poetry-consumer/requirements.txt" \
+            --pip-requirement "${PWD}/tests/poetry-consumer/pip-requirement.txt" \
+            --controlled-wheel "${runtime}/controlled/demo-1.0-py3-none-any.whl" \
+            --project "${PWD}/tests/poetry-consumer/project" \
+            --runtime "${fixture_runtime}")"
+          printf '%s\n' "${report}"
+          jq --exit-status '
+            .schema == "sealr.poetry-2.4.2-conformance.v1" and
+            .platform == "ubuntu-24.04-x86_64-cpython-3.12" and
+            .poetry == "2.4.2" and
+            .poetry_core == "2.4.0" and
+            .installer == "1.0.1" and
+            .wheelhouse_artifacts == 47 and
+            .runtime_distributions == 46 and
+            .source_sha256 == "078364afdeda960f1e0df0959d9cafcdb067b2c3c8c2999c0cea7cd521c466ec" and
+            .archive_tree_sha256 == "7336763b06639d2cc5a1ee004adf6c42a0a15e6ace846e0457299f3010011f82" and
+            .artifact_sha256 == "986f82074b5ac802253ba317579bf1500a28947e022b0c27581180ea05004c55" and
+            .install_plan_sha256 == "54b263d0c136a522fa08e0b5d582a5bdfb5203af970e5a84c786ef549a19dac8" and
+            .realization_sha256 == "76a81ee48ebc43ff7d6f60440dce5edd047f13f3ac9a6663fbe3f52322566142" and
+            .installed_files == 13 and
+            (.stock_target_sha256 | test("^[0-9a-f]{64}$")) and
+            .adapted_target_sha256 == .stock_target_sha256 and
+            .event_order == [
+              "poetry-download-returned",
+              "poetry-lock-hash-confirmed",
+              "prepared",
+              "wheel-open-probe-denied",
+              "real-uninstall-entered",
+              "real-uninstall-returned",
+              "permit-written",
+              "handoff-completed"
+            ] and
+            .abort_gate == "old-install-preserved-after-prepared-eof" and
+            .symlink_gate == "preflight-denied-before-prepared-or-uninstall" and
+            .physical_collision_gate == "dry-preflight-antichain-denied-both-orders" and
+            .post_prepared_wheel_open == "denied" and
+            .lock_unchanged == true
+          ' <<<"${report}"
 
       - name: Verify README walkthrough
         shell: pwsh

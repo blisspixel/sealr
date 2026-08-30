@@ -4,6 +4,8 @@
 .idea
 .vscode
 .DS_Store
+__pycache__/
+*.py[cod]
 *.profraw
 /fuzz/target
 /tests/packaged-consumer/target

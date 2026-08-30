@@ -15,11 +15,13 @@ import os
 from pathlib import Path
 import re
 import stat
+import subprocess
 import sys
 from typing import Any, Callable, Iterable
 
 
 SCHEMA = "sealr.pypa-wheel-source.v1"
+POETRY_SCHEMA = "sealr.pypa-wheel-source.v2"
 REPORT_SCHEMA = "sealr.pypa-wheel-source-report.v1"
 ADAPTER = "pypa-installer-1.0.1-wheel-source"
 INSTALLER_VERSION = "1.0.1"
@@ -32,6 +34,11 @@ INSTALLER_RECORD_SHA256 = (
 INTERPRETER = "/usr/bin/python3"
 TARGET_MODEL = "pypa-installer-1.0.1-linux-posix"
 INSTALLER_POLICY = "separate-roots-no-bytecode-no-overwrite-v1"
+POETRY_TARGET_MODEL = "poetry-2.4.2-installer-1.0.1-linux-posix"
+POETRY_INSTALLER_POLICY = (
+    "poetry-2.4.2-cpython-3.12-venv-no-bytecode-no-overwrite-v1"
+)
+POETRY_INSTALLER_METADATA = "Poetry 2.4.2"
 MAX_MANIFEST_BYTES = 16 * 1024 * 1024
 MAX_REPORT_BYTES = 16 * 1024 * 1024
 MAX_MEMBERS = 65_536
@@ -41,11 +48,12 @@ MAX_DIST_INFO_BYTES = 16 * 1024 * 1024
 MAX_INSTALLER_BYTES = 32 * 1024 * 1024
 MAX_OUTPUT_FILES = 131_072
 MAX_OUTPUT_BYTES = 128 * 1024 * 1024
+MAX_INTERPRETER_REPORT_BYTES = 4096
 SCHEMES = ("purelib", "platlib", "scripts", "headers", "data")
 HEX_SHA256 = re.compile(r"[0-9a-f]{64}")
 RECORD_SHA256 = re.compile(r"sha256=([A-Za-z0-9_-]{43})")
 DECIMAL = re.compile(r"0|[1-9][0-9]*")
-MANIFEST_KEYS = {
+MANIFEST_V1_KEYS = {
     "schema",
     "adapter",
     "installer_version",
@@ -62,6 +70,7 @@ MANIFEST_KEYS = {
     "installer_policy",
     "members",
 }
+MANIFEST_V2_KEYS = MANIFEST_V1_KEYS | {"additional_installer", "destination_model"}
 MEMBER_KEYS = {
     "index",
     "path",
@@ -338,24 +347,60 @@ def _load_manifest(path: Path, expected_digest: str) -> dict[str, Any]:
         )
     except (UnicodeDecodeError, json.JSONDecodeError) as error:
         _fail(f"manifest is not strict UTF-8 JSON: {error}")
-    return _exact_object(value, MANIFEST_KEYS, "manifest")
+    if type(value) is not dict:
+        _fail("manifest must be an object")
+    schema = value.get("schema")
+    if schema == SCHEMA:
+        return _exact_object(value, MANIFEST_V1_KEYS, "manifest")
+    if schema == POETRY_SCHEMA:
+        return _exact_object(value, MANIFEST_V2_KEYS, "manifest")
+    _fail("manifest.schema is unsupported")
 
 
 def _validate_manifest(
     manifest: dict[str, Any], expected_receipt: str
 ) -> tuple[list[dict[str, Any]], str]:
     expected = {
-        "schema": SCHEMA,
         "adapter": ADAPTER,
         "installer_version": INSTALLER_VERSION,
         "installer_wheel_sha256": INSTALLER_WHEEL_SHA256,
-        "interpreter": INTERPRETER,
-        "target_model": TARGET_MODEL,
-        "installer_policy": INSTALLER_POLICY,
     }
     for key, value in expected.items():
         if manifest[key] != value:
             _fail(f"manifest.{key} must equal {value!r}")
+
+    if manifest["schema"] == SCHEMA:
+        target = (
+            manifest["target_model"],
+            manifest["installer_policy"],
+            None,
+            "fresh-separate-roots-v1",
+        )
+        manifest["additional_installer"] = None
+        manifest["destination_model"] = "fresh-separate-roots-v1"
+    else:
+        target = (
+            manifest["target_model"],
+            manifest["installer_policy"],
+            manifest["additional_installer"],
+            manifest["destination_model"],
+        )
+    allowed_targets = (
+        (TARGET_MODEL, INSTALLER_POLICY, None, "fresh-separate-roots-v1"),
+        (
+            POETRY_TARGET_MODEL,
+            POETRY_INSTALLER_POLICY,
+            POETRY_INSTALLER_METADATA,
+            "poetry-2.4.2-cpython-3.12-venv-v1",
+        ),
+    )
+    if target not in allowed_targets:
+        _fail("manifest target model and installer policy combination is unsupported")
+    interpreter = _string(manifest["interpreter"], "manifest.interpreter")
+    if target == allowed_targets[0] and interpreter != INTERPRETER:
+        _fail(f"manifest.interpreter must equal {INTERPRETER!r}")
+    if target == allowed_targets[1] and not Path(interpreter).is_absolute():
+        _fail("Poetry target interpreter must be absolute")
 
     receipt = _hex_sha256(expected_receipt, "expected canonical receipt SHA-256")
     if _hex_sha256(
@@ -583,30 +628,302 @@ def _consume_source(source: Any) -> list[tuple[Any, str, int, bool]]:
     return result
 
 
-def _prepare_destination(root: Path) -> dict[str, str]:
+def _prepare_destination(root: Path, manifest: dict[str, Any]) -> dict[str, str]:
     root = _trusted_absolute_parent(root, "output root")
-    if root.exists() or root.is_symlink():
-        _fail("output root already exists; exclusive installation is required")
-    root.mkdir(mode=0o700)
-    created = os.lstat(root)
-    if (
-        stat.S_ISLNK(created.st_mode)
-        or not stat.S_ISDIR(created.st_mode)
-        or created.st_uid != os.geteuid()
-        or created.st_mode & (stat.S_IRWXG | stat.S_IRWXO)
+    if manifest["destination_model"] == "fresh-separate-roots-v1":
+        if root.exists() or root.is_symlink():
+            _fail("output root already exists; exclusive installation is required")
+        root.mkdir(mode=0o700)
+        created = os.lstat(root)
+        if (
+            stat.S_ISLNK(created.st_mode)
+            or not stat.S_ISDIR(created.st_mode)
+            or created.st_uid != os.geteuid()
+            or created.st_mode & (stat.S_IRWXG | stat.S_IRWXO)
+        ):
+            _fail("output root was not created as an effective-user-private directory")
+        scheme_dict = {}
+        resolved = set()
+        for scheme in SCHEMES:
+            path = root / scheme
+            path.mkdir(mode=0o700)
+            value = path.resolve(strict=True)
+            if value in resolved:
+                _fail("scheme roots must be distinct")
+            resolved.add(value)
+            scheme_dict[scheme] = str(value)
+        return scheme_dict
+
+    created = _require_trusted_directory(root, "Poetry virtual environment root")
+    if created.st_uid != os.geteuid() or created.st_mode & (
+        stat.S_IWGRP | stat.S_IWOTH
     ):
-        _fail("output root was not created as an effective-user-private directory")
-    scheme_dict = {}
-    resolved = set()
-    for scheme in SCHEMES:
-        path = root / scheme
-        path.mkdir(mode=0o700)
-        value = path.resolve(strict=True)
-        if value in resolved:
-            _fail("scheme roots must be distinct")
-        resolved.add(value)
-        scheme_dict[scheme] = str(value)
-    return scheme_dict
+        _fail("Poetry virtual environment root must deny group and other writes")
+    purelib = root / "lib/python3.12/site-packages"
+    scripts = root / "bin"
+    _require_trusted_directory(purelib, "Poetry virtual environment site-packages")
+    _require_trusted_directory(scripts, "Poetry virtual environment scripts")
+    interpreter = Path(manifest["interpreter"]).absolute()
+    if interpreter != root / "bin/python":
+        _fail("Poetry target interpreter disagrees with the virtual environment")
+    interpreter_info = os.lstat(interpreter)
+    if not (stat.S_ISREG(interpreter_info.st_mode) or stat.S_ISLNK(interpreter_info.st_mode)):
+        _fail("Poetry target interpreter must be a file or symbolic link")
+    _verify_poetry_interpreter(root, interpreter)
+    return {
+        "purelib": str(purelib),
+        "platlib": str(purelib),
+        "scripts": str(scripts),
+        "headers": str(
+            root
+            / "include/site/python3.12"
+            / manifest["distribution"]
+        ),
+        "data": str(root),
+    }
+
+
+def _verify_poetry_interpreter(root: Path, interpreter: Path) -> None:
+    script = (
+        "import json, pathlib, sys\n"
+        "print(json.dumps({"
+        "'implementation': sys.implementation.name,"
+        "'version': list(sys.version_info[:3]),"
+        "'prefix': str(pathlib.Path(sys.prefix).resolve()),"
+        "'executable': str(pathlib.Path(sys.executable).absolute())"
+        "}, sort_keys=True, separators=(',', ':')))\n"
+    )
+    try:
+        result = subprocess.run(
+            [str(interpreter), "-I", "-B", "-c", script],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            check=False,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        _fail(f"Poetry target interpreter identity failed: {error}")
+    if result.returncode != 0:
+        detail = result.stderr[:MAX_INTERPRETER_REPORT_BYTES].decode(
+            "utf-8", errors="replace"
+        )
+        _fail(f"Poetry target interpreter identity failed: {detail}")
+    if len(result.stdout) > MAX_INTERPRETER_REPORT_BYTES:
+        _fail("Poetry target interpreter identity report exceeds its cap")
+    try:
+        identity = json.loads(
+            result.stdout.decode("utf-8"),
+            object_pairs_hook=_duplicate_safe_object,
+            parse_constant=_reject_constant,
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        _fail(f"Poetry target interpreter identity is not strict JSON: {error}")
+    identity = _exact_object(
+        identity,
+        {"implementation", "version", "prefix", "executable"},
+        "Poetry target interpreter identity",
+    )
+    if identity != {
+        "implementation": "cpython",
+        "version": [3, 12, sys.version_info.micro],
+        "prefix": str(root.resolve(strict=True)),
+        "executable": str(interpreter.absolute()),
+    }:
+        _fail("Poetry target interpreter is not this exact CPython 3.12 environment")
+
+
+def _validate_poetry_output_target(
+    output_root: Path,
+    scheme_dict: dict[str, str],
+    scheme: str,
+    raw_path: str,
+    physical: set[str],
+) -> tuple[str, Path]:
+    if scheme not in SCHEMES:
+        _fail(f"installer wrote an unknown scheme: {scheme}")
+    relative = _canonical_path(raw_path, "installer-written output path")
+    scheme_root = Path(scheme_dict[scheme]).absolute()
+    target = Path(os.path.abspath(scheme_root / relative))
+    if target != scheme_root and scheme_root not in target.parents:
+        _fail(f"installer output escaped its scheme root: {scheme}/{relative}")
+    root = output_root.resolve(strict=True)
+    try:
+        target_relative = target.relative_to(root)
+    except ValueError:
+        _fail(f"installer output escaped the Poetry environment: {scheme}/{relative}")
+    current = root
+    components = list(target_relative.parts)
+    for offset, component in enumerate(components):
+        current /= component
+        try:
+            info = os.lstat(current)
+        except FileNotFoundError:
+            continue
+        if stat.S_ISLNK(info.st_mode):
+            _fail(f"installer output crosses a symbolic link: {scheme}/{relative}")
+        if offset < len(components) - 1:
+            if not stat.S_ISDIR(info.st_mode):
+                _fail(f"installer output ancestor is not a directory: {scheme}/{relative}")
+            _require_trusted_directory(current, "Poetry output ancestor")
+        else:
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1:
+                _fail(f"existing installer target is not a single-link regular file: {scheme}/{relative}")
+            if info.st_uid != os.geteuid() or info.st_mode & (stat.S_IWGRP | stat.S_IWOTH):
+                _fail(f"existing installer target is not effective-user-controlled: {scheme}/{relative}")
+    physical_key = str(target)
+    if physical_key in physical:
+        _fail(f"installer outputs alias one physical target: {scheme}/{relative}")
+    for prior_key in physical:
+        prior = Path(prior_key)
+        if target in prior.parents or prior in target.parents:
+            _fail(
+                "installer outputs have a physical file-ancestor conflict: "
+                f"{scheme}/{relative}"
+            )
+    physical.add(physical_key)
+    return relative, target
+
+
+def _preflight_destination_type(
+    destination_type: type[Any],
+    record_entry_type: type[Any],
+    output_root: Path,
+) -> type[Any]:
+    class PreflightDestination(destination_type):
+        def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self._sealr_physical: set[str] = set()
+            self._sealr_count = 0
+            self._sealr_total = 0
+
+        def write_to_fs(
+            self: Any,
+            scheme: str,
+            path: str,
+            stream: Any,
+            is_executable: bool,
+        ) -> Any:
+            del is_executable
+            relative, _target = _validate_poetry_output_target(
+                output_root,
+                self.scheme_dict,
+                scheme,
+                path,
+                self._sealr_physical,
+            )
+            if self._sealr_count >= MAX_OUTPUT_FILES:
+                _fail("installer outputs exceed the file-count cap")
+            digest = hashlib.sha256()
+            size = 0
+            while chunk := stream.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_OUTPUT_BYTES - self._sealr_total:
+                    _fail("installer outputs exceed the aggregate byte cap")
+                digest.update(chunk)
+            self._sealr_count += 1
+            self._sealr_total += size
+            encoded = base64.urlsafe_b64encode(digest.digest()).rstrip(b"=").decode("ascii")
+            return record_entry_type.from_elements(
+                relative,
+                f"sha256={encoded}",
+                str(size),
+            )
+
+        def write_script(
+            self: Any,
+            name: str,
+            module: str,
+            attr: str,
+            section: str,
+        ) -> Any:
+            script_type = destination_type.write_script.__globals__["Script"]
+            script = script_type(name, module, attr, section)
+            script_name, data = script.generate(self.interpreter, self.script_kind)
+            with io.BytesIO(data) as stream:
+                return self.write_to_fs(
+                    "scripts",
+                    script_name,
+                    stream,
+                    is_executable=True,
+                )
+
+    return PreflightDestination
+
+
+def _tracking_destination_type(
+    destination_type: type[Any],
+    writes: list[tuple[str, str, bool]],
+    output_root: Path,
+) -> type[Any]:
+    class TrackingDestination(destination_type):
+        def __init__(self: Any, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self._sealr_physical: set[str] = set()
+
+        def write_to_fs(
+            self: Any,
+            scheme: str,
+            path: str,
+            stream: Any,
+            is_executable: bool,
+        ) -> Any:
+            if len(writes) >= MAX_OUTPUT_FILES:
+                _fail("installer outputs exceed the file-count cap")
+            _validate_poetry_output_target(
+                output_root,
+                self.scheme_dict,
+                scheme,
+                path,
+                self._sealr_physical,
+            )
+            record = super().write_to_fs(scheme, path, stream, is_executable)
+            writes.append((scheme, path, is_executable))
+            return record
+
+    return TrackingDestination
+
+
+def _enumerate_written_outputs(
+    destination: Any, writes: list[tuple[str, str, bool]]
+) -> list[dict[str, Any]]:
+    outputs = []
+    logical = set()
+    physical = set()
+    total = 0
+    for scheme, raw_path, requested_executable in writes:
+        if scheme not in SCHEMES:
+            _fail(f"installer wrote an unknown scheme: {scheme}")
+        path_text = _canonical_path(raw_path, "installer-written output path")
+        key = (scheme, path_text)
+        if key in logical:
+            _fail(f"installer wrote an output more than once: {scheme}/{path_text}")
+        logical.add(key)
+        scheme_root = Path(destination.scheme_dict[scheme]).resolve(strict=True)
+        path = scheme_root / path_text
+        resolved_parent = path.parent.resolve(strict=True)
+        if resolved_parent != scheme_root and scheme_root not in resolved_parent.parents:
+            _fail(f"installer output escaped its scheme root: {scheme}/{path_text}")
+        physical_key = (resolved_parent / path.name).as_posix()
+        if physical_key in physical:
+            _fail(f"installer outputs alias one physical target: {scheme}/{path_text}")
+        physical.add(physical_key)
+        digest, size, mode = _hash_regular(path, MAX_OUTPUT_BYTES - total)
+        total += size
+        executable = bool(mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH))
+        if executable != requested_executable:
+            _fail(f"installer output mode disagrees: {scheme}/{path_text}")
+        outputs.append(
+            {
+                "scheme": scheme,
+                "relative_path": path_text,
+                "sha256": digest,
+                "size": size,
+                "executable": executable,
+            }
+        )
+    outputs.sort(key=lambda item: (SCHEMES.index(item["scheme"]), item["relative_path"]))
+    return outputs
 
 
 def _hash_regular(path: Path, remaining: int) -> tuple[str, int, int]:
@@ -700,10 +1017,12 @@ def _write_report(path: Path, report: dict[str, Any], output_root: Path) -> None
 
 
 def _run(argv: list[str]) -> None:
-    if len(argv) != 7:
+    preflight_only = len(argv) == 8 and argv[7] == "--preflight-only"
+    if len(argv) != 7 and not preflight_only:
         _fail(
             "usage: wheel_source.py <manifest.json> <manifest-sha256> "
-            "<receipt-sha256> <installer-root> <new-output-root> <report.json>"
+            "<receipt-sha256> <installer-root> <output-root> <report.json> "
+            "[--preflight-only]"
         )
     _prove_wheel_open_denied()
     manifest_path = Path(argv[1])
@@ -722,8 +1041,38 @@ def _run(argv: list[str]) -> None:
         _fail("WheelSource member reads are not repeatable")
 
     output_root = Path(argv[5]).absolute()
-    scheme_dict = _prepare_destination(output_root)
-    destination = destination_type(
+    scheme_dict = _prepare_destination(output_root, manifest)
+    additional_metadata = {}
+    if manifest["additional_installer"] is not None:
+        additional_metadata["INSTALLER"] = manifest["additional_installer"].encode(
+            "utf-8"
+        )
+    if preflight_only:
+        if manifest["destination_model"] != "poetry-2.4.2-cpython-3.12-venv-v1":
+            _fail("preflight-only is reserved for the Poetry destination model")
+        preflight_type = _preflight_destination_type(
+            destination_type,
+            record_type,
+            output_root,
+        )
+        destination = preflight_type(
+            scheme_dict=scheme_dict,
+            interpreter=manifest["interpreter"],
+            script_kind="posix",
+            hash_algorithm="sha256",
+            bytecode_optimization_levels=(),
+            destdir=None,
+            overwrite_existing=False,
+        )
+        install(source, destination, additional_metadata)
+        return
+    writes: list[tuple[str, str, bool]] = []
+    audited_destination_type = _tracking_destination_type(
+        destination_type,
+        writes,
+        output_root,
+    )
+    destination = audited_destination_type(
         scheme_dict=scheme_dict,
         interpreter=manifest["interpreter"],
         script_kind="posix",
@@ -732,8 +1081,13 @@ def _run(argv: list[str]) -> None:
         destdir=None,
         overwrite_existing=False,
     )
-    install(source, destination, {})
-    outputs = _enumerate_outputs(output_root)
+    install(source, destination, additional_metadata)
+    if manifest["destination_model"] == "fresh-separate-roots-v1":
+        outputs = _enumerate_outputs(output_root)
+        if outputs != _enumerate_written_outputs(destination, writes):
+            _fail("complete output enumeration disagrees with installer writes")
+    else:
+        outputs = _enumerate_written_outputs(destination, writes)
     report = {
         "schema": REPORT_SCHEMA,
         "adapter": ADAPTER,

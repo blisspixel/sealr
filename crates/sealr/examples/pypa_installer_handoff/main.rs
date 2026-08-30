@@ -2,9 +2,13 @@ mod stage;
 
 use std::ffi::OsString;
 use std::fs::{self, OpenOptions};
+#[cfg(target_os = "linux")]
+use std::io::Read;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+#[cfg(target_os = "linux")]
+use std::time::{Duration, Instant};
 
 use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelLimits};
 use sealr::{
@@ -13,9 +17,13 @@ use sealr::{
 use serde::Serialize;
 
 use stage::{
-    configure_process_group, prepare_wheel_source, wait_for_child, PrivateRoot, INSTALLER_POLICY,
-    TARGET_MODEL,
+    configure_process_group, prepare_wheel_source, validate_existing_poetry_venv, wait_for_child,
+    HandoffTarget, PreparationTarget, PrivateRoot,
 };
+
+const PREPARED_SCHEMA: &str = "sealr.pypa-wheel-source-prepared.v1";
+#[cfg(target_os = "linux")]
+const INSTALL_PERMIT_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug)]
 struct Args {
@@ -26,6 +34,7 @@ struct Args {
     installer_root: PathBuf,
     output_root: PathBuf,
     materialize_raw: Option<PathBuf>,
+    poetry_update_context: Option<String>,
 }
 
 impl Args {
@@ -38,7 +47,20 @@ impl Args {
         let mut installer_root = None;
         let mut output_root = None;
         let mut materialize_raw = None;
+        let mut poetry_update_context = None;
         while let Some(flag) = values.next() {
+            if flag == "--poetry-2-4-2-update" {
+                if poetry_update_context.is_some() {
+                    return Err("duplicate argument: --poetry-2-4-2-update".to_owned());
+                }
+                let value = next_value(&mut values, &flag)?;
+                poetry_update_context = Some(
+                    value
+                        .into_string()
+                        .map_err(|_| "Poetry update context must be UTF-8")?,
+                );
+                continue;
+            }
             let slot = match flag.to_str() {
                 Some("--consume-wheel") => &mut wheel,
                 Some("--worker-manifest") => &mut worker_manifest,
@@ -62,6 +84,7 @@ impl Args {
             installer_root: installer_root.ok_or("--installer-root is required")?,
             output_root: output_root.ok_or("--output-root is required")?,
             materialize_raw,
+            poetry_update_context,
         })
     }
 }
@@ -90,6 +113,22 @@ struct SuccessReport {
     realization_sha256: String,
     installed_files: usize,
     raw_materialized: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    context_sha256: Option<String>,
+}
+
+#[derive(Serialize)]
+struct PreparedReport<'a> {
+    schema: &'static str,
+    context_sha256: &'a str,
+    source_deleted: bool,
+    target_model: &'static str,
+    installer_policy: &'static str,
+    canonical_receipt_sha256: &'a str,
+    source_sha256: &'a str,
+    archive_tree_sha256: &'a str,
+    artifact_sha256: &'a str,
+    install_plan_sha256: &'a str,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -103,14 +142,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "usage: pypa_installer_handoff \\\n",
                 "  --consume-wheel FILE --worker-manifest ABSOLUTE_PATH --verifier FILE \\\n",
                 "  --python /usr/bin/python3 --installer-root DIR --output-root NEW_DIR \\\n",
-                "  [--materialize-raw NEW_DIR]"
+                "  [--materialize-raw NEW_DIR] [--poetry-2-4-2-update CONTEXT_SHA256]"
             )
         )
     })?;
     require_regular_file(&args.wheel, "wheel")?;
     require_regular_file(&args.verifier, "identity verifier")?;
     require_real_directory(&args.installer_root, "installer root")?;
-    require_absent(&args.output_root, "output root")?;
+    let target = if let Some(context) = &args.poetry_update_context {
+        validate_sha256(context, "Poetry update context")?;
+        if !args.output_root.is_absolute() {
+            return Err("Poetry virtual environment root must be absolute".into());
+        }
+        validate_existing_poetry_venv(&args.output_root)?;
+        HandoffTarget::Poetry242Update
+    } else {
+        require_absent(&args.output_root, "output root")?;
+        HandoffTarget::Copyable
+    };
     if let Some(raw) = &args.materialize_raw {
         require_absent(raw, "raw materialization root")?;
         if raw == &args.output_root {
@@ -162,7 +211,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .arg("--source")
         .arg(&args.wheel)
         .stdin(Stdio::null())
-        .stdout(Stdio::inherit())
+        .stdout(Stdio::null())
         .stderr(Stdio::inherit())
         .spawn()?;
     let status = wait_for_child(&mut verifier, "independent evidence verifier")?;
@@ -189,6 +238,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let archive = outcome
         .into_verified_archive()
         .ok_or("verified wheel authority disappeared")?;
+    let target_interpreter = match target {
+        HandoffTarget::Copyable => args.python.clone(),
+        HandoffTarget::Poetry242Update => args.output_root.join("bin/python"),
+    };
     let prepared = prepare_wheel_source(
         &private,
         &archive,
@@ -196,12 +249,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &plan,
         &identities,
         &canonical.receipt_digest,
+        PreparationTarget {
+            handoff: target,
+            interpreter: &target_interpreter,
+        },
     )?;
     drop(archive);
 
     fs::remove_file(&args.wheel)?;
     if args.wheel.exists() || fs::symlink_metadata(&args.wheel).is_ok() {
-        return Err("consumed wheel remained accessible before Python started".into());
+        return Err("consumed wheel remained accessible before post-admission installation".into());
+    }
+    if matches!(target, HandoffTarget::Poetry242Update) {
+        prepared.preflight(&args.python, &args.installer_root, &args.output_root)?;
+    }
+    if let Some(context) = &args.poetry_update_context {
+        let prepared_report = PreparedReport {
+            schema: PREPARED_SCHEMA,
+            context_sha256: context,
+            source_deleted: true,
+            target_model: target.target_model(),
+            installer_policy: target.installer_policy(),
+            canonical_receipt_sha256: &canonical.receipt_digest,
+            source_sha256: &identities.source_sha256,
+            archive_tree_sha256: &identities.archive_tree_sha256,
+            artifact_sha256: &identities.artifact_sha256,
+            install_plan_sha256: &identities.install_plan_sha256,
+        };
+        println!("{}", serde_json::to_string(&prepared_report)?);
+        std::io::stdout().flush()?;
+        wait_for_install_permit(context)?;
     }
     let installation = prepared.install(
         &args.python,
@@ -214,8 +291,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let report = SuccessReport {
         schema: "sealr.pypa-wheel-source-example.v1",
         source_deleted_before_python: true,
-        target_model: TARGET_MODEL,
-        installer_policy: INSTALLER_POLICY,
+        target_model: target.target_model(),
+        installer_policy: target.installer_policy(),
         canonical_view_sha256: canonical.view_digest,
         canonical_receipt_sha256: canonical.receipt_digest,
         source_sha256: identities.source_sha256,
@@ -225,8 +302,74 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         realization_sha256: installation.realization_sha256,
         installed_files: installation.files.len(),
         raw_materialized: args.materialize_raw.is_some(),
+        context_sha256: args.poetry_update_context,
     };
     println!("{}", serde_json::to_string(&report)?);
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn wait_for_install_permit(context: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let expected = format!("install {context}\n");
+    let deadline = Instant::now() + INSTALL_PERMIT_TIMEOUT;
+    let mut received = Vec::with_capacity(expected.len());
+    let mut stdin = std::io::stdin().lock();
+    while received.len() <= expected.len() {
+        let now = Instant::now();
+        if now >= deadline {
+            return Err("Poetry install permit exceeded its 120-second deadline".into());
+        }
+        let remaining = deadline.saturating_duration_since(now).as_millis();
+        let timeout = i32::try_from(remaining).unwrap_or(i32::MAX).max(1);
+        let mut descriptor = libc::pollfd {
+            fd: libc::STDIN_FILENO,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+        let result = unsafe { libc::poll(&mut descriptor, 1, timeout) };
+        if result == 0 {
+            return Err("Poetry install permit exceeded its 120-second deadline".into());
+        }
+        if result < 0 {
+            let error = std::io::Error::last_os_error();
+            if error.kind() == std::io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(format!("Poetry install permit polling failed: {error}").into());
+        }
+        let mut byte = [0_u8; 1];
+        match stdin.read(&mut byte) {
+            Ok(0) => return Err("Poetry install permit input closed before authorization".into()),
+            Ok(1) => {
+                received.push(byte[0]);
+                if byte[0] == b'\n' {
+                    break;
+                }
+            }
+            Ok(_) => unreachable!("one-byte read returned more than one byte"),
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(format!("Poetry install permit read failed: {error}").into()),
+        }
+    }
+    if received != expected.as_bytes() {
+        return Err("Poetry install permit did not match the prepared context".into());
+    }
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn wait_for_install_permit(_context: &str) -> Result<(), Box<dyn std::error::Error>> {
+    Err("the Poetry install permit protocol requires Linux".into())
+}
+
+fn validate_sha256(value: &str, label: &str) -> Result<(), Box<dyn std::error::Error>> {
+    if value.len() != 64
+        || !value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return Err(format!("{label} must be a lowercase hexadecimal SHA-256 digest").into());
+    }
     Ok(())
 }
 
