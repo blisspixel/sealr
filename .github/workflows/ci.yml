@@ -170,6 +170,11 @@ jobs:
           cargo run --locked -p sealr-identity-verifier --
           crates/sealr/tests/conformance/identity-v1.json
 
+      - name: Verify canonical evidence conformance
+        run: >-
+          cargo run --locked -p sealr-identity-verifier --
+          crates/sealr/tests/conformance/evidence-v1.json
+
       - name: Verify committed wheel compatibility report
         run: >-
           cargo run --locked -p sealr-wheel-lab --bin sealr-wheel-lab -- verify-report

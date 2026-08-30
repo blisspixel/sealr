@@ -557,7 +557,10 @@ dependencies = [
 name = "sealr-attest"
 version = "0.1.0-alpha.11"
 dependencies = [
+ "sealr-identity-verifier",
+ "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]

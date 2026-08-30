@@ -67,6 +67,7 @@
     "tests/api_surface.rs",
     "tests/bounded_path_memory.rs",
     "tests/evidence_encoding.rs",
+    "tests/conformance/evidence-v1.json",
     "tests/conformance/identity-v1.json",
     "tests/conformance/semantic-shadow-v1.json",
     "tests/conformance/semantic-shadow-v2.json",
