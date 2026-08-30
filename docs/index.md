@@ -1,6 +1,6 @@
 # Documentation
 
-Start with the [README](../README.md) for the published Alpha.12 boundary and a short walkthrough. This index separates current contracts from plans and research notes.
+Start with the [README](../README.md) for the latest published Alpha.12 boundary, clearly marked current-main additions, and a short walkthrough. This index separates current contracts from plans and research notes.
 
 ## Start and integrate
 
@@ -8,6 +8,7 @@ Start with the [README](../README.md) for the published Alpha.12 boundary and a 
 |---|---|
 | [Usage](usage.md) | Current CLI behavior and examples |
 | [API contract](api.md) | Current Rust and JSON surface, plus clearly marked target notation |
+| [Copyable PyPA `WheelSource` handoff](../crates/sealr/examples/pypa_installer_handoff/README.md) | Public-API-only supervised admission, reduced digest-bound manifest, source deletion, real installer effects, and Rust-owned result audit |
 | [Current release notes](releases/v0.1.0-alpha.12.md) | Alpha.12 contents and limitations |
 | [Release verification](release-verification.md) | Verify checksums, provenance, tag, and immutable release state |
 | [Distribution contract](distribution-contract.md) | Exact source-package scope, compatibility policy, and native archive floors |

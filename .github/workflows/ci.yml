@@ -95,6 +95,9 @@ jobs:
       - name: Run tests
         run: cargo test --locked --workspace --all-features
 
+      - name: Verify copyable handoff child deadlines
+        run: cargo test --locked -p sealr --example pypa_installer_handoff
+
       - name: Stress native materialization lifecycle
         run: cargo run --locked --release -p sealr-materialization-lifecycle
 
@@ -193,6 +196,20 @@ jobs:
       - name: Build extracted-package consumers
         run: |
           cargo package --locked -p sealr
+          cargo build --locked --release \
+            --manifest-path target/package/sealr-0.1.0-alpha.12/Cargo.toml \
+            --example pypa_installer_handoff
+          handoff="${RUNNER_TEMP}/sealr-pypa-installer-handoff"
+          cp --recursive \
+            target/package/sealr-0.1.0-alpha.12/examples/pypa_installer_handoff \
+            "${handoff}"
+          mv "${handoff}/Cargo.toml.example" "${handoff}/Cargo.toml"
+          cargo generate-lockfile \
+            --manifest-path "${handoff}/Cargo.toml" \
+            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.12'"
+          cargo build --locked --release \
+            --manifest-path "${handoff}/Cargo.toml" \
+            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.12'"
           cargo build --locked --release --manifest-path tests/packaged-consumer/Cargo.toml
           cargo build --locked --release \
             --manifest-path tests/pypa-installer-consumer/Cargo.toml
@@ -209,31 +226,66 @@ jobs:
             jq --raw-output '.packages[] | select(.name == "sealr") | .manifest_path')"
           test "${manifest}" = \
             "${PWD}/target/package/sealr-0.1.0-alpha.12/Cargo.toml"
+          copied_manifest="$(cargo metadata --locked --format-version 1 \
+            --manifest-path "${handoff}/Cargo.toml" \
+            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.12'" |
+            jq --raw-output '.packages[] | select(.name == "sealr") | .manifest_path')"
+          test "${copied_manifest}" = \
+            "${PWD}/target/package/sealr-0.1.0-alpha.12/Cargo.toml"
+          features="$(cargo metadata --locked --format-version 1 \
+            --manifest-path "${handoff}/Cargo.toml" \
+            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.12'" |
+            jq --compact-output \
+              '[.resolve.nodes[] | select(.id | startswith("path+file:") and contains("#sealr@")) | .features]')"
+          jq --exit-status 'length == 1' <<<"${features}" >/dev/null
+          if grep --quiet '__internal-' <<<"${features}"; then
+            echo 'copyable handoff enabled an internal Sealr feature' >&2
+            exit 1
+          fi
 
-      - name: Run packaged PyPA adopter conformance
+      - name: Run packaged PyPA repository conformance
         shell: bash
         run: |
           set -euo pipefail
-          download="${RUNNER_TEMP}/sealr-installer-download"
-          extracted="${RUNNER_TEMP}/sealr-installer-extracted"
+          umask 077
+          runtime="$(mktemp --directory /tmp/sealr-handoff.XXXXXX)"
+          printf 'SEALR_HANDOFF_RUNTIME=%s\n' "${runtime}" >>"${GITHUB_ENV}"
+          download="${runtime}/installer-download"
+          extracted="${runtime}/installer-extracted"
           mkdir --parents "${download}" "${extracted}"
           python3 -m pip download \
             --disable-pip-version-check \
             --no-deps \
             --only-binary=:all: \
             --require-hashes \
-            --requirement tests/pypa-installer-consumer/requirements.txt \
+            --requirement \
+              target/package/sealr-0.1.0-alpha.12/examples/pypa_installer_handoff/requirements.txt \
             --dest "${download}"
           installer="${download}/installer-1.0.1-py3-none-any.whl"
           echo "011d045df8b954ced7dde3a7e42ae4418da40ecda7990f2d11d5ed7c146fd98b  ${installer}" |
             sha256sum --check
           python3 -m zipfile -e "${installer}" "${extracted}"
+          mkdir --parents \
+            "${runtime}/real-input" \
+            "${runtime}/controlled" \
+            "${runtime}/controlled-inspect-input" \
+            "${runtime}/controlled-materialize-input"
+          cp "${installer}" \
+            "${runtime}/real-input/installer-1.0.1-py3-none-any.whl"
           cargo run --locked --release \
             --manifest-path tests/pypa-installer-consumer/Cargo.toml -- \
             --python /usr/bin/python3 \
             --installer-root "${extracted}" \
             --verifier "${PWD}/target/release/sealr-identity-verifier" \
-            --real-wheel "${installer}"
+            --real-wheel "${installer}" \
+            --bridge \
+              "${PWD}/target/package/sealr-0.1.0-alpha.12/examples/pypa_installer_handoff/wheel_source.py" \
+            --controlled-wheel-output \
+              "${runtime}/controlled/demo-1.0-py3-none-any.whl"
+          cp "${runtime}/controlled/demo-1.0-py3-none-any.whl" \
+            "${runtime}/controlled-inspect-input/demo-1.0-py3-none-any.whl"
+          cp "${runtime}/controlled/demo-1.0-py3-none-any.whl" \
+            "${runtime}/controlled-materialize-input/demo-1.0-py3-none-any.whl"
 
       - name: Verify crate publication contract
         shell: pwsh
@@ -261,6 +313,89 @@ jobs:
             -LabBinary target/release/sealr-worker-bootstrap-lab `
             -WheelLabBinary target/release/sealr-wheel-lab `
             -PackagedConsumerBinary tests/packaged-consumer/target/release/sealr-packaged-consumer
+
+      - name: Run copyable WheelSource handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(cargo metadata --locked --no-deps --format-version 1 |
+            jq --raw-output '.packages[] | select(.name == "sealr") | .version')"
+          package="${RUNNER_TEMP}/sealr-native-handoff"
+          mkdir --parents "${package}"
+          tar --extract --gzip \
+            --file "target/native-package-contract/sealr-${version}-x86_64-unknown-linux-gnu.tar.gz" \
+            --directory "${package}"
+          native="${package}/sealr-${version}-x86_64-unknown-linux-gnu"
+          example="${RUNNER_TEMP}/sealr-pypa-installer-handoff/target/release/sealr-pypa-installer-handoff"
+          runtime="${SEALR_HANDOFF_RUNTIME}"
+          installer_root="${runtime}/installer-extracted"
+          real_log="$("${example}" \
+            --consume-wheel \
+              "${runtime}/real-input/installer-1.0.1-py3-none-any.whl" \
+            --worker-manifest "${native}/libexec/sealr/sealr-worker.manifest" \
+            --verifier "${native}/sealr-identity-verifier" \
+            --python /usr/bin/python3 \
+            --installer-root "${installer_root}" \
+            --output-root "${runtime}/real-output")"
+          controlled_inspect_log="$("${example}" \
+            --consume-wheel \
+              "${runtime}/controlled-inspect-input/demo-1.0-py3-none-any.whl" \
+            --worker-manifest "${native}/libexec/sealr/sealr-worker.manifest" \
+            --verifier "${native}/sealr-identity-verifier" \
+            --python /usr/bin/python3 \
+            --installer-root "${installer_root}" \
+            --output-root "${runtime}/controlled-inspect-output")"
+          controlled_materialize_log="$("${example}" \
+            --consume-wheel \
+              "${runtime}/controlled-materialize-input/demo-1.0-py3-none-any.whl" \
+            --worker-manifest "${native}/libexec/sealr/sealr-worker.manifest" \
+            --verifier "${native}/sealr-identity-verifier" \
+            --python /usr/bin/python3 \
+            --installer-root "${installer_root}" \
+            --output-root "${runtime}/controlled-materialize-output" \
+            --materialize-raw "${runtime}/controlled-raw-tree")"
+          real_report="$(tail --lines=1 <<<"${real_log}")"
+          controlled_inspect_report="$(tail --lines=1 <<<"${controlled_inspect_log}")"
+          controlled_materialize_report="$(tail --lines=1 <<<"${controlled_materialize_log}")"
+          printf '%s\n%s\n%s\n' \
+            "${real_report}" \
+            "${controlled_inspect_report}" \
+            "${controlled_materialize_report}"
+          jq --exit-status '
+            .schema == "sealr.pypa-wheel-source-example.v1" and
+            .source_deleted_before_python == true and
+            .source_sha256 == "011d045df8b954ced7dde3a7e42ae4418da40ecda7990f2d11d5ed7c146fd98b" and
+            .installed_files == 23 and
+            .raw_materialized == false
+          ' <<<"${real_report}"
+          jq --exit-status '
+            .schema == "sealr.pypa-wheel-source-example.v1" and
+            .source_deleted_before_python == true and
+            .source_sha256 == "078364afdeda960f1e0df0959d9cafcdb067b2c3c8c2999c0cea7cd521c466ec" and
+            .archive_tree_sha256 == "7336763b06639d2cc5a1ee004adf6c42a0a15e6ace846e0457299f3010011f82" and
+            .artifact_sha256 == "986f82074b5ac802253ba317579bf1500a28947e022b0c27581180ea05004c55" and
+            .install_plan_sha256 == "54b263d0c136a522fa08e0b5d582a5bdfb5203af970e5a84c786ef549a19dac8" and
+            .realization_sha256 == "5978f3ebecb5a2ff85567240a2a659c01c4212e0a770ca8ba4d13b6bbe97f228" and
+            .installed_files == 12 and
+            .raw_materialized == false
+          ' <<<"${controlled_inspect_report}"
+          jq --null-input --exit-status \
+            --argjson inspect "${controlled_inspect_report}" \
+            --argjson materialize "${controlled_materialize_report}" '
+              $materialize.schema == "sealr.pypa-wheel-source-example.v1" and
+              $materialize.source_deleted_before_python == true and
+              $materialize.raw_materialized == true and
+              $materialize.installed_files == $inspect.installed_files and
+              $materialize.source_sha256 == $inspect.source_sha256 and
+              $materialize.archive_tree_sha256 == $inspect.archive_tree_sha256 and
+              $materialize.artifact_sha256 == $inspect.artifact_sha256 and
+              $materialize.install_plan_sha256 == $inspect.install_plan_sha256 and
+              $materialize.realization_sha256 == $inspect.realization_sha256
+            '
+          test ! -e "${runtime}/real-input/installer-1.0.1-py3-none-any.whl"
+          test ! -e "${runtime}/controlled-inspect-input/demo-1.0-py3-none-any.whl"
+          test ! -e "${runtime}/controlled-materialize-input/demo-1.0-py3-none-any.whl"
+          test -d "${runtime}/controlled-raw-tree"
 
       - name: Verify README walkthrough
         shell: pwsh
