@@ -65,7 +65,7 @@ fn main() {
 }
 ```
 
-The complete runnable version — including a hostile `..` container refused before any capability exists and an admitted container whose lying `RECORD` is denied with an exact finding — is `cargo run --locked -p sealr --example wheel_admission`.
+The complete runnable version — including a hostile `..` container refused before any capability exists and an admitted container whose lying `RECORD` is denied with an exact finding — is `cargo run --locked -p sealr --example wheel_admission`. A second example, `cargo run --locked -p sealr --example same_digest_different_tree`, turns the archive-confusion research into a capability-path artifact: one archive digest, an identical archive tree under two filenames, distinct filename-bound identities, and a typed refusal for a third — [the write-up](docs/same-digest-different-tree.md) explains why same digest is not same tree.
 
 ## Non-goals
 

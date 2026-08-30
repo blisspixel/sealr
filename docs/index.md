@@ -75,6 +75,7 @@ Repository vulnerability reporting and supported-version policy are in [SECURITY
 | [Near-term execution plan](near-term.md) | Release-sized work packages through Alpha.11 and the next acceptance gates |
 | [Vision](vision.md) | Durable category and priorities |
 | [Usefulness test](usefulness.md) | Proof that a downstream consumer stops reparsing |
+| [Same digest is not same tree](same-digest-different-tree.md) | The archive-confusion lesson as a runnable capability-path demonstration |
 | [Competitive context](competitive.md) | Category boundaries and alternatives |
 | [Related work](who-else.md) | Projects and research that inform the design |
 | [Why now](now.md) | Practical research and platform context |
