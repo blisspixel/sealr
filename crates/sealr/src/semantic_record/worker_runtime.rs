@@ -107,6 +107,7 @@ pub struct ValidatedMemberRead {
 pub struct MemberReadEvidence {
     pub member_index: u64,
     pub actual_bytes: u64,
+    pub retained_bytes: u64,
     pub actual_crc: u32,
 }
 
@@ -430,6 +431,28 @@ pub fn create_member_read_request(
     .map_err(debug_error)
 }
 
+/// Create one canonical prefix request from an already authorized plan and
+/// completion. The worker still emits and verifies the complete member while
+/// the supervisor retains at most `prefix_cap` bytes.
+pub fn create_member_prefix_read_request(
+    source: File,
+    source_len: u64,
+    authority: MemberReadAuthority<'_>,
+    read_operation_id: [u8; 16],
+    canonical_path: &str,
+    prefix_cap: u64,
+) -> Result<Vec<u8>, String> {
+    let (planning, _snapshot) = bind_member_read_source(source, source_len, authority)?;
+    super::member_read::encode_prefix(
+        &planning,
+        authority.completion,
+        read_operation_id,
+        canonical_path,
+        prefix_cap,
+    )
+    .map_err(debug_error)
+}
+
 /// Bind a canonical request to the worker's exact source descriptor and the
 /// supervisor-authorized original execution.
 pub fn validate_member_read(
@@ -439,10 +462,56 @@ pub fn validate_member_read(
     request: &[u8],
     read_operation_id: [u8; 16],
 ) -> Result<ValidatedMemberRead, String> {
+    validate_member_read_kind(
+        source,
+        source_len,
+        authority,
+        request,
+        read_operation_id,
+        super::member_read::MemberReadKind::Full,
+    )
+}
+
+/// Bind a canonical prefix request to the worker's exact source descriptor and
+/// the supervisor-authorized original execution.
+pub fn validate_member_prefix_read(
+    source: File,
+    source_len: u64,
+    authority: MemberReadAuthority<'_>,
+    request: &[u8],
+    read_operation_id: [u8; 16],
+) -> Result<ValidatedMemberRead, String> {
+    validate_member_read_kind(
+        source,
+        source_len,
+        authority,
+        request,
+        read_operation_id,
+        super::member_read::MemberReadKind::Prefix,
+    )
+}
+
+fn validate_member_read_kind(
+    source: File,
+    source_len: u64,
+    authority: MemberReadAuthority<'_>,
+    request: &[u8],
+    read_operation_id: [u8; 16],
+    kind: super::member_read::MemberReadKind,
+) -> Result<ValidatedMemberRead, String> {
     let (planning, snapshot) = bind_member_read_source(source, source_len, authority)?;
-    let request =
-        super::member_read::decode(&planning, authority.completion, request, read_operation_id)
-            .map_err(debug_error)?;
+    let request = match kind {
+        super::member_read::MemberReadKind::Full => {
+            super::member_read::decode(&planning, authority.completion, request, read_operation_id)
+        }
+        super::member_read::MemberReadKind::Prefix => super::member_read::decode_prefix(
+            &planning,
+            authority.completion,
+            request,
+            read_operation_id,
+        ),
+    }
+    .map_err(debug_error)?;
     Ok(ValidatedMemberRead {
         planning,
         snapshot,
@@ -458,10 +527,56 @@ pub fn validate_member_read_request(
     request: &[u8],
     read_operation_id: [u8; 16],
 ) -> Result<MemberReadEvidence, String> {
+    validate_member_read_request_kind(
+        source,
+        source_len,
+        authority,
+        request,
+        read_operation_id,
+        super::member_read::MemberReadKind::Full,
+    )
+}
+
+/// Preflight a prefix request before allocating output or spawning a one-shot
+/// worker.
+pub fn validate_member_prefix_read_request(
+    source: File,
+    source_len: u64,
+    authority: MemberReadAuthority<'_>,
+    request: &[u8],
+    read_operation_id: [u8; 16],
+) -> Result<MemberReadEvidence, String> {
+    validate_member_read_request_kind(
+        source,
+        source_len,
+        authority,
+        request,
+        read_operation_id,
+        super::member_read::MemberReadKind::Prefix,
+    )
+}
+
+fn validate_member_read_request_kind(
+    source: File,
+    source_len: u64,
+    authority: MemberReadAuthority<'_>,
+    request: &[u8],
+    read_operation_id: [u8; 16],
+    kind: super::member_read::MemberReadKind,
+) -> Result<MemberReadEvidence, String> {
     let (planning, _snapshot) = bind_member_read_source(source, source_len, authority)?;
-    let request =
-        super::member_read::decode(&planning, authority.completion, request, read_operation_id)
-            .map_err(debug_error)?;
+    let request = match kind {
+        super::member_read::MemberReadKind::Full => {
+            super::member_read::decode(&planning, authority.completion, request, read_operation_id)
+        }
+        super::member_read::MemberReadKind::Prefix => super::member_read::decode_prefix(
+            &planning,
+            authority.completion,
+            request,
+            read_operation_id,
+        ),
+    }
+    .map_err(debug_error)?;
     Ok(member_read_evidence(&request))
 }
 
@@ -481,6 +596,94 @@ pub fn validate_member_read_result(
         request,
         read_operation_id,
         bytes,
+    )
+    .map_err(debug_error)?;
+    Ok(member_read_evidence(&request))
+}
+
+/// Validate a completely streamed worker result without retaining the full
+/// member in supervisor memory. The measured size, CRC32, SHA-256, and retained
+/// prefix length must all agree with the exact request and completion.
+#[allow(clippy::too_many_arguments)]
+pub fn validate_member_read_stream_result(
+    source: File,
+    source_len: u64,
+    authority: MemberReadAuthority<'_>,
+    request: &[u8],
+    read_operation_id: [u8; 16],
+    actual_bytes: u64,
+    actual_crc: u32,
+    actual_sha256: [u8; 32],
+    retained_bytes: u64,
+) -> Result<MemberReadEvidence, String> {
+    validate_member_read_stream_result_kind(
+        source,
+        source_len,
+        authority,
+        request,
+        read_operation_id,
+        actual_bytes,
+        actual_crc,
+        actual_sha256,
+        retained_bytes,
+        super::member_read::MemberReadKind::Full,
+    )
+}
+
+/// Validate a completely streamed prefix result against its exact prefix
+/// request and complete authorized member evidence.
+#[allow(clippy::too_many_arguments)]
+pub fn validate_member_prefix_read_stream_result(
+    source: File,
+    source_len: u64,
+    authority: MemberReadAuthority<'_>,
+    request: &[u8],
+    read_operation_id: [u8; 16],
+    actual_bytes: u64,
+    actual_crc: u32,
+    actual_sha256: [u8; 32],
+    retained_bytes: u64,
+) -> Result<MemberReadEvidence, String> {
+    validate_member_read_stream_result_kind(
+        source,
+        source_len,
+        authority,
+        request,
+        read_operation_id,
+        actual_bytes,
+        actual_crc,
+        actual_sha256,
+        retained_bytes,
+        super::member_read::MemberReadKind::Prefix,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn validate_member_read_stream_result_kind(
+    source: File,
+    source_len: u64,
+    authority: MemberReadAuthority<'_>,
+    request: &[u8],
+    read_operation_id: [u8; 16],
+    actual_bytes: u64,
+    actual_crc: u32,
+    actual_sha256: [u8; 32],
+    retained_bytes: u64,
+    kind: super::member_read::MemberReadKind,
+) -> Result<MemberReadEvidence, String> {
+    let (planning, _snapshot) = bind_member_read_source(source, source_len, authority)?;
+    let request = super::member_read::validate_stream_result(
+        &planning,
+        authority.completion,
+        request,
+        read_operation_id,
+        super::member_read::MemberReadStreamEvidence {
+            actual_bytes,
+            actual_crc,
+            actual_sha256,
+            retained_bytes,
+        },
+        kind,
     )
     .map_err(debug_error)?;
     Ok(member_read_evidence(&request))
@@ -522,6 +725,7 @@ impl ValidatedMemberRead {
         Ok(MemberReadEvidence {
             member_index: self.request.member_index as u64,
             actual_bytes: actual,
+            retained_bytes: self.request.retained_bytes(),
             actual_crc: crc,
         })
     }
@@ -552,6 +756,7 @@ fn member_read_evidence(request: &super::member_read::MemberReadRequest) -> Memb
     MemberReadEvidence {
         member_index: request.member_index as u64,
         actual_bytes: request.expected_size,
+        retained_bytes: request.retained_bytes(),
         actual_crc: request.expected_crc,
     }
 }
@@ -579,6 +784,7 @@ mod tests {
     use std::io::{Cursor, Write};
     use std::path::PathBuf;
 
+    use sha2::{Digest, Sha256};
     use zip::write::SimpleFileOptions;
     use zip::{CompressionMethod, ZipWriter};
 
@@ -791,6 +997,7 @@ mod tests {
             MemberReadEvidence {
                 member_index: 0,
                 actual_bytes: 21,
+                retained_bytes: 21,
                 actual_crc: crc32fast::hash(b"custom policy payload"),
             }
         );
@@ -817,6 +1024,202 @@ mod tests {
             .unwrap(),
             read_evidence
         );
+
+        let prefix_operation_id = [0x7d; 16];
+        let prefix_request = create_member_prefix_read_request(
+            temp.open(),
+            source.len() as u64,
+            authority,
+            prefix_operation_id,
+            "custom.txt",
+            6,
+        )
+        .unwrap();
+        let prefix_expected = validate_member_prefix_read_request(
+            temp.open(),
+            source.len() as u64,
+            authority,
+            &prefix_request,
+            prefix_operation_id,
+        )
+        .unwrap();
+        assert_eq!(
+            prefix_expected,
+            MemberReadEvidence {
+                member_index: 0,
+                actual_bytes: 21,
+                retained_bytes: 6,
+                actual_crc: crc32fast::hash(b"custom policy payload"),
+            }
+        );
+        assert!(validate_member_read_request(
+            temp.open(),
+            source.len() as u64,
+            authority,
+            &prefix_request,
+            prefix_operation_id,
+        )
+        .is_err());
+        assert!(validate_member_prefix_read_request(
+            temp.open(),
+            source.len() as u64,
+            authority,
+            &request,
+            read_operation_id,
+        )
+        .is_err());
+        let zero_prefix_request = create_member_prefix_read_request(
+            temp.open(),
+            source.len() as u64,
+            authority,
+            [0x7e; 16],
+            "custom.txt",
+            0,
+        )
+        .unwrap();
+        assert_eq!(
+            validate_member_prefix_read_request(
+                temp.open(),
+                source.len() as u64,
+                authority,
+                &zero_prefix_request,
+                [0x7e; 16],
+            )
+            .unwrap()
+            .retained_bytes,
+            0
+        );
+        let generous_prefix_request = create_member_prefix_read_request(
+            temp.open(),
+            source.len() as u64,
+            authority,
+            [0x7f; 16],
+            "custom.txt",
+            super::super::MAX_ISOLATED_READ_BYTES + 1,
+        )
+        .unwrap();
+        assert_eq!(
+            validate_member_prefix_read_request(
+                temp.open(),
+                source.len() as u64,
+                authority,
+                &generous_prefix_request,
+                [0x7f; 16],
+            )
+            .unwrap()
+            .retained_bytes,
+            21
+        );
+        let mut unknown_prefix_kind = prefix_request.clone();
+        unknown_prefix_kind[10] = 0xff;
+        assert!(validate_member_prefix_read_request(
+            temp.open(),
+            source.len() as u64,
+            authority,
+            &unknown_prefix_kind,
+            prefix_operation_id,
+        )
+        .is_err());
+        let prefix_read = validate_member_prefix_read(
+            temp.open(),
+            source.len() as u64,
+            authority,
+            &prefix_request,
+            prefix_operation_id,
+        )
+        .unwrap();
+        let mut prefix_stream = Vec::new();
+        let prefix_evidence = prefix_read.execute_into(&mut prefix_stream).unwrap();
+        assert_eq!(prefix_stream, b"custom policy payload");
+        assert_eq!(prefix_evidence, prefix_expected);
+        assert_eq!(
+            validate_member_prefix_read_stream_result(
+                temp.open(),
+                source.len() as u64,
+                authority,
+                &prefix_request,
+                prefix_operation_id,
+                prefix_stream.len() as u64,
+                crc32fast::hash(&prefix_stream),
+                Sha256::digest(&prefix_stream).into(),
+                6,
+            )
+            .unwrap(),
+            prefix_evidence
+        );
+        assert!(validate_member_prefix_read_stream_result(
+            temp.open(),
+            source.len() as u64,
+            authority,
+            &prefix_request,
+            prefix_operation_id,
+            prefix_stream.len() as u64,
+            crc32fast::hash(&prefix_stream),
+            Sha256::digest(&prefix_stream).into(),
+            5,
+        )
+        .is_err());
+        let mut corrupted_tail = prefix_stream.clone();
+        corrupted_tail[12] ^= 1;
+        assert!(validate_member_prefix_read_stream_result(
+            temp.open(),
+            source.len() as u64,
+            authority,
+            &prefix_request,
+            prefix_operation_id,
+            corrupted_tail.len() as u64,
+            crc32fast::hash(&corrupted_tail),
+            Sha256::digest(&corrupted_tail).into(),
+            6,
+        )
+        .is_err());
+        assert!(validate_member_prefix_read_stream_result(
+            temp.open(),
+            source.len() as u64,
+            authority,
+            &prefix_request,
+            prefix_operation_id,
+            prefix_stream.len() as u64 - 1,
+            crc32fast::hash(&prefix_stream),
+            Sha256::digest(&prefix_stream).into(),
+            6,
+        )
+        .is_err());
+        assert!(validate_member_prefix_read_stream_result(
+            temp.open(),
+            source.len() as u64,
+            authority,
+            &prefix_request,
+            prefix_operation_id,
+            prefix_stream.len() as u64,
+            crc32fast::hash(&prefix_stream) ^ 1,
+            Sha256::digest(&prefix_stream).into(),
+            6,
+        )
+        .is_err());
+        let mut wrong_sha256: [u8; 32] = Sha256::digest(&prefix_stream).into();
+        wrong_sha256[0] ^= 1;
+        assert!(validate_member_prefix_read_stream_result(
+            temp.open(),
+            source.len() as u64,
+            authority,
+            &prefix_request,
+            prefix_operation_id,
+            prefix_stream.len() as u64,
+            crc32fast::hash(&prefix_stream),
+            wrong_sha256,
+            6,
+        )
+        .is_err());
+        assert!(validate_member_read_result(
+            temp.open(),
+            source.len() as u64,
+            authority,
+            &prefix_request,
+            prefix_operation_id,
+            &prefix_stream[..6],
+        )
+        .is_err());
         assert!(validate_operation(
             temp.open(),
             source.len() as u64,

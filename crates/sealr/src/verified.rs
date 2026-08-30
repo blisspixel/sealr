@@ -662,13 +662,16 @@ impl VerifiedArchive {
     /// agree with the recorded evidence — but only the first `prefix_cap`
     /// bytes are retained and released. A prefix therefore carries the same
     /// evidence authority as a full read while caller memory stays bounded by
-    /// the prefix instead of the member size, and there is no caller size cap
-    /// to fail: every verified regular file of any size can be classified by
-    /// its prefix. No byte is released on any verification disagreement.
+    /// the prefix instead of the member size. A verified regular file of any
+    /// size can be classified with a bounded prefix. No byte is released on
+    /// any verification disagreement.
     ///
-    /// The supervised Linux backend does not yet represent prefix reads in its
-    /// semantic record and returns a typed isolation-unavailable failure
-    /// without fallback, exactly like other not-yet-represented selections.
+    /// On the supervised Linux backend, the restricted worker streams the
+    /// complete member through a write-only pipe. The supervisor independently
+    /// checks the complete size, CRC32, and SHA-256 while retaining only the
+    /// requested prefix, then waits for clean exit and reap before release. Its
+    /// isolated return buffer is capped at 63 MiB; a prefix that would retain
+    /// more returns [`MemberReadErrorKind::LimitExceeded`] before worker spawn.
     pub fn read_member_prefix(
         &self,
         canonical_path: &str,
@@ -676,7 +679,8 @@ impl VerifiedArchive {
     ) -> Result<Vec<u8>, MemberReadError> {
         let (member_index, expected_size) = self.verified_regular_member(canonical_path)?;
         let member = &self.inner.ir.members()[member_index];
-        let retain = usize::try_from(expected_size.min(prefix_cap as u64)).unwrap_or(prefix_cap);
+        let caller_cap = u64::try_from(prefix_cap).unwrap_or(u64::MAX);
+        let retain = usize::try_from(expected_size.min(caller_cap)).unwrap_or(prefix_cap);
         if let Some(retained) = self.retained_member(canonical_path) {
             if retained.len() as u64 != expected_size {
                 return Err(MemberReadError::new(
@@ -735,11 +739,22 @@ impl VerifiedArchive {
                 Ok(sink.into_retained())
             }
             #[cfg(target_os = "linux")]
-            VerifiedArchiveBackend::Supervised(_) => Err(MemberReadError::new(
-                MemberReadErrorKind::IsolationUnavailable,
-                canonical_path,
-                "supervised prefix reads are not represented by the current semantic record",
-            )),
+            VerifiedArchiveBackend::Supervised(authority) => {
+                if expected_size.min(caller_cap) > crate::semantic_record::MAX_ISOLATED_READ_BYTES {
+                    return Err(MemberReadError::new(
+                        MemberReadErrorKind::LimitExceeded,
+                        canonical_path,
+                        format!(
+                            "retained prefix size {} exceeds the supervised backend ceiling {}",
+                            expected_size.min(caller_cap),
+                            crate::semantic_record::MAX_ISOLATED_READ_BYTES
+                        ),
+                    ));
+                }
+                authority
+                    .read_member_prefix(canonical_path, caller_cap)
+                    .map_err(|error| error.into_member_read_error(canonical_path))
+            }
         }
     }
 }
@@ -959,6 +974,31 @@ mod tests {
                 .kind(),
             MemberReadErrorKind::NotFound
         );
+    }
+
+    #[test]
+    fn prefix_reads_match_store_and_deflate_at_zero_exact_and_generous_caps() {
+        for method in [CompressionMethod::Stored, CompressionMethod::Deflated] {
+            for size in [0_usize, 1, 7, 64] {
+                let data: Vec<u8> = (0..size).map(|index| index as u8).collect();
+                let bytes = make_single_file_zip(&data, method);
+                let outcome = admitted(&bytes);
+                let archive = outcome.verified_archive().unwrap();
+                let mut caps = vec![0, 1, size.saturating_sub(1), size, size + 1, usize::MAX];
+                caps.sort_unstable();
+                caps.dedup();
+                for cap in caps {
+                    reset_verify_payload_calls();
+                    let prefix = archive.read_member_prefix("member.bin", cap).unwrap();
+                    assert_eq!(prefix, data[..data.len().min(cap)]);
+                    assert_eq!(
+                        verify_payload_calls(),
+                        1,
+                        "method={method:?}, size={size}, cap={cap}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

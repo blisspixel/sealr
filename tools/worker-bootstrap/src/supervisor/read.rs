@@ -1,8 +1,9 @@
 //! One-shot isolated non-retained member reads for the repository lab.
 
 use super::*;
-use crate::linux::FLAG_MEMBER_READ;
+use crate::linux::{FLAG_MEMBER_PREFIX_READ, FLAG_MEMBER_READ};
 use rustix::pipe::PipeFlags;
+use sha2::{Digest, Sha256};
 use std::os::fd::FromRawFd;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -247,6 +248,27 @@ impl IsolatedReadCapability {
         cancellation: &ReadCancellation,
         mode: ChildMode,
     ) -> Result<Vec<u8>, ReadFailure> {
+        self.read_with(path, max_bytes, false, cancellation, mode)
+    }
+
+    fn read_prefix(
+        &self,
+        path: &str,
+        prefix_cap: u64,
+        cancellation: &ReadCancellation,
+        mode: ChildMode,
+    ) -> Result<Vec<u8>, ReadFailure> {
+        self.read_with(path, prefix_cap, true, cancellation, mode)
+    }
+
+    fn read_with(
+        &self,
+        path: &str,
+        max_bytes: u64,
+        prefix: bool,
+        cancellation: &ReadCancellation,
+        mode: ChildMode,
+    ) -> Result<Vec<u8>, ReadFailure> {
         let started = Instant::now();
         let deadline = started + READ_DEADLINE;
         let read_operation_id =
@@ -256,31 +278,58 @@ impl IsolatedReadCapability {
             &self.inner.planning,
             &self.inner.completion,
         );
-        let request = sealr::__worker_runtime::create_member_read_request(
-            self.inner
-                .source
-                .try_clone()
-                .map_err(|error| failure(ReadFailureKind::Preflight, error))?,
-            source_bytes().len() as u64,
-            authority,
-            read_operation_id,
-            path,
-            max_bytes,
-        )
+        let request = if prefix {
+            sealr::__worker_runtime::create_member_prefix_read_request(
+                self.inner
+                    .source
+                    .try_clone()
+                    .map_err(|error| failure(ReadFailureKind::Preflight, error))?,
+                source_bytes().len() as u64,
+                authority,
+                read_operation_id,
+                path,
+                max_bytes,
+            )
+        } else {
+            sealr::__worker_runtime::create_member_read_request(
+                self.inner
+                    .source
+                    .try_clone()
+                    .map_err(|error| failure(ReadFailureKind::Preflight, error))?,
+                source_bytes().len() as u64,
+                authority,
+                read_operation_id,
+                path,
+                max_bytes,
+            )
+        }
         .map_err(|error| failure(ReadFailureKind::Preflight, error))?;
-        let expected = sealr::__worker_runtime::validate_member_read_request(
-            self.inner
-                .source
-                .try_clone()
-                .map_err(|error| failure(ReadFailureKind::Preflight, error))?,
-            source_bytes().len() as u64,
-            authority,
-            &request,
-            read_operation_id,
-        )
+        let expected = if prefix {
+            sealr::__worker_runtime::validate_member_prefix_read_request(
+                self.inner
+                    .source
+                    .try_clone()
+                    .map_err(|error| failure(ReadFailureKind::Preflight, error))?,
+                source_bytes().len() as u64,
+                authority,
+                &request,
+                read_operation_id,
+            )
+        } else {
+            sealr::__worker_runtime::validate_member_read_request(
+                self.inner
+                    .source
+                    .try_clone()
+                    .map_err(|error| failure(ReadFailureKind::Preflight, error))?,
+                source_bytes().len() as u64,
+                authority,
+                &request,
+                read_operation_id,
+            )
+        }
         .map_err(|error| failure(ReadFailureKind::Preflight, error))?;
         let _permit = self.inner.coordinator.acquire(cancellation, deadline)?;
-        let capacity = usize::try_from(expected.actual_bytes).map_err(|_| {
+        let capacity = usize::try_from(expected.retained_bytes).map_err(|_| {
             failure(
                 ReadFailureKind::Preflight,
                 "member-read size does not fit this platform",
@@ -304,6 +353,7 @@ impl IsolatedReadCapability {
             read_operation_id,
             &request,
             expected,
+            prefix,
             cancellation,
             deadline,
             mode,
@@ -333,6 +383,25 @@ pub(super) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
         if stored != b"stored payload" || deflated != b"deflated payload" {
             return Err(io::Error::other("isolated member-read bytes are incorrect").into());
         }
+        for (path, bytes) in [
+            ("stored.txt", b"stored payload".as_slice()),
+            ("deflated.txt", b"deflated payload".as_slice()),
+        ] {
+            for cap in [0_u64, 4, bytes.len() as u64, bytes.len() as u64 + 1] {
+                let prefix = capability.read_prefix(
+                    path,
+                    cap,
+                    &ReadCancellation::new()?,
+                    ChildMode::Normal,
+                )?;
+                if prefix != bytes[..bytes.len().min(cap as usize)] {
+                    return Err(io::Error::other(format!(
+                        "isolated prefix read returned wrong bytes for {path} at cap {cap}"
+                    ))
+                    .into());
+                }
+            }
+        }
 
         let before_preflight = capability.spawned();
         let under = capability
@@ -349,12 +418,7 @@ pub(super) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
         let cancelled = ReadCancellation::new()?;
         cancelled.cancel();
         let pre_cancel = capability
-            .read(
-                "stored.txt",
-                b"stored payload".len() as u64,
-                &cancelled,
-                ChildMode::Normal,
-            )
+            .read_prefix("stored.txt", 4, &cancelled, ChildMode::Normal)
             .expect_err("pre-cancelled read must fail before spawn");
         if pre_cancel.kind != ReadFailureKind::Cancelled || capability.spawned() != before_preflight
         {
@@ -366,9 +430,9 @@ pub(super) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
         let active_cancel_worker = active_cancel.clone();
         let spawn_before_cancel = capability.spawned();
         let stalled = thread::spawn(move || {
-            stalled_capability.read(
+            stalled_capability.read_prefix(
                 "deflated.txt",
-                b"deflated payload".len() as u64,
+                4,
                 &active_cancel_worker,
                 ChildMode::StallAt(StallPoint::ProbeExecution),
             )
@@ -384,12 +448,7 @@ pub(super) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
         let queued_cancel = ReadCancellation::new()?;
         let queued_cancel_worker = queued_cancel.clone();
         let queued = thread::spawn(move || {
-            queued_capability.read(
-                "stored.txt",
-                b"stored payload".len() as u64,
-                &queued_cancel_worker,
-                ChildMode::Normal,
-            )
+            queued_capability.read_prefix("stored.txt", 4, &queued_cancel_worker, ChildMode::Normal)
         });
         thread::sleep(Duration::from_millis(10));
         queued_cancel.cancel();
@@ -421,9 +480,9 @@ pub(super) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
         drop(active_cancel);
 
         let crash = capability
-            .read(
+            .read_prefix(
                 "stored.txt",
-                b"stored payload".len() as u64,
+                4,
                 &ReadCancellation::new()?,
                 ChildMode::ExitAt(FaultPoint::Result),
             )
@@ -431,14 +490,63 @@ pub(super) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
         if crash.kind != ReadFailureKind::WorkerCrashed {
             return Err(io::Error::other(format!("post-result crash returned {crash}")).into());
         }
-        if capability.read(
+        if capability.read_prefix(
             "stored.txt",
-            b"stored payload".len() as u64,
+            4,
             &ReadCancellation::new()?,
             ChildMode::Normal,
-        )? != b"stored payload"
+        )? != b"stor"
         {
             return Err(io::Error::other("read after isolated crash did not recover").into());
+        }
+
+        let corrupt_tail = capability
+            .read_prefix(
+                "deflated.txt",
+                4,
+                &ReadCancellation::new()?,
+                ChildMode::CorruptMemberTail,
+            )
+            .expect_err("corruption after the retained prefix must reject the complete read");
+        if corrupt_tail.kind != ReadFailureKind::Integrity {
+            return Err(io::Error::other(format!(
+                "discarded-tail corruption returned {corrupt_tail}"
+            ))
+            .into());
+        }
+        if capability.read_prefix(
+            "deflated.txt",
+            4,
+            &ReadCancellation::new()?,
+            ChildMode::Normal,
+        )? != b"defl"
+        {
+            return Err(
+                io::Error::other("prefix read after tail corruption did not recover").into(),
+            );
+        }
+
+        let timed_out = capability
+            .read_prefix(
+                "deflated.txt",
+                4,
+                &ReadCancellation::new()?,
+                ChildMode::StallAt(StallPoint::ProbeExecution),
+            )
+            .expect_err("stalled prefix read must reach its absolute deadline");
+        if timed_out.kind != ReadFailureKind::TimedOut {
+            return Err(
+                io::Error::other(format!("stalled prefix read returned {timed_out}")).into(),
+            );
+        }
+        if capability.read_prefix(
+            "deflated.txt",
+            4,
+            &ReadCancellation::new()?,
+            ChildMode::Normal,
+        )? != b"defl"
+        {
+            return Err(io::Error::other("prefix read after timeout did not recover").into());
         }
 
         for iteration in 0..READ_STRESS_ITERATIONS {
@@ -450,14 +558,23 @@ pub(super) fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
             let expected = if iteration % 2 == 0 {
                 b"stored payload".as_slice()
             } else {
-                b"deflated payload".as_slice()
+                b"deflat".as_slice()
             };
-            let bytes = capability.read(
-                path,
-                expected.len() as u64,
-                &ReadCancellation::new()?,
-                ChildMode::Normal,
-            )?;
+            let bytes = if iteration % 2 == 0 {
+                capability.read(
+                    path,
+                    expected.len() as u64,
+                    &ReadCancellation::new()?,
+                    ChildMode::Normal,
+                )?
+            } else {
+                capability.read_prefix(
+                    path,
+                    expected.len() as u64,
+                    &ReadCancellation::new()?,
+                    ChildMode::Normal,
+                )?
+            };
             if bytes != expected {
                 return Err(io::Error::other(format!(
                     "isolated read stress iteration {iteration} returned wrong bytes"
@@ -488,6 +605,7 @@ fn run_worker(
     read_operation_id: [u8; 16],
     request: &[u8],
     expected: sealr::__worker_runtime::MemberReadEvidence,
+    prefix: bool,
     cancellation: &ReadCancellation,
     deadline: Instant,
     mode: ChildMode,
@@ -552,6 +670,7 @@ fn run_worker(
         read_operation_id,
         request,
         expected,
+        prefix,
         cancellation,
         deadline,
         mode,
@@ -577,6 +696,7 @@ fn run_worker_active(
     read_operation_id: [u8; 16],
     request: &[u8],
     expected: sealr::__worker_runtime::MemberReadEvidence,
+    prefix: bool,
     cancellation: &ReadCancellation,
     deadline: Instant,
     mode: ChildMode,
@@ -589,7 +709,7 @@ fn run_worker_active(
         expires_at: deadline,
     };
     let mut bootstrap = Frame::new(Kind::Bootstrap, read_operation_id);
-    bootstrap.flags = FLAG_MEMBER_READ;
+    bootstrap.flags = FLAG_MEMBER_READ | if prefix { FLAG_MEMBER_PREFIX_READ } else { 0 };
     transport_until(control, child, epoch, libc::POLLOUT, || {
         send_packet(control, bootstrap, &[])
     })
@@ -601,7 +721,7 @@ fn run_worker_active(
     if !descriptors.is_empty()
         || ready.kind != Kind::RestrictedReady
         || ready.operation_id != read_operation_id
-        || ready.flags != READY_FLAGS | FLAG_MEMBER_READ
+        || ready.flags != READY_FLAGS | bootstrap.flags
         || ready.values[0] < ABI::V3 as u64
         || ready.values[3] != u64::MAX
     {
@@ -701,6 +821,7 @@ fn run_worker_active(
         )
     })?;
     let mut read = Frame::new(Kind::MemberRead, read_operation_id);
+    read.flags = if prefix { FLAG_MEMBER_PREFIX_READ } else { 0 };
     read.values = [completion_len, request_len, 0, 0];
     transport_until(control, child, epoch, libc::POLLOUT, || {
         send_packet(
@@ -717,7 +838,7 @@ fn run_worker_active(
     if !descriptors.is_empty()
         || read_accepted.kind != Kind::MemberReadAccepted
         || read_accepted.operation_id != read_operation_id
-        || read_accepted.flags != 0
+        || read_accepted.flags != read.flags
         || read_accepted.values[0] != completion_len
         || read_accepted.values[1] > i32::MAX as u64
         || read_accepted.values[2] != request_len
@@ -753,6 +874,7 @@ fn run_worker_active(
         read_operation_id,
         request,
         expected,
+        prefix,
         cancellation,
         deadline,
         mode,
@@ -769,6 +891,7 @@ fn drain_and_finalize(
     read_operation_id: [u8; 16],
     request: &[u8],
     expected: sealr::__worker_runtime::MemberReadEvidence,
+    prefix: bool,
     cancellation: &ReadCancellation,
     deadline: Instant,
     mode: ChildMode,
@@ -779,6 +902,15 @@ fn drain_and_finalize(
 ) -> Result<(), ReadFailure> {
     let mut eof = false;
     let mut result = None;
+    let mut actual_bytes = 0_u64;
+    let mut actual_crc = crc32fast::Hasher::new();
+    let mut actual_sha256 = Sha256::new();
+    let retained = usize::try_from(expected.retained_bytes).map_err(|_| {
+        failure(
+            ReadFailureKind::Preflight,
+            "authorized retained member size is unrepresentable",
+        )
+    })?;
     while !eof || result.is_none() {
         if cancellation.is_cancelled() {
             return Err(failure(
@@ -861,19 +993,31 @@ fn drain_and_finalize(
                         break;
                     }
                     Ok(read) => {
-                        let next = output.len().checked_add(read).ok_or_else(|| {
+                        let read_u64 = u64::try_from(read).map_err(|_| {
+                            failure(
+                                ReadFailureKind::Protocol,
+                                "member-read chunk size is unrepresentable",
+                            )
+                        })?;
+                        let next = actual_bytes.checked_add(read_u64).ok_or_else(|| {
                             failure(
                                 ReadFailureKind::Protocol,
                                 "member-read output length overflowed",
                             )
                         })?;
-                        if next > expected.actual_bytes as usize {
+                        if next > expected.actual_bytes {
                             return Err(failure(
                                 ReadFailureKind::Protocol,
                                 "member-read worker emitted more than the authorized size",
                             ));
                         }
-                        output.extend_from_slice(&chunk[..read]);
+                        actual_bytes = next;
+                        actual_crc.update(&chunk[..read]);
+                        actual_sha256.update(&chunk[..read]);
+                        if output.len() < retained {
+                            let take = (retained - output.len()).min(read);
+                            output.extend_from_slice(&chunk[..take]);
+                        }
                     }
                     Err(rustix::io::Errno::AGAIN) => break,
                     Err(rustix::io::Errno::INTR) => {}
@@ -901,10 +1045,16 @@ fn drain_and_finalize(
             }
         }
     }
-    if output.len() as u64 != expected.actual_bytes {
+    if actual_bytes != expected.actual_bytes {
         return Err(failure(
             ReadFailureKind::Integrity,
             "member-read output reached EOF at the wrong length",
+        ));
+    }
+    if output.len() as u64 != expected.retained_bytes {
+        return Err(failure(
+            ReadFailureKind::Integrity,
+            "member-read retained output reached EOF at the wrong length",
         ));
     }
 
@@ -951,18 +1101,38 @@ fn drain_and_finalize(
         &authority.planning,
         &authority.completion,
     );
-    sealr::__worker_runtime::validate_member_read_result(
-        authority
-            .source
-            .try_clone()
-            .map_err(|error| failure(ReadFailureKind::Integrity, error))?,
-        source_bytes().len() as u64,
-        read_authority,
-        request,
-        read_operation_id,
-        output,
-    )
-    .map_err(|error| failure(ReadFailureKind::Integrity, error))?;
+    let source = authority
+        .source
+        .try_clone()
+        .map_err(|error| failure(ReadFailureKind::Integrity, error))?;
+    let actual_crc = actual_crc.finalize();
+    let actual_sha256 = actual_sha256.finalize().into();
+    let validated = if prefix {
+        sealr::__worker_runtime::validate_member_prefix_read_stream_result(
+            source,
+            source_bytes().len() as u64,
+            read_authority,
+            request,
+            read_operation_id,
+            actual_bytes,
+            actual_crc,
+            actual_sha256,
+            output.len() as u64,
+        )
+    } else {
+        sealr::__worker_runtime::validate_member_read_stream_result(
+            source,
+            source_bytes().len() as u64,
+            read_authority,
+            request,
+            read_operation_id,
+            actual_bytes,
+            actual_crc,
+            actual_sha256,
+            output.len() as u64,
+        )
+    };
+    validated.map_err(|error| failure(ReadFailureKind::Integrity, error))?;
     Ok(())
 }
 

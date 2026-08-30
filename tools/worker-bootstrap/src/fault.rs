@@ -9,6 +9,7 @@ pub(crate) enum ChildMode {
     RestrictionProbeFailure,
     SeccompInstallationFailure,
     UnknownAncillary,
+    CorruptMemberTail,
     StallAt(StallPoint),
     ExitAt(FaultPoint),
 }
@@ -22,6 +23,7 @@ impl ChildMode {
             Self::RestrictionProbeFailure => "restriction-probe-failure",
             Self::SeccompInstallationFailure => "seccomp-installation-failure",
             Self::UnknownAncillary => "unknown-ancillary",
+            Self::CorruptMemberTail => "corrupt-member-tail",
             Self::StallAt(point) => point.argument(),
             Self::ExitAt(point) => point.argument(),
         }
@@ -36,6 +38,7 @@ impl ChildMode {
             "restriction-probe-failure" => Some(Self::RestrictionProbeFailure),
             "seccomp-installation-failure" => Some(Self::SeccompInstallationFailure),
             "unknown-ancillary" => Some(Self::UnknownAncillary),
+            "corrupt-member-tail" => Some(Self::CorruptMemberTail),
             _ => StallPoint::parse(argument)
                 .map(Self::StallAt)
                 .or_else(|| FaultPoint::parse(argument).map(Self::ExitAt)),
@@ -236,6 +239,7 @@ mod tests {
             ChildMode::RestrictionProbeFailure,
             ChildMode::SeccompInstallationFailure,
             ChildMode::UnknownAncillary,
+            ChildMode::CorruptMemberTail,
         ] {
             assert_eq!(ChildMode::parse(OsStr::new(mode.argument())), Some(mode));
         }

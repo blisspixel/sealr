@@ -6,6 +6,10 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+### Added
+
+- Added full-integrity supervised prefix reads to the authenticated Linux `VerifiedArchive` backend. A distinct private request kind binds the prefix cap to the exact source, accepted plan, completion, member, and originating effect while preserving existing full-read record bytes. The worker streams the complete Store or Deflate member; the supervisor retains at most the requested prefix and independently checks complete size, CRC32, SHA-256, exact EOF, correlated success, clean exit, and reap before releasing any bytes. Helper feature generation 2 prevents an older helper from accepting the new request shape before source transfer. Deterministic evidence covers zero, short, exact, oversized, and effectively unbounded caps, cross-kind rejection, wrong size, CRC32, SHA-256, and retained length, discarded-tail corruption, cancellation, timeout, post-result crash recovery, clones, repeated reads, and descriptor and child cleanup. The extracted-package consumer now evaluates a supervised `.data/scripts` wheel through this prefix path with no fallback.
+
 ## [0.1.0-alpha.12] - 2026-08-30
 
 ### Added

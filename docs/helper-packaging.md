@@ -36,7 +36,7 @@ The CLI, identity verifier, and helper have mode `0755`. Documentation, licenses
 }
 ```
 
-The example `byte_len` is schematic. Every real manifest binds the exact positive helper length and SHA-256. The enclosing release archive checksum and build-provenance attestation authenticate the helper and manifest transitively. At execution, the supervisor independently opens, hashes, seals, launches, and proves the running object before transferring archive authority, as specified in the [reduced-authority design](sandbox.md).
+The example `byte_len` is schematic. Every real manifest binds the exact positive helper length and SHA-256. `bootstrap_abi` remains 1 because the bootstrap frame layout is unchanged. The authenticated runtime hello separately requires helper feature generation 2, which binds support for the additive supervised prefix-read request and frame flag. A helper with any other feature generation is rejected before source transfer. The feature generation is intentionally not a manifest field. The enclosing release archive checksum and build-provenance attestation authenticate the helper and manifest transitively. At execution, the supervisor independently opens, hashes, seals, launches, and proves the running object before transferring archive authority, as specified in the [reduced-authority design](sandbox.md).
 
 The helper is built as a static `x86_64-unknown-linux-musl` ELF and must have no program interpreter. The repository lab is a separate verification executable and is never included in a native release archive.
 
@@ -52,11 +52,11 @@ All targets also check the extracted verifier's version, help, misuse exit, admi
 
 Linux additionally requires:
 
-- exact manifest fields, release version, helper target, bootstrap ABI, length, and SHA-256;
+- exact manifest fields, release version, helper target, bootstrap ABI, length, and SHA-256, plus runtime helper feature generation 2;
 - ELF64 x86-64 identity and absence of `PT_INTERP`;
 - bounded refusal of direct invocation and `--help`;
 - an authenticated extracted-helper hello, executable-identity proof, restricted inspect completion, clean exit, and exact reap through the repository lab;
-- supervised completion through the packaged CLI, wheel laboratory, and a binary built against the extracted crate, all using the exact extracted manifest and helper with no fallback.
+- supervised completion through the packaged CLI, wheel laboratory, and a binary built against the extracted crate, all using the exact extracted manifest and helper with no fallback; the general consumer includes a `.data/scripts` wheel that requires the prefix-read path.
 
 The release workflow calls the same package and verification scripts before uploading any archive. Historical releases through Alpha.5 do not contain this helper; Alpha.6 is the first release whose Linux archive carries the contract.
 

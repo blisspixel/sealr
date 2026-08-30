@@ -14,13 +14,13 @@ pwsh -NoProfile -File scripts/generate_tcb_report.ps1
 
 | Measurement | Value |
 |---|---|
-| Runtime Rust lines (crates/sealr/src) | 44353 |
-| In-crate test lines | 18434 |
+| Runtime Rust lines (crates/sealr/src) | 44800 |
+| In-crate test lines | 18657 |
 | `unsafe` uses in runtime code | 51 |
 | `unsafe` uses in test code | 13 |
 | `extern "C"` blocks in runtime code | 1 |
 | Panic sites in runtime code (`.unwrap(`, `.expect(`, `panic!(`, `unreachable!(`) | 313 |
-| Panic sites in test code | 1248 |
+| Panic sites in test code | 1259 |
 
 ## Unsafe code
 
@@ -37,7 +37,7 @@ The parsing, verification, and identity path — every module that interprets un
 
 | Pattern | Runtime | Test |
 |---|---|---|
-| `.unwrap(` | 150 | 1097 |
+| `.unwrap(` | 150 | 1108 |
 | `.expect(` | 134 | 103 |
 | `panic!(` | 17 | 45 |
 | `unreachable!(` | 12 | 3 |
@@ -96,23 +96,23 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/policy.rs` | 878 | 798 | 0 | 1 |
 | `crates/sealr/src/quota.rs` | 82 | 51 | 0 | 0 |
 | `crates/sealr/src/ratio.rs` | 34 | 58 | 0 | 0 |
-| `crates/sealr/src/semantic_record.rs` | 4703 | 4011 | 0 | 45 |
+| `crates/sealr/src/semantic_record.rs` | 4705 | 4011 | 0 | 45 |
 | `crates/sealr/src/semantic_record/executor.rs` | 500 | 0 | 0 | 0 |
-| `crates/sealr/src/semantic_record/member_read.rs` | 244 | 0 | 0 | 0 |
+| `crates/sealr/src/semantic_record/member_read.rs` | 383 | 0 | 0 | 0 |
 | `crates/sealr/src/semantic_record/peak_live.rs` | 0 | 489 | 0 | 0 |
 | `crates/sealr/src/semantic_record/retained_content.rs` | 382 | 0 | 0 | 0 |
 | `crates/sealr/src/semantic_record/worker_lab.rs` | 1026 | 609 | 0 | 0 |
-| `crates/sealr/src/semantic_record/worker_runtime.rs` | 576 | 330 | 0 | 0 |
+| `crates/sealr/src/semantic_record/worker_runtime.rs` | 781 | 528 | 0 | 0 |
 | `crates/sealr/src/sevenz.rs` | 1113 | 273 | 0 | 10 |
 | `crates/sealr/src/snapshot.rs` | 1414 | 664 | 0 | 6 |
 | `crates/sealr/src/supervised.rs` | 642 | 0 | 0 | 5 |
-| `crates/sealr/src/supervised/linux.rs` | 1599 | 0 | 4 | 4 |
+| `crates/sealr/src/supervised/linux.rs` | 1684 | 0 | 4 | 4 |
 | `crates/sealr/src/supervised/linux/materialize.rs` | 288 | 0 | 0 | 0 |
 | `crates/sealr/src/tar.rs` | 583 | 381 | 0 | 7 |
 | `crates/sealr/src/tar_gnu.rs` | 863 | 294 | 0 | 9 |
 | `crates/sealr/src/tar_pax.rs` | 1018 | 442 | 0 | 10 |
 | `crates/sealr/src/verification.rs` | 455 | 0 | 0 | 1 |
-| `crates/sealr/src/verified.rs` | 804 | 543 | 0 | 1 |
+| `crates/sealr/src/verified.rs` | 819 | 568 | 0 | 1 |
 | `crates/sealr/src/wheel/evaluate.rs` | 1081 | 698 | 0 | 2 |
 | `crates/sealr/src/wheel/identity.rs` | 278 | 0 | 0 | 1 |
 | `crates/sealr/src/wheel/mod.rs` | 33 | 0 | 0 | 0 |
@@ -120,7 +120,7 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/wheel/parse.rs` | 977 | 260 | 0 | 4 |
 | `crates/sealr/src/worker_protocol/frame.rs` | 141 | 93 | 0 | 1 |
 | `crates/sealr/src/worker_protocol/helper.rs` | 388 | 121 | 0 | 2 |
-| `crates/sealr/src/worker_protocol/linux.rs` | 389 | 263 | 9 | 0 |
+| `crates/sealr/src/worker_protocol/linux.rs` | 390 | 263 | 9 | 0 |
 | `crates/sealr/src/worker_protocol/mod.rs` | 15 | 0 | 0 | 0 |
 | `crates/sealr/src/worker_protocol/sealed.rs` | 254 | 132 | 0 | 2 |
 | `crates/sealr/src/xz.rs` | 1096 | 337 | 0 | 2 |
