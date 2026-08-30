@@ -24,7 +24,7 @@
     "uploadOn": "failure",
     "retentionDays": 7
   },
-  "dictionary": {"path": "fuzz/dictionaries/sevenz_copy_portable_v1_dictionary", "bytes": 484, "sha256": "c7cfbd9a8cabb7c2c77e79f0a2b9d6434ff89296127617a6429f0957c7149c10"},
+  "dictionary": {"path": "fuzz/dictionaries/sevenz_copy_portable_v1_dictionary", "bytes": 629, "sha256": "7ac0b67eb5287996ab223e581930c97fcdad00148ca341aaa0dd931e9c4efcc1"},
   "targetSource": {"path": "fuzz/fuzz_targets/sevenz_copy_portable_v1.rs", "bytes": 2736, "sha256": "74d2b3513566584d51e7c6c683f78e7946ef237a13c1cbd643c9ca1673e7227a"},
   "generatorSource": {"path": "fuzz/generate_sevenz_fuzz_seeds.ps1", "bytes": 7335, "sha256": "ab6bdaf54596291b1fc139d01cfcc9ba2498695213e9a657d27c698123625db5"},
   "generator": "fuzz/generate_sevenz_fuzz_seeds.ps1",

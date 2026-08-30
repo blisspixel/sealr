@@ -340,6 +340,42 @@ function Assert-ManifestFile {
     }
 }
 
+function Assert-LibFuzzerDictionaryBytes {
+    param(
+        [Parameter(Mandatory)] [byte[]] $Bytes,
+        [Parameter(Mandatory)] [string] $Label
+    )
+
+    foreach ($byte in $Bytes) {
+        if ($byte -ne 0x0A -and ($byte -lt 0x20 -or $byte -gt 0x7E)) {
+            throw "libFuzzer dictionary must encode binary tokens with ASCII escapes: $Label"
+        }
+    }
+
+    $text = [Text.Encoding]::ASCII.GetString($Bytes)
+    if (-not $text.EndsWith("`n", [StringComparison]::Ordinal)) {
+        throw "libFuzzer dictionary must end with LF: $Label"
+    }
+    $linePattern = '^(?:[A-Za-z_][A-Za-z0-9_]*=)?"(?:[^"\\]|\\(?:\\|"|x[0-9A-Fa-f]{2}))*"$'
+    $lines = $text.Split("`n")
+    foreach ($line in $lines[0..($lines.Count - 2)]) {
+        if ($line -cnotmatch $linePattern) {
+            throw "libFuzzer dictionary contains invalid syntax: ${Label}: $line"
+        }
+    }
+}
+
+function Assert-LibFuzzerDictionary {
+    param(
+        [Parameter(Mandatory)] [object] $Entry
+    )
+
+    $fullPath = Join-Path $workspace ([string]$Entry.path)
+    Assert-LibFuzzerDictionaryBytes `
+        -Bytes ([IO.File]::ReadAllBytes($fullPath)) `
+        -Label ([string]$Entry.path)
+}
+
 function Assert-TarPaxManifestContract {
     param([Parameter(Mandatory)] [object] $Candidate)
 
@@ -968,8 +1004,8 @@ function Assert-SevenZManifestContract {
     if ((@($Candidate.dictionary.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
             ((@('bytes', 'path', 'sha256') | Sort-Object) -join "`n") -or
         $Candidate.dictionary.path -cne 'fuzz/dictionaries/sevenz_copy_portable_v1_dictionary' -or
-        $Candidate.dictionary.bytes -ne 484 -or
-        $Candidate.dictionary.sha256 -cne 'c7cfbd9a8cabb7c2c77e79f0a2b9d6434ff89296127617a6429f0957c7149c10') {
+        $Candidate.dictionary.bytes -ne 629 -or
+        $Candidate.dictionary.sha256 -cne '7ac0b67eb5287996ab223e581930c97fcdad00148ca341aaa0dd931e9c4efcc1') {
         throw '7z Copy fuzz manifest dictionary contract changed'
     }
     if ((@($Candidate.targetSource.PSObject.Properties.Name | Sort-Object) -join "`n") -cne
@@ -1077,6 +1113,46 @@ foreach ($seed in $sevenzManifest.seeds) {
 Assert-ManifestFile -Entry $zip64Manifest.dictionary
 foreach ($seed in $zip64Manifest.seeds) {
     Assert-ManifestFile -Entry $seed
+}
+
+@(
+    $manifest.dictionary,
+    $semanticManifest.dictionary,
+    $tarManifest.dictionary,
+    $tarPaxManifest.dictionary,
+    $tarGnuLongNameManifest.dictionary,
+    $gzipManifest.dictionary,
+    $tarGzipManifest.dictionary,
+    $tarGzipPaxManifest.dictionary,
+    $tarGzipGnuLongNameManifest.dictionary,
+    $tarZstdManifest.dictionary,
+    $tarXzManifest.dictionary,
+    $tarBzip2Manifest.dictionary,
+    $sevenzManifest.dictionary,
+    $zip64Manifest.dictionary
+) | ForEach-Object { Assert-LibFuzzerDictionary -Entry $_ }
+
+foreach ($invalidDictionary in @(
+    @{
+        Label = 'raw binary token regression fixture'
+        Bytes = [byte[]]@(0x22, 0xBC, 0x22, 0x0A)
+    },
+    @{
+        Label = 'malformed hexadecimal escape regression fixture'
+        Bytes = [Text.Encoding]::ASCII.GetBytes('"\x0g"' + "`n")
+    }
+)) {
+    $rejected = $false
+    try {
+        Assert-LibFuzzerDictionaryBytes `
+            -Bytes $invalidDictionary.Bytes `
+            -Label $invalidDictionary.Label
+    } catch {
+        $rejected = $true
+    }
+    if (-not $rejected) {
+        throw "libFuzzer dictionary verifier accepted its $($invalidDictionary.Label)"
+    }
 }
 
 $corpusRoot = Join-Path $workspace 'fuzz/corpus/protocol_decoders'
