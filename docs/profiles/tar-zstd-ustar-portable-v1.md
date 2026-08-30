@@ -1,6 +1,6 @@
 # Strict zstd-wrapped portable ustar profile v1
 
-> Status: supported in-process preview on current main. This is the first promoted codec adapter beyond Deflate. Authenticated worker execution fails closed until a later semantic record can bind both snapshot domains and their transform.
+> Status: supported in-process preview released in Alpha.12. This is the first promoted codec adapter beyond Deflate. Authenticated worker execution fails closed until a later semantic record can bind both snapshot domains and their transform.
 
 Profile ID: `sealr.profile.tar-zstd.ustar-portable.v1`
 

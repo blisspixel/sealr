@@ -199,7 +199,7 @@
 
 ## Rejection-cluster investigation
 
-- `wheel.header-duplicate`: fourteen artifacts carry a duplicated `Generator` field - the cffi and matplotlib pair the v4 pilot investigated, joined at population scale by cbor2, ddtrace, duckdb, h5py, mmh3, pymssql, pyroaring, simplejson, statsmodels, thrift, xgboost, and zopfli, almost all cp310 macOS artifacts whose build pipelines emit a second generator line. The supported model still denies duplicated headers because it has not defined ordered or merged generator semantics; this is a consumer-compatibility gap, not a container disagreement, and it is now the dominant denial cluster.
+- `wheel.header-duplicate`: fourteen artifacts carry a duplicated `Generator` field. The cffi and matplotlib pair from the v4 pilot are joined in the stratified v5 corpus by cbor2, ddtrace, duckdb, h5py, mmh3, pymssql, pyroaring, simplejson, statsmodels, thrift, xgboost, and zopfli, almost all cp310 macOS artifacts whose build pipelines emit a second generator line. The supported model still denies duplicated headers because it has not defined ordered or merged generator semantics; this is a consumer-compatibility gap, not a container disagreement, and it is the largest denial cluster in this corpus.
 - `quota.ratio`: SciPy reaches the existing default 100:1 expansion ceiling on three NIST ANOVA test-data members before wheel evaluation, exactly as in v3 and v4. The portable profile does not weaken the adversarial resource policy to improve corpus acceptance.
 - `wheel.tag-disagreement`: playwright publishes the filename tag `py3-none-win_amd64` while its `WHEEL` Tag fields expand to a different set, and the mysql-connector-python aarch64 artifact disagrees the same way. Two declared tag sets that disagree are denied rather than one being silently preferred.
 - `wheel.artifact-root-disagreement`: jaraco.classes keeps its legacy dotted distribution name as the `.dist-info` root, which is not the canonical normalized root bound to the outer filename. The consumer requires exact root agreement instead of re-normalizing on its behalf.
@@ -219,7 +219,7 @@ Exactly the two artifacts the immutable v4 report denied with `wheel.script-aggr
 
 - Artifacts with Unicode paths: `0`
 - Unix-creator executable regular-file members: `1581`
-- The `scripts` scheme is measured on twelve admitted artifacts - awscli, dill, dulwich, jmespath, maturin, ninja, numba, patchelf, pywin32, ruff, ty, and uv - so the native-CLI shape the revision unblocked is proven at population scale, not only on the two flipped artifacts.
+- The `scripts` scheme is measured on twelve admitted artifacts: awscli, dill, dulwich, jmespath, maturin, ninja, numba, patchelf, pywin32, ruff, ty, and uv. This extends the native-CLI observation beyond the two flipped artifacts, but the stratified corpus is not a population-prevalence sample.
 - The `headers` scheme is measured for the first time: greenlet relocates `.data/headers`. fonttools, jupyterlab, and notebook relocate the `data` scheme.
 - No measured artifact declares Core Metadata 2.6, and none surfaced across the PEP 658 metadata prospecting of several hundred candidate projects; that half of the snapshot widening is still exercised only by unit fixtures. Core Metadata 2.3 is measured for the first time on two artifacts.
 - No measured artifact contains Unicode member paths, so those rule consequences continue to rely on hostile fixtures.

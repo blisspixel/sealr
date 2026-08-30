@@ -11,8 +11,8 @@ use sealr::{
     TreeRoot, VerificationStatus, VerifiedArchive, ZipInterpretationProfile,
     SEVENZ_COPY_PORTABLE_V1, TAR_BZIP2_USTAR_PORTABLE_V1, TAR_GNU_LONGNAME_PORTABLE_V1,
     TAR_GZIP_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_PAX_PORTABLE_V1, TAR_PAX_PORTABLE_V1,
-    TAR_USTAR_PORTABLE_V1, TAR_XZ_USTAR_PORTABLE_V1, TAR_ZSTD_USTAR_PORTABLE_V1,
-    ZIP_STRICT_ASCII_V2,
+    TAR_GZIP_USTAR_PORTABLE_V1, TAR_USTAR_PORTABLE_V1, TAR_XZ_USTAR_PORTABLE_V1,
+    TAR_ZSTD_USTAR_PORTABLE_V1, ZIP64_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2,
 };
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
@@ -161,6 +161,54 @@ fn main() {
         .any(|binding| binding.path == "demo/caf\u{e9}.py"));
     assert_eq!(plan.artifact_sha256(), identities.artifact_sha256);
 
+    let zip64_bytes = decode_hex(CPYTHON_SEEK_ZIP64_HEX);
+    let zip64_options = ApplyOptions::new()
+        .with_interpretation_profile(ZipInterpretationProfile::Zip64StrictAsciiV1)
+        .with_retention(
+            RetentionPlan::new(16, 16)
+                .with_path("a")
+                .expect("canonical ZIP64 retention path"),
+        );
+    let zip64_outcome = apply_with_options(
+        Request {
+            source: Source::Bytes {
+                path: Some("cpython-seek.zip"),
+                data: &zip64_bytes,
+            },
+            policy: &Policy::default_v3(),
+            dest: None,
+        },
+        &zip64_options,
+    );
+    assert!(
+        matches!(zip64_outcome.admission, AdmissionStatus::Admitted),
+        "{:?}",
+        zip64_outcome.view.findings
+    );
+    assert!(matches!(
+        zip64_outcome.verification,
+        VerificationStatus::Complete
+    ));
+    let zip64_ir = zip64_outcome.archive_ir().expect("strict ZIP64 IR");
+    assert_eq!(zip64_ir.format(), ArchiveFormat::Zip64);
+    assert_eq!(zip64_ir.profile(), ZIP64_STRICT_ASCII_V1);
+    assert!(matches!(
+        zip64_outcome.receipt.identities.layout,
+        TreeRoot::SealrTreeV3 { .. }
+    ));
+    let zip64_archive = zip64_outcome
+        .into_verified_archive()
+        .expect("strict ZIP64 must expose verified authority");
+    assert_eq!(zip64_archive.retention_status("a"), RetentionStatus::Retained);
+    assert_eq!(
+        zip64_archive.retained_member("a"),
+        Some(b"AAAAAAAAAAAAAAAA".as_slice())
+    );
+    assert_eq!(
+        zip64_archive.read_member("a", 16).unwrap(),
+        b"AAAAAAAAAAAAAAAA"
+    );
+
     let tar_policy = Policy::default_v2();
     let tar_options = ApplyOptions::new()
         .with_tar_interpretation_profile(TarInterpretationProfile::UstarPortableV1)
@@ -203,6 +251,67 @@ fn main() {
         Some(b"retained".as_slice())
     );
     assert_eq!(tar_archive.read_member("later.txt", 5).unwrap(), b"later");
+
+    let gzip_ustar_tar = portable_tar();
+    let gzip_ustar_bytes = gzip_wrapped(&gzip_ustar_tar);
+    let gzip_ustar_options = ApplyOptions::new()
+        .with_tar_gzip_interpretation_profile(TarGzipInterpretationProfile::UstarPortableV1)
+        .with_retention(
+            RetentionPlan::new(8, 8)
+                .with_path("retained.txt")
+                .expect("canonical gzip-wrapped ustar retention path"),
+        );
+    let gzip_ustar_outcome = apply_with_options(
+        Request {
+            source: Source::Bytes {
+                path: Some("portable.tar.gz"),
+                data: &gzip_ustar_bytes,
+            },
+            policy: &Policy::default_v4(),
+            dest: None,
+        },
+        &gzip_ustar_options,
+    );
+    assert!(
+        matches!(gzip_ustar_outcome.admission, AdmissionStatus::Admitted),
+        "{:?}",
+        gzip_ustar_outcome.view.findings
+    );
+    assert!(matches!(
+        gzip_ustar_outcome.verification,
+        VerificationStatus::Complete
+    ));
+    let gzip_ustar_ir = gzip_ustar_outcome
+        .archive_ir()
+        .expect("gzip-wrapped ustar IR");
+    assert_eq!(gzip_ustar_ir.format(), ArchiveFormat::TarGzipUstar);
+    assert_eq!(gzip_ustar_ir.profile(), TAR_GZIP_USTAR_PORTABLE_V1);
+    assert_eq!(
+        gzip_ustar_ir
+            .gzip_evidence()
+            .expect("gzip-wrapped ustar evidence")
+            .derived_output_len,
+        gzip_ustar_tar.len() as u64
+    );
+    assert!(matches!(
+        gzip_ustar_outcome.receipt.identities.layout,
+        TreeRoot::SealrTreeV4 { .. }
+    ));
+    let gzip_ustar_archive = gzip_ustar_outcome
+        .into_verified_archive()
+        .expect("gzip-wrapped ustar must expose verified authority");
+    assert_eq!(
+        gzip_ustar_archive.retention_status("retained.txt"),
+        RetentionStatus::Retained
+    );
+    assert_eq!(
+        gzip_ustar_archive.retained_member("retained.txt"),
+        Some(b"retained".as_slice())
+    );
+    assert_eq!(
+        gzip_ustar_archive.read_member("later.txt", 5).unwrap(),
+        b"later"
+    );
 
     let pax_policy = Policy::default_v5();
     let pax_options = ApplyOptions::new()
@@ -700,6 +809,16 @@ const TAR_BZIP2_LEVEL9_FIXTURE_HEX: &str =
      6a64f51a64d0340640c4d064a0d341a680034d001e6587e2308c005913503e46a2880842162fc4d83544cc\
      801bd752180f90d0c026e224716664838d467b58fbfac1cf118147687b09c160a4ad2080f498e75a99561f\
      215194f509f0637e2ee48a70a120f63b854e";
+
+/// CPython's seekable forced-small ZIP64 shape carrying `a` with sixteen `A`
+/// bytes, pinned by the public ZIP64 identity-conformance bundle.
+const CPYTHON_SEEK_ZIP64_HEX: &str = concat!(
+    "504b03042d0000000800000021000b5704bbffffffffffffffff01001400",
+    "6101001000100000000000000005000000000000007374440500504b0102",
+    "2d002d0000000800000021000b5704bb0500000010000000010000000000",
+    "00000000000080010000000061504b050600000000010001002f00000038",
+    "0000000000",
+);
 
 fn decode_hex(value: &str) -> Vec<u8> {
     let cleaned: String = value.chars().filter(|c| !c.is_whitespace()).collect();

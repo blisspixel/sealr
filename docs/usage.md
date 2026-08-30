@@ -45,7 +45,7 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-ustar
 
 ZIP remains the compatibility default. Every `--format` value invokes exactly one parser and uses a policy that authorizes that selection.
 
-Strict single-member gzip-wrapped portable ustar is a separate current-main in-process preview under policy v4:
+Strict single-member gzip-wrapped portable ustar is a separate Alpha.10 in-process preview under policy v4:
 
 ```text
 cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-ustar
@@ -61,7 +61,7 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-pax
 
 `--format tar-pax` accepts only `sealr.profile.tar.pax-portable.v1`: exact portable-ustar physical headers plus bounded local or global extensions containing only canonical `path` and `size` records. It is not automatic PAX detection or general TAR compatibility. Unknown keywords, links, sparse files, GNU records, base-256 numbers, mixed dialects, and recovery behavior fail closed.
 
-Restricted raw old-GNU long-name TAR is a separate current-main in-process preview under policy v6:
+Restricted raw old-GNU long-name TAR is a separate Alpha.12 in-process preview under policy v6:
 
 ```text
 cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-gnu-longname
@@ -69,7 +69,7 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar --format tar-gnu-longname
 
 `--format tar-gnu-longname` accepts only exact old-GNU magic with at most one bounded pathname-only `L` carrier per member. `K` long links, sparse records, base-256 numbers, PAX records, mixed state, and orphan carriers fail closed.
 
-The gzip-wrapped restricted PAX and GNU long-name compositions are separate current-main in-process previews under policy v7:
+The gzip-wrapped restricted PAX and GNU long-name compositions are separate Alpha.12 in-process previews under policy v7:
 
 ```text
 cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-pax
@@ -78,7 +78,7 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar.gz --format tar-gzip-gnu-
 
 Each composition accepts exactly one strict RFC 1952 gzip member whose bounded decoded output satisfies the complete frozen raw dialect. No composition detects, retries, or aliases another selection, and the gzip FNAME field never selects the parser or supplies a member path.
 
-The zstd-wrapped portable ustar profile is a separate current-main in-process preview under policy v8, and the first promoted codec beyond Deflate:
+The zstd-wrapped portable ustar profile is a separate Alpha.12 in-process preview under policy v8, and the first promoted codec beyond Deflate:
 
 ```text
 cargo run --locked -p sealr-cli -- path/to/archive.tar.zst --format tar-zstd-ustar
@@ -86,7 +86,7 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar.zst --format tar-zstd-ust
 
 `--format tar-zstd-ustar` accepts exactly one strict RFC 8878 frame whose bounded decoded output is exact portable ustar. Skippable frames, dictionaries, windows beyond 8 MiB, concatenation, and trailing bytes fail closed.
 
-The xz-wrapped portable ustar profile is a separate current-main in-process preview under policy v9, and the second promoted codec:
+The xz-wrapped portable ustar profile is a separate Alpha.12 in-process preview under policy v9, and the second promoted codec:
 
 ```text
 cargo run --locked -p sealr-cli -- path/to/archive.tar.xz --format tar-xz-ustar
@@ -94,7 +94,7 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar.xz --format tar-xz-ustar
 
 `--format tar-xz-ustar` accepts exactly one restricted XZ stream — one to 4096 LZMA2-only blocks, dictionaries at most 8 MiB, CRC32/CRC64/SHA-256 checks verified twice with check `None` denied — whose bounded decoded output is exact portable ustar. Other filter chains, stream padding, concatenation, and trailing bytes fail closed.
 
-The bzip2-wrapped portable ustar profile is a separate current-main in-process preview under policy v10, and the third promoted codec:
+The bzip2-wrapped portable ustar profile is a separate Alpha.12 in-process preview under policy v10, and the third promoted codec:
 
 ```text
 cargo run --locked -p sealr-cli -- path/to/archive.tar.bz2 --format tar-bzip2-ustar
@@ -102,7 +102,7 @@ cargo run --locked -p sealr-cli -- path/to/archive.tar.bz2 --format tar-bzip2-us
 
 `--format tar-bzip2-ustar` accepts exactly one restricted bzip2 stream — levels 1 to 9, one to 65,536 blocks, the bit-aligned container independently replayed with a footer shift-scan and a block-CRC chain fold — whose bounded decoded output is exact portable ustar. Bzip1, randomized blocks, empty streams, concatenated streams, and trailing bytes fail closed.
 
-The Copy-only 7z container is a separate current-main in-process preview under policy v11, and the first Gate C structure step:
+The Copy-only 7z container is a separate Alpha.12 in-process preview under policy v11, and the first Gate C structure step:
 
 ```text
 cargo run --locked -p sealr-cli -- path/to/archive.7z --format 7z-copy
@@ -110,7 +110,7 @@ cargo run --locked -p sealr-cli -- path/to/archive.7z --format 7z-copy
 
 `--format 7z-copy` accepts exactly one raw-header, single-volume 7z whose every coder is Copy. Stock `7z a` output compresses the header itself and is rejected as unsupported — produce admissible archives with `7z a -m0=Copy -mhc=off` (or py7zr's `set_encoded_header_mode(False)`). Non-Copy coders, packed headers, external records, anti-items, and trailing bytes fail closed.
 
-Strict ZIP64 is a separate current-main in-process preview under policy v3:
+Strict ZIP64 is a separate Alpha.10 in-process preview under policy v3:
 
 ```text
 cargo run --locked -p sealr-cli -- path/to/archive.zip --format zip64

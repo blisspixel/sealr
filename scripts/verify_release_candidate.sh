@@ -2,14 +2,14 @@
 set -euo pipefail
 
 selector="scripts/release_candidate.jq"
-tag="v0.1.0-alpha.11"
-title="sealr 0.1.0-alpha.11: restricted POSIX PAX"
-notes=$'# sealr 0.1.0-alpha.11\n'
+tag="v0.1.0-alpha.12"
+title="sealr 0.1.0-alpha.12: canonical evidence and independent verification"
+notes=$'# sealr 0.1.0-alpha.12\n'
 allowed='[
   "SHA256SUMS",
-  "sealr-0.1.0-alpha.11-aarch64-apple-darwin.tar.gz",
-  "sealr-0.1.0-alpha.11-x86_64-pc-windows-msvc.zip",
-  "sealr-0.1.0-alpha.11-x86_64-unknown-linux-gnu.tar.gz"
+  "sealr-0.1.0-alpha.12-aarch64-apple-darwin.tar.gz",
+  "sealr-0.1.0-alpha.12-x86_64-pc-windows-msvc.zip",
+  "sealr-0.1.0-alpha.12-x86_64-unknown-linux-gnu.tar.gz"
 ]'
 
 mapfile -t workspace_versions < <(
