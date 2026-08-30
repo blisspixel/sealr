@@ -21,7 +21,7 @@ The package contract at `tests/package-contract/sealr.json` pins:
 - the Apache-2.0 SPDX expression;
 - a package-root `README.md` and `LICENSE` whose bytes match the repository sources.
 
-Required CI packages and verifies the crate, extracts the exact `.crate`, and builds a separately locked downstream consumer against that extraction. The consumer exercises supervised ZIP, every current in-process format selection through Copy-only 7z, retained and later member reads after source removal, and the public wheel evaluator. The check fails if another workspace crate becomes publishable or any packaged path changes without a reviewed contract update.
+Required CI packages and verifies the crate, extracts the exact `.crate`, and builds two separately locked downstream consumers against that extraction. The general consumer exercises supervised ZIP, every current in-process format selection through Copy-only 7z, retained and later member reads after source removal, and the public wheel evaluator. The Linux POSIX PyPA consumer independently verifies canonical evidence, removes the source, stages bounded member bytes only through `VerifiedArchive`, and completes real installer 1.0.1 filesystem effects for a controlled fixture and the exact hash-pinned upstream wheel. It has no dependency on another Sealr workspace crate or internal feature. The check fails if another workspace crate becomes publishable or any packaged path changes without a reviewed contract update.
 
 ### Public API review
 

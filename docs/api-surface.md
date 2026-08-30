@@ -21,4 +21,4 @@ Everything supported flows through the crate root's re-exports plus the two publ
 
 Discipline this surface already holds and the freeze will keep: non-exhaustive markers on output records; output records readable but not constructible where they carry authority (`WheelInstallPlan`, `VerifiedArchive` use private fields and accessors and block caller construction); input types built through constructors and builders; error types exposing accessors rather than public fields.
 
-A compiler-accurate diff layer (pinned `cargo-semver-checks` in the scheduled assurance lane) remains a planned addition; it augments this contract rather than replacing it.
+The extracted-package PyPA installer conformance now proves one substantial downstream use of the supported surface without an internal feature or another workspace crate. A compiler-accurate diff layer, using pinned `cargo-semver-checks` in the scheduled assurance lane, remains the next compatibility addition. It augments these source and consumer contracts rather than replacing them.
