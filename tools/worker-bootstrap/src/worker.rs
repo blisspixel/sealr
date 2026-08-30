@@ -994,8 +994,8 @@ fn verify_outside_denied(stage: Option<&OwnedFd>) -> Result<u64, WorkerFailure> 
     let result = if let Some(stage) = stage {
         rustix::fs::openat(
             stage,
-            "../outside-sentinel",
-            OFlags::RDONLY | OFlags::CLOEXEC,
+            "..",
+            OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC,
             Mode::empty(),
         )
     } else {

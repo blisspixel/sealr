@@ -2,7 +2,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 use sealr::wheel::{
     evaluate_wheel, realize_identity, ExecutableDisposition, InstallScheme, InstallTransform,
@@ -10,17 +11,17 @@ use sealr::wheel::{
     WheelInstallPlan, WheelLimits,
 };
 use sealr::{
-    apply_with_options, ApplyOptions, MemberKind, Policy, Request, Source, VerifiedArchive,
-    ZipInterpretationProfile,
+    apply_with_options, ApplyOptions, MemberKind, MemberReadErrorKind, Policy, Request, Source,
+    VerifiedArchive, ZipInterpretationProfile,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};
 
-const BRIDGE_SCHEMA: &str = "sealr.pypa-adopter.v1";
+const BRIDGE_SCHEMA: &str = "sealr.pypa-wheel-source.v1";
 const BRIDGE_ID: &str = "pypa-installer-1.0.1-wheel-source";
-const REPORT_SCHEMA: &str = "sealr.pypa-adopter-report.v1";
+const REPORT_SCHEMA: &str = "sealr.pypa-wheel-source-report.v1";
 const INSTALLER_VERSION: &str = "1.0.1";
 const INSTALLER_WHEEL_SHA256: &str =
     "011d045df8b954ced7dde3a7e42ae4418da40ecda7990f2d11d5ed7c146fd98b";
@@ -30,12 +31,13 @@ const MAX_MEMBER_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_DESCRIPTOR_BYTES: usize = 16 * 1024 * 1024;
 const PYTHON_INTERPRETER: &str = "/usr/bin/python3";
+const BRIDGE_TIMEOUT: Duration = Duration::from_secs(120);
 const CONTROLLED_IDENTITY_PINS: [&str; 5] = [
-    "23619aae41ab794474aed01cb6e9877f0c1f68c21d135464b1c3f276168bc5be",
-    "811ac7b1dd594500651918e41260274ed8b380fffd28736516c6f39c00091e34",
-    "767126fa9683ee3b3a924b495e1380066695c171847f63cb3d761b3e0ca1eb06",
-    "75c7b1e1906da096806aa984c4ef880181b24e5b9c1d635b7ffd33891a315087",
-    "fee4c452e95ab3e2c27fcaa5acacd610c874af5490af7f7ab7364549f7bbc008",
+    "078364afdeda960f1e0df0959d9cafcdb067b2c3c8c2999c0cea7cd521c466ec",
+    "7336763b06639d2cc5a1ee004adf6c42a0a15e6ace846e0457299f3010011f82",
+    "986f82074b5ac802253ba317579bf1500a28947e022b0c27581180ea05004c55",
+    "54b263d0c136a522fa08e0b5d582a5bdfb5203af970e5a84c786ef549a19dac8",
+    "5978f3ebecb5a2ff85567240a2a659c01c4212e0a770ca8ba4d13b6bbe97f228",
 ];
 const REAL_INSTALLER_IDENTITY_PINS: [&str; 5] = [
     INSTALLER_WHEEL_SHA256,
@@ -51,6 +53,8 @@ struct Args {
     installer_root: PathBuf,
     verifier: PathBuf,
     real_wheel: PathBuf,
+    bridge: PathBuf,
+    controlled_wheel_output: PathBuf,
 }
 
 impl Args {
@@ -60,12 +64,16 @@ impl Args {
         let mut installer_root = None;
         let mut verifier = None;
         let mut real_wheel = None;
+        let mut bridge = None;
+        let mut controlled_wheel_output = None;
         while let Some(flag) = values.next() {
             let slot = match flag.to_str() {
                 Some("--python") => &mut python,
                 Some("--installer-root") => &mut installer_root,
                 Some("--verifier") => &mut verifier,
                 Some("--real-wheel") => &mut real_wheel,
+                Some("--bridge") => &mut bridge,
+                Some("--controlled-wheel-output") => &mut controlled_wheel_output,
                 _ => return Err(format!("unknown argument: {}", flag.to_string_lossy())),
             };
             if slot.is_some() {
@@ -80,6 +88,9 @@ impl Args {
             installer_root: installer_root.ok_or("--installer-root is required")?,
             verifier: verifier.ok_or("--verifier is required")?,
             real_wheel: real_wheel.ok_or("--real-wheel is required")?,
+            bridge: bridge.ok_or("--bridge is required")?,
+            controlled_wheel_output: controlled_wheel_output
+                .ok_or("--controlled-wheel-output is required")?,
         })
     }
 }
@@ -113,21 +124,25 @@ impl Drop for TestDir {
 #[derive(Serialize)]
 struct BridgeDescriptor<'a> {
     schema: &'static str,
-    bridge: &'static str,
+    adapter: &'static str,
     installer_version: &'static str,
     installer_wheel_sha256: &'static str,
-    interpreter: String,
+    canonical_receipt_sha256: &'a str,
+    artifact_sha256: &'a str,
+    install_plan_sha256: &'a str,
+    distribution: &'a str,
+    version: &'a str,
+    dist_info_dir: &'a str,
+    data_dir: String,
+    interpreter: &'static str,
     target_model: &'static str,
     installer_policy: &'static str,
-    artifact: &'a WheelArtifactIR,
-    plan: &'a WheelInstallPlan,
-    identities: &'a WheelIdentities,
     members: Vec<BridgeMember>,
 }
 
 #[derive(Serialize)]
 struct BridgeMember {
-    member_index: usize,
+    index: usize,
     path: String,
     blob: String,
     sha256: String,
@@ -151,7 +166,10 @@ struct InstalledFile {
 #[serde(deny_unknown_fields)]
 struct BridgeReport {
     schema: String,
+    adapter: String,
     installer_version: String,
+    manifest_sha256: String,
+    canonical_receipt_sha256: String,
     wheel_open_audit: String,
     repeatable_member_reads: usize,
     installed_files: Vec<InstalledFile>,
@@ -176,7 +194,7 @@ struct ConformanceReport {
     installer_version: &'static str,
     controlled: CaseReport,
     real_distribution: CaseReport,
-    negative_gates: [&'static str; 5],
+    negative_gates: [&'static str; 8],
     claims: [&'static str; 3],
 }
 
@@ -186,7 +204,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     let args = Args::parse().map_err(|detail| {
         format!(
-            "{detail}\nusage: sealr-pypa-installer-consumer --python PATH \\\n+             --installer-root DIR --verifier PATH --real-wheel FILE"
+            "{detail}\nusage: sealr-pypa-installer-consumer --python PATH \\\n             --installer-root DIR --verifier PATH --real-wheel FILE \\\n             --bridge FILE --controlled-wheel-output NEW_FILE"
         )
     })?;
     for (label, path) in [
@@ -194,6 +212,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ("installer import root", &args.installer_root),
         ("identity verifier", &args.verifier),
         ("real wheel", &args.real_wheel),
+        ("packaged WheelSource bridge", &args.bridge),
     ] {
         if !path.exists() {
             return Err(format!("{label} does not exist: {}", path.display()).into());
@@ -225,6 +244,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     prove_evaluator_denials()?;
     let fixture = controlled_wheel(false)?;
+    write_controlled_fixture(&args.controlled_wheel_output, &fixture)?;
     let controlled = run_case(
         "controlled",
         "demo-1.0-py3-none-any.whl",
@@ -232,7 +252,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         &args,
         true,
     )?;
-    assert_case_pins("controlled", &controlled, CONTROLLED_IDENTITY_PINS, 10)?;
+    assert_case_pins("controlled", &controlled, CONTROLLED_IDENTITY_PINS, 12)?;
     let controlled_repeat = run_case(
         "controlled-repeat",
         "demo-1.0-py3-none-any.whl",
@@ -267,7 +287,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             "lying-record-denied-before-bridge",
             "traversal-denied-before-capability",
             "member-tamper-denied-before-install",
-            "descriptor-tamper-denied-before-install",
+            "raw-manifest-tamper-denied-before-install",
+            "closed-schema-tamper-denied-before-install",
+            "receipt-argument-tamper-denied-before-install",
+            "unexpected-installer-directory-denied-before-install",
             "source-removed-before-python",
         ],
         claims: [
@@ -277,6 +300,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ],
     };
     println!("{}", serde_json::to_string(&report)?);
+    Ok(())
+}
+
+fn write_controlled_fixture(
+    path: &Path,
+    bytes: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
+    if path.file_name().and_then(|name| name.to_str()) != Some("demo-1.0-py3-none-any.whl") {
+        return Err("--controlled-wheel-output must end in demo-1.0-py3-none-any.whl".into());
+    }
+    let parent = path
+        .parent()
+        .ok_or("controlled wheel output requires a parent")?;
+    let metadata = fs::symlink_metadata(parent)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err("controlled wheel output parent must be a real directory".into());
+    }
+    let mut output = OpenOptions::new().create_new(true).write(true).open(path)?;
+    output.write_all(bytes)?;
+    output.flush()?;
     Ok(())
 }
 
@@ -344,6 +387,9 @@ fn run_case(
     let archive = outcome
         .into_verified_archive()
         .ok_or("admitted wheel capability disappeared")?;
+    if label == "controlled" || label == "controlled-repeat" {
+        validate_controlled_reads(&archive)?;
+    }
     fs::remove_file(&source)?;
     if source.exists() {
         return Err("source wheel remained available after removal".into());
@@ -353,13 +399,13 @@ fn run_case(
         let tampered = temp.path().join("tampered-bridge");
         let descriptor = stage_bridge(
             &tampered,
-            &args.python,
             &archive,
             &artifact,
             &plan,
             &identities,
+            &canonical.receipt_digest,
         )?;
-        let first_blob = first_blob_path(&descriptor)?;
+        let first_blob = first_blob_path(&descriptor.manifest_path)?;
         let mut data = fs::read(&first_blob)?;
         let first = data
             .first_mut()
@@ -370,46 +416,97 @@ fn run_case(
         if output.status.success() {
             return Err("tampered verified-member staging was accepted".into());
         }
-        if contains_regular_file(&tampered.join("install"))? {
-            return Err("tampered staging produced installation effects".into());
-        }
+        require_no_install_effects(&descriptor)?;
 
         let descriptor_tampered = temp.path().join("tampered-descriptor-bridge");
         let descriptor = stage_bridge(
             &descriptor_tampered,
-            &args.python,
             &archive,
             &artifact,
             &plan,
             &identities,
+            &canonical.receipt_digest,
         )?;
-        tamper_descriptor(&descriptor)?;
+        tamper_descriptor(&descriptor.manifest_path)?;
         let output = invoke_bridge(args, &descriptor)?;
         if output.status.success() {
             return Err("tampered handoff descriptor was accepted".into());
         }
-        if contains_regular_file(&descriptor_tampered.join("install"))? {
-            return Err("tampered descriptor produced installation effects".into());
+        require_no_install_effects(&descriptor)?;
+
+        let schema_tampered = temp.path().join("schema-tampered-bridge");
+        let mut descriptor = stage_bridge(
+            &schema_tampered,
+            &archive,
+            &artifact,
+            &plan,
+            &identities,
+            &canonical.receipt_digest,
+        )?;
+        add_unknown_manifest_key(&descriptor.manifest_path)?;
+        descriptor.manifest_sha256 = hex_sha256(&fs::read(&descriptor.manifest_path)?);
+        let output = invoke_bridge(args, &descriptor)?;
+        if output.status.success() {
+            return Err("unknown handoff manifest key was accepted".into());
         }
+        require_no_install_effects(&descriptor)?;
+
+        let receipt_tampered = temp.path().join("receipt-tampered-bridge");
+        let mut descriptor = stage_bridge(
+            &receipt_tampered,
+            &archive,
+            &artifact,
+            &plan,
+            &identities,
+            &canonical.receipt_digest,
+        )?;
+        descriptor.receipt_sha256 = "0".repeat(64);
+        let output = invoke_bridge(args, &descriptor)?;
+        if output.status.success() {
+            return Err("wrong out-of-band canonical receipt digest was accepted".into());
+        }
+        require_no_install_effects(&descriptor)?;
+
+        let unexpected_tree = temp.path().join("unexpected-installer-tree-bridge");
+        let descriptor = stage_bridge(
+            &unexpected_tree,
+            &archive,
+            &artifact,
+            &plan,
+            &identities,
+            &canonical.receipt_digest,
+        )?;
+        let unexpected_directory = args.installer_root.join("sealr-unexpected-empty-directory");
+        fs::create_dir(&unexpected_directory)?;
+        let output_result = invoke_bridge(args, &descriptor);
+        fs::remove_dir(&unexpected_directory)?;
+        let output = output_result?;
+        if output.status.success() {
+            return Err("unexpected empty installer directory was accepted".into());
+        }
+        require_no_install_effects(&descriptor)?;
     }
 
     let bridge = temp.path().join("bridge");
     let descriptor = stage_bridge(
         &bridge,
-        &args.python,
         &archive,
         &artifact,
         &plan,
         &identities,
+        &canonical.receipt_digest,
     )?;
     let output = invoke_bridge(args, &descriptor)?;
     require_success("PyPA installer bridge", &output)?;
     if source.exists() {
         return Err("PyPA bridge recreated or retained the source wheel".into());
     }
-    let report: BridgeReport = serde_json::from_slice(&output.stdout)?;
+    let report: BridgeReport = serde_json::from_slice(&fs::read(&descriptor.report_path)?)?;
     if report.schema != REPORT_SCHEMA
+        || report.adapter != BRIDGE_ID
         || report.installer_version != INSTALLER_VERSION
+        || report.manifest_sha256 != descriptor.manifest_sha256
+        || report.canonical_receipt_sha256 != canonical.receipt_digest
         || report.wheel_open_audit != "enforced"
         || report.repeatable_member_reads
             != archive
@@ -421,7 +518,7 @@ fn run_case(
         return Err(format!("bridge report contract disagreement: {report:?}").into());
     }
 
-    let mut installed = enumerate_installation(&bridge.join("install"))?;
+    let mut installed = enumerate_installation(&descriptor.output_root)?;
     let mut reported = report.installed_files;
     installed.sort();
     reported.sort();
@@ -478,27 +575,38 @@ fn run_case(
     })
 }
 
+struct PreparedBridge {
+    manifest_path: PathBuf,
+    manifest_sha256: String,
+    receipt_sha256: String,
+    output_root: PathBuf,
+    report_path: PathBuf,
+}
+
 fn stage_bridge(
     root: &Path,
-    python: &Path,
     archive: &VerifiedArchive,
     artifact: &WheelArtifactIR,
     plan: &WheelInstallPlan,
     identities: &WheelIdentities,
-) -> Result<PathBuf, Box<dyn std::error::Error>> {
-    if root.exists() {
+    receipt_sha256: &str,
+) -> Result<PreparedBridge, Box<dyn std::error::Error>> {
+    if root.exists() || fs::symlink_metadata(root).is_ok() {
         return Err("bridge staging root already exists".into());
     }
+    fs::create_dir(root)?;
     let blobs = root.join("members");
-    fs::create_dir_all(&blobs)?;
+    fs::create_dir(&blobs)?;
     let records = artifact
         .record
         .iter()
         .map(|record| (record.path.as_str(), record))
         .collect::<BTreeMap<_, _>>();
+    let record_path = format!("{}/RECORD", artifact.dist_info_root);
+    let signature_paths = [format!("{record_path}.jws"), format!("{record_path}.p7s")];
     let mut total = 0_u64;
-    let mut members = Vec::new();
-    for (member_index, member) in archive.members().iter().enumerate() {
+    let mut preflight = Vec::new();
+    for (index, member) in archive.members().iter().enumerate() {
         if matches!(member.kind, MemberKind::Directory) {
             continue;
         }
@@ -514,6 +622,19 @@ fn stage_bridge(
         if total > MAX_TOTAL_BYTES {
             return Err("bridge aggregate member cap exceeded".into());
         }
+        let record = records.get(member.canonical_path.as_str()).copied();
+        if record.is_none()
+            && !signature_paths
+                .iter()
+                .any(|path| path == &member.canonical_path)
+        {
+            return Err("verified member is absent from bound RECORD".into());
+        }
+        preflight.push((index, member, size, record));
+    }
+
+    let mut members = Vec::new();
+    for (index, member, size, record) in preflight {
         let bytes = archive.read_member(&member.canonical_path, MAX_MEMBER_BYTES)?;
         if bytes.len() as u64 != size {
             return Err("verified member read disagrees with measured size".into());
@@ -525,68 +646,118 @@ fn stage_bridge(
         if hex_sha256(&bytes) != digest {
             return Err("verified member bytes disagree with bound SHA-256".into());
         }
-        let record = records
-            .get(member.canonical_path.as_str())
-            .ok_or("verified member is absent from bound RECORD")?;
         let executable = member
             .container_facts()
             .ok_or("wheel member lacks container facts")?
             .unix_regular_executable();
-        let blob = format!("{member_index:06}.bin");
+        let blob = format!("{index:06}.bin");
         let mut output = OpenOptions::new()
             .create_new(true)
             .write(true)
             .open(blobs.join(&blob))?;
         output.write_all(&bytes)?;
         output.flush()?;
+        let (record_hash, record_size) = match record {
+            Some(record) => (
+                record_hash(record)?,
+                record
+                    .size
+                    .map_or_else(String::new, |value| value.to_string()),
+            ),
+            None => (String::new(), String::new()),
+        };
         members.push(BridgeMember {
-            member_index,
+            index,
             path: member.canonical_path.clone(),
             blob,
             sha256: digest.to_owned(),
             size,
-            record_hash: record_hash(record)?,
-            record_size: record
-                .size
-                .map_or_else(String::new, |value| value.to_string()),
+            record_hash,
+            record_size,
             executable,
         });
     }
+    let data_dir = artifact.data_root.clone().unwrap_or_else(|| {
+        format!(
+            "{}-{}.data",
+            artifact.filename.normalized_distribution, artifact.filename.normalized_version
+        )
+    });
     let descriptor = BridgeDescriptor {
         schema: BRIDGE_SCHEMA,
-        bridge: BRIDGE_ID,
+        adapter: BRIDGE_ID,
         installer_version: INSTALLER_VERSION,
         installer_wheel_sha256: INSTALLER_WHEEL_SHA256,
-        interpreter: python.to_string_lossy().into_owned(),
+        canonical_receipt_sha256: receipt_sha256,
+        artifact_sha256: &identities.artifact_sha256,
+        install_plan_sha256: &identities.install_plan_sha256,
+        distribution: &artifact.filename.distribution,
+        version: &artifact.filename.version,
+        dist_info_dir: &artifact.dist_info_root,
+        data_dir,
+        interpreter: PYTHON_INTERPRETER,
         target_model: TARGET_MODEL,
         installer_policy: INSTALLER_POLICY,
-        artifact,
-        plan,
-        identities,
         members,
     };
-    let encoded = serde_json::to_vec_pretty(&descriptor)?;
+    if plan.artifact_sha256() != identities.artifact_sha256 {
+        return Err("wheel plan and artifact identity disagree".into());
+    }
+    let mut encoded = serde_json::to_vec(&descriptor)?;
+    encoded.push(b'\n');
     if encoded.len() > MAX_DESCRIPTOR_BYTES {
         return Err("bridge descriptor exceeds its byte cap".into());
     }
-    let descriptor_path = root.join("descriptor.json");
+    let descriptor_path = root.join("manifest.json");
     let mut output = OpenOptions::new()
         .create_new(true)
         .write(true)
         .open(&descriptor_path)?;
     output.write_all(&encoded)?;
-    output.write_all(b"\n")?;
     output.flush()?;
-    Ok(descriptor_path)
+    Ok(PreparedBridge {
+        manifest_path: descriptor_path,
+        manifest_sha256: hex_sha256(&encoded),
+        receipt_sha256: receipt_sha256.to_owned(),
+        output_root: root.join("install"),
+        report_path: root.join("report.json"),
+    })
 }
 
-fn invoke_bridge(args: &Args, descriptor: &Path) -> Result<Output, std::io::Error> {
-    Command::new(&args.python)
+fn invoke_bridge(
+    args: &Args,
+    descriptor: &PreparedBridge,
+) -> Result<Output, Box<dyn std::error::Error>> {
+    let mut child = Command::new(&args.python)
         .arg("-I")
-        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("bridge.py"))
-        .arg(descriptor)
+        .arg(&args.bridge)
+        .arg(&descriptor.manifest_path)
+        .arg(&descriptor.manifest_sha256)
+        .arg(&descriptor.receipt_sha256)
         .arg(&args.installer_root)
-        .output()
+        .arg(&descriptor.output_root)
+        .arg(&descriptor.report_path)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()?;
+    let deadline = Instant::now() + BRIDGE_TIMEOUT;
+    loop {
+        if child.try_wait()?.is_some() {
+            return Ok(child.wait_with_output()?);
+        }
+        if Instant::now() >= deadline {
+            child.kill()?;
+            let output = child.wait_with_output()?;
+            return Err(format!(
+                "PyPA installer bridge exceeded its {}-second deadline; stderr:\n{}",
+                BRIDGE_TIMEOUT.as_secs(),
+                String::from_utf8_lossy(&output.stderr)
+            )
+            .into());
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
 }
 
 fn require_success(label: &str, output: &Output) -> Result<(), Box<dyn std::error::Error>> {
@@ -616,37 +787,56 @@ fn first_blob_path(descriptor: &Path) -> Result<PathBuf, Box<dyn std::error::Err
 
 fn tamper_descriptor(descriptor: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let mut value: serde_json::Value = serde_json::from_slice(&fs::read(descriptor)?)?;
-    let artifact_identity = value
-        .get_mut("plan")
-        .and_then(serde_json::Value::as_object_mut)
-        .and_then(|plan| plan.get_mut("artifact_sha256"))
-        .ok_or("descriptor plan artifact identity was unavailable")?;
-    *artifact_identity = serde_json::Value::String("0".repeat(64));
+    *value
+        .get_mut("artifact_sha256")
+        .ok_or("descriptor artifact identity was unavailable")? =
+        serde_json::Value::String("0".repeat(64));
+    *value
+        .get_mut("install_plan_sha256")
+        .ok_or("descriptor plan identity was unavailable")? =
+        serde_json::Value::String("1".repeat(64));
     fs::write(descriptor, serde_json::to_vec_pretty(&value)?)?;
     Ok(())
 }
 
-fn contains_regular_file(root: &Path) -> Result<bool, std::io::Error> {
-    if !root.exists() {
-        return Ok(false);
-    }
-    let mut pending = vec![root.to_owned()];
-    while let Some(path) = pending.pop() {
-        for entry in fs::read_dir(path)? {
-            let entry = entry?;
-            let kind = entry.file_type()?;
-            if kind.is_symlink() || kind.is_file() {
-                return Ok(true);
-            }
-            if kind.is_dir() {
-                pending.push(entry.path());
+fn add_unknown_manifest_key(descriptor: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let mut value: serde_json::Value = serde_json::from_slice(&fs::read(descriptor)?)?;
+    value
+        .as_object_mut()
+        .ok_or("handoff manifest is not an object")?
+        .insert("unknown".to_owned(), serde_json::Value::Bool(true));
+    fs::write(descriptor, serde_json::to_vec(&value)?)?;
+    Ok(())
+}
+
+fn require_no_install_effects(
+    descriptor: &PreparedBridge,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for (label, path) in [
+        ("output root", &descriptor.output_root),
+        ("report", &descriptor.report_path),
+    ] {
+        match fs::symlink_metadata(path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error.into()),
+            Ok(_) => {
+                return Err(format!(
+                    "rejected handoff created its {label}: {}",
+                    path.display()
+                )
+                .into())
             }
         }
     }
-    Ok(false)
+    Ok(())
 }
 
 fn enumerate_installation(root: &Path) -> Result<Vec<InstalledFile>, Box<dyn std::error::Error>> {
+    let root_metadata = fs::symlink_metadata(root)?;
+    if root_metadata.file_type().is_symlink() || !root_metadata.is_dir() {
+        return Err("installer output root is not a real directory".into());
+    }
+    validate_scheme_roots(root)?;
     let mut outputs = Vec::new();
     for scheme in ["purelib", "platlib", "scripts", "headers", "data"] {
         let scheme_root = root.join(scheme);
@@ -676,10 +866,12 @@ fn enumerate_installation(root: &Path) -> Result<Vec<InstalledFile>, Box<dyn std
                     )
                     .into());
                 }
-                let relative_path = entry
-                    .path()
+                require_single_link(&metadata, &entry.path())?;
+                let entry_path = entry.path();
+                let relative_path = entry_path
                     .strip_prefix(&scheme_root)?
-                    .to_string_lossy()
+                    .to_str()
+                    .ok_or("installed output path is not UTF-8")?
                     .replace('\\', "/");
                 let bytes = fs::read(entry.path())?;
                 #[cfg(unix)]
@@ -702,6 +894,58 @@ fn enumerate_installation(root: &Path) -> Result<Vec<InstalledFile>, Box<dyn std
     Ok(outputs)
 }
 
+#[cfg(unix)]
+fn require_single_link(
+    metadata: &fs::Metadata,
+    path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::os::unix::fs::MetadataExt;
+
+    if metadata.nlink() != 1 {
+        return Err(format!("installation contains a hard link: {}", path.display()).into());
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn require_single_link(
+    _metadata: &fs::Metadata,
+    _path: &Path,
+) -> Result<(), Box<dyn std::error::Error>> {
+    Ok(())
+}
+
+fn validate_scheme_roots(root: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let expected = ["purelib", "platlib", "scripts", "headers", "data"]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+    let mut observed = BTreeSet::new();
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        let metadata = fs::symlink_metadata(&path)?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err(format!(
+                "installer output root contains a non-directory entry: {}",
+                path.display()
+            )
+            .into());
+        }
+        let name = entry
+            .file_name()
+            .into_string()
+            .map_err(|_| "installer output root contains a non-UTF-8 scheme name")?;
+        if !observed.insert(name) {
+            return Err("installer output root contains duplicate scheme names".into());
+        }
+    }
+    if observed != expected {
+        return Err("installer output root disagrees with the five exact scheme roots".into());
+    }
+    Ok(())
+}
+
 fn parse_scheme(value: &str) -> Result<InstallScheme, String> {
     match value {
         "purelib" => Ok(InstallScheme::Purelib),
@@ -713,14 +957,14 @@ fn parse_scheme(value: &str) -> Result<InstallScheme, String> {
     }
 }
 
-fn scheme_name(value: &InstallScheme) -> &'static str {
+fn scheme_name(value: &InstallScheme) -> Result<&'static str, Box<dyn std::error::Error>> {
     match value {
-        InstallScheme::Purelib => "purelib",
-        InstallScheme::Platlib => "platlib",
-        InstallScheme::Scripts => "scripts",
-        InstallScheme::Headers => "headers",
-        InstallScheme::Data => "data",
-        _ => "unsupported",
+        InstallScheme::Purelib => Ok("purelib"),
+        InstallScheme::Platlib => Ok("platlib"),
+        InstallScheme::Scripts => Ok("scripts"),
+        InstallScheme::Headers => Ok("headers"),
+        InstallScheme::Data => Ok("data"),
+        _ => Err("wheel plan contains an unsupported future install scheme".into()),
     }
 }
 
@@ -729,34 +973,116 @@ fn validate_installed_targets(
     plan: &WheelInstallPlan,
     installed: &[InstalledFile],
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let mut expected = plan
-        .entries()
-        .iter()
-        .map(|entry| {
-            (
-                scheme_name(&entry.scheme).to_owned(),
-                entry.relative_path.clone(),
-            )
-        })
-        .collect::<BTreeSet<_>>();
+    let mut expected = BTreeMap::new();
+    for entry in plan.entries() {
+        let key = (
+            scheme_name(&entry.scheme)?.to_owned(),
+            entry.relative_path.clone(),
+        );
+        if expected
+            .insert(key, expected_executable(&entry.executable)?)
+            .is_some()
+        {
+            return Err("wheel plan contains a duplicate output".into());
+        }
+    }
     let record_scheme = if artifact.wheel.root_is_purelib {
         "purelib"
     } else {
         "platlib"
     };
-    expected.insert((
-        record_scheme.to_owned(),
-        format!("{}/RECORD", artifact.dist_info_root),
-    ));
-    let actual = installed
-        .iter()
-        .map(|file| (file.scheme.clone(), file.relative_path.clone()))
-        .collect::<BTreeSet<_>>();
-    if actual != expected || installed.len() != expected.len() {
-        return Err(format!(
-            "installed paths disagree with the complete plan plus final RECORD\nexpected={expected:#?}\nactual={actual:#?}"
-        )
-        .into());
+    expected.insert(
+        (
+            record_scheme.to_owned(),
+            format!("{}/RECORD", artifact.dist_info_root),
+        ),
+        false,
+    );
+    let mut actual = BTreeSet::new();
+    for file in installed {
+        let key = (file.scheme.clone(), file.relative_path.clone());
+        let Some(executable) = expected.get(&key) else {
+            return Err(format!(
+                "installation produced an unexpected output: {}/{}",
+                file.scheme, file.relative_path
+            )
+            .into());
+        };
+        if file.executable != *executable {
+            return Err(format!(
+                "installed executable mode disagrees for {}/{}",
+                file.scheme, file.relative_path
+            )
+            .into());
+        }
+        if !actual.insert(key) {
+            return Err("installation report contains a duplicate output".into());
+        }
+    }
+    if actual != expected.keys().cloned().collect::<BTreeSet<_>>() {
+        return Err("installed paths disagree with the complete plan plus final RECORD".into());
+    }
+    Ok(())
+}
+
+fn expected_executable(
+    disposition: &ExecutableDisposition,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    match disposition {
+        ExecutableDisposition::NotExecutable => Ok(false),
+        ExecutableDisposition::SourceExecutable | ExecutableDisposition::GeneratedWrapper => {
+            Ok(true)
+        }
+        _ => Err("wheel plan contains an unsupported future executable disposition".into()),
+    }
+}
+
+fn validate_controlled_reads(
+    archive: &VerifiedArchive,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let cases = [
+        (
+            "demo-1.0.data/scripts/demo-script",
+            [b"#!python\nprint('deflated')\n".as_slice(), &[b'd'; 2048]].concat(),
+            8_u16,
+        ),
+        (
+            "demo-1.0.data/scripts/demo-stored",
+            [b"#!python\nprint('stored')\n".as_slice(), &[b's'; 2048]].concat(),
+            0_u16,
+        ),
+    ];
+    let cloned = archive.clone();
+    for (path, expected, method) in cases {
+        let observed_method = archive
+            .member(path)
+            .and_then(|member| member.zip_evidence())
+            .ok_or("controlled member lacks ZIP evidence")?
+            .method;
+        if observed_method != method {
+            return Err(format!("controlled codec evidence changed for {path}").into());
+        }
+        let size = expected.len();
+        for cap in [0, 9, 1024, size, size + 1] {
+            let prefix = archive.read_member_prefix(path, cap)?;
+            if prefix != expected[..size.min(cap)] {
+                return Err(format!("verified prefix disagrees at cap {cap} for {path}").into());
+            }
+        }
+        if archive.read_member(path, size as u64)? != expected {
+            return Err(format!("verified full read disagrees for {path}").into());
+        }
+        let error = archive.read_member(path, (size - 1) as u64).unwrap_err();
+        if error.kind() != MemberReadErrorKind::LimitExceeded {
+            return Err(format!(
+                "one-under full-read cap returned {:?} for {path}",
+                error.kind()
+            )
+            .into());
+        }
+        if cloned.read_member_prefix(path, 1024)? != expected[..1024] {
+            return Err(format!("cloned verified authority changed prefix bytes for {path}").into());
+        }
     }
     Ok(())
 }
@@ -778,6 +1104,11 @@ fn validate_controlled_plan(plan: &WheelInstallPlan) -> Result<(), Box<dyn std::
         || !has(
             InstallScheme::Scripts,
             "demo-script",
+            InstallTransform::RewritePythonShebang,
+        )
+        || !has(
+            InstallScheme::Scripts,
+            "demo-stored",
             InstallTransform::RewritePythonShebang,
         )
         || !has(
@@ -880,7 +1211,11 @@ fn controlled_wheel(lying_record: bool) -> Result<Vec<u8>, zip::result::ZipError
     files.insert("root.txt", b"root payload\n".to_vec());
     files.insert(
         "demo-1.0.data/scripts/demo-script",
-        b"#!python\nprint('demo')\n".to_vec(),
+        [b"#!python\nprint('deflated')\n".as_slice(), &[b'd'; 2048]].concat(),
+    );
+    files.insert(
+        "demo-1.0.data/scripts/demo-stored",
+        [b"#!python\nprint('stored')\n".as_slice(), &[b's'; 2048]].concat(),
     );
     files.insert("demo-1.0.data/headers/demo.h", b"#define DEMO 1\n".to_vec());
     files.insert(
@@ -914,18 +1249,26 @@ fn controlled_wheel(lying_record: bool) -> Result<Vec<u8>, zip::result::ZipError
     }
     record.push_str("demo-1.0.dist-info/RECORD,,\n");
     files.insert("demo-1.0.dist-info/RECORD", record.into_bytes());
+    files.insert(
+        "demo-1.0.dist-info/RECORD.jws",
+        b"repository-signature-fixture".to_vec(),
+    );
 
     let mut cursor = Cursor::new(Vec::new());
     {
         let mut writer = ZipWriter::new(&mut cursor);
         for (path, bytes) in files {
-            let permissions = if path.ends_with("demo-script") {
+            let permissions = if path.ends_with("demo-script") || path.ends_with("demo-stored") {
                 0o100755
             } else {
                 0o100644
             };
             let options = SimpleFileOptions::default()
-                .compression_method(CompressionMethod::Deflated)
+                .compression_method(if path.ends_with("demo-stored") {
+                    CompressionMethod::Stored
+                } else {
+                    CompressionMethod::Deflated
+                })
                 .unix_permissions(permissions);
             writer.start_file(path, options)?;
             writer.write_all(&bytes)?;

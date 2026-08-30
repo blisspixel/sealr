@@ -435,6 +435,7 @@ fn run_public_api_smoke() -> Result<(), Box<dyn std::error::Error>> {
     require_no_supervisor_children("after public unretained prefix read")?;
 
     let fixture = Fixture::new(false, false, false)?;
+    fs::remove_file(fixture.root.join("outside-sentinel"))?;
     let destination = fixture.root.join("public-output");
     let outcome = sealr::apply_supervised(
         sealr::Request {
@@ -502,9 +503,7 @@ fn run_public_api_smoke() -> Result<(), Box<dyn std::error::Error>> {
         .into());
     }
     verify_public_materialized_tree(&destination)?;
-    if directory_entry_names(&fixture.root)?
-        != vec!["outside-sentinel".to_owned(), "public-output".to_owned()]
-    {
+    if directory_entry_names(&fixture.root)? != vec!["public-output".to_owned()] {
         return Err(io::Error::other(
             "public supervised materialization left an unexpected staging object",
         )
