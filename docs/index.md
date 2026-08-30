@@ -21,7 +21,7 @@ Start with the [README](../README.md) for the published Alpha.11 boundary and a 
 | [Invariants](invariants.md) | Properties that implementation and evidence must preserve |
 | [Assurance](assurance.md) | Current evidence and the layered verification program |
 | [Assurance discovery and promotion](assurance-promotion.md) | Pinned Kani, mutation, coverage, report, and promotion contracts |
-| [Identity conformance](identity-conformance.md) | Current vectors, standalone verifier, exact root bytes, and bounded claims |
+| [Identity conformance](identity-conformance.md) | Current vectors, live canonical evidence verification, exact root bytes, and bounded claims |
 | [Wheel compatibility pilot](wheel-compatibility-pilot.md) | Initial non-shipping corpus measurement and investigated denial evidence |
 | [Wheel semantic inventory v2](wheel-compatibility-v2.md) | Predecessor-bound wheel-profile and consumer evaluation over the same pinned bytes |
 | [Wheel supported-preview inventory v3](wheel-compatibility-v3.md) | Public portable-profile evaluator replay over the same pinned bytes |
@@ -49,7 +49,7 @@ Start with the [README](../README.md) for the published Alpha.11 boundary and a 
 | [Private semantic record](semantic-record.md) | Crate-private split-phase codec and worker executor, hostile validation, current evidence, and remaining gates |
 | [Policy](policy.md) | Current policy schema, compilation, and defaults |
 | [Receipt attestation](attestation.md) | Signing receipts with external DSSE tools and the signer-agnostic statement builder |
-| [Evidence encoding contract](evidence-encoding.md) | The normative declaration-order canonical JSON behind every policy digest and `view_digest` |
+| [Evidence encoding contract](evidence-encoding.md) | The frozen declaration-order lineage and byte-exact RFC 8785 canonical evidence lineage |
 | [Public API surface contract](api-surface.md) | The role-grouped supported surface, compile-time pinned by `tests/api_surface.rs` |
 
 Repository vulnerability reporting and supported-version policy are in [SECURITY.md](../SECURITY.md).

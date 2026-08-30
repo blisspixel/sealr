@@ -7,7 +7,10 @@ license.workspace = true
 publish = false
 
 [dependencies]
-serde_json.workspace = true
+sealr-identity-verifier = { version = "=0.1.0-alpha.11", path = "../identity-verifier" }
+serde.workspace = true
+serde_json = { workspace = true, features = ["raw_value"] }
+sha2.workspace = true
 
 [[bin]]
 name = "sealr-attest"

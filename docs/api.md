@@ -49,6 +49,9 @@ pub struct Outcome {
 impl Outcome {
     /// Read-only interpretation evidence when structure planning completed.
     pub fn archive_ir(&self) -> Option<&ArchiveIR>;
+
+    /// Exact RFC 8785 view v2 and receipt v3 bytes plus their SHA-256 values.
+    pub fn canonical_evidence(&self) -> Result<CanonicalEvidence, Finding>;
 }
 
 pub enum Verdict {
@@ -66,7 +69,7 @@ Invariants:
 - Every outcome contains both a view and a receipt, including source, parse, policy, quota, and materialization failures.
 - `verdict` is derived: `Admitted + Committed` → `Allowed { wrote: true }`; `Admitted + NotRequested` → `Allowed { wrote: false }`; every other combination, including `Admitted + Failed`, → `Rejected`. The receipt axes are the precise record.
 
-- `receipt.view_digest` is currently SHA-256 of deterministic `serde_json` bytes for the versioned Rust struct. RFC 8785 JCS is a Phase 0.1 gate.
+- Default-lineage `receipt.view_digest` is SHA-256 of the frozen declaration-order JSON bytes for view v1. `Outcome::canonical_evidence()` emits RFC 8785 view v2 and receipt v3 bytes; hashing the emitted view reproduces its `view_digest`, and hashing the emitted receipt produces its externally nameable digest.
 - `receipt.policy.digest` uses the same current deterministic struct serialization. It is not yet a cross-encoder canonical JSON promise.
 - After the complete source bytes are available, `receipt.source` is `{ "sha256": "..." }`. A source open, metadata, copy, stability-check, or cap failure before exact EOF uses `{ "status": "unavailable" }` and omits `sha256`. An over-cap `Source::Bytes` input is complete caller-owned data, so it is hashed. The inspectable view keeps the same digest object so `receipt.source` equals `view.source.digest`.
 - `receipt.source_snapshot` is `private-file` for successful path ingest and `memory-borrowed` for caller byte slices, including an over-cap slice rejected before parsing. It is `unavailable` when no complete snapshot was retained. `memory-owned` remains a stable variant for process-owned in-memory snapshots. Parse and payload reads use the recorded snapshot; they do not reopen the caller path.
@@ -106,7 +109,7 @@ No second function that “recovers” a broken zip.
 
 ### InspectableView JSON
 
-One document. The current CLI emits pretty JSON; JSONL is planned. The current digest covers deterministic Rust-struct JSON bytes. JCS canonicalization is a Phase 0.1 gate.
+One document. The default CLI lineage emits pretty view v1 JSON and its digest covers the frozen compact declaration-order bytes. `--canonical`, valid with `--view` and `--receipt`, emits exact RFC 8785 view v2 and receipt v3 bytes with no trailing newline.
 
 ```json
 {
@@ -143,7 +146,7 @@ Projection and hydration on read are target surfaces. They are not part of Alpha
 
 ### Receipt
 
-The current receipt is versioned unsigned JSON (`signed: false`). DSSE and in-toto wrapping are future work.
+The current receipt is versioned unsigned JSON (`signed: false`). The repository statement builder can place an independently verified canonical receipt v3 in an unsigned in-toto Statement v1 for an external DSSE signer. Sealr itself does not sign or authenticate it.
 
 ```json
 {
