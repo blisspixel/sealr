@@ -3,7 +3,7 @@ use crate::frame::{Frame, Kind};
 use crate::linux::{
     close_inherited_authority, configure_timeout, receive_packet, send_packet,
     ERROR_AUTHORITY_CLOSE, ERROR_DESCRIPTOR, ERROR_PROBE, ERROR_PROTOCOL, ERROR_RESTRICTION,
-    FLAG_MATERIALIZE, FLAG_MEMBER_READ, FLAG_STAGE, READY_FLAGS,
+    FLAG_MATERIALIZE, FLAG_MEMBER_PREFIX_READ, FLAG_MEMBER_READ, FLAG_STAGE, READY_FLAGS,
 };
 use crate::sealed::{self, BlobRole};
 use crate::seccomp;
@@ -176,7 +176,10 @@ fn run(
     mode: ChildMode,
 ) -> Result<(), WorkerFailure> {
     require_kind(&bootstrap, Kind::Bootstrap, PHASE_BOOTSTRAP)?;
-    if bootstrap.flags & !(FLAG_STAGE | FLAG_MEMBER_READ | FLAG_MATERIALIZE) != 0 {
+    if bootstrap.flags
+        & !(FLAG_STAGE | FLAG_MEMBER_READ | FLAG_MATERIALIZE | FLAG_MEMBER_PREFIX_READ)
+        != 0
+    {
         return Err(protocol(PHASE_BOOTSTRAP, "bootstrap flags are invalid"));
     }
     if bootstrap.flags & FLAG_STAGE != 0 && bootstrap.flags & FLAG_MEMBER_READ != 0 {
@@ -187,7 +190,14 @@ fn run(
     }
     let has_stage = bootstrap.flags & FLAG_STAGE != 0;
     let member_read = bootstrap.flags & FLAG_MEMBER_READ != 0;
+    let member_prefix_read = bootstrap.flags & FLAG_MEMBER_PREFIX_READ != 0;
     let materialize = bootstrap.flags & FLAG_MATERIALIZE != 0;
+    if member_prefix_read && !member_read {
+        return Err(protocol(
+            PHASE_BOOTSTRAP,
+            "member-prefix-read selection requires member-read authority",
+        ));
+    }
     if materialize && !has_stage && !member_read {
         return Err(protocol(
             PHASE_BOOTSTRAP,
@@ -278,8 +288,9 @@ fn run(
 
     let operation_id = bootstrap.operation_id;
     let mut ready = Frame::new(Kind::RestrictedReady, operation_id);
-    ready.flags =
-        READY_FLAGS | (bootstrap.flags & (FLAG_STAGE | FLAG_MEMBER_READ | FLAG_MATERIALIZE));
+    ready.flags = READY_FLAGS
+        | (bootstrap.flags
+            & (FLAG_STAGE | FLAG_MEMBER_READ | FLAG_MATERIALIZE | FLAG_MEMBER_PREFIX_READ));
     ready.values = [
         effective_abi,
         handled.bits(),
@@ -431,6 +442,7 @@ fn run(
             source.take().expect("member-read source is retained"),
             source_frame.values[0],
             plan.bytes(),
+            member_prefix_read,
         );
     }
 
@@ -582,6 +594,7 @@ fn run_member_read(
     source: File,
     source_len: u64,
     planning: &[u8],
+    prefix: bool,
 ) -> Result<(), WorkerFailure> {
     let (read_frame, mut descriptors) = receive_packet(control, Some(2)).map_err(|error| {
         protocol(
@@ -595,7 +608,8 @@ fn run_member_read(
         read_operation_id,
         PHASE_MEMBER_READ,
     )?;
-    if read_frame.flags != 0
+    let expected_flags = if prefix { FLAG_MEMBER_PREFIX_READ } else { 0 };
+    if read_frame.flags != expected_flags
         || read_frame.values[0] == 0
         || read_frame.values[1] == 0
         || read_frame.values[2..] != [0; 2]
@@ -638,13 +652,23 @@ fn run_member_read(
         planning,
         completion.bytes(),
     );
-    let read = sealr::__worker_runtime::validate_member_read(
-        source,
-        source_len,
-        authority,
-        request.bytes(),
-        read_operation_id,
-    )
+    let read = if prefix {
+        sealr::__worker_runtime::validate_member_prefix_read(
+            source,
+            source_len,
+            authority,
+            request.bytes(),
+            read_operation_id,
+        )
+    } else {
+        sealr::__worker_runtime::validate_member_read(
+            source,
+            source_len,
+            authority,
+            request.bytes(),
+            read_operation_id,
+        )
+    }
     .map_err(|error| {
         protocol(
             PHASE_MEMBER_READ,
@@ -652,6 +676,7 @@ fn run_member_read(
         )
     })?;
     let mut accepted = Frame::new(Kind::MemberReadAccepted, read_operation_id);
+    accepted.flags = expected_flags;
     accepted.values = [
         read_frame.values[0],
         completion_descriptor.as_raw_fd() as u64,
@@ -690,7 +715,13 @@ fn run_member_read(
     mode.exit_at(FaultPoint::Proceed);
     mode.stall_at(StallPoint::ProbeExecution);
     let mut output = File::from(output);
-    let evidence = read.execute_into(&mut output).map_err(|error| {
+    let evidence = if mode == ChildMode::CorruptMemberTail {
+        let mut corrupting = TailCorruptingWriter::new(&mut output, 8);
+        read.execute_into(&mut corrupting)
+    } else {
+        read.execute_into(&mut output)
+    }
+    .map_err(|error| {
         protocol(
             PHASE_MEMBER_READ,
             format!("executing member read failed: {error}"),
@@ -734,6 +765,49 @@ fn run_member_read(
     mode.exit_at(FaultPoint::ExitAck);
     mode.stall_at(StallPoint::ExitCompletion);
     Ok(())
+}
+
+struct TailCorruptingWriter<'a> {
+    inner: &'a mut File,
+    offset: usize,
+    corrupt_at: usize,
+    corrupted: bool,
+}
+
+impl<'a> TailCorruptingWriter<'a> {
+    fn new(inner: &'a mut File, corrupt_at: usize) -> Self {
+        Self {
+            inner,
+            offset: 0,
+            corrupt_at,
+            corrupted: false,
+        }
+    }
+}
+
+impl io::Write for TailCorruptingWriter<'_> {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        let mut changed = None;
+        if !self.corrupted
+            && self.offset <= self.corrupt_at
+            && self.corrupt_at < self.offset.saturating_add(buffer.len())
+        {
+            let mut bytes = buffer.to_vec();
+            bytes[self.corrupt_at - self.offset] ^= 1;
+            changed = Some(bytes);
+            self.corrupted = true;
+        }
+        let written = match changed {
+            Some(bytes) => io::Write::write(self.inner, &bytes),
+            None => io::Write::write(self.inner, buffer),
+        }?;
+        self.offset = self.offset.saturating_add(written);
+        Ok(written)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        io::Write::flush(self.inner)
+    }
 }
 
 fn validate_output_pipe(output: &OwnedFd) -> Result<(), WorkerFailure> {
@@ -863,6 +937,7 @@ fn probe_landlock_abi(mode: ChildMode) -> Result<u64, WorkerFailure> {
         ChildMode::Normal
         | ChildMode::SeccompInstallationFailure
         | ChildMode::UnknownAncillary
+        | ChildMode::CorruptMemberTail
         | ChildMode::StallAt(_)
         | ChildMode::ExitAt(_) => {
             const LANDLOCK_CREATE_RULESET_VERSION: u32 = 1;

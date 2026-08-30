@@ -1466,7 +1466,7 @@ mod tests {
             authority,
             [0x75; 16],
             "planned.txt",
-            super::super::member_read::MAX_ISOLATED_READ_BYTES + 1,
+            super::super::MAX_ISOLATED_READ_BYTES + 1,
         )
         .is_err());
         let mut mutated = bytes.clone();

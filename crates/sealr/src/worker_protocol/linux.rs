@@ -15,6 +15,7 @@ pub const FLAG_LANDLOCK_ENFORCED: u8 = 1 << 3;
 pub const FLAG_SECCOMP_ENFORCED: u8 = 1 << 4;
 pub const FLAG_MEMBER_READ: u8 = 1 << 5;
 pub const FLAG_MATERIALIZE: u8 = 1 << 6;
+pub const FLAG_MEMBER_PREFIX_READ: u8 = 1 << 7;
 pub const READY_FLAGS: u8 =
     FLAG_NO_NEW_PRIVS | FLAG_CLOSE_RANGE | FLAG_LANDLOCK_ENFORCED | FLAG_SECCOMP_ENFORCED;
 pub const PROTOCOL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);

@@ -298,7 +298,7 @@ fn run_package_smoke() -> Result<(), Box<dyn std::error::Error>> {
         .expect("child programs remain initialized during package smoke")
         .production;
     println!(
-        "sealr.worker-package-smoke.v1: authenticated helper sha256={} bytes={}, private inspect, public supervised inspect and materialize, retained borrow, cloned one-shot read, setup-failure preservation, and exact reap passed",
+        "sealr.worker-package-smoke.v1: authenticated helper sha256={} bytes={}, private inspect, public supervised inspect and materialize, retained borrow, cloned full and prefix reads, setup-failure preservation, and exact reap passed",
         helper.digest_hex(),
         helper.len()
     );
@@ -351,7 +351,7 @@ fn run_conformance() -> Result<(), Box<dyn std::error::Error>> {
         .expect("child programs remain initialized during conformance")
         .production;
     println!(
-        "sealr.worker-bootstrap-evidence.v1: authenticated helper sha256={} bytes={}, 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 1 supervisor content replay, 1 immutable inspect retention transfer, 1 public supervised inspect and materialize with retained borrow, cloned one-shot read, setup-failure preservation, and exact reap, 1 isolated one-shot Store-and-Deflate read boundary, 1 reaped and audited Store-and-Deflate writer publication with immutable retention transfer, 1 post-reap writer audit-mutation rejection, 1 writer destination-race rejection, 1 distinct writer cleanup failure, 4 writer crash barriers, 2 writer authority-epoch stalls, 22 bootstrap crash barriers, 11 bootstrap authority-epoch stalls, 500 bounded bootstrap stress iterations, 500 bounded writer lifecycle iterations, and bounded reap passed",
+        "sealr.worker-bootstrap-evidence.v1: authenticated helper sha256={} bytes={}, 2 enforced probes, 7 authority cases, 2 protocol cases, 3 restriction failures, 3 process-boundary truncations, 1 raw ancillary rejection, 4 sealed-plan rejections, 1 isolated semantic Store-and-Deflate bridge, 1 supervisor content replay, 1 immutable inspect retention transfer, 1 public supervised inspect and materialize with retained borrow, cloned full and prefix reads, setup-failure preservation, and exact reap, 1 isolated full-and-prefix Store-and-Deflate read boundary with cap limits, cancellation, timeout, crash recovery, discarded-tail integrity, and 64 alternating calls, 1 reaped and audited Store-and-Deflate writer publication with immutable retention transfer, 1 post-reap writer audit-mutation rejection, 1 writer destination-race rejection, 1 distinct writer cleanup failure, 4 writer crash barriers, 2 writer authority-epoch stalls, 22 bootstrap crash barriers, 11 bootstrap authority-epoch stalls, 500 bounded bootstrap stress iterations, 500 bounded writer lifecycle iterations, and bounded reap passed",
         helper.digest_hex(),
         helper.len()
     );
@@ -393,11 +393,46 @@ fn run_public_api_smoke() -> Result<(), Box<dyn std::error::Error>> {
     }
     let clone = archive.clone();
     drop(archive);
-    if clone.read_member("deflated.txt", 16)? != b"deflated payload" {
-        return Err(io::Error::other("public cloned one-shot read is incorrect").into());
+    if clone.read_member("deflated.txt", 16)? != b"deflated payload"
+        || clone.read_member_prefix("stored.txt", 6)? != b"stored"
+    {
+        return Err(
+            io::Error::other("public cloned full or retained prefix read is incorrect").into(),
+        );
+    }
+    for (cap, expected) in [
+        (0, b"".as_slice()),
+        (4, b"defl".as_slice()),
+        (16, b"deflated payload".as_slice()),
+        (17, b"deflated payload".as_slice()),
+        (usize::MAX, b"deflated payload".as_slice()),
+    ] {
+        if clone.read_member_prefix("deflated.txt", cap)? != expected {
+            return Err(io::Error::other(format!(
+                "public cloned Deflate prefix read is incorrect for cap {cap}"
+            ))
+            .into());
+        }
     }
     drop(clone);
     require_no_supervisor_children("after public supervised capability last-owner drop")?;
+
+    let unretained = sealr::inspect_supervised(
+        sealr::Source::Bytes {
+            path: Some("public-supervised-unretained-fixture.zip"),
+            data: source_bytes(),
+        },
+        &policy,
+        &sealr::ApplyOptions::new(),
+        &programs.public,
+    )?
+    .into_verified_archive()
+    .ok_or("public unretained inspect produced no verified capability")?;
+    if unretained.read_member_prefix("stored.txt", 6)? != b"stored" {
+        return Err(io::Error::other("public Store prefix read is incorrect").into());
+    }
+    drop(unretained);
+    require_no_supervisor_children("after public unretained prefix read")?;
 
     let fixture = Fixture::new(false, false, false)?;
     let destination = fixture.root.join("public-output");
@@ -431,9 +466,10 @@ fn run_public_api_smoke() -> Result<(), Box<dyn std::error::Error>> {
         .ok_or("public supervised materialize produced no verified capability")?;
     if archive.retained_member("stored.txt") != Some(b"stored payload".as_slice())
         || archive.read_member("deflated.txt", 16)? != b"deflated payload"
+        || archive.read_member_prefix("deflated.txt", 8)? != b"deflated"
     {
         return Err(io::Error::other(
-            "public materialized capability returned incorrect retained or one-shot bytes",
+            "public materialized capability returned incorrect retained, full, or prefix bytes",
         )
         .into());
     }

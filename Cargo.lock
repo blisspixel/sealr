@@ -639,6 +639,7 @@ dependencies = [
 name = "sealr-worker-bootstrap-lab"
 version = "0.1.0-alpha.12"
 dependencies = [
+ "crc32fast",
  "getrandom",
  "landlock",
  "libc",

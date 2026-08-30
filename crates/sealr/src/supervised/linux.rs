@@ -12,6 +12,7 @@ use rustix::fs::OFlags;
 use rustix::net::{AddressFamily, SocketFlags, SocketType};
 use rustix::pipe::PipeFlags;
 use rustix::process::{PidfdFlags, Signal};
+use sha2::{Digest, Sha256};
 
 use super::{LinuxWorker, SupervisionError, SupervisionErrorKind};
 use crate::apply::{
@@ -33,7 +34,7 @@ use crate::worker_protocol::frame::{Frame, Kind};
 use crate::worker_protocol::helper::HelperArtifact;
 use crate::worker_protocol::linux::{
     configure_timeout, receive_packet, send_packet, TransportError, ERROR_RESTRICTION,
-    FLAG_MATERIALIZE, FLAG_MEMBER_READ, FLAG_STAGE, READY_FLAGS,
+    FLAG_MATERIALIZE, FLAG_MEMBER_PREFIX_READ, FLAG_MEMBER_READ, FLAG_STAGE, READY_FLAGS,
 };
 use crate::worker_protocol::sealed::{self, BlobRole};
 use crate::worker_protocol::{HELPER_BOOTSTRAP_ABI, HELPER_FEATURE_ID};
@@ -592,6 +593,23 @@ impl WorkerReadAuthority {
         canonical_path: &str,
         max_bytes: u64,
     ) -> Result<Vec<u8>, SupervisionError> {
+        self.read_member_with(canonical_path, max_bytes, false)
+    }
+
+    pub(crate) fn read_member_prefix(
+        &self,
+        canonical_path: &str,
+        prefix_cap: u64,
+    ) -> Result<Vec<u8>, SupervisionError> {
+        self.read_member_with(canonical_path, prefix_cap, true)
+    }
+
+    fn read_member_with(
+        &self,
+        canonical_path: &str,
+        max_bytes: u64,
+        prefix: bool,
+    ) -> Result<Vec<u8>, SupervisionError> {
         let deadline = Instant::now() + MEMBER_READ_TIMEOUT;
         let read_operation_id = random_operation_id()?;
         let authority = MemberReadAuthority::new(
@@ -599,35 +617,56 @@ impl WorkerReadAuthority {
             &self.inner.planning,
             &self.inner.completion,
         );
-        let request = worker_runtime::create_member_read_request(
-            clone_source(&self.inner.snapshot)?,
-            self.inner.snapshot.len(),
-            authority,
-            read_operation_id,
-            canonical_path,
-            max_bytes,
-        )
+        let request = if prefix {
+            worker_runtime::create_member_prefix_read_request(
+                clone_source(&self.inner.snapshot)?,
+                self.inner.snapshot.len(),
+                authority,
+                read_operation_id,
+                canonical_path,
+                max_bytes,
+            )
+        } else {
+            worker_runtime::create_member_read_request(
+                clone_source(&self.inner.snapshot)?,
+                self.inner.snapshot.len(),
+                authority,
+                read_operation_id,
+                canonical_path,
+                max_bytes,
+            )
+        }
         .map_err(|detail| SupervisionError::new(SupervisionErrorKind::IntegrityMismatch, detail))?;
-        let expected = worker_runtime::validate_member_read_request(
-            clone_source(&self.inner.snapshot)?,
-            self.inner.snapshot.len(),
-            authority,
-            &request,
-            read_operation_id,
-        )
+        let expected = if prefix {
+            worker_runtime::validate_member_prefix_read_request(
+                clone_source(&self.inner.snapshot)?,
+                self.inner.snapshot.len(),
+                authority,
+                &request,
+                read_operation_id,
+            )
+        } else {
+            worker_runtime::validate_member_read_request(
+                clone_source(&self.inner.snapshot)?,
+                self.inner.snapshot.len(),
+                authority,
+                &request,
+                read_operation_id,
+            )
+        }
         .map_err(|detail| SupervisionError::new(SupervisionErrorKind::IntegrityMismatch, detail))?;
         let _permit = self.inner.coordinator.acquire(deadline)?;
-        let capacity = usize::try_from(expected.actual_bytes).map_err(|_| {
+        let capacity = usize::try_from(expected.retained_bytes).map_err(|_| {
             SupervisionError::new(
                 SupervisionErrorKind::Internal,
-                "authorized member size does not fit this platform",
+                "authorized retained member size does not fit this platform",
             )
         })?;
         let mut output = Vec::new();
         output.try_reserve_exact(capacity).map_err(|error| {
             SupervisionError::new(
                 SupervisionErrorKind::Internal,
-                format!("could not reserve {capacity} authorized member bytes: {error}"),
+                format!("could not reserve {capacity} authorized retained bytes: {error}"),
             )
         })?;
         execute_member_read(
@@ -635,6 +674,7 @@ impl WorkerReadAuthority {
             read_operation_id,
             &request,
             expected,
+            prefix,
             deadline,
             &mut output,
         )?;
@@ -688,6 +728,7 @@ fn execute_member_read(
     read_operation_id: [u8; 16],
     request: &[u8],
     expected: MemberReadEvidence,
+    prefix: bool,
     deadline: Instant,
     output: &mut Vec<u8>,
 ) -> Result<(), SupervisionError> {
@@ -706,6 +747,7 @@ fn execute_member_read(
         read_operation_id,
         request,
         expected,
+        prefix,
         deadline,
         output,
         &control,
@@ -720,6 +762,7 @@ fn execute_member_read_active(
     read_operation_id: [u8; 16],
     request: &[u8],
     expected: MemberReadEvidence,
+    prefix: bool,
     deadline: Instant,
     output: &mut Vec<u8>,
     control: &OwnedFd,
@@ -728,6 +771,7 @@ fn execute_member_read_active(
     let epoch = EpochDeadline::ending_at(AuthorityEpoch::Execution, deadline);
     let mut bootstrap = Frame::new(Kind::Bootstrap, read_operation_id);
     bootstrap.flags = FLAG_MEMBER_READ
+        | if prefix { FLAG_MEMBER_PREFIX_READ } else { 0 }
         | if matches!(authority.kind, OperationKind::Materialize) {
             FLAG_MATERIALIZE
         } else {
@@ -824,6 +868,7 @@ fn execute_member_read_active(
     let request_len = sealed::total_len(request.len())
         .ok_or_else(|| protocol("member-read request blob exceeds its envelope"))?;
     let mut read = Frame::new(Kind::MemberRead, read_operation_id);
+    read.flags = if prefix { FLAG_MEMBER_PREFIX_READ } else { 0 };
     read.values = [completion_len, request_len, 0, 0];
     transport_until(control, child, epoch, libc::POLLOUT, || {
         send_packet(
@@ -839,7 +884,7 @@ fn execute_member_read_active(
     }
     if read_accepted.kind != Kind::MemberReadAccepted
         || read_accepted.operation_id != read_operation_id
-        || read_accepted.flags != 0
+        || read_accepted.flags != read.flags
         || read_accepted.values[0] != completion_len
         || read_accepted.values[1] > i32::MAX as u64
         || read_accepted.values[2] != request_len
@@ -866,6 +911,7 @@ fn execute_member_read_active(
         read_operation_id,
         request,
         expected,
+        prefix,
         deadline,
         output,
         control,
@@ -880,6 +926,7 @@ fn drain_member_read(
     read_operation_id: [u8; 16],
     request: &[u8],
     expected: MemberReadEvidence,
+    prefix: bool,
     deadline: Instant,
     output: &mut Vec<u8>,
     control: &OwnedFd,
@@ -888,6 +935,11 @@ fn drain_member_read(
 ) -> Result<(), SupervisionError> {
     let mut eof = false;
     let mut result_observed = false;
+    let mut actual_bytes = 0_u64;
+    let mut actual_crc = crc32fast::Hasher::new();
+    let mut actual_sha256 = Sha256::new();
+    let retained = usize::try_from(expected.retained_bytes)
+        .map_err(|_| protocol("authorized retained member size is unrepresentable"))?;
     while !eof || !result_observed {
         let remaining = deadline
             .checked_duration_since(Instant::now())
@@ -953,16 +1005,23 @@ fn drain_member_read(
                         break;
                     }
                     Ok(read) => {
-                        let next = output
-                            .len()
-                            .checked_add(read)
+                        let read_u64 = u64::try_from(read)
+                            .map_err(|_| protocol("member-read chunk size is unrepresentable"))?;
+                        let next = actual_bytes
+                            .checked_add(read_u64)
                             .ok_or_else(|| protocol("member-read output length overflowed"))?;
-                        if next > expected.actual_bytes as usize {
+                        if next > expected.actual_bytes {
                             return Err(protocol(
                                 "member-read worker emitted more than the authorized size",
                             ));
                         }
-                        output.extend_from_slice(&chunk[..read]);
+                        actual_bytes = next;
+                        actual_crc.update(&chunk[..read]);
+                        actual_sha256.update(&chunk[..read]);
+                        if output.len() < retained {
+                            let take = (retained - output.len()).min(read);
+                            output.extend_from_slice(&chunk[..take]);
+                        }
                     }
                     Err(rustix::io::Errno::AGAIN) => break,
                     Err(rustix::io::Errno::INTR) => {}
@@ -993,10 +1052,16 @@ fn drain_member_read(
             result_observed = true;
         }
     }
-    if output.len() as u64 != expected.actual_bytes {
+    if actual_bytes != expected.actual_bytes {
         return Err(SupervisionError::new(
             SupervisionErrorKind::IntegrityMismatch,
             "member-read output reached EOF at the wrong length",
+        ));
+    }
+    if output.len() as u64 != expected.retained_bytes {
+        return Err(SupervisionError::new(
+            SupervisionErrorKind::IntegrityMismatch,
+            "member-read retained output reached EOF at the wrong length",
         ));
     }
 
@@ -1016,15 +1081,35 @@ fn drain_member_read(
         &authority.planning,
         &authority.completion,
     );
-    worker_runtime::validate_member_read_result(
-        clone_source(&authority.snapshot)?,
-        authority.snapshot.len(),
-        read_authority,
-        request,
-        read_operation_id,
-        output,
-    )
-    .map_err(|detail| SupervisionError::new(SupervisionErrorKind::IntegrityMismatch, detail))?;
+    let actual_crc = actual_crc.finalize();
+    let actual_sha256 = actual_sha256.finalize().into();
+    let validated = if prefix {
+        worker_runtime::validate_member_prefix_read_stream_result(
+            clone_source(&authority.snapshot)?,
+            authority.snapshot.len(),
+            read_authority,
+            request,
+            read_operation_id,
+            actual_bytes,
+            actual_crc,
+            actual_sha256,
+            output.len() as u64,
+        )
+    } else {
+        worker_runtime::validate_member_read_stream_result(
+            clone_source(&authority.snapshot)?,
+            authority.snapshot.len(),
+            read_authority,
+            request,
+            read_operation_id,
+            actual_bytes,
+            actual_crc,
+            actual_sha256,
+            output.len() as u64,
+        )
+    };
+    validated
+        .map_err(|detail| SupervisionError::new(SupervisionErrorKind::IntegrityMismatch, detail))?;
     Ok(())
 }
 

@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use std::io::{Cursor, Write};
 
-use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelLimits, CONSUMER_PROFILE_ID};
+use sealr::wheel::{
+    evaluate_wheel, InstallTransform, WheelEvaluation, WheelLimits, CONSUMER_PROFILE_ID,
+};
 use sealr::{
     apply_supervised, apply_with_options, AdmissionStatus, ApplyOptions, ArchiveFormat,
     LinuxWorker, MemberReadErrorKind, Policy, Request, RetentionPlan, RetentionStatus,
@@ -159,6 +161,10 @@ fn main() {
         .record
         .iter()
         .any(|binding| binding.path == "demo/caf\u{e9}.py"));
+    assert!(plan.entries().iter().any(|entry| {
+        entry.source_path.as_deref() == Some("demo-1.0.data/scripts/demo-script")
+            && entry.transform == InstallTransform::RewritePythonShebang
+    }));
     assert_eq!(plan.artifact_sha256(), identities.artifact_sha256);
 
     let zip64_bytes = decode_hex(CPYTHON_SEEK_ZIP64_HEX);
@@ -1058,6 +1064,10 @@ fn wheel_bytes() -> Vec<u8> {
     files.insert(
         "demo/caf\u{e9}.py".to_owned(),
         b"VALUE = 'unicode'\n".to_vec(),
+    );
+    files.insert(
+        "demo-1.0.data/scripts/demo-script".to_owned(),
+        b"#!python\nprint('supervised prefix')\n".to_vec(),
     );
     files.insert(
         "demo-1.0.dist-info/WHEEL".to_owned(),
