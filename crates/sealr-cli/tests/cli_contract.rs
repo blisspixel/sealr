@@ -442,6 +442,8 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert!(help_text.contains("--receipt <NEW_FILE>"));
     assert!(help_text.contains("--policy <FILE>"));
     assert!(help_text.contains("--canonical"));
+    assert!(help_text.contains("do not reopen the archive"));
+    assert!(help_text.contains("not an authority"));
     assert!(help_text.contains("inspect"));
     assert!(help_text.contains("materialize"));
     assert!(help_text.contains("--version"));

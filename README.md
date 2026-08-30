@@ -176,7 +176,20 @@ The repository pins Rust 1.98.0 in `rust-toolchain.toml`; rustup selects it auto
 
 The crate's current minimum supported Rust version is 1.98, declared through `rust-version`. CI selects exactly 1.98.0. Preview releases may raise this minimum only as a documented compatibility change; patch releases within a stable 1.x line will not.
 
-Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.11` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.11). Runnable checksum and provenance commands are in [release verification](docs/release-verification.md). To build from source:
+Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.11` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.11). Runnable checksum and provenance commands are in [release verification](https://github.com/blisspixel/sealr/blob/main/docs/release-verification.md). The native archive extracts a single `sealr` binary; run it directly:
+
+```text
+# After checksumming and extracting the native archive:
+./sealr path/to/archive.zip
+# View JSON goes to stdout; receipt JSON to stderr. Exit 0 means admitted.
+
+# Materialize into a new destination below an existing parent.
+./sealr path/to/archive.zip --dest ./out
+```
+
+**After admission, do not reopen the archive.** Consume the materialized `--dest` tree, or a `VerifiedArchive` from the library, and never parse the original bytes again. The original archive is not an authority — a second parser is exactly where two tools' interpretations of the same bytes can diverge, which is the failure this project exists to prevent. Materializing to `--dest` and then reading that tree is the contract; materializing and continuing to trust the original ZIP is just unzip with extra steps.
+
+To build from source instead of using the native binary:
 
 ```text
 git clone https://github.com/blisspixel/sealr.git

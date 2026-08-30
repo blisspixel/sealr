@@ -18,6 +18,10 @@ use serde::Serialize;
     name = "sealr",
     version,
     about = "Untrusted archive × policy → (materialize | reject) × receipt × view",
+    after_help = "The archive is admitted through exactly one interpretation. After admission, do \
+                  not reopen the archive: consume the materialized --dest tree, or a VerifiedArchive \
+                  from the library, and never parse the original bytes again. The original archive \
+                  is not an authority; a second parser is where interpretations disagree.",
     args_conflicts_with_subcommands = true
 )]
 struct Cli {
