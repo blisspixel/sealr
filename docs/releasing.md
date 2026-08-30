@@ -2,7 +2,7 @@
 
 Releases come only from the current protected `main` commit. The tag workflow stages an attested draft. It never publishes. A trusted local promotion script revalidates live repository controls and publishes only the exact verified draft through the operator's existing administrative GitHub session.
 
-Verification commands for the current published prerelease are maintained in [release-verification.md](release-verification.md). Historical release notes remain identical to their immutable GitHub release bodies.
+Verification commands for the current published prerelease are maintained in [release-verification.md](release-verification.md). Each new immutable GitHub release body is taken exactly from its tagged release-note file.
 
 The workflow and promotion script are intentionally pinned to one preview version at a time.
 
@@ -57,7 +57,7 @@ This tool is used only to build release notices. It is not a sealr runtime depen
 
 ## Stage the draft
 
-Create an annotated tag at the verified commit and push only that tag. For `0.1.0-alpha.12`, the tag is `v0.1.0-alpha.12`.
+Create an annotated tag at the verified commit and push only that tag. For `0.1.0-alpha.13`, the tag is `v0.1.0-alpha.13`.
 
 The tag workflow:
 

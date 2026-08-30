@@ -79,13 +79,13 @@ The complete runnable version, including a hostile `..` container refused before
 - **Not a general process sandbox.** The explicit x86_64 Linux worker is a reduced-authority boundary for selected operations, not host containment.
 - **Not a 7-Zip or libarchive replacement.** Sealr is deliberately narrow: unsupported structure fails closed by design, and general-compatibility extraction is explicitly out of scope.
 - **Not production-grade yet.** There is no external security audit, receipts are unsigned, and the limitations below are security boundaries, not fine print.
-- **Not chasing format breadth.** Parser breadth is currently frozen. Supervised prefix parity, the copyable wheel handoff, and the exact Poetry 2.4.2 repository fixture are implemented after Alpha.12. The active sequence is independent adoption, measured compatibility, stable API and identity review, and independent security review. See the [near-term execution plan](docs/near-term.md).
+- **Not chasing format breadth.** Parser breadth is currently frozen. Alpha.13 releases supervised prefix parity, the copyable wheel handoff, and the exact Poetry 2.4.2 repository fixture. The active sequence is independent adoption, measured compatibility, stable API and identity review, and independent security review. See the [near-term execution plan](docs/near-term.md).
 
 The longer-term aim is an archive-to-tree admission boundary whose decision and evidence can be reused by other systems. Usefulness is not “more unzip.” It is: same bytes and policy produce one tree or no tree on Linux, macOS, and Windows, and the next tool consumes that tree instead of opening the ZIP again. The [usefulness test](docs/usefulness.md) is the quality bar.
 
-> Status: `v0.1.0-alpha.12` is the twelfth development preview of the archive boundary. It is useful for evaluation, integration work, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. Alpha.12 provides twelve deliberately narrow container and codec selections across ZIP32, strict ZIP64, portable and restricted TAR dialects, exact gzip, zstd, xz, and bzip2 wrappers, and a Copy-only 7z container. Every nondefault format is selected explicitly and does not widen or alias the ZIP32 compatibility default. An explicit x86_64 Linux mode moves supported ZIP32 payload verification, stage writes, and later non-retained reads into an authenticated worker restricted with Landlock ABI 3 and seccomp, while the supervisor retains structural planning and publication authority; unsupported worker selections never fall back to in-process execution.
+> Status: `v0.1.0-alpha.13` is the thirteenth development preview of the archive boundary. It is useful for evaluation, integration work, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. Alpha.13 retains the twelve deliberately narrow container and codec selections released through Alpha.12 across ZIP32, strict ZIP64, portable and restricted TAR dialects, exact gzip, zstd, xz, and bzip2 wrappers, and a Copy-only 7z container. Every nondefault format is selected explicitly and does not widen or alias the ZIP32 compatibility default. An explicit x86_64 Linux mode moves supported ZIP32 payload verification, stage writes, and later non-retained reads into an authenticated worker restricted with Landlock ABI 3 and seccomp, while the supervisor retains structural planning and publication authority; unsupported worker selections never fall back to in-process execution.
 
-> Release contents: Alpha.12 turns the verified decision into a more usable handoff. Byte-exact RFC 8785 view v2 and receipt v3 evidence, the no-Sealr-dependency verifier shipped beside every native CLI, the packaged PyPA installer 1.0.1 conformance kit, validated caller policy files, and explicit inspect and materialize commands close the repository-owned integration path. Seven separately selected profiles add restricted GNU long-name TAR, gzip-wrapped PAX and GNU compositions, three Gate B codec promotions, and the Gate C Copy-only 7z structure without changing the ZIP32 default. The [Alpha.12 release notes](docs/releases/v0.1.0-alpha.12.md) define the complete delta and remaining limitations.
+> Release contents: Alpha.13 releases full-integrity supervised prefix reads, a packaged public-API-only PyPA `WheelSource` handoff for exact installer 1.0.1, and an exact repository-owned Poetry 2.4.2 update fixture. Rust retains the admitted plan, Python receives only a reduced digest-bound manifest and verified member blobs, and the realized output set, executable modes, and identity are audited exactly. The Poetry fixture preserves lock validation and real update uninstall while placing PREPARED before uninstall or target writes. This remains repository evidence, not external adoption or general Poetry support. The [Alpha.13 release notes](docs/releases/v0.1.0-alpha.13.md) define the complete delta and remaining limitations. This GitHub-only prerelease does not publish a crate to crates.io.
 
 ## Why this exists
 
@@ -108,7 +108,7 @@ Every outcome contains:
 
 ## Current implementation boundary
 
-Alpha.12 supports twelve explicit container and codec selections: classic ZIP32 with stored or Deflate members, strict ZIP64, raw portable ustar, restricted raw POSIX PAX, restricted raw old-GNU long-name TAR, gzip-wrapped portable ustar, gzip-wrapped restricted PAX and GNU long-name TAR, zstd-, xz-, and bzip2-wrapped portable ustar, and a Copy-only 7z container. ZIP32 additionally offers separate compatibility, strict ASCII, and portable UTF-8 name profiles. Every nondefault format is explicit and in process. `apply()` and the `zip` CLI selection remain ZIP32 and never alias to another profile.
+Alpha.13 retains the twelve explicit container and codec selections released through Alpha.12: classic ZIP32 with stored or Deflate members, strict ZIP64, raw portable ustar, restricted raw POSIX PAX, restricted raw old-GNU long-name TAR, gzip-wrapped portable ustar, gzip-wrapped restricted PAX and GNU long-name TAR, zstd-, xz-, and bzip2-wrapped portable ustar, and a Copy-only 7z container. ZIP32 additionally offers separate compatibility, strict ASCII, and portable UTF-8 name profiles. Every nondefault format is explicit and in process. `apply()` and the `zip` CLI selection remain ZIP32 and never alias to another profile.
 
 - CD-first parsing with exact EOCD, central-directory, local-header, and data-descriptor agreement.
 - Rejection of hidden stream records, unreferenced layout bytes, overlapping records, spanned archives, traditional or strong encryption indicators, masked headers, unsupported methods, and mismatched flags or metadata. Every ZIP32 profile rejects ZIP64 markers rather than treating them as an alternate encoding of the ZIP32 selection.
@@ -180,7 +180,7 @@ The repository pins Rust 1.98.0 in `rust-toolchain.toml`; rustup selects it auto
 
 The crate's current minimum supported Rust version is 1.98, declared through `rust-version`. CI selects exactly 1.98.0. Preview releases may raise this minimum only as a documented compatibility change; patch releases within a stable 1.x line will not.
 
-Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.12` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.12). Runnable checksum and provenance commands are in [release verification](https://github.com/blisspixel/sealr/blob/main/docs/release-verification.md). Every archive extracts the `sealr` CLI and independent `sealr-identity-verifier` companion.
+Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.13` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.13). Runnable checksum and provenance commands are in [release verification](https://github.com/blisspixel/sealr/blob/main/docs/release-verification.md). Every archive extracts the `sealr` CLI and independent `sealr-identity-verifier` companion.
 
 ```text
 # After checksumming and extracting the native archive:
@@ -190,7 +190,7 @@ Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0
 # Materialize into a new destination below an existing parent.
 ./sealr path/to/archive.zip --dest ./out
 
-# Alpha.12 can emit and independently check exact evidence.
+# Alpha.13 can emit and independently check exact evidence.
 ./sealr path/to/archive.zip --view view.json --receipt receipt.json --canonical
 ./sealr-identity-verifier evidence \
   --view view.json --receipt receipt.json --source path/to/archive.zip
@@ -288,10 +288,10 @@ The semantic walkthrough is enforced by CLI integration tests on the native plat
 
 ## What comes next
 
-Parser breadth is deliberately frozen. Twelve explicit container and codec selections ship in Alpha.12; adding another selection is no longer the scarce work. The active milestones are:
+Parser breadth is deliberately frozen. Twelve explicit container and codec selections were released through Alpha.12; adding another selection is no longer the scarce work. Alpha.13 releases the three completed consumer milestones. The active milestones are:
 
-1. **Packaged wheel handoff: implemented.** The [copyable example](crates/sealr/examples/pypa_installer_handoff/README.md) uses only the public `sealr` crate, the native packaged worker and verifier, independently checked canonical evidence, bounded verified member blobs, and a reduced SHA-256-bound Python manifest. Rust retains the exact plan and audits every output and executable mode. Python never receives or reopens a wheel path.
-2. **Poetry 2.4.2 repository fixture: implemented after Alpha.12.** The exact Ubuntu 24.04 x86_64 CPython 3.12 fixture pins Poetry and its complete wheel closure, preserves Poetry's lock validation and real update uninstall, emits PREPARED before uninstall or target writes, denies post-PREPARED wheel opens in the host adapter and installer bridge, and requires stock-output and realization-identity parity. This remains repository-owned mechanism evidence.
+1. **Packaged wheel handoff: released in Alpha.13.** The [copyable example](crates/sealr/examples/pypa_installer_handoff/README.md) uses only the public `sealr` crate, the native packaged worker and verifier, independently checked canonical evidence, bounded verified member blobs, and a reduced SHA-256-bound Python manifest. Rust retains the exact plan and audits every output and executable mode. Python never receives or reopens a wheel path.
+2. **Poetry 2.4.2 repository fixture: released in Alpha.13.** The exact Ubuntu 24.04 x86_64 CPython 3.12 fixture pins Poetry and its complete wheel closure, preserves Poetry's lock validation and real update uninstall, emits PREPARED before uninstall or target writes, denies post-PREPARED wheel opens in the host adapter and installer bridge, and requires stock-output and realization-identity parity. This remains repository-owned mechanism evidence.
 3. **External usefulness: next.** Seek one separately maintained publisher, registry, build backend, or installer that adopts the capability and independently verified evidence as authoritative.
 4. **Measured compatibility and independent review.** Continue targeted benign Unicode and descriptor-bearing wheel evidence, stable assurance history, a measurable TCB, bounded review, continuous fuzzing, and independent security review.
 
@@ -320,7 +320,7 @@ See the [near-term execution plan](docs/near-term.md) for release-sized work and
 | Document | Purpose |
 |---|---|
 | [Documentation index](docs/index.md) | Guided map of current contracts, security material, plans, and operations |
-| [Near-term execution plan](docs/near-term.md) | Released Alpha.12 baseline and the next usefulness, compatibility, and review gates |
+| [Near-term execution plan](docs/near-term.md) | Released Alpha.13 baseline and the next usefulness, compatibility, and review gates |
 | [Distribution contract](docs/distribution-contract.md) | Exact source-package scope, SemVer and MSRV policy, and native archive floors |
 | [Copyable PyPA `WheelSource` handoff](crates/sealr/examples/pypa_installer_handoff/README.md) | Public-API-only supervised admission, reduced manifest, source deletion, real installer effects, and exact result audit |
 | [Exact Poetry 2.4.2 repository fixture](tests/poetry-consumer/README.md) | Lock-preserving update ordering, PREPARED-boundary source removal, host-and-bridge wheel-open denial, stock parity, and exact realization audit |
@@ -329,7 +329,7 @@ See the [near-term execution plan](docs/near-term.md) for release-sized work and
 | [Private semantic record](docs/semantic-record.md) | Crate-private Alpha.6 planning/completion codec, worker executors, validation rules, evidence, and remaining gates |
 | [Roadmap](ROADMAP.md) | Full capability order, release gate, and non-goals |
 | [Safety specification](docs/safety.md) | Normative safety rules and supported boundary |
-| [API contract](docs/api.md) | Published Alpha.12 Rust and JSON surface |
+| [API contract](docs/api.md) | Published Alpha.13 Rust and JSON surface |
 | [Release verification](docs/release-verification.md) | Checksums, provenance, tag, and immutable release verification |
 | [Evidence encoding contract](docs/evidence-encoding.md) | The default declaration-order encoding and opt-in RFC 8785 canonical evidence lineage |
 

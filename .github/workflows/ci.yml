@@ -197,19 +197,19 @@ jobs:
         run: |
           cargo package --locked -p sealr
           cargo build --locked --release \
-            --manifest-path target/package/sealr-0.1.0-alpha.12/Cargo.toml \
+            --manifest-path target/package/sealr-0.1.0-alpha.13/Cargo.toml \
             --example pypa_installer_handoff
           handoff="${RUNNER_TEMP}/sealr-pypa-installer-handoff"
           cp --recursive \
-            target/package/sealr-0.1.0-alpha.12/examples/pypa_installer_handoff \
+            target/package/sealr-0.1.0-alpha.13/examples/pypa_installer_handoff \
             "${handoff}"
           mv "${handoff}/Cargo.toml.example" "${handoff}/Cargo.toml"
           cargo generate-lockfile \
             --manifest-path "${handoff}/Cargo.toml" \
-            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.12'"
+            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.13'"
           cargo build --locked --release \
             --manifest-path "${handoff}/Cargo.toml" \
-            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.12'"
+            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.13'"
           cargo build --locked --release --manifest-path tests/packaged-consumer/Cargo.toml
           cargo build --locked --release \
             --manifest-path tests/pypa-installer-consumer/Cargo.toml
@@ -225,16 +225,16 @@ jobs:
             --manifest-path tests/pypa-installer-consumer/Cargo.toml |
             jq --raw-output '.packages[] | select(.name == "sealr") | .manifest_path')"
           test "${manifest}" = \
-            "${PWD}/target/package/sealr-0.1.0-alpha.12/Cargo.toml"
+            "${PWD}/target/package/sealr-0.1.0-alpha.13/Cargo.toml"
           copied_manifest="$(cargo metadata --locked --format-version 1 \
             --manifest-path "${handoff}/Cargo.toml" \
-            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.12'" |
+            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.13'" |
             jq --raw-output '.packages[] | select(.name == "sealr") | .manifest_path')"
           test "${copied_manifest}" = \
-            "${PWD}/target/package/sealr-0.1.0-alpha.12/Cargo.toml"
+            "${PWD}/target/package/sealr-0.1.0-alpha.13/Cargo.toml"
           features="$(cargo metadata --locked --format-version 1 \
             --manifest-path "${handoff}/Cargo.toml" \
-            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.12'" |
+            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.13'" |
             jq --compact-output \
               '[.resolve.nodes[] | select(.id | startswith("path+file:") and contains("#sealr@")) | .features]')"
           jq --exit-status 'length == 1' <<<"${features}" >/dev/null
@@ -259,7 +259,7 @@ jobs:
             --only-binary=:all: \
             --require-hashes \
             --requirement \
-              target/package/sealr-0.1.0-alpha.12/examples/pypa_installer_handoff/requirements.txt \
+              target/package/sealr-0.1.0-alpha.13/examples/pypa_installer_handoff/requirements.txt \
             --dest "${download}"
           installer="${download}/installer-1.0.1-py3-none-any.whl"
           echo "011d045df8b954ced7dde3a7e42ae4418da40ecda7990f2d11d5ed7c146fd98b  ${installer}" |
@@ -279,7 +279,7 @@ jobs:
             --verifier "${PWD}/target/release/sealr-identity-verifier" \
             --real-wheel "${installer}" \
             --bridge \
-              "${PWD}/target/package/sealr-0.1.0-alpha.12/examples/pypa_installer_handoff/wheel_source.py" \
+              "${PWD}/target/package/sealr-0.1.0-alpha.13/examples/pypa_installer_handoff/wheel_source.py" \
             --controlled-wheel-output \
               "${runtime}/controlled/demo-1.0-py3-none-any.whl"
           cp "${runtime}/controlled/demo-1.0-py3-none-any.whl" \
