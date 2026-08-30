@@ -1,20 +1,20 @@
 # Verify a published release
 
-This page gives runnable commands for the current immutable prerelease. Historical release notes remain byte-identical to the published GitHub release body, so corrections and clearer examples live here.
+This page gives runnable commands for the current immutable prerelease. Historical release notes remain versioned snapshots, while current verification commands and clearer examples live here.
 
 Current release:
 
-- tag: `v0.1.0-alpha.12`;
-- release: <https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.12>;
+- tag: `v0.1.0-alpha.13`;
+- release: <https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.13>;
 - state: prerelease, published, immutable.
 
 ## Linux
 
-Download `SHA256SUMS` and `sealr-0.1.0-alpha.12-x86_64-unknown-linux-gnu.tar.gz` into one directory, then run:
+Download `SHA256SUMS` and `sealr-0.1.0-alpha.13-x86_64-unknown-linux-gnu.tar.gz` into one directory, then run:
 
 ```sh
-archive='sealr-0.1.0-alpha.12-x86_64-unknown-linux-gnu.tar.gz'
-tag='v0.1.0-alpha.12'
+archive='sealr-0.1.0-alpha.13-x86_64-unknown-linux-gnu.tar.gz'
+tag='v0.1.0-alpha.13'
 commit="$(gh api "repos/blisspixel/sealr/commits/${tag}" --jq .sha)"
 if [ "${#commit}" -ne 40 ]; then echo 'could not resolve release tag commit' >&2; exit 1; fi
 case "${commit}" in *[!0-9a-f]*) echo 'could not resolve release tag commit' >&2; exit 1;; esac
@@ -30,11 +30,11 @@ gh attestation verify "${archive}" \
 
 ## macOS
 
-Download `SHA256SUMS` and `sealr-0.1.0-alpha.12-aarch64-apple-darwin.tar.gz` into one directory, then run:
+Download `SHA256SUMS` and `sealr-0.1.0-alpha.13-aarch64-apple-darwin.tar.gz` into one directory, then run:
 
 ```sh
-archive='sealr-0.1.0-alpha.12-aarch64-apple-darwin.tar.gz'
-tag='v0.1.0-alpha.12'
+archive='sealr-0.1.0-alpha.13-aarch64-apple-darwin.tar.gz'
+tag='v0.1.0-alpha.13'
 commit="$(gh api "repos/blisspixel/sealr/commits/${tag}" --jq .sha)"
 if [ "${#commit}" -ne 40 ]; then echo 'could not resolve release tag commit' >&2; exit 1; fi
 case "${commit}" in *[!0-9a-f]*) echo 'could not resolve release tag commit' >&2; exit 1;; esac
@@ -55,11 +55,11 @@ gh attestation verify "${archive}" \
 
 ## Windows PowerShell
 
-Download `SHA256SUMS` and `sealr-0.1.0-alpha.12-x86_64-pc-windows-msvc.zip` into one directory, then run:
+Download `SHA256SUMS` and `sealr-0.1.0-alpha.13-x86_64-pc-windows-msvc.zip` into one directory, then run:
 
 ```powershell
-$archive = 'sealr-0.1.0-alpha.12-x86_64-pc-windows-msvc.zip'
-$tag = 'v0.1.0-alpha.12'
+$archive = 'sealr-0.1.0-alpha.13-x86_64-pc-windows-msvc.zip'
+$tag = 'v0.1.0-alpha.13'
 $commit = gh api "repos/blisspixel/sealr/commits/$tag" --jq .sha
 if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{40}$') { throw 'could not resolve release tag commit' }
 $line = (Get-Content -LiteralPath SHA256SUMS) | Where-Object { $_ -match "  $([regex]::Escape($archive))$" }
@@ -82,14 +82,14 @@ if ($LASTEXITCODE -ne 0) { throw 'build provenance verification failed' }
 With a current GitHub CLI, verify the immutable release record:
 
 ```sh
-gh release verify v0.1.0-alpha.12 --repo blisspixel/sealr
+gh release verify v0.1.0-alpha.13 --repo blisspixel/sealr
 ```
 
 Build provenance binds each native archive to the tagged GitHub Actions workflow and source commit. It is not a vulnerability-free claim, an archive-decision attestation, or a substitute for reviewing the security limitations.
 
 ## Canonical evidence after archive authentication
 
-The published Alpha.12 archives include `sealr-identity-verifier` or `sealr-identity-verifier.exe` beside the `sealr` CLI, with no additional release asset. After the checksum and provenance steps above succeed, the extracted pair can produce and check byte-exact evidence without a source checkout or Rust toolchain:
+The published Alpha.13 archives include `sealr-identity-verifier` or `sealr-identity-verifier.exe` beside the `sealr` CLI, with no additional release asset. After the checksum and provenance steps above succeed, the extracted pair can produce and check byte-exact evidence without a source checkout or Rust toolchain:
 
 ```sh
 ./sealr path/to/archive.zip \

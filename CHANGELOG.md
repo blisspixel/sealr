@@ -6,6 +6,8 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+## [0.1.0-alpha.13] - 2026-08-31
+
 ### Added
 
 - Added an exact repository-owned [Poetry 2.4.2 update fixture](tests/poetry-consumer/README.md) for Ubuntu 24.04 x86_64 CPython 3.12. Required CI pins the Poetry wheel and complete 47-wheel acquisition set. Poetry validates the selected artifact against its lock hash before the injected executor begins Sealr preparation. The executor reports PREPARED only after supervised admission, independent canonical-evidence verification, wheel evaluation, bounded member staging, private-source deletion, exact target-interpreter validation, and a target-read-only installer preflight. The fixture proves the old distribution remains installed at that boundary, then performs Poetry's real update uninstall, sends a digest-bound installation permit, completes through the packaged `WheelSource` handoff, denies `.whl` opens in the host adapter and installer bridge after PREPARED, and requires Rust's exact output, executable-mode, and realization-identity audit. The adapted path reports 13 realized files, its realization identity matches the pin, and its complete non-bytecode target snapshot matches the stock control. EOF after PREPARED preserves the complete old target, while a symlinked output ancestor is denied before PREPARED or uninstall without changing the target or an outside sentinel. This is repository-owned evidence for one exact private Poetry seam, not external adoption or general Poetry support.
@@ -441,7 +443,8 @@ First public development preview of the ZIP boundary.
 
 This preview is not a production-ready security boundary and has not received an external security audit. See the security limitations in the README and the reporting policy in `SECURITY.md` before evaluating it.
 
-[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.12...HEAD
+[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.13...HEAD
+[0.1.0-alpha.13]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.12...v0.1.0-alpha.13
 [0.1.0-alpha.12]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.11...v0.1.0-alpha.12
 [0.1.0-alpha.11]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.10...v0.1.0-alpha.11
 [0.1.0-alpha.10]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.9...v0.1.0-alpha.10

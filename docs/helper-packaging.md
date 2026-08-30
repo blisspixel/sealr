@@ -28,7 +28,7 @@ The CLI, identity verifier, and helper have mode `0755`. Documentation, licenses
 ```json
 {
   "schema": "sealr.worker-artifact.v1",
-  "release_version": "0.1.0-alpha.12",
+  "release_version": "0.1.0-alpha.13",
   "target": "x86_64-unknown-linux-musl",
   "bootstrap_abi": 1,
   "byte_len": 0,

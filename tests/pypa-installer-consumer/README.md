@@ -44,7 +44,7 @@ python3 -m pip download \
   --no-deps \
   --only-binary=:all: \
   --require-hashes \
-  --requirement target/package/sealr-0.1.0-alpha.12/examples/pypa_installer_handoff/requirements.txt \
+  --requirement target/package/sealr-0.1.0-alpha.13/examples/pypa_installer_handoff/requirements.txt \
   --dest target/pypa-installer-download
 python3 -m zipfile -e \
   target/pypa-installer-download/installer-1.0.1-py3-none-any.whl \
@@ -55,7 +55,7 @@ cargo run --locked --release \
   --installer-root target/pypa-installer-extracted \
   --verifier target/release/sealr-identity-verifier \
   --real-wheel target/pypa-installer-download/installer-1.0.1-py3-none-any.whl \
-  --bridge target/package/sealr-0.1.0-alpha.12/examples/pypa_installer_handoff/wheel_source.py \
+  --bridge target/package/sealr-0.1.0-alpha.13/examples/pypa_installer_handoff/wheel_source.py \
   --controlled-wheel-output target/pypa-controlled-output/demo-1.0-py3-none-any.whl
 ```
 

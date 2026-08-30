@@ -1,6 +1,6 @@
 # API contract
 
-This page distinguishes the implemented preview contract from the target semantic API. Alpha.12 is the latest published release. Its explicit selections include portable ustar, strict ZIP64 under policy v3, strict gzip-wrapped portable ustar under policy v4, restricted raw POSIX PAX under policy v5, restricted raw GNU long-name TAR under policy v6, the gzip-wrapped restricted PAX and GNU compositions under policy v7, zstd-, xz-, and bzip2-wrapped portable ustar under policies v8 through v10, and the Copy-only 7z container under policy v11. None changes the compatibility `apply()` behavior or ZIP32 default. Current callers must pin to the implemented section. The target is specified further in [semantic-model.md](semantic-model.md).
+This page distinguishes the implemented preview contract from the target semantic API. Alpha.13 is the latest published release. Its explicit selections include portable ustar, strict ZIP64 under policy v3, strict gzip-wrapped portable ustar under policy v4, restricted raw POSIX PAX under policy v5, restricted raw GNU long-name TAR under policy v6, the gzip-wrapped restricted PAX and GNU compositions under policy v7, zstd-, xz-, and bzip2-wrapped portable ustar under policies v8 through v10, and the Copy-only 7z container under policy v11. None changes the compatibility `apply()` behavior or ZIP32 default. Current callers must pin to the implemented section. The target is specified further in [semantic-model.md](semantic-model.md).
 
 ## Implemented surface
 
@@ -191,7 +191,7 @@ The current receipt is versioned unsigned JSON (`signed: false`). The repository
     "content": { "sealrTreeV1": "..." }
   },
   "view_digest": { "sha256": "..." },
-  "tool": { "name": "sealr", "version": "0.1.0-alpha.12" },
+  "tool": { "name": "sealr", "version": "0.1.0-alpha.13" },
   "environment": { "os": "windows", "arch": "x86_64", "kernel_jail": "unavailable" },
   "materialization": {
     "schema": "sealr.materialization.v2",
