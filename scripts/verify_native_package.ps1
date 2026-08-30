@@ -291,12 +291,18 @@ $resolvedArchive = Resolve-RequiredFile -Path $ArchivePath -Role 'native release
 $archiveBase = "sealr-$Version-$TargetTriple"
 $isLinuxTarget = $TargetTriple -eq $linuxTarget
 $binaryName = if ($TargetTriple -eq $windowsTarget) { 'sealr.exe' } else { 'sealr' }
+$identityVerifierName = if ($TargetTriple -eq $windowsTarget) {
+    'sealr-identity-verifier.exe'
+} else {
+    'sealr-identity-verifier'
+}
 $expectedFiles = @(
     'CHANGELOG.md',
     'LICENSE',
     'README.md',
     'THIRD_PARTY_LICENSES.txt',
-    $binaryName
+    $binaryName,
+    $identityVerifierName
 )
 $expectedDirectories = @()
 if ($isLinuxTarget) {
@@ -430,6 +436,31 @@ try {
     if ($LASTEXITCODE -ne 0) {
         throw 'packaged CLI help smoke test failed'
     }
+    $packagedIdentityVerifier = Join-Path $packageRoot $identityVerifierName
+    $verifierVersion = (& $packagedIdentityVerifier --version | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $verifierVersion -cne "sealr-identity-verifier $Version") {
+        throw "packaged identity verifier reported unexpected version: $verifierVersion"
+    }
+    foreach ($helpArguments in @(@('--help'), @('evidence', '--help'))) {
+        $help = Invoke-Captured `
+            -FilePath $packagedIdentityVerifier `
+            -Arguments $helpArguments `
+            -Role 'packaged identity verifier help'
+        if ($help.ExitCode -ne 0 -or
+            [string]::IsNullOrWhiteSpace($help.Stdout) -or
+            -not [string]::IsNullOrEmpty($help.Stderr)) {
+            throw 'packaged identity verifier help contract failed'
+        }
+    }
+    $verifierMisuse = Invoke-Captured `
+        -FilePath $packagedIdentityVerifier `
+        -Arguments @('evidence', '--view', 'missing-receipt.json') `
+        -Role 'packaged identity verifier misuse'
+    if ($verifierMisuse.ExitCode -ne 2 -or
+        -not [string]::IsNullOrEmpty($verifierMisuse.Stdout) -or
+        $verifierMisuse.Stderr -notmatch '^usage: ') {
+        throw 'packaged identity verifier misuse contract failed'
+    }
 
     $tarManifestPath = Resolve-RequiredFile `
         -Path (Join-Path $workspace 'crates/sealr/tests/conformance/tar-producers-v1.json') `
@@ -464,6 +495,143 @@ try {
     $tarHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $tarArchivePath).Hash.ToLowerInvariant()
     if ($tarHash -cne $tarFixture.source_sha256) {
         throw "reconstructed portable ustar source digest changed: $tarHash"
+    }
+
+    $canonicalViewPath = Join-Path $temporaryRoot 'canonical-view.json'
+    $canonicalReceiptPath = Join-Path $temporaryRoot 'canonical-receipt.json'
+    $canonicalProducer = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @(
+            '--format', 'tar-ustar',
+            $tarArchivePath,
+            '--view', $canonicalViewPath,
+            '--receipt', $canonicalReceiptPath,
+            '--canonical'
+        ) `
+        -Role 'packaged canonical evidence producer'
+    if ($canonicalProducer.ExitCode -ne 0 -or
+        -not [string]::IsNullOrEmpty($canonicalProducer.Stdout) -or
+        -not [string]::IsNullOrEmpty($canonicalProducer.Stderr)) {
+        throw 'packaged CLI did not produce canonical evidence silently'
+    }
+    $canonicalView = Get-Content -Raw -LiteralPath $canonicalViewPath | ConvertFrom-Json
+    $canonicalReceipt = Get-Content -Raw -LiteralPath $canonicalReceiptPath | ConvertFrom-Json
+    if ($canonicalView.schema -cne 'sealr.view.v2' -or
+        $canonicalReceipt.schema -cne 'sealr.receipt.v3' -or
+        $canonicalView.admission.status -cne 'admitted' -or
+        $canonicalView.verification.status -cne 'complete' -or
+        @($canonicalView.members).Count -ne 1) {
+        throw 'packaged CLI canonical evidence shape changed'
+    }
+    $canonicalViewHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $canonicalViewPath).Hash.ToLowerInvariant()
+    $canonicalReceiptHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $canonicalReceiptPath).Hash.ToLowerInvariant()
+    $canonicalVerification = Invoke-Captured `
+        -FilePath $packagedIdentityVerifier `
+        -Arguments @(
+            'evidence',
+            '--view', $canonicalViewPath,
+            '--receipt', $canonicalReceiptPath,
+            '--source', $tarArchivePath
+        ) `
+        -Role 'packaged canonical evidence verification'
+    $expectedVerification = "verified canonical evidence: view sha256 $canonicalViewHash, receipt sha256 $canonicalReceiptHash, 1 member(s), content root independently verified, source digest checked; layout root remains a producer claim`n"
+    if ($canonicalVerification.ExitCode -ne 0 -or
+        $canonicalVerification.Stdout -cne $expectedVerification -or
+        -not [string]::IsNullOrEmpty($canonicalVerification.Stderr)) {
+        throw 'packaged identity verifier did not reproduce the exact admitted evidence contract'
+    }
+
+    $rejectedArchivePath = Join-Path $temporaryRoot 'rejected-portable-ustar.tar'
+    $rejectedBytes = [System.IO.File]::ReadAllBytes($tarArchivePath)
+    $rejectedBytes[0] = $rejectedBytes[0] -bxor 1
+    [System.IO.File]::WriteAllBytes($rejectedArchivePath, $rejectedBytes)
+    $rejectedViewPath = Join-Path $temporaryRoot 'rejected-view.json'
+    $rejectedReceiptPath = Join-Path $temporaryRoot 'rejected-receipt.json'
+    $rejectedProducer = Invoke-Captured `
+        -FilePath $packagedCli `
+        -Arguments @(
+            '--format', 'tar-ustar',
+            $rejectedArchivePath,
+            '--view', $rejectedViewPath,
+            '--receipt', $rejectedReceiptPath,
+            '--canonical'
+        ) `
+        -Role 'packaged rejected canonical evidence producer'
+    if ($rejectedProducer.ExitCode -ne 2 -or
+        -not [string]::IsNullOrEmpty($rejectedProducer.Stdout) -or
+        -not [string]::IsNullOrEmpty($rejectedProducer.Stderr)) {
+        throw 'packaged CLI did not produce canonical rejection evidence silently'
+    }
+    $rejectedView = Get-Content -Raw -LiteralPath $rejectedViewPath | ConvertFrom-Json
+    $rejectedReceipt = Get-Content -Raw -LiteralPath $rejectedReceiptPath | ConvertFrom-Json
+    if ($rejectedView.schema -cne 'sealr.view.v2' -or
+        $rejectedReceipt.schema -cne 'sealr.receipt.v3' -or
+        $rejectedView.verdict -cne 'rejected') {
+        throw 'packaged CLI canonical rejection evidence shape changed'
+    }
+    $rejectedVerification = Invoke-Captured `
+        -FilePath $packagedIdentityVerifier `
+        -Arguments @(
+            'evidence',
+            '--view', $rejectedViewPath,
+            '--receipt', $rejectedReceiptPath,
+            '--source', $rejectedArchivePath
+        ) `
+        -Role 'packaged canonical rejection evidence verification'
+    if ($rejectedVerification.ExitCode -ne 0 -or
+        $rejectedVerification.Stdout -notmatch '^verified canonical evidence: ' -or
+        $rejectedVerification.Stdout -notmatch 'content root unavailable, source digest checked; layout root remains a producer claim\r?\n$' -or
+        -not [string]::IsNullOrEmpty($rejectedVerification.Stderr)) {
+        throw 'packaged identity verifier did not accept coherent rejection evidence'
+    }
+
+    $tamperCases = @(
+        [pscustomobject]@{ Label = 'view'; Original = $canonicalViewPath; IsView = $true; IsSource = $false },
+        [pscustomobject]@{ Label = 'receipt'; Original = $canonicalReceiptPath; IsView = $false; IsSource = $false },
+        [pscustomobject]@{ Label = 'source'; Original = $tarArchivePath; IsView = $false; IsSource = $true }
+    )
+    foreach ($case in $tamperCases) {
+        $tamperedPath = Join-Path $temporaryRoot "tampered-$($case.Label).bin"
+        $originalBytes = [System.IO.File]::ReadAllBytes($case.Original)
+        $tamperedBytes = [byte[]]::new($originalBytes.Length + 1)
+        [System.Array]::Copy($originalBytes, 0, $tamperedBytes, 0, $originalBytes.Length)
+        $tamperedBytes[$tamperedBytes.Length - 1] = 0x0a
+        [System.IO.File]::WriteAllBytes($tamperedPath, $tamperedBytes)
+        $viewUnderTest = if ($case.IsView) { $tamperedPath } else { $canonicalViewPath }
+        $receiptUnderTest = if (-not $case.IsView -and -not $case.IsSource) {
+            $tamperedPath
+        } else {
+            $canonicalReceiptPath
+        }
+        $sourceUnderTest = if ($case.IsSource) { $tamperedPath } else { $tarArchivePath }
+        $refusal = Invoke-Captured `
+            -FilePath $packagedIdentityVerifier `
+            -Arguments @(
+                'evidence',
+                '--view', $viewUnderTest,
+                '--receipt', $receiptUnderTest,
+                '--source', $sourceUnderTest
+            ) `
+            -Role "packaged identity verifier $($case.Label) tamper refusal"
+        if ($refusal.ExitCode -ne 1 -or
+            -not [string]::IsNullOrEmpty($refusal.Stdout) -or
+            $refusal.Stderr -notmatch '^canonical evidence rejected: ') {
+            throw "packaged identity verifier did not reject $($case.Label) tampering"
+        }
+    }
+    $pairSubstitution = Invoke-Captured `
+        -FilePath $packagedIdentityVerifier `
+        -Arguments @(
+            'evidence',
+            '--view', $canonicalViewPath,
+            '--receipt', $rejectedReceiptPath,
+            '--source', $tarArchivePath
+        ) `
+        -Role 'packaged identity verifier pair substitution refusal'
+    if ($pairSubstitution.ExitCode -ne 1 -or
+        -not [string]::IsNullOrEmpty($pairSubstitution.Stdout) -or
+        $pairSubstitution.Stderr -notmatch '^canonical evidence rejected: ') {
+        throw 'packaged identity verifier did not reject evidence pair substitution'
     }
 
     $tarInspect = Invoke-Captured `
@@ -1284,7 +1452,11 @@ try {
 
     if ($TargetTriple -ne $windowsTarget) {
         foreach ($relative in $expectedFiles) {
-            $expectedMode = if ($relative -in @($binaryName, 'libexec/sealr/sealr-worker')) { '755' } else { '644' }
+            $expectedMode = if ($relative -in @(
+                    $binaryName,
+                    $identityVerifierName,
+                    'libexec/sealr/sealr-worker'
+                )) { '755' } else { '644' }
             $path = Join-Path $packageRoot $relative
             $actualMode = if ($TargetTriple -eq $macTarget) {
                 (stat -f '%Lp' -- $path | Out-String).Trim()

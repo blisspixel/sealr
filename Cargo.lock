@@ -597,6 +597,7 @@ version = "0.1.0-alpha.11"
 dependencies = [
  "clap",
  "sealr",
+ "sealr-identity-verifier",
  "sealr-worker-bootstrap-lab",
  "serde",
  "serde_json",

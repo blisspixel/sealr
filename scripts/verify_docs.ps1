@@ -143,7 +143,8 @@ foreach ($term in @(
     'sealr.worker-artifact.v1',
     'x86_64-unknown-linux-musl',
     'production-only helper graph',
-    'macOS and Windows archives retain their exact five-file contracts'
+    'sealr-identity-verifier',
+    'macOS and Windows archives have exact six-file contracts'
 )) {
     if (-not $helperPackaging.Contains($term, [StringComparison]::Ordinal)) {
         throw "docs/helper-packaging.md is missing its exact package contract: $term"

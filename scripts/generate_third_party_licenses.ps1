@@ -72,11 +72,7 @@ try {
     foreach ($target in $targets) {
         $basePath = Join-Path $temporaryRoot "$target-base.txt"
         $jsonPath = Join-Path $temporaryRoot "$target.json"
-        $manifestPath = if ($target -eq 'x86_64-unknown-linux-gnu') {
-            'tools/release-license-closure/Cargo.toml'
-        } else {
-            'crates/sealr-cli/Cargo.toml'
-        }
+        $manifestPath = 'tools/release-license-closure/Cargo.toml'
         $commonArguments = @(
             '--config', 'about.toml',
             '--locked',
@@ -85,9 +81,7 @@ try {
             '--fail',
             '--target', $target
         )
-        if ($target -eq 'x86_64-unknown-linux-gnu') {
-            $commonArguments += '--no-default-features'
-        }
+        $commonArguments += '--no-default-features'
 
         Invoke-CargoAbout -Arguments (@(
                 'about', 'generate', 'scripts/third_party_licenses.hbs'

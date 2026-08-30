@@ -86,3 +86,16 @@ gh release verify v0.1.0-alpha.11 --repo blisspixel/sealr
 ```
 
 Build provenance binds each native archive to the tagged GitHub Actions workflow and source commit. It is not a vulnerability-free claim, an archive-decision attestation, or a substitute for reviewing the security limitations.
+
+## Canonical evidence after archive authentication
+
+The published Alpha.11 archives predate native delivery of the evidence verifier. Native archives built from current main include `sealr-identity-verifier` or `sealr-identity-verifier.exe` beside the `sealr` CLI, with no additional release asset. After a future prerelease carrying that contract has passed the checksum and provenance steps above, the extracted pair can produce and check byte-exact evidence without a source checkout or Rust toolchain:
+
+```sh
+./sealr path/to/archive.zip \
+  --view view.json --receipt receipt.json --canonical
+./sealr-identity-verifier evidence \
+  --view view.json --receipt receipt.json --source path/to/archive.zip
+```
+
+Verifier exit `0` means the unsigned view and receipt are internally coherent and bound to the supplied source bytes. A coherent rejection receipt also verifies with exit `0`; inspect the evidence verdict separately. The companion is built and attested inside the same archive as the producer, so it cannot authenticate that archive or establish supply-chain independence. It does not execute codecs, reinterpret the source, reconstruct the live layout root, authenticate a signer, or turn the evidence into an attestation.

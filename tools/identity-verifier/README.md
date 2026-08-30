@@ -30,4 +30,25 @@ cargo run --locked -p sealr-identity-verifier -- crates/sealr/tests/conformance/
 cargo run --locked -p sealr-identity-verifier -- crates/sealr/tests/conformance/sevenz-copy-identity-v1.json
 ```
 
+Live canonical-evidence verification is:
+
+```powershell
+cargo run --locked -p sealr-identity-verifier -- evidence `
+  --view view.json --receipt receipt.json --source archive.zip
+```
+
+`--view` and `--receipt` are required byte-exact RFC 8785 documents. `--source` is optional only so evidence whose source was unavailable can still be checked. Supply it whenever the verification claim should bind to observed archive bytes. Each evidence document is read once through one open handle with a 16 MiB limit-plus-one bound. The source is streamed into SHA-256 through a fixed 64 KiB buffer.
+
+Native archives built from current main include `sealr-identity-verifier` or its `.exe` form beside the `sealr` CLI. Authenticate the archive with `SHA256SUMS` and GitHub build provenance before trusting either executable. The packaged verifier is not a separate release asset and cannot authenticate the archive that contains it.
+
+The command contract is:
+
+- exit `0`: the evidence verification completed, including coherent rejection or unavailable-source evidence;
+- exit `1`: file I/O, size, canonicality, pair, source, policy, semantic, or root verification failed;
+- exit `2`: the command arguments were missing, duplicated, unknown, or malformed.
+
+Success writes one summary line to stdout and nothing to stderr. Verification failure writes no stdout and one diagnostic to stderr. Automation should use the exit status and parse the evidence documents themselves rather than treating the human summary as a stable machine protocol.
+
+Live mode does not parse or decompress the source, recompute member hashes from compressed payloads, reconstruct the format-specific layout root, verify a signature, prove SHA-256, or turn unsigned evidence into an attestation. Exit `0` does not mean the archive was admitted; the evidence verdict carries that decision.
+
 Its exact checks and nonclaims are documented in [identity conformance](../../docs/identity-conformance.md).
