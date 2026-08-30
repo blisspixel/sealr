@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-08-28.
+Updated 2026-08-30.
 
 sealr's product is the boundary:
 
@@ -10,7 +10,7 @@ Archive bytes -> versioned interpretation -> verified admitted tree
 All stages                                  -> evidence
 ```
 
-The current `apply()` API remains a one-entry-point preview. `Outcome`, `View`, and receipt v2 now expose interpretation, admission, verification, effect, and completeness separately, while the old `Verdict` remains a compatibility projection and `view_digest` remains invocation evidence rather than tree identity. Phase 0.1 must finish the profile, capability, identity, snapshot, worker, and consumer contracts before stable external dependence.
+The current `apply()` API remains a one-entry-point preview. `Outcome`, default-lineage view v1 and receipt v2, and opt-in RFC 8785 view v2 and receipt v3 expose interpretation, admission, verification, effect, and completeness separately. The old `Verdict` remains a compatibility projection and `view_digest` remains invocation evidence rather than tree identity. Phase 0.1 must finish the profile, capability, identity, snapshot, worker, and consumer contracts before stable external dependence.
 
 The mathematical object this order is protecting is named in [docs/theory.md](docs/theory.md): a profile-indexed partial function from bytes to one covering and one IR, or to nothing. That page is research notes, not a proof.
 
@@ -158,6 +158,7 @@ The detailed release-sized plan is [docs/near-term.md](docs/near-term.md). It co
 9. **Alpha.10 strict gzip-wrapped portable ustar: released.** `TarGzipInterpretationProfile::UstarPortableV1` is an explicit in-process selection authorized by policy v4. It retains the original gzip and one bounded decoded TAR as separate immutable domains, requires one exact full-source transform, applies independent wrapper, TAR, and composite audits before staging, and publishes `sealrTreeV4` layout evidence while preserving the format-neutral content root. It reuses `flate2`, adds no runtime dependency, and carries independent vectors plus a 44-seed scheduled AddressSanitizer campaign. The authenticated worker refuses the profile without fallback until a later semantic record can bind both domains.
 10. **Alpha.11 restricted raw POSIX PAX: released.** `TarPaxInterpretationProfile::PortableV1` is an explicit in-process selection authorized by policy v5. `sealr.profile.tar.pax-portable.v1` permits only canonical local and global `path` and `size` records, resolves local then global then underlying ustar values with exact provenance, and denies unknown keywords, links, sparse files, GNU records, base-256 numbers, mixed dialects, and recovery behavior. Format-native `sealr.archive-ir.tar-pax.v1` evidence, an independent source-covering and state-replay audit, `sealrTreeV5`, and a dedicated nine-seed bounded scheduled AddressSanitizer campaign bind and exercise the result. It adds no runtime dependency, never widens raw ustar, and is refused by the authenticated worker without fallback.
 11. **Stable distribution mechanics: executable before the stable claim.** Only the `sealr` crate is crates.io-allowlisted; exact package files, README, license, MSRV, registry, extracted consumer, and public API fixture are required checks. Native workflows use exact Ubuntu 24.04, macOS 15 arm64, and Windows Server 2022 runners and assert the architecture, ABI, kernel or deployment contract before testing and packaging. The [distribution contract](docs/distribution-contract.md) keeps source and native promises separate. The remaining 1.0 blockers are trust-gate completion, supported consumer promotion, stable assurance history, API and schema freeze, and independent review.
+12. **Canonical evidence verification: implemented on current main.** `Outcome::canonical_evidence()` and CLI `--canonical` emit byte-exact RFC 8785 `sealr.view.v2` and `sealr.receipt.v3` documents. The no-Sealr-dependency verifier checks those bytes, pair bindings, observed source, every registered interpretation profile, known default-policy identities, outcome and effect consistency, and the format-neutral content root. Five committed evidence cases and hostile mutations run in required CI. The statement builder accepts v3 only with its verified view and actual source, then embeds the original receipt token in an unsigned in-toto Statement v1.
 
 Raw portable ustar, restricted raw PAX, the narrow GNU long-name-only raw profile, strict gzip-wrapped portable ustar, the gzip-wrapped PAX and GNU compositions, format-native archive and member evidence, domain-qualified retained payload plans, one validated `VerifiedArchive` construction authority, immutable original and derived snapshots, exact transform graphs, and the explicit strict ZIP64 in-process path are landed. The zstd wrapper is promoted through the executed ruzstd Gate B review under policy v8, the xz wrapper through the executed lzma-rust2 Gate B review under policy v9, the bzip2 wrapper through the executed bzip2/libbz2-rs-sys Gate B review under policy v10, and the Copy-first 7z structure through the executed Gate C first step under policy v11. The immediate sequence is the usefulness, measured-compatibility, and independent-review milestones in the [near-term execution plan](docs/near-term.md); the parked 7z LZMA/LZMA2 member and packed-header step over that structure with the reviewed lzma-rust2 layer resumes afterward. cpio, ar/deb, CAB, RPM, and RAR5 follow only through measured gates. ISO 9660, UDF, and filesystem images remain separate. ZIP64 and TAR worker-record parity, targeted wheel evidence, authenticated recovery, durability, stable identities, and avoided-work performance continue in parallel.
 
@@ -400,10 +401,10 @@ Exit evidence:
 
 Deliverables:
 
-1. Canonicalize policy and view JSON with RFC 8785 JCS before hashing.
+1. Canonicalize policy and view JSON with RFC 8785 JCS before hashing. **Partially landed:** view v2 and receipt v3 are an opt-in RFC 8785 lineage whose emitted bytes are the digested bytes. Default-lineage policy digests and view v1 remain on their frozen declaration-order encodings.
 2. Version the policy, view, receipt, tree, and finding registry with compatibility tests.
 3. Add receipt fields for isolation and degraded conditions. Materializer backend and stage-cleanup evidence are already versioned in the current receipt.
-4. Extend the landed identity-conformance tool into a small independent verifier for canonical evidence bytes, tree-root computation, structural coverage claims, policy identity, signatures when present, and effect-record consistency. It must not extract archives.
+4. Extend the landed identity-conformance tool into a small independent verifier for canonical evidence bytes, tree-root computation, structural coverage claims, policy identity, signatures when present, and effect-record consistency. It must not extract archives. **Unsigned evidence slice landed:** live v2/v3 pairs, observed source, known default policies, content roots, axes, findings, and effects are checked independently; format-specific layout reconstruction remains in finite conformance manifests and signature verification remains future work.
 5. Benchmark structure, full verification, realization, and reuse separately against representative valid ZIPs.
 6. Compare tree and content results with established parsers only for well-formed inputs.
 7. Publish CPU time, peak memory, allocations, open-handle peak, cancellation latency, and avoided decompression or writes, not one headline number.
@@ -510,15 +511,15 @@ The non-shipping Alpha.7 wheel laboratory began during Phase 0.1. Alpha.8 promot
 - **Supported preview landed:** separate source, archive-tree, wheel-artifact, scheme-relative install-plan, and target-realization identities;
 - **Supported preview landed:** bounded verified metadata access without reopening the source or invoking a second ZIP parser;
 - **Supported preview landed:** minimized hostile fixtures and predecessor-bound v2 research plus v3 public-surface compatibility reports;
-- `sealr lock` only after the profile and identity encodings are independently reproducible.
+- `sealr lock` only after its exact semantic scope, compatibility rules, and external adopter are fixed. The underlying profile, tree, and canonical evidence encodings are now independently reproducible.
 
 ### 0.2.2 Canonical consumer bridge
 
 - **Repository research landed:** PyPA installer 0.7.0 consumes a verified-member bridge rather than reparsing the ZIP;
 - **Repository research landed:** the integration deletes the original wheel before Python starts, installs an audit hook before importing installer, denies every `.whl` open, and still completes through the admitted capability;
-- one public same-digest, different-tree wheel demonstration through that path;
+- **Landed:** one public same-digest, different-tree wheel demonstration through that path;
 - a GitHub Action only after it emits the same stable evidence as the Rust API and cannot be confused with the canonical-consumer proof;
-- Sigstore keyless signing only after unsigned claim bytes and the broader evidence verifier are stable. Release archives already carry GitHub build-provenance attestations.
+- Sigstore keyless signing only after the canonical unsigned claim bytes and independent verifier complete review and an adopter fixes the verifier policy. Release archives already carry GitHub build-provenance attestations.
 
 Done when one external consumer treats Sealr's admitted tree and semantic lock as its canonical decision and does not reparse the original ZIP. That is the [usefulness test](docs/usefulness.md). A receipt beside a second unzip does not pass.
 

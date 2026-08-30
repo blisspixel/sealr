@@ -1,10 +1,18 @@
-//! Independent verifier for Sealr identity conformance manifests.
+//! Independent verifier for Sealr identity and canonical-evidence manifests.
 //!
 //! This crate deliberately does not depend on `sealr`. It reads committed
 //! evidence facts, validates their semantic coherence, and independently
-//! reproduces profile, layout, and content digests. It parses only the closed
-//! source-bearing formats represented by a manifest and never inflates an
-//! archive or performs filesystem effects.
+//! reproduces profile, layout, and content digests. Its live mode checks exact
+//! RFC 8785 view and receipt bytes without depending on Sealr. It parses only
+//! the closed source-bearing formats represented by a manifest and never
+//! inflates an archive or performs filesystem effects.
+
+mod evidence;
+
+pub use evidence::{
+    reject_duplicate_json_properties, verify_canonical_evidence, verify_evidence_conformance_json,
+    EvidenceVerificationSummary, EVIDENCE_CONFORMANCE_SCHEMA, MAX_EVIDENCE_BYTES,
+};
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -1564,6 +1572,7 @@ pub fn verify_manifest_json(bytes: &[u8]) -> Result<VerificationSummary, VerifyE
         TAR_XZ_MANIFEST_SCHEMA => verify_tar_xz_identity_vector_json(bytes),
         TAR_BZIP2_MANIFEST_SCHEMA => verify_tar_bzip2_identity_vector_json(bytes),
         SEVENZ_MANIFEST_SCHEMA => verify_sevenz_identity_vector_json(bytes),
+        EVIDENCE_CONFORMANCE_SCHEMA => verify_evidence_conformance_json(bytes),
         schema => Err(VerifyError::new(format!("unsupported schema {schema:?}"))),
     }
 }

@@ -21,7 +21,7 @@ The package contract at `tests/package-contract/sealr.json` pins:
 - the Apache-2.0 SPDX expression;
 - a package-root `README.md` and `LICENSE` whose bytes match the repository sources.
 
-Required CI packages and verifies the crate, extracts the exact `.crate`, and builds a separately locked downstream consumer against that extraction. The consumer exercises supervised ZIP plus in-process portable ustar, including retained and later member reads after the original TAR byte vector is gone. The check fails if another workspace crate becomes publishable or any packaged path changes without a reviewed contract update.
+Required CI packages and verifies the crate, extracts the exact `.crate`, and builds a separately locked downstream consumer against that extraction. The consumer exercises supervised ZIP, every current in-process format selection through Copy-only 7z, retained and later member reads after source removal, and the public wheel evaluator. The check fails if another workspace crate becomes publishable or any packaged path changes without a reviewed contract update.
 
 ### Public API review
 

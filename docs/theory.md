@@ -300,7 +300,7 @@ Do not mix these. A Kani harness on ranges is not a SHA-256 proof. A corpus gate
 
 **Systems, adversarial.** Inspect/materialize stay one parser after a worker exists; snapshot immutability under concurrent writers; no-replace publication; host does not select Unicode; ZipDiff gate covers known constructions, not \(\mathbb{B}^*\).
 
-The current independent identity verifier checks committed covering certificates without inflating and reproduces their profile and tree digests. That establishes combinatorial and encoding agreement for those finite vectors, not codec execution, parser correctness outside the vectors, or a cryptographic proof. The broader signed-evidence verifier in the [roadmap](../ROADMAP.md) remains future work.
+The current independent identity verifier checks committed covering certificates without inflating and reproduces their profile and tree digests. It also checks live canonical evidence bindings, observed source identity, registered interpretation and known default-policy identities, effect consistency, and the format-neutral content root. That establishes combinatorial and encoding agreement for finite vectors plus internal consistency for supplied live claims. It does not establish codec execution, parser correctness outside the vectors, the live format-specific layout root, signer authenticity, or a cryptographic proof. Authenticated-envelope verification remains future work.
 
 ## What this page must not become
 
