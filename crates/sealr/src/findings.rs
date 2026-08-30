@@ -66,13 +66,15 @@ pub enum FindingCode {
     TarFeatureUnsupported,
     TarPaxRecord,
     TarPaxState,
-    TarGnuLongName,
-    TarGnuState,
     FormatUnsupported,
     FormatMagic,
     GzipExtra,
     CodecDeflateInvalidStream,
     CodecDeflateTrailingInput,
+    CrcMismatch,
+    MethodUnsupported,
+    TarGnuLongName,
+    TarGnuState,
     CodecZstdInvalidFrame,
     CodecZstdTrailingInput,
     CodecXzInvalidStream,
@@ -81,8 +83,6 @@ pub enum FindingCode {
     CodecBzip2TrailingInput,
     SevenZInvalidStructure,
     EvidenceCanonicalization,
-    CrcMismatch,
-    MethodUnsupported,
 }
 
 impl FindingCode {
