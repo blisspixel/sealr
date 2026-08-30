@@ -62,15 +62,15 @@ The exact runners are `ubuntu-24.04`, `macos-15`, and `windows-2022`. The releas
 
 1. verifies the runner, architecture, ABI, and deployment contract;
 2. runs the optimized workspace tests on that host;
-3. builds the release CLI;
+3. builds the release CLI and independent canonical-evidence verifier;
 4. packages the exact target archive;
-5. extracts and smoke-tests the packaged CLI;
+5. extracts and smoke-tests both packaged executables;
 6. verifies the target-specific license closure and exact archive contents;
 7. stages only the three expected archives for checksums and provenance.
 
-Every extracted native CLI is exercised through portable ustar inspect and materialization against the same independently produced fixture, with exact source, layout, content, and output bytes. Linux additionally proves that selecting portable ustar with the packaged authenticated worker returns typed isolation unavailability, creates no destination or stage, and does not fall back to in-process execution.
+Every extracted native CLI is exercised through portable ustar inspect and materialization against the same independently produced fixture, with exact source, layout, content, and output bytes. The extracted CLI also emits admitted and rejected canonical evidence that the extracted `sealr-identity-verifier` checks against the observed source. View, receipt, source, and pair-substitution mutations must all fail closed. Linux additionally proves that selecting portable ustar with the packaged authenticated worker returns typed isolation unavailability, creates no destination or stage, and does not fall back to in-process execution.
 
-The Linux archive also contains the authenticated static helper and its fixed manifest. The helper is absent from macOS and Windows archives. A separate pinned-kernel QEMU gate proves that explicit Linux supervision fails before source transfer on Landlock ABI 2, while required Linux tests exercise successful ABI 3 setup on the declared release host.
+All three archives contain `sealr-identity-verifier` or its `.exe` form beside `sealr`. It remains a separate executable with no dependency on the Sealr crate. The Linux archive also contains the authenticated static helper and its fixed manifest. The helper is absent from macOS and Windows archives. A separate pinned-kernel QEMU gate proves that explicit Linux supervision fails before source transfer on Landlock ABI 2, while required Linux tests exercise successful ABI 3 setup on the declared release host.
 
 ## Release evidence
 

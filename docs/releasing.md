@@ -65,8 +65,8 @@ The tag workflow:
 2. waits for the exact protected `main` CI run at that commit, requires all six promotion jobs to succeed, and verifies the stable `Required CI` branch-protection check;
 3. requires all six successful bounded fuzz campaigns on that exact commit;
 4. tests optimized workspace builds on standard Ubuntu, Windows, and macOS runners;
-5. builds and packages each native executable with README, changelog, the Apache-2.0 project license, and the verified target-specific third-party license bundle, including upstream root notice and copyright files;
-6. extracts every package and smoke-tests its version and help output;
+5. builds and packages the native CLI and independent evidence verifier with README, changelog, the Apache-2.0 project license, and the verified target-specific third-party license bundle, including upstream root notice and copyright files;
+6. extracts every package, checks both executables' version and help output, and proves canonical producer-verifier success plus tamper refusal;
 7. creates and verifies `SHA256SUMS` for exactly three native archives;
 8. records build provenance for those archives;
 9. creates or safely resumes the exact expected prerelease draft by numeric release ID;

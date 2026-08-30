@@ -40,6 +40,8 @@ cargo run --locked -p sealr-identity-verifier -- evidence \
 
 `--source` is optional so unavailable-source evidence can still be structurally checked. Supplying it is required when a caller wants the verifier to bind the receipt to observed archive bytes. A successful result names the exact view and receipt SHA-256 values and states whether source and content roots were checked. It also states that the layout root remains a producer claim.
 
+Native archives built from current main carry the same verifier beside the CLI, so the second command becomes `./sealr-identity-verifier evidence ...` after the release archive has been authenticated. Required CI proves this extracted-only flow on Linux, macOS, and Windows for both admitted and rejected evidence, then separately mutates the view, receipt, source, and pair. Because the producer and verifier share one release archive and workflow, this is implementation-independent evidence checking but not supply-chain independence.
+
 ## Manifest contract
 
 `sealr.identity-conformance.v1` contains:

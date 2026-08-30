@@ -1,6 +1,6 @@
 use std::env;
 use std::ffi::{OsStr, OsString};
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::Read;
 use std::path::Path;
 use std::process::ExitCode;
@@ -17,7 +17,19 @@ fn main() -> ExitCode {
         .and_then(|value| Path::new(&value).file_name().map(|name| name.to_owned()))
         .unwrap_or_else(|| "sealr-identity-verifier".into());
     let arguments: Vec<_> = arguments.collect();
+    if matches!(arguments.as_slice(), [argument] if argument == "--help" || argument == "-h") {
+        println!("{}", usage(&program));
+        return ExitCode::SUCCESS;
+    }
+    if matches!(arguments.as_slice(), [argument] if argument == "--version" || argument == "-V") {
+        println!("sealr-identity-verifier {}", env!("CARGO_PKG_VERSION"));
+        return ExitCode::SUCCESS;
+    }
     if arguments.first().is_some_and(|value| value == "evidence") {
+        if matches!(&arguments[1..], [argument] if argument == "--help" || argument == "-h") {
+            println!("{}", evidence_usage(&program));
+            return ExitCode::SUCCESS;
+        }
         return run_evidence(&program, &arguments[1..]);
     }
     run_manifest(&program, &arguments)
@@ -31,28 +43,28 @@ fn usage(program: &OsStr) -> String {
     )
 }
 
+fn evidence_usage(program: &OsStr) -> String {
+    format!(
+        "usage: {} evidence --view <view.json> --receipt <receipt.json> [--source <archive>]",
+        Path::new(program).display()
+    )
+}
+
 fn run_manifest(program: &OsStr, arguments: &[OsString]) -> ExitCode {
     let [path] = arguments else {
         eprintln!("{}", usage(program));
         return ExitCode::from(2);
     };
+    if path.to_string_lossy().starts_with('-') {
+        eprintln!("{}", usage(program));
+        return ExitCode::from(2);
+    }
 
     let path = Path::new(path);
-    let metadata = match fs::metadata(path) {
-        Ok(metadata) => metadata,
-        Err(error) => {
-            eprintln!("identity manifest metadata: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
-    if metadata.len() > MAX_MANIFEST_BYTES as u64 {
-        eprintln!("identity manifest exceeds the {MAX_MANIFEST_BYTES}-byte verifier limit");
-        return ExitCode::FAILURE;
-    }
-    let bytes = match fs::read(path) {
+    let bytes = match read_limited(path, "identity manifest", MAX_MANIFEST_BYTES) {
         Ok(bytes) => bytes,
         Err(error) => {
-            eprintln!("identity manifest read: {error}");
+            eprintln!("{error}");
             return ExitCode::FAILURE;
         }
     };
@@ -154,13 +166,28 @@ fn run_evidence(program: &OsStr, arguments: &[OsString]) -> ExitCode {
 }
 
 fn read_bounded(path: &Path, label: &str) -> Result<Vec<u8>, String> {
-    let metadata = fs::metadata(path).map_err(|error| format!("{label} metadata: {error}"))?;
-    if metadata.len() > MAX_EVIDENCE_BYTES as u64 {
-        return Err(format!(
-            "{label} exceeds the {MAX_EVIDENCE_BYTES}-byte verifier limit"
-        ));
+    read_limited(path, label, MAX_EVIDENCE_BYTES)
+}
+
+fn read_limited(path: &Path, label: &str, limit: usize) -> Result<Vec<u8>, String> {
+    let file = File::open(path).map_err(|error| format!("{label} open: {error}"))?;
+    let initial_length = file
+        .metadata()
+        .map_err(|error| format!("{label} metadata: {error}"))?
+        .len();
+    if initial_length > limit as u64 {
+        return Err(format!("{label} exceeds the {limit}-byte verifier limit"));
     }
-    fs::read(path).map_err(|error| format!("{label} read: {error}"))
+
+    let initial_capacity = usize::try_from(initial_length).unwrap_or(limit).min(limit);
+    let mut bytes = Vec::with_capacity(initial_capacity);
+    file.take(limit as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("{label} read: {error}"))?;
+    if bytes.len() > limit {
+        return Err(format!("{label} exceeds the {limit}-byte verifier limit"));
+    }
+    Ok(bytes)
 }
 
 fn hash_source(path: &Path) -> Result<String, String> {
