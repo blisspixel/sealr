@@ -14,6 +14,7 @@
     "LICENSE",
     "README.md",
     "examples/classify_zipdiff.rs",
+    "examples/same_digest_different_tree.rs",
     "examples/wheel_admission.rs",
     "src/apply.rs",
     "src/bzip2.rs",
