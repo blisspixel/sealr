@@ -198,7 +198,7 @@ The supported preview requires:
 
 Alpha.8 meets these gates through the portable profile vector, exhaustive flag and extra-field checks, the public capability-only evaluator, downstream source-deletion regression, hostile fixtures inherited from the Alpha.7 laboratory, distinct identity domains, and the predecessor-bound v3 inventory. Alpha.8 release promotion requires the final surface to pass Required CI on Linux, macOS, and Windows.
 
-This is supported prerelease evaluation, not stable wheel installation. A stable API requires a larger targeted corpus with benign `.data`, Unicode, and descriptor-bearing artifacts; an explicit Core Metadata version policy; long-running cross-platform evidence; broader public API review; and the remaining production-readiness gates in the roadmap.
+This is supported prerelease evaluation, not stable wheel installation. Benign `.data` and `.data/headers` shapes now appear in the 300-artifact inventory, and Core Metadata 2.1 through 2.6 has an explicit pinned policy. The packaged PyPA installer 1.0.1 conformance kit also exercises real target effects after source deletion. A stable API still requires targeted benign Unicode and descriptor-bearing artifacts, long-running cross-platform evidence, broader public API review, independent adoption, and the remaining production-readiness gates in the roadmap.
 
 ## Primary sources
 

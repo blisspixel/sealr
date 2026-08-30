@@ -95,29 +95,6 @@ jobs:
       - name: Run tests
         run: cargo test --locked --workspace --all-features
 
-      - name: Prove the pinned external wheel consumer boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          download="${RUNNER_TEMP}/sealr-installer-download"
-          extracted="${RUNNER_TEMP}/sealr-installer-extracted"
-          mkdir --parents "${download}" "${extracted}"
-          python3 -m pip download \
-            --disable-pip-version-check \
-            --no-deps \
-            --only-binary=:all: \
-            --require-hashes \
-            --requirement tools/wheel-lab/bridge/requirements.txt \
-            --dest "${download}"
-          installer="${download}/installer-0.7.0-py3-none-any.whl"
-          echo "05d1933f0a5ba7d8d6296bb6d5018e7c94fa473ceb10cf198a92ccea19c27b53  ${installer}" |
-            sha256sum --check
-          python3 -m zipfile -e "${installer}" "${extracted}"
-          SEALR_BRIDGE_PYTHON="$(command -v python3)" \
-          SEALR_INSTALLER_PYTHONPATH="${extracted}" \
-            cargo test --locked -p sealr-wheel-lab --test installer_bridge -- --exact \
-              pypa_installer_consumes_only_verified_staged_members
-
       - name: Stress native materialization lifecycle
         run: cargo run --locked --release -p sealr-materialization-lifecycle
 
@@ -213,10 +190,50 @@ jobs:
       - name: Build optimized workspace
         run: cargo build --locked --release --workspace --all-features
 
-      - name: Build extracted-package consumer
+      - name: Build extracted-package consumers
         run: |
           cargo package --locked -p sealr
           cargo build --locked --release --manifest-path tests/packaged-consumer/Cargo.toml
+          cargo build --locked --release \
+            --manifest-path tests/pypa-installer-consumer/Cargo.toml
+          tree="$(cargo tree --locked \
+            --manifest-path tests/pypa-installer-consumer/Cargo.toml \
+            --edges normal,build)"
+          if grep --extended-regexp --quiet \
+            'sealr-(wheel-lab|cli|protocol)|__internal-' <<<"${tree}"; then
+            echo 'packaged PyPA consumer reached a repository-only dependency' >&2
+            exit 1
+          fi
+          manifest="$(cargo metadata --locked --format-version 1 \
+            --manifest-path tests/pypa-installer-consumer/Cargo.toml |
+            jq --raw-output '.packages[] | select(.name == "sealr") | .manifest_path')"
+          test "${manifest}" = \
+            "${PWD}/target/package/sealr-0.1.0-alpha.11/Cargo.toml"
+
+      - name: Run packaged PyPA adopter conformance
+        shell: bash
+        run: |
+          set -euo pipefail
+          download="${RUNNER_TEMP}/sealr-installer-download"
+          extracted="${RUNNER_TEMP}/sealr-installer-extracted"
+          mkdir --parents "${download}" "${extracted}"
+          python3 -m pip download \
+            --disable-pip-version-check \
+            --no-deps \
+            --only-binary=:all: \
+            --require-hashes \
+            --requirement tests/pypa-installer-consumer/requirements.txt \
+            --dest "${download}"
+          installer="${download}/installer-1.0.1-py3-none-any.whl"
+          echo "011d045df8b954ced7dde3a7e42ae4418da40ecda7990f2d11d5ed7c146fd98b  ${installer}" |
+            sha256sum --check
+          python3 -m zipfile -e "${installer}" "${extracted}"
+          cargo run --locked --release \
+            --manifest-path tests/pypa-installer-consumer/Cargo.toml -- \
+            --python /usr/bin/python3 \
+            --installer-root "${extracted}" \
+            --verifier "${PWD}/target/release/sealr-identity-verifier" \
+            --real-wheel "${installer}"
 
       - name: Verify crate publication contract
         shell: pwsh
@@ -394,6 +411,7 @@ jobs:
           cargo deny --manifest-path verification/kani/Cargo.toml check
           cargo package --locked -p sealr
           cargo deny --manifest-path tests/packaged-consumer/Cargo.toml check
+          cargo deny --manifest-path tests/pypa-installer-consumer/Cargo.toml check
 
       - name: Install cargo-about
         run: cargo install cargo-about --version 0.9.1 --locked --features cli

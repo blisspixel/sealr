@@ -7,5 +7,6 @@
 *.profraw
 /fuzz/target
 /tests/packaged-consumer/target
+/tests/pypa-installer-consumer/target
 /verification/kani/target
 /.kani
