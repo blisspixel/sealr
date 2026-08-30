@@ -73,6 +73,7 @@ pub enum TreeRoot {
     SealrTreeV3 { hex: String },
     SealrTreeV4 { hex: String },
     SealrTreeV5 { hex: String },
+    Unavailable,
     SealrTreeV6 { hex: String },
     SealrTreeV7 { hex: String },
     SealrTreeV8 { hex: String },
@@ -80,7 +81,6 @@ pub enum TreeRoot {
     SealrTreeV10 { hex: String },
     SealrTreeV11 { hex: String },
     SealrTreeV12 { hex: String },
-    Unavailable,
 }
 
 impl TreeRoot {
