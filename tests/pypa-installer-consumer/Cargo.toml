@@ -1,0 +1,15 @@
+[package]
+name = "sealr-pypa-installer-consumer"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[workspace]
+
+[dependencies]
+sealr = { version = "=0.1.0-alpha.11", path = "../../target/package/sealr-0.1.0-alpha.11" }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+sha2 = "0.11"
+zip = { version = "8", default-features = false, features = ["deflate"] }
