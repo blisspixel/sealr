@@ -60,13 +60,30 @@ Assert-True -Condition ([int]$manifest.artifact_retention_days -eq 30) -Message 
 Assert-True -Condition ($manifest.tools.kani -eq '0.67.0') -Message 'Kani version drifted'
 Assert-True -Condition ($manifest.tools.cargo_mutants -eq '27.1.0') -Message 'cargo-mutants version drifted'
 Assert-True -Condition ($manifest.tools.cargo_llvm_cov -eq '0.9.0') -Message 'cargo-llvm-cov version drifted'
+Assert-True -Condition ($manifest.tools.cargo_semver_checks -eq '0.49.0') -Message 'cargo-semver-checks version drifted'
 Assert-True -Condition ($manifest.tools.rust -eq '1.98.0') -Message 'assurance Rust version drifted'
+Assert-True -Condition ($manifest.semver_tool_archive_sha256 -eq '72f6834d75d28a66e02c9fd6a230ce901bb30eee6067b85867a97445df040e4a') -Message 'cargo-semver-checks archive digest drifted'
+Assert-True -Condition ($manifest.semver_baseline_tag -eq 'v0.1.0-alpha.11') -Message 'semver baseline tag drifted'
+Assert-True -Condition ($manifest.semver_baseline_rev -eq 'a1f2bf62a5a432a20b045db327ce9a6e4bdf8f6b') -Message 'semver baseline revision drifted'
+Assert-True -Condition ($manifest.semver_baseline_version -eq '0.1.0-alpha.11') -Message 'semver baseline version drifted'
+Assert-True -Condition ($manifest.semver_command -eq 'cargo-semver-checks check-release --manifest-path crates/sealr/Cargo.toml --baseline-root <packaged-alpha.11-root> --release-type minor') -Message 'semver command drifted'
+Assert-True -Condition ($manifest.semver_known_warnings -eq 'tests/assurance/semver-alpha11-known-warnings.txt') -Message 'semver known-warning path drifted'
+Assert-True -Condition ($manifest.semver_expected_summary -eq '196 checks: 193 pass, 0 fail, 3 warn, 57 skip') -Message 'semver expected summary drifted'
 Assert-True -Condition ($manifest.kani_command -eq 'cargo kani --manifest-path verification/kani/Cargo.toml --package sealr --default-unwind 1') -Message 'Kani command drifted'
 Assert-True -Condition ($manifest.kani_manifest -eq 'verification/kani/Cargo.toml') -Message 'Kani proof manifest path drifted'
 Assert-True -Condition ($manifest.kani_compiler_rust -eq '1.93.0-nightly (53732d5e0 2025-11-20)') -Message 'Kani compiler Rust version drifted'
 Assert-NonemptyText -Value $manifest.kani_compatibility_assumption -Context 'Kani compatibility assumption'
 Assert-NonemptyText -Value $manifest.kani_compatibility_nonclaim -Context 'Kani compatibility nonclaim'
 Assert-True -Condition ($manifest.promotion_ledger -eq 'tests/assurance/promotion-ledger.json') -Message 'promotion ledger path drifted'
+
+$knownWarningsPath = Join-Path $RepositoryRoot ([string]$manifest.semver_known_warnings)
+Assert-True -Condition (Test-Path -LiteralPath $knownWarningsPath -PathType Leaf) -Message 'semver known-warning file is missing'
+$knownWarnings = @(Get-Content -LiteralPath $knownWarningsPath)
+Assert-True -Condition ($knownWarnings.Count -eq 7) -Message 'semver known-warning debt must contain exactly seven items'
+Assert-True -Condition (($knownWarnings | Select-Object -Unique).Count -eq $knownWarnings.Count) -Message 'semver known-warning debt contains duplicates'
+foreach ($knownWarning in $knownWarnings) {
+    Assert-NonemptyText -Value $knownWarning -Context 'semver known warning'
+}
 
 $workflowPath = Join-Path $RepositoryRoot ([string]$manifest.workflow)
 Assert-True -Condition (Test-Path -LiteralPath $workflowPath -PathType Leaf) -Message 'scheduled assurance workflow is missing'
@@ -76,6 +93,11 @@ Assert-TextContains -Text $workflow -Expected "  RUST_VERSION: $($manifest.tools
 Assert-TextContains -Text $workflow -Expected "  KANI_VERSION: $($manifest.tools.kani)" -Context 'assurance workflow'
 Assert-TextContains -Text $workflow -Expected "  CARGO_MUTANTS_VERSION: $($manifest.tools.cargo_mutants)" -Context 'assurance workflow'
 Assert-TextContains -Text $workflow -Expected "  CARGO_LLVM_COV_VERSION: $($manifest.tools.cargo_llvm_cov)" -Context 'assurance workflow'
+Assert-TextContains -Text $workflow -Expected "  CARGO_SEMVER_CHECKS_VERSION: $($manifest.tools.cargo_semver_checks)" -Context 'assurance workflow'
+Assert-TextContains -Text $workflow -Expected "  CARGO_SEMVER_CHECKS_ARCHIVE_SHA256: $($manifest.semver_tool_archive_sha256)" -Context 'assurance workflow'
+Assert-TextContains -Text $workflow -Expected "  SEMVER_BASELINE_TAG: $($manifest.semver_baseline_tag)" -Context 'assurance workflow'
+Assert-TextContains -Text $workflow -Expected "  SEMVER_BASELINE_REV: $($manifest.semver_baseline_rev)" -Context 'assurance workflow'
+Assert-TextContains -Text $workflow -Expected "  SEMVER_BASELINE_VERSION: $($manifest.semver_baseline_version)" -Context 'assurance workflow'
 Assert-TextContains -Text $workflow -Expected ([string]$manifest.kani_command) -Context 'assurance workflow'
 Assert-TextContains -Text $workflow -Expected 'cargo install kani-verifier --version "${KANI_VERSION}" --locked' -Context 'assurance workflow'
 Assert-TextContains -Text $workflow -Expected 'cargo install cargo-mutants --version "${CARGO_MUTANTS_VERSION}" --locked' -Context 'assurance workflow'
@@ -89,12 +111,28 @@ Assert-TextContains -Text $workflow -Expected '            0|2|3)' -Context 'mut
 Assert-TextContains -Text $workflow -Expected 'cargo-mutants infrastructure, usage, filter, or baseline failed' -Context 'mutation discovery'
 Assert-TextContains -Text $workflow -Expected '            --summary-only' -Context 'coverage discovery'
 Assert-TextContains -Text $workflow -Expected '            --output-path target/assurance-discovery/coverage.json' -Context 'coverage discovery'
+Assert-TextContains -Text $workflow -Expected '          fetch-depth: 0' -Context 'semver discovery'
+Assert-TextContains -Text $workflow -Expected '            "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v${CARGO_SEMVER_CHECKS_VERSION}/cargo-semver-checks-x86_64-unknown-linux-gnu.tar.gz"' -Context 'semver discovery'
+Assert-TextContains -Text $workflow -Expected '          echo "${CARGO_SEMVER_CHECKS_ARCHIVE_SHA256}  ${archive}" |' -Context 'semver discovery'
+Assert-TextContains -Text $workflow -Expected '            actual_revision="$(git rev-parse "${SEMVER_BASELINE_TAG}^{commit}")"' -Context 'semver discovery'
+Assert-TextContains -Text $workflow -Expected '            CARGO_TARGET_DIR="${baseline_target}" cargo package \' -Context 'semver discovery'
+Assert-TextContains -Text $workflow -Expected '              --manifest-path "${baseline_source}/crates/sealr/Cargo.toml"' -Context 'semver discovery'
+Assert-TextContains -Text $workflow -Expected '            "${tool}" check-release \' -Context 'semver discovery'
+Assert-TextContains -Text $workflow -Expected '              --baseline-root "${baseline_package}"' -Context 'semver discovery'
+Assert-TextContains -Text $workflow -Expected '              --release-type minor' -Context 'semver discovery'
+Assert-TextContains -Text $workflow -Expected '            tests/assurance/semver-alpha11-known-warnings.txt \' -Context 'semver discovery'
+Assert-TextContains -Text $workflow -Expected "            '$($manifest.semver_expected_summary)' \" -Context 'semver discovery'
+Assert-TextContains -Text $workflow -Expected '          path: target/assurance-discovery/semver/semver.log' -Context 'semver discovery'
 Assert-True -Condition (-not $workflow.Contains('--fail-under')) -Message 'coverage discovery must not contain a percentage gate'
 Assert-True -Condition (-not $workflow.Contains('codecov')) -Message 'coverage discovery must not publish a headline score'
-Assert-True -Condition ([regex]::Matches($workflow, 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a').Count -eq 3) -Message 'every discovery report must use the pinned upload action'
-Assert-True -Condition ([regex]::Matches($workflow, 'retention-days: 30').Count -eq 3) -Message 'every discovery report must use the manifest retention period'
+Assert-True -Condition ([regex]::Matches($workflow, 'actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a').Count -eq 4) -Message 'every discovery report must use the pinned upload action'
+Assert-True -Condition ([regex]::Matches($workflow, 'retention-days: 30').Count -eq 4) -Message 'every discovery report must use the manifest retention period'
 
 $cargoManifest = Get-Content -LiteralPath (Join-Path $RepositoryRoot 'crates/sealr/Cargo.toml') -Raw
+Assert-TextContains -Text $cargoManifest -Expected '[package.metadata.cargo-semver-checks.lints]' -Context 'sealr Cargo manifest'
+Assert-TextContains -Text $cargoManifest -Expected 'struct_marked_non_exhaustive = "warn"' -Context 'sealr Cargo manifest'
+Assert-TextContains -Text $cargoManifest -Expected 'struct_pub_field_missing = "warn"' -Context 'sealr Cargo manifest'
+Assert-TextContains -Text $cargoManifest -Expected 'struct_pub_field_now_doc_hidden = "warn"' -Context 'sealr Cargo manifest'
 Assert-TextContains -Text $cargoManifest -Expected 'unexpected_cfgs = { level = "warn", check-cfg = [''cfg(kani)''] }' -Context 'sealr Cargo manifest'
 Assert-TextContains -Text $cargoManifest -Expected '[package.metadata.kani.flags]' -Context 'sealr Cargo manifest'
 Assert-TextContains -Text $cargoManifest -Expected 'default-unwind = "1"' -Context 'sealr Cargo manifest'
@@ -152,8 +190,8 @@ foreach ($harness in $harnesses) {
 }
 
 $reports = @($manifest.discovery_reports)
-Assert-True -Condition ($reports.Count -eq 2) -Message 'mutation and coverage discovery reports must both be declared'
-Assert-True -Condition ((@($reports.tool) -contains 'cargo-mutants') -and (@($reports.tool) -contains 'cargo-llvm-cov')) -Message 'discovery report tools drifted'
+Assert-True -Condition ($reports.Count -eq 3) -Message 'mutation, coverage, and semver discovery reports must all be declared'
+Assert-True -Condition ((@($reports.tool) -contains 'cargo-mutants') -and (@($reports.tool) -contains 'cargo-llvm-cov') -and (@($reports.tool) -contains 'cargo-semver-checks')) -Message 'discovery report tools drifted'
 foreach ($report in $reports) {
     Assert-NonemptyText -Value $report.id -Context 'discovery report id'
     Assert-NonemptyText -Value $report.scope -Context "discovery report $($report.id) scope"
@@ -170,7 +208,7 @@ Assert-NonemptyText -Value $ledger.failure_policy -Context 'promotion failure po
 $requiredWorkflowPath = Join-Path $RepositoryRoot ([string]$ledger.required_workflow)
 $requiredWorkflow = Get-Content -LiteralPath $requiredWorkflowPath -Raw
 $checks = @($ledger.checks)
-Assert-True -Condition ($checks.Count -eq 5) -Message 'promotion ledger must cover all five scheduled evidence categories'
+Assert-True -Condition ($checks.Count -eq 6) -Message 'promotion ledger must cover all six scheduled evidence categories'
 $checkIds = @{}
 $categories = @{}
 foreach ($check in $checks) {

@@ -7,8 +7,16 @@
     "kani": "0.67.0",
     "cargo_mutants": "27.1.0",
     "cargo_llvm_cov": "0.9.0",
+    "cargo_semver_checks": "0.49.0",
     "rust": "1.98.0"
   },
+  "semver_tool_archive_sha256": "72f6834d75d28a66e02c9fd6a230ce901bb30eee6067b85867a97445df040e4a",
+  "semver_baseline_tag": "v0.1.0-alpha.11",
+  "semver_baseline_rev": "a1f2bf62a5a432a20b045db327ce9a6e4bdf8f6b",
+  "semver_baseline_version": "0.1.0-alpha.11",
+  "semver_command": "cargo-semver-checks check-release --manifest-path crates/sealr/Cargo.toml --baseline-root <packaged-alpha.11-root> --release-type minor",
+  "semver_known_warnings": "tests/assurance/semver-alpha11-known-warnings.txt",
+  "semver_expected_summary": "196 checks: 193 pass, 0 fail, 3 warn, 57 skip",
   "kani_command": "cargo kani --manifest-path verification/kani/Cargo.toml --package sealr --default-unwind 1",
   "kani_manifest": "verification/kani/Cargo.toml",
   "kani_compiler_rust": "1.93.0-nightly (53732d5e0 2025-11-20)",
@@ -75,6 +83,14 @@
       "bounded_by": "20-minute job and the ordinary non-ignored sealr package test suite.",
       "result_policy": "The complete summary JSON is retained for branch and assertion discovery without a percentage threshold.",
       "nonclaim": "Executed source regions do not establish assertion strength, path completeness, semantic correctness, or security."
+    },
+    {
+      "id": "semver.public-api-alpha11.v1",
+      "tool": "cargo-semver-checks",
+      "scope": "Compiler-accurate public API compatibility of the current sealr library against the self-contained Cargo package produced from the exact Alpha.11 commit.",
+      "bounded_by": "20-minute Linux job, Rust 1.98.0, cargo-semver-checks 0.49.0 from one SHA-256-authenticated x86_64 Linux release archive, the exact v0.1.0-alpha.11 tag-to-commit binding, and an explicit minor release class so unchanged prerelease version text cannot skip compatibility lints.",
+      "result_policy": "Deny-level compatibility findings and tool, packaging, tag-binding, rustdoc, summary, or known-warning drift fail the scheduled job. Three deliberate pre-freeze Alpha.11 lint classes remain warnings only while their exact seven item instances match the committed debt file; the complete log is retained for review.",
+      "nonclaim": "A clean result covers only the lints implemented by cargo-semver-checks 0.49.0 for Rust-visible public API and does not prove behavioral, wire-format, evidence-schema, filesystem, platform, or security compatibility."
     }
   ],
   "promotion_ledger": "tests/assurance/promotion-ledger.json"

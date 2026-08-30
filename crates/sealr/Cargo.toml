@@ -9,6 +9,13 @@ description.workspace = true
 repository.workspace = true
 publish = ["crates-io"]
 
+[package.metadata.cargo-semver-checks.lints]
+# Alpha.11 exposed these shapes before the pre-freeze API review. Scheduled
+# assurance pins their exact warning instances and refuses any additional debt.
+struct_marked_non_exhaustive = "warn"
+struct_pub_field_missing = "warn"
+struct_pub_field_now_doc_hidden = "warn"
+
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(kani)'] }
 
