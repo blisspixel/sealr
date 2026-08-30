@@ -20,9 +20,9 @@ env:
   CARGO_LLVM_COV_VERSION: 0.9.0
   CARGO_SEMVER_CHECKS_VERSION: 0.49.0
   CARGO_SEMVER_CHECKS_ARCHIVE_SHA256: 72f6834d75d28a66e02c9fd6a230ce901bb30eee6067b85867a97445df040e4a
-  SEMVER_BASELINE_TAG: v0.1.0-alpha.11
-  SEMVER_BASELINE_REV: a1f2bf62a5a432a20b045db327ce9a6e4bdf8f6b
-  SEMVER_BASELINE_VERSION: 0.1.0-alpha.11
+  SEMVER_BASELINE_TAG: v0.1.0-alpha.12
+  SEMVER_BASELINE_REV: 9d762a596624415b8499b774707d018cf128dbd6
+  SEMVER_BASELINE_VERSION: 0.1.0-alpha.12
 
 jobs:
   kani:
@@ -208,7 +208,7 @@ jobs:
           test "$("${tool_dir}/cargo-semver-checks" --version)" = \
             "cargo-semver-checks ${CARGO_SEMVER_CHECKS_VERSION}"
 
-      - name: Compare the packaged Alpha.11 public API
+      - name: Compare the packaged Alpha.12 public API
         shell: bash
         run: |
           set -euo pipefail
@@ -238,18 +238,19 @@ jobs:
               --baseline-root "${baseline_package}" \
               --release-type minor
           } 2>&1 | tee "${report}/semver.log"
-          grep --extended-regexp '^  (struct|field) ' "${report}/semver.log" |
-            sed --regexp-extended \
-              -e 's/^  //' \
-              -e 's/, previously in file .*$//' \
-              -e 's/ in file .*$//' \
-              -e 's/ in \/.*$//' \
-              > "${report}/known-warnings.txt"
+          grep --extended-regexp '^  (struct|field) ' "${report}/semver.log" \
+            > "${report}/known-warnings.txt" || test "$?" -eq 1
+          sed --in-place --regexp-extended \
+            -e 's/^  //' \
+            -e 's/, previously in file .*$//' \
+            -e 's/ in file .*$//' \
+            -e 's/ in \/.*$//' \
+            "${report}/known-warnings.txt"
           diff --unified \
-            tests/assurance/semver-alpha11-known-warnings.txt \
+            tests/assurance/semver-alpha12-known-warnings.txt \
             "${report}/known-warnings.txt"
           grep --fixed-strings --quiet \
-            '196 checks: 193 pass, 0 fail, 3 warn, 57 skip' \
+            '196 checks: 196 pass, 57 skip' \
             "${report}/semver.log"
 
       - name: Upload public API compatibility report

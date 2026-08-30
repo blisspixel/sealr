@@ -15,12 +15,12 @@ pwsh -NoProfile -File scripts/generate_tcb_report.ps1
 | Measurement | Value |
 |---|---|
 | Runtime Rust lines (crates/sealr/src) | 44353 |
-| In-crate test lines | 18423 |
+| In-crate test lines | 18434 |
 | `unsafe` uses in runtime code | 51 |
 | `unsafe` uses in test code | 13 |
 | `extern "C"` blocks in runtime code | 1 |
 | Panic sites in runtime code (`.unwrap(`, `.expect(`, `panic!(`, `unreachable!(`) | 313 |
-| Panic sites in test code | 1252 |
+| Panic sites in test code | 1248 |
 
 ## Unsafe code
 
@@ -37,7 +37,7 @@ The parsing, verification, and identity path — every module that interprets un
 
 | Pattern | Runtime | Test |
 |---|---|---|
-| `.unwrap(` | 150 | 1101 |
+| `.unwrap(` | 150 | 1097 |
 | `.expect(` | 134 | 103 |
 | `panic!(` | 17 | 45 |
 | `unreachable!(` | 12 | 3 |
@@ -119,7 +119,7 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/wheel/model.rs` | 362 | 0 | 0 | 0 |
 | `crates/sealr/src/wheel/parse.rs` | 977 | 260 | 0 | 4 |
 | `crates/sealr/src/worker_protocol/frame.rs` | 141 | 93 | 0 | 1 |
-| `crates/sealr/src/worker_protocol/helper.rs` | 388 | 110 | 0 | 2 |
+| `crates/sealr/src/worker_protocol/helper.rs` | 388 | 121 | 0 | 2 |
 | `crates/sealr/src/worker_protocol/linux.rs` | 389 | 263 | 9 | 0 |
 | `crates/sealr/src/worker_protocol/mod.rs` | 15 | 0 | 0 | 0 |
 | `crates/sealr/src/worker_protocol/sealed.rs` | 254 | 132 | 0 | 2 |

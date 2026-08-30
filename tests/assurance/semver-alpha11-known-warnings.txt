@@ -1,7 +1,0 @@
-struct Policy
-field code of struct RealizationIdentityError
-field detail of struct RealizationIdentityError
-field path of struct RealizationIdentityError
-field RealizationIdentityError.code
-field RealizationIdentityError.detail
-field RealizationIdentityError.path

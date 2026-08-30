@@ -58,22 +58,22 @@
       "promoted": false
     },
     {
-      "id": "semver.public-api-alpha11.v1",
+      "id": "semver.public-api-alpha12.v1",
       "category": "public-api-compatibility",
       "scheduled_workflow": ".github/workflows/assurance.yml",
       "scheduled_job": "Public API compatibility discovery",
-      "domain": "The Rust-visible public API lints implemented by cargo-semver-checks 0.49.0, comparing current sealr with the self-contained Cargo package produced from exact Alpha.11 commit a1f2bf62a5a432a20b045db327ce9a6e4bdf8f6b.",
-      "nonclaim": "A clean job accepts exactly seven committed warning instances from three deliberate pre-freeze Alpha.11 shape changes. It does not prove behavioral, wire-format, evidence-schema, filesystem, platform, or security compatibility, and it cannot detect compatibility classes outside the pinned tool's implemented lints.",
+      "domain": "The Rust-visible public API lints implemented by cargo-semver-checks 0.49.0, comparing current sealr with the self-contained Cargo package produced from exact Alpha.12 commit 9d762a596624415b8499b774707d018cf128dbd6.",
+      "nonclaim": "A clean job accepts no compatibility warnings. It does not prove behavioral, wire-format, evidence-schema, filesystem, platform, or security compatibility, and it cannot detect compatibility classes outside the pinned tool's implemented lints.",
       "local_reproduction": [
         "mkdir -p \"${TMPDIR}/sealr-semver-baseline-source\" \"${TMPDIR}/sealr-semver-baseline-target\"",
-        "test \"$(git rev-parse 'v0.1.0-alpha.11^{commit}')\" = 'a1f2bf62a5a432a20b045db327ce9a6e4bdf8f6b'",
-        "git archive --format=tar a1f2bf62a5a432a20b045db327ce9a6e4bdf8f6b | tar --extract --directory \"${TMPDIR}/sealr-semver-baseline-source\"",
+        "test \"$(git rev-parse 'v0.1.0-alpha.12^{commit}')\" = '9d762a596624415b8499b774707d018cf128dbd6'",
+        "git archive --format=tar 9d762a596624415b8499b774707d018cf128dbd6 | tar --extract --directory \"${TMPDIR}/sealr-semver-baseline-source\"",
         "CARGO_TARGET_DIR=\"${TMPDIR}/sealr-semver-baseline-target\" cargo package --locked --allow-dirty --manifest-path \"${TMPDIR}/sealr-semver-baseline-source/crates/sealr/Cargo.toml\"",
-        "cargo-semver-checks check-release --manifest-path crates/sealr/Cargo.toml --baseline-root \"${TMPDIR}/sealr-semver-baseline-target/package/sealr-0.1.0-alpha.11\" --release-type minor"
+        "cargo-semver-checks check-release --manifest-path crates/sealr/Cargo.toml --baseline-root \"${TMPDIR}/sealr-semver-baseline-target/package/sealr-0.1.0-alpha.12\" --release-type minor"
       ],
       "timeout_minutes": 20,
       "required_ci_marker": "cargo-semver-checks check-release",
-      "promotable": false,
+      "promotable": true,
       "stable_main_runs": [],
       "eligible": false,
       "promoted": false

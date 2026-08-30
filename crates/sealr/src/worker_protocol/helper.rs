@@ -390,11 +390,9 @@ pub enum HelperError {
 mod tests {
     use super::*;
     use std::fs;
-    use std::os::unix::fs::symlink;
+    use std::os::unix::fs::{symlink, PermissionsExt};
 
-    fn file_digest(path: &Path) -> [u8; 32] {
-        Sha256::digest(fs::read(path).expect("fixture reads")).into()
-    }
+    const HELPER_FIXTURE_PREFIX: &[u8] = b"#!/bin/sh\nexit 0\n";
 
     fn unique_path(name: &str) -> PathBuf {
         std::env::temp_dir().join(format!(
@@ -402,6 +400,19 @@ mod tests {
             std::process::id(),
             std::thread::current().name().unwrap_or("test")
         ))
+    }
+
+    fn write_helper_fixture(name: &str) -> (PathBuf, u64, [u8; 32]) {
+        let path = unique_path(name);
+        let mut bytes = vec![b'#'; COPY_CHUNK_LEN + 1];
+        bytes[..HELPER_FIXTURE_PREFIX.len()].copy_from_slice(HELPER_FIXTURE_PREFIX);
+        fs::write(&path, &bytes).expect("helper fixture writes");
+        let mut permissions = fs::metadata(&path)
+            .expect("helper fixture metadata reads")
+            .permissions();
+        permissions.set_mode(0o700);
+        fs::set_permissions(&path, permissions).expect("helper fixture mode sets");
+        (path, bytes.len() as u64, Sha256::digest(&bytes).into())
     }
 
     #[test]
@@ -414,9 +425,7 @@ mod tests {
 
     #[test]
     fn helper_is_copied_authenticated_and_sealed() {
-        let source = std::env::current_exe().expect("current test executable resolves");
-        let expected = file_digest(&source);
-        let expected_len = fs::metadata(&source).unwrap().len();
+        let (source, expected_len, expected) = write_helper_fixture("sealed");
         let helper =
             HelperArtifact::load(&source, expected_len, expected).expect("helper authenticates");
         assert_eq!(helper.digest(), expected);
@@ -425,6 +434,7 @@ mod tests {
         assert!(helper.execution_path().is_absolute());
         let seals = rustix::fs::fcntl_get_seals(&helper.inner.executable).unwrap();
         assert!(seals.contains(BASE_SEALS));
+        fs::remove_file(source).expect("helper fixture removes");
     }
 
     #[test]
@@ -445,54 +455,55 @@ mod tests {
             Err(HelperError::Length { actual: 0, .. })
         ));
 
-        let source = std::env::current_exe().expect("current test executable resolves");
-        let source_len = fs::metadata(&source).unwrap().len();
+        let (source, source_len, source_digest) = write_helper_fixture("rejections");
+        let mut wrong_digest = source_digest;
+        wrong_digest[0] ^= 0xff;
         assert!(matches!(
-            HelperArtifact::load(&source, source_len, [0; 32]),
+            HelperArtifact::load(&source, source_len, wrong_digest),
             Err(HelperError::DigestMismatch { .. })
         ));
 
         let link = unique_path("link");
         symlink(&source, &link).expect("symlink fixture creates");
         assert!(matches!(
-            HelperArtifact::load(&link, source_len, file_digest(&source)),
+            HelperArtifact::load(&link, source_len, source_digest),
             Err(HelperError::Open { .. })
         ));
         fs::remove_file(link).expect("symlink fixture removes");
+        fs::remove_file(source).expect("helper fixture removes");
         fs::remove_file(zero).expect("zero fixture removes");
     }
 
     #[test]
     fn authenticated_helper_survives_source_removal_and_path_spaces() {
-        let source = std::env::current_exe().expect("current test executable resolves");
-        let copy = unique_path("path with spaces");
-        fs::copy(&source, &copy).expect("helper fixture copies");
-        let expected_len = fs::metadata(&copy).unwrap().len();
-        let expected_digest = file_digest(&copy);
-        let helper = HelperArtifact::load(&copy, expected_len, expected_digest)
+        let (source, expected_len, expected_digest) = write_helper_fixture("path with spaces");
+        let helper = HelperArtifact::load(&source, expected_len, expected_digest)
             .expect("copied helper authenticates");
-        fs::remove_file(&copy).expect("authenticated source removes");
+        fs::remove_file(&source).expect("authenticated source removes");
 
         assert_eq!(
             hash_exact(&helper.inner.executable, expected_len).unwrap(),
             expected_digest
         );
         assert_eq!(helper.execution_path(), helper.execution_path());
-        assert!(helper.source_matches(&copy).is_err());
+        assert!(helper.source_matches(&source).is_err());
     }
 
     #[test]
     fn helper_rejects_length_drift_and_oversized_specs() {
-        let source = std::env::current_exe().expect("current test executable resolves");
-        let source_len = fs::metadata(&source).unwrap().len();
-        let digest = file_digest(&source);
+        let (source, source_len, digest) = write_helper_fixture("length");
         assert!(matches!(
             HelperArtifact::load(&source, source_len - 1, digest),
             Err(HelperError::LengthMismatch { .. })
         ));
+        assert_eq!(MAX_HELPER_LEN, 67_108_864);
         assert!(matches!(
             HelperArtifact::load(&source, MAX_HELPER_LEN + 1, digest),
-            Err(HelperError::Length { .. })
+            Err(HelperError::Length {
+                actual: 67_108_865,
+                maximum: 67_108_864
+            })
         ));
+        fs::remove_file(source).expect("helper fixture removes");
     }
 }
