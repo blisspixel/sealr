@@ -38,7 +38,7 @@ The [API contract](api.md), [safety specification](safety.md), and [finding regi
 
 ## Common codecs
 
-The product destination includes the lossless methods ordinary ZIP and TAR producers actually emit. They are codec adapters, not a second unarchiver. Sequencing is in the [roadmap](../ROADMAP.md#common-compression-one-boundary).
+The product destination includes the lossless methods ordinary ZIP and TAR producers actually emit. They are codec adapters, not a second unarchiver. Current support and dependency gates are in the [format support architecture](format-support.md); sequencing is in the [later roadmap](../ROADMAP.md#format-and-codec-breadth).
 
 ZIP methods in scope: Store, Deflate, Deflate64, BZip2, LZMA, XZ, and Zstandard. TAR wrappers in scope: uncompressed, gzip, zstd, xz, bzip2, and LZ4 frame. Each adapter must consume declared compressed input exactly, bind every transform and snapshot domain, bound its window and output, fail closed, and reuse the same path, quota, verification, and publication core.
 

@@ -1,0 +1,279 @@
+{
+  "schema": "sealr.candidate-surface.v1",
+  "status": "inventory-not-a-freeze",
+  "freeze": false,
+  "follows": "adopter-feedback",
+  "classes": [
+    "candidate-stable-for-pilot",
+    "preview",
+    "internal",
+    "planned-for-replacement"
+  ],
+  "interpretation_profiles": [
+    {
+      "id": "sealr.profile.zip.portable-utf8.v1",
+      "class": "candidate-stable-for-pilot"
+    },
+    {
+      "id": "sealr.profile.zip.strict-ascii.v1",
+      "class": "preview"
+    },
+    {
+      "id": "sealr.profile.zip.strict-ascii.v2",
+      "class": "preview"
+    },
+    {
+      "id": "sealr.profile.zip64.strict-ascii.v1",
+      "class": "preview"
+    },
+    {
+      "id": "sealr.profile.tar.ustar-portable.v1",
+      "class": "preview"
+    },
+    {
+      "id": "sealr.profile.tar-gzip.ustar-portable.v1",
+      "class": "preview"
+    },
+    {
+      "id": "sealr.profile.tar.pax-portable.v1",
+      "class": "preview"
+    },
+    {
+      "id": "sealr.profile.tar.gnu-longname-portable.v1",
+      "class": "preview"
+    },
+    {
+      "id": "sealr.profile.tar-gzip.pax-portable.v1",
+      "class": "preview"
+    },
+    {
+      "id": "sealr.profile.tar-gzip.gnu-longname-portable.v1",
+      "class": "preview"
+    },
+    {
+      "id": "sealr.profile.tar-zstd.ustar-portable.v1",
+      "class": "preview"
+    },
+    {
+      "id": "sealr.profile.tar-xz.ustar-portable.v1",
+      "class": "preview"
+    },
+    {
+      "id": "sealr.profile.tar-bzip2.ustar-portable.v1",
+      "class": "preview"
+    },
+    {
+      "id": "sealr.profile.7z.copy-portable.v1",
+      "class": "preview"
+    },
+    {
+      "id": "sealr.profile.zip.wheel-utf8.v1",
+      "class": "internal"
+    }
+  ],
+  "policies": [
+    {
+      "id": "sealr:policy/default/v1",
+      "class": "candidate-stable-for-pilot"
+    },
+    {
+      "id": "sealr:policy/default/v2",
+      "class": "preview"
+    },
+    {
+      "id": "sealr:policy/default/v3",
+      "class": "preview"
+    },
+    {
+      "id": "sealr:policy/default/v4",
+      "class": "preview"
+    },
+    {
+      "id": "sealr:policy/default/v5",
+      "class": "preview"
+    },
+    {
+      "id": "sealr:policy/default/v6",
+      "class": "preview"
+    },
+    {
+      "id": "sealr:policy/default/v7",
+      "class": "preview"
+    },
+    {
+      "id": "sealr:policy/default/v8",
+      "class": "preview"
+    },
+    {
+      "id": "sealr:policy/default/v9",
+      "class": "preview"
+    },
+    {
+      "id": "sealr:policy/default/v10",
+      "class": "preview"
+    },
+    {
+      "id": "sealr:policy/default/v11",
+      "class": "preview"
+    }
+  ],
+  "identities": [
+    {
+      "id": "sealr.consumer.python-wheel.v1",
+      "class": "candidate-stable-for-pilot"
+    },
+    {
+      "id": "sealr.wheel-consumer-profile.v1",
+      "class": "candidate-stable-for-pilot"
+    },
+    {
+      "id": "pypa-wheel-core-metadata-2026-08-28",
+      "class": "candidate-stable-for-pilot"
+    },
+    {
+      "id": "sealrWheelArtifactV1",
+      "class": "candidate-stable-for-pilot"
+    },
+    {
+      "id": "sealrWheelInstallPlanV1",
+      "class": "candidate-stable-for-pilot"
+    },
+    {
+      "id": "sealrWheelRealizationV1",
+      "class": "candidate-stable-for-pilot"
+    },
+    {
+      "id": "sealrTreeV1",
+      "class": "preview"
+    },
+    {
+      "id": "sealrTreeV2",
+      "class": "preview"
+    },
+    {
+      "id": "sealrTreeV3",
+      "class": "preview"
+    },
+    {
+      "id": "sealrTreeV4",
+      "class": "preview"
+    },
+    {
+      "id": "sealrTreeV5",
+      "class": "preview"
+    },
+    {
+      "id": "sealrTreeV6",
+      "class": "preview"
+    },
+    {
+      "id": "sealrTreeV7",
+      "class": "preview"
+    },
+    {
+      "id": "sealrTreeV8",
+      "class": "preview"
+    },
+    {
+      "id": "sealrTreeV9",
+      "class": "preview"
+    },
+    {
+      "id": "sealrTreeV10",
+      "class": "preview"
+    },
+    {
+      "id": "sealrTreeV11",
+      "class": "preview"
+    },
+    {
+      "id": "sealrTreeV12",
+      "class": "preview"
+    }
+  ],
+  "evidence_schemas": [
+    {
+      "id": "sealr.view.v2",
+      "class": "candidate-stable-for-pilot"
+    },
+    {
+      "id": "sealr.receipt.v3",
+      "class": "candidate-stable-for-pilot"
+    },
+    {
+      "id": "sealr.archive-ir.v1",
+      "class": "preview"
+    },
+    {
+      "id": "sealr.view.v1",
+      "class": "planned-for-replacement"
+    },
+    {
+      "id": "sealr.receipt.v2",
+      "class": "planned-for-replacement"
+    }
+  ],
+  "pilot_operations": [
+    "apply",
+    "apply_with_options",
+    "Request",
+    "apply_supervised",
+    "inspect_supervised",
+    "LinuxWorker",
+    "evaluate_wheel",
+    "realize_identity",
+    "VerifiedArchive::read_member",
+    "VerifiedArchive::read_member_prefix",
+    "Outcome::canonical_evidence"
+  ],
+  "cli": {
+    "class": "preview",
+    "admitted_exit": 0,
+    "not_admitted_exit": 2,
+    "effect_failed_exit": 3,
+    "operational_exit": 1
+  },
+  "distribution": {
+    "msrv": "1.98",
+    "msrv_class": "candidate-stable-for-pilot",
+    "semver_policy": "prerelease-changelog-required",
+    "publishable_crate": "sealr",
+    "linux_archive_class": "candidate-stable-for-pilot",
+    "other_archive_class": "preview",
+    "linux_files": [
+      "CHANGELOG.md",
+      "LICENSE",
+      "README.md",
+      "THIRD_PARTY_LICENSES.txt",
+      "sealr",
+      "sealr-identity-verifier",
+      "libexec/sealr/sealr-worker",
+      "libexec/sealr/sealr-worker.manifest"
+    ],
+    "helper_manifest_schema": "sealr.worker-artifact.v1",
+    "verifier": "sealr-identity-verifier"
+  },
+  "internal_features": [
+    "__internal-fuzzing",
+    "__internal-worker-lab",
+    "__internal-lifecycle-lab"
+  ],
+  "planned_for_replacement": [
+    {
+      "id": "Verdict",
+      "reason": "compatibility adapter over the outcome axes"
+    },
+    {
+      "id": "receipt.schema.v2-default-lineage",
+      "reason": "canonical receipt v3 is the digested lineage"
+    },
+    {
+      "id": "view.schema.v1-default-lineage",
+      "reason": "canonical view v2 is the digested lineage"
+    },
+    {
+      "id": "Policy.atomic",
+      "reason": "historical durability selector name kept for digest stability"
+    }
+  ]
+}

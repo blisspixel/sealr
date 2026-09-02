@@ -16,9 +16,9 @@ Archive bytes are a weak program in a language with disagreeing interpreters. Pa
 
 Sealr owns that semantic boundary first. Materialization, projection, caching, language bindings, consumer integrations, and acceleration are consumers of the boundary. The [usefulness test](usefulness.md) is whether another program calls that boundary and stops opening the ZIP.
 
-## The Alpha.6 foundation
+## The current foundation
 
-The current Rust library preserves one compatibility `apply()` path and adds an explicit supervised x86_64 Linux path:
+The current Rust library preserves one compatibility `apply()` path and provides an explicit supervised x86_64 Linux path:
 
 ```text
 UntrustedArchive x Policy
@@ -27,7 +27,9 @@ UntrustedArchive x Policy
 
 Inspect and materialize share one planned tree. Every outcome includes structured findings, a view, and deterministic unsigned receipt data. Accepted members are content-verified, and requested files are staged and published through capability-relative, native no-replace materialization on the documented Linux, macOS, and Windows filesystem matrix.
 
-This is the foundation, not the finished semantic API. Preview-line work includes `ArchiveIR`, unsigned `sealrTreeV1` roots, a private file-backed path snapshot, checked random access, bounded resource evidence, an explicit authenticated Linux worker, and the separate capability-oriented worker-protocol codec. The worker reduces authority for payload verification, stage writes, and later non-retained reads, but does not confine structural planning or establish general process containment. Sealr does not yet produce semantic locks, signed archive-decision attestations, read-only projection, content-addressed reuse, wheel admission, extra ZIP codecs, or proof certificates.
+The preview line now includes `ArchiveIR`, separately identified layout and content roots, private file-backed snapshots, checked random access, bounded resource evidence, twelve explicit container and codec selections, an authenticated Linux worker for supported ZIP32 records, canonical RFC 8785 evidence, an independently implemented packaged verifier, and a public capability-only Python wheel evaluator. The packaged PyPA handoff and exact Poetry fixture prove the consumer mechanism inside this repository.
+
+This remains a foundation, not a stable product claim. Structural planning still runs in the supervisor, the worker does not establish general process containment, receipts are unsigned, crash recovery and full durability are unfinished, and no separately maintained project has adopted the capability as authoritative. Semantic locks, read-only projection, content-addressed reuse, broader worker-record support, and proof certificates remain future work.
 
 ## The target contract
 
@@ -61,27 +63,27 @@ The product bar is high-consequence ingest: fail closed, one interpretation, evi
 
 ## Product priorities
 
-The release-sized implementation order is in the [near-term execution plan](near-term.md). Assurance and wheel research begin alongside the primary implementation rather than waiting for every Phase 0.1 capability to finish.
+The current implementation order is in the [roadmap](../ROADMAP.md), and the bounded post-Alpha.13 work is in the [near-term execution plan](near-term.md).
 
-### 1. Semantic identity
+### 1. External usefulness
 
-Define the canonical `ArchiveIR`, immutable source snapshot, interpretation profiles, target filesystem models, consumer profiles, layout root, content-tree root, and target outcome axes. Stabilize exact codec-consumption and policy-compilation rules. Make the first private file-backed snapshot capability precede worker IPC.
+Move the proven repository mechanism into one separately maintained consumer. That consumer must treat `VerifiedArchive` and independently checked evidence as authoritative, make the original source unavailable after admission, and finish without another archive parser. This is the next test of the product category.
 
-### 2. Measured trust
+### 2. Stable semantic surface
 
-Combine the hostile ZipDiff gate with a benign ecosystem corpus, source-mutation tests, cross-platform semantic goldens, independent property oracles, bounded model checking, fuzzing, native systems stress, reduced-authority execution, and a small independent evidence verifier. Each evidence type keeps its stated domain and nonclaim.
+Use adopter feedback to review the public API, interpretation profiles, policies, identity encodings, evidence schemas, CLI machine output, MSRV, and package layout. Freeze only the surfaces backed by compatibility fixtures and migration rules. A profile or encoding change receives a new identifier rather than changing old meaning in place.
 
-### 3. One canonical consumer
+### 3. Measured trust
 
-Python wheel evaluation is the first supported-preview consumer. It has a documented same-bytes, different-installed-tree problem and meaningful consumer semantics beyond ZIP. The [profile implementation](profiles/python-wheel-v1.md) separates source, archive-tree, wheel-artifact, scheme-relative install-plan, and target-realization identities. The public evaluator consumes only `VerifiedArchive`; the current supervised backend supports its full and prefix reads, and the repository conformance proves exact installer 1.0.1 can consume bounded verified members after the original wheel is removed. The packaged [copyable `WheelSource` handoff](../crates/sealr/examples/pypa_installer_handoff/README.md) makes that repository proof available as a public-API-only copied project. The exact [Poetry 2.4.2 fixture](../tests/poetry-consumer/README.md) now proves one private injected update seam with stock parity, real uninstall ordering, a PREPARED abort gate, and post-PREPARED wheel-open denial in the host adapter and installer bridge. A stable external adopter still matters because if a builder or installer reopens the wheel, Sealr has produced a receipt rather than an admission boundary.
+Combine the hostile ZipDiff gate with targeted benign compatibility, source-mutation tests, cross-platform semantic goldens, independent property oracles, bounded model checking, fuzzing, native systems stress, reduced-authority execution, TCB measurement, and independent review. Each evidence type keeps its stated domain and nonclaim. Current wheel evidence should target Unicode paths and data descriptors rather than merely enlarging a sample that observed neither gap.
 
 ### 4. Reusable admitted trees
 
 Add semantic locks, verified content-addressed blobs, read-only projection, and materialization from verified content. The goal is to avoid reparsing, reinflating, and rewriting the same admitted tree.
 
-### 5. Common codecs, then consumers
+### 5. Evidence-led breadth
 
-After the ZIP trust gate, add Zstd, XZ/LZMA, BZip2, and Deflate64 as ZIP method adapters, then TAR wrappers that call those same adapters. Agent workspaces and hermetic build inputs are promising consumer profiles. OCI, JAR, APK, and other formats follow only when their consumer semantics are explicit. No format is added by bundling another unarchiver.
+The shipped zstd, XZ/LZMA2, and bzip2 TAR wrappers demonstrate the codec-promotion path, and the Copy-only 7z profile demonstrates the first separate container step. Further 7z, ZIP codec, and major-format work resumes after external usefulness and review. Agent workspaces and hermetic build inputs are promising later consumer profiles. OCI, JAR, APK, and language bindings follow only when their consumer semantics are explicit. No format is added by bundling another unarchiver.
 
 ## Durable project surface
 
@@ -100,7 +102,7 @@ That surface compounds semantic knowledge, compatibility data, test fixtures, au
 
 ## Evidence discipline
 
-Alpha.6 receipts are deterministic unsigned evidence records. They are not attestations. Future authenticated claims should use standard envelopes and verified identities, keep interpretation, verification, admission, and effect claims distinct, and use SBOM formats only where a consumer profile establishes package or component semantics.
+Alpha.13 receipts are deterministic unsigned evidence records, and the opt-in canonical lineage can be checked by the independently implemented packaged verifier. They are not authenticated attestations. Future authenticated claims should use standard envelopes and verified identities, keep interpretation, verification, admission, and effect claims distinct, and use SBOM formats only where a consumer profile establishes package or component semantics.
 
 Do not use a numeric risk score. Current findings provide stable codes, severity, member context, and detail. The target finding schema adds explicit rule versions, phases, deterministic evidence, source spans where applicable, and remediation without turning the human message into the machine contract.
 
@@ -131,10 +133,13 @@ The complete task-oriented map is the [documentation index](index.md).
 
 | Document | Purpose |
 |---|---|
-| [near-term.md](near-term.md) | Alpha.4 through Alpha.6 work packages and acceptance gates |
+| [near-term.md](near-term.md) | Post-Alpha.13 external-adoption work packages and acceptance gates |
+| [adopter-pilot.md](adopter-pilot.md) | Exact first-pilot baseline, proofs, and nonclaims |
+| [candidate-surface.md](candidate-surface.md) | Classified public identities; inventory, not a freeze |
+| [milestones.md](milestones.md) | Completed preview outcomes and links to immutable release detail |
 | [profiles/python-wheel-v1.md](profiles/python-wheel-v1.md) | First-consumer design and corpus plan |
 | [semantic-model.md](semantic-model.md) | Target outcome axes, `ArchiveIR`, identities, profiles, locks, and sequencing |
-| [api.md](api.md) | Implemented Alpha.6 contract and future type-state direction |
+| [api.md](api.md) | Implemented Alpha.13 contract and future type-state direction |
 | [architecture.md](architecture.md) | Current trust boundaries and target pipeline |
 | [threat-model.md](threat-model.md) | Adversaries and protected properties |
 | [invariants.md](invariants.md) | Testable safety invariants |

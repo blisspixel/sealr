@@ -64,6 +64,14 @@ jobs:
         shell: pwsh
         run: pwsh -NoLogo -NoProfile -File scripts/verify_docs.ps1
 
+      - name: Verify external adopter bundle contract
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_adopter_contract.ps1
+
+      - name: Verify candidate surface inventory
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_candidate_surface.ps1
+
       - name: Verify trusted-computing-base report
         shell: pwsh
         run: pwsh -NoLogo -NoProfile -File scripts/verify_tcb_report.ps1

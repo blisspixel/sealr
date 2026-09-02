@@ -163,4 +163,4 @@ Coverage-guided fuzzing is heuristic evidence. A clean bounded campaign does not
 - It does not implement Landlock, seccomp, AppContainer, a restricted token, or a worker lifecycle.
 - It does not make the current in-process parser a sandbox.
 
-The process and authority design is in [sandboxing and projection](sandbox.md). The delivery order is in the [near-term plan](near-term.md#alpha6-reduced-authority-linux-execution).
+The process and authority design is in [sandboxing and projection](sandbox.md). The private production semantic boundary is documented in [semantic-record.md](semantic-record.md), and remaining closure work is in the [near-term assurance track](near-term.md#parallel-track-c-assurance-and-review-readiness).
