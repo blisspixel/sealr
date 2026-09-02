@@ -18,7 +18,7 @@
 
 ### ouch
 
-[ouch](https://github.com/ouch-org/ouch) provides a unified archive command and has explored optional Landlock confinement. It is useful operational prior art. Sealr's planned worker differs by retaining publication authority in a trusted supervisor and treating the worker result as untrusted.
+[ouch](https://github.com/ouch-org/ouch) provides a unified archive command and has explored optional Landlock confinement. It is useful operational prior art. Sealr's explicit Linux worker differs by retaining publication authority in a trusted supervisor and treating the worker result as untrusted.
 
 ### ratarmount and archivemount
 
@@ -38,4 +38,4 @@
 
 The project should learn configuration ergonomics, performance measurement, projection mechanics, and standard evidence envelopes from adjacent work. It should not claim novelty merely because those pieces are combined.
 
-The next meaningful result is narrower: demonstrate that a versioned admitted tree and its evidence stay identical across supported platforms and are consumed without another archive parser. The [roadmap](../ROADMAP.md#active-execution-queue) defines that test.
+The next meaningful result is narrower: prove in a separately maintained consumer that a versioned admitted tree and independently checked evidence can be authoritative without another archive parser. The [roadmap](../ROADMAP.md#active-execution-queue) defines that test.

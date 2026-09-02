@@ -6,6 +6,12 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+### Changed
+
+- Refocused the roadmap on external adoption, candidate stability, lifecycle closure, independent review, and the stable-release gates. Completed Alpha.1 through Alpha.13 planning detail now lives in a linked milestone history and immutable release notes, while the near-term plan defines only post-Alpha.13 adopter work and parallel evidence tracks.
+- Added a machine-checked external-adopter contract that binds the verified Alpha.13 technical baseline, clean-tag package digest, Linux native archive digest and floor, worker ABI and feature generation, interpretation and policy identities, wheel consumer digest, canonical evidence schemas, installer bridge, adopter selection rules, forbidden acquisition paths, required downstream proofs, negative matrix, report fields, and nonclaims. Required CI verifies the contract against package metadata, conformance vectors, implementation constants, native floor, copyable handoff, and the surrounding documentation. The contract also prevents retroactive Alpha.13 publication and requires a new, internally consistent source and native prerelease after adopter scope is agreed.
+- Added a machine-checked candidate surface inventory that classifies public interpretation profiles, default policies, wheel and tree identities, evidence schemas, first-pilot operations, CLI exits, MSRV, native Linux archive layout, helper manifest, verifier, internal crate features, and planned replacements. Required CI rejects drift against those implementation constants. The inventory is not a freeze; candidate stability still follows adopter feedback.
+
 ## [0.1.0-alpha.13] - 2026-08-31
 
 ### Added

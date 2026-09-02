@@ -192,7 +192,7 @@ Neither verifier extracts the archive, and neither may imply that it independent
 4. **Systems stress.** Exercise native namespace races, worker failures, stage mutation, audit, cleanup, and no-replace publication repeatedly. Compare every receipt with the executable lifecycle model.
 5. **Test-strength and dependency review.** Use targeted mutation testing, coverage reports, and dependency review as review aids. Coverage percentage is not a release claim, and a time-bounded dependency exemption is not an audit.
 
-The detailed budgets and promotion gates are in the [near-term execution plan](near-term.md#assurance-cadence). The existing `CI` workflow remains the only required promotion authority. Scheduled assurance jobs discover evidence. A scheduled gate moves into required CI only after its runtime is bounded, failures reproduce locally, and ten consecutive main runs are stable.
+The detailed budgets and promotion gates are in [assurance discovery and promotion](assurance-promotion.md). Current closure work is tracked in the [near-term assurance track](near-term.md#parallel-track-c-assurance-and-review-readiness). The existing `CI` workflow remains the only required promotion authority. Scheduled assurance jobs discover evidence. A scheduled gate moves into required CI only after its runtime is bounded, failures reproduce locally, and ten consecutive main runs are stable.
 
 ## Continuous program
 

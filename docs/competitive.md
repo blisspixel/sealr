@@ -25,7 +25,7 @@ The working hypothesis is modest:
 4. downstream consumers use the admitted representation instead of reparsing the source;
 5. Linux, macOS, and Windows produce the same semantic tree evidence for the same profile.
 
-Alpha.6 adds an explicit reduced-authority x86_64 Linux path to reusable verified admission over a private random-access path snapshot, a closed opt-in interpretation profile, and preview tree identities. It does not yet establish stable lock semantics, a stable consumer profile, cross-platform worker isolation, or the complete Phase 0.1 contract.
+Alpha.13 combines reusable verified admission over a private random-access snapshot with twelve explicit interpretation selections, preview tree identities, canonical evidence, a packaged independent verifier, a supported wheel evaluator, and an explicit reduced-authority x86_64 Linux path. It does not yet establish stable lock semantics, external adoption, cross-platform worker isolation, or a production-ready contract.
 
 ## What not to optimize for first
 
@@ -37,6 +37,6 @@ Alpha.6 adds an explicit reduced-authority x86_64 Linux path to reusable verifie
 - many language bindings without one dependent consumer;
 - permissive recovery for rejected archives.
 
-The next test of differentiation is not a marketing comparison. It is whether the Phase 0.1 semantic identity, corpus, worker, and verifier gates can be implemented without weakening compatibility or platform support.
+The next test of differentiation is not a marketing comparison. It is whether a separately maintained consumer can depend on the capability, evidence, worker, and verifier without reopening the archive or relying on repository-only knowledge.
 
 See [who-else.md](who-else.md) for project-specific notes and [ROADMAP.md](../ROADMAP.md#active-execution-queue) for the implementation order.

@@ -8,21 +8,21 @@ Sealr is trying to become a dependable archive-to-tree admission boundary. It is
 
 One bounded source invocation receives one versioned interpretation. Inspect, materialize, evidence, and future consumers must use the same immutable representation. No recovery parser or downstream reparse may assign a second meaning to the archive.
 
-Alpha.6 preserves this rule through the compatibility `apply()` path and the explicit supervised path, both using one versioned, effect-independent `ArchiveIR`. Inspect and materialize consume the same IR and private or borrowed snapshot, and preview layout and content-tree identities are derived from it.
+Alpha.13 preserves this rule through the compatibility `apply()` path and the explicit supervised path, both using one versioned, effect-independent `ArchiveIR`. Inspect, materialize, verified-member reads, and the wheel evaluator consume the admitted representation and private or borrowed snapshot without another structural parse. Preview layout and content-tree identities are derived from that representation.
 
 ## Admission and effects are different facts
 
-The compatibility `Allowed { wrote } | Rejected` result combines semantic and operational outcomes. Alpha.6 exposes separate interpretation, admission, verification, effect, and view-completeness axes, and CLI exit `3` identifies an admitted archive whose requested destination effect failed.
+The compatibility `Allowed { wrote } | Rejected` result combines semantic and operational outcomes. The current API exposes separate interpretation, admission, verification, effect, and view-completeness axes, and CLI exit `3` identifies an admitted archive whose requested destination effect failed.
 
 ## Filesystem access is capability based
 
 Validated path components enter a component-bound materializer. Member creation is relative to retained directory handles, no-follow, and create-new. Publication is same-volume and no-replace on supported Linux, macOS, and Windows filesystems. Unsupported platforms and storage semantics fail closed.
 
-A future worker reduces parser authority. It does not replace the path grammar, quotas, staged-tree audit, or platform publication controls.
+The explicit x86_64 Linux worker reduces authority for supported ZIP32 payload verification, stage writes, and later reads. It does not replace the path grammar, quotas, staged-tree audit, or platform publication controls, and structural planning remains supervisor-owned.
 
 ## Evidence names only established facts
 
-Alpha.6 emits deterministic unsigned evidence plus preview semantic tree roots. It does not emit an authenticated archive-decision attestation, stable lock, or formal proof. Future evidence keeps source, interpretation, layout, content, policy, and effect identities distinct.
+Alpha.13 emits deterministic unsigned evidence, opt-in byte-exact canonical evidence, and preview semantic tree roots. The packaged independent verifier checks canonical evidence but does not authenticate it. Sealr does not yet emit a stable lock, authenticated archive-decision claim, or formal proof. Future evidence keeps source, interpretation, layout, content, policy, and effect identities distinct.
 
 ## Compatibility is measured
 
@@ -34,6 +34,6 @@ Measure structure, full verification, realization, and reuse separately. The str
 
 ## Expansion follows the boundary, then consumers
 
-Python wheel admission is the first candidate consumer after the semantic core and can stay on Store and Deflate. Common ZIP methods (Zstd, XZ/LZMA, BZip2, Deflate64) and TAR wrappers are codec adapters on the same boundary, added only with exact consumption, bounded windows, and a justified tiny dependency. OCI, JAR, APK, agent workspaces, projection, bindings, and acceleration follow when a concrete consumer and its semantics are specified. A second unarchiver is never the expansion strategy.
+Python wheel admission is the first supported-preview consumer and stays on Store and Deflate. The shipped TAR wrappers prove that zstd, XZ/LZMA2, and bzip2 can be separately promoted as adapters on the same boundary. Further ZIP methods, 7z structure, and major formats wait for external usefulness and review. OCI, JAR, APK, agent workspaces, projection, bindings, and acceleration follow when a concrete consumer and its semantics are specified. A second unarchiver is never the expansion strategy.
 
 See [semantic-model.md](semantic-model.md) for the target types and [ROADMAP.md](../ROADMAP.md#active-execution-queue) for the active implementation order.

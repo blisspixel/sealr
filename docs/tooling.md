@@ -19,7 +19,7 @@ cargo run -p xtask -- licenses verify
 cargo run -p xtask -- release verify
 ```
 
-The commands above are target notation, not current commands. Migration order and safety requirements are in the [roadmap](../ROADMAP.md#repository-tooling-and-dependency-rule).
+The commands above are target notation, not current commands. This document owns the migration order; the project-wide dependency and TCB requirements are in the [roadmap decision rules](../ROADMAP.md#decision-rules).
 
 Host wrappers remain thin:
 

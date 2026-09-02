@@ -6,7 +6,7 @@ Goals: no path escape, no disk/RAM bomb, no silent corruption, no extra files (A
 
 Language: MUST / SHOULD / MAY.
 
-This is the target safety specification. [README.md](../README.md#security-limitations) and [ROADMAP.md](../ROADMAP.md) record current implementation status. Options described as future policy surfaces are not accepted by the current CLI.
+This is the target safety specification. The [README](../README.md#security-limitations), [API contract](api.md), and [security policy](../SECURITY.md) record current implementation status; the [roadmap](../ROADMAP.md) defines sequencing and stable gates. Options described as future policy surfaces are not accepted by the current CLI.
 
 ## Path jail (hard, not a flag)
 
@@ -40,7 +40,7 @@ On Windows, sealr supports only a retained parent handle that reports non-remote
 
 Current preview behavior: **do not create them.** ZIP external attributes that describe a special file type are rejected, file/directory attribute disagreements are rejected, and portable ustar admits only regular files plus zero-size directories while denying all link and special-file typeflags.
 
-A future named policy may allow constrained links only after the target passes the jail relative to the link parent and is proven non-absolute. Such links must be created only after regular files. Member creation never opens through a symlink or reparse point: each canonical component is opened separately with no-follow semantics from a retained directory handle. Windows also rejects a reparse-point attribute on each opened directory or file handle. Alpha.6 has no link-enabling CLI option. Repeated hostile race stress remains a Phase 0.1 gate.
+A future named policy may allow constrained links only after the target passes the jail relative to the link parent and is proven non-absolute. Such links must be created only after regular files. Member creation never opens through a symlink or reparse point: each canonical component is opened separately with no-follow semantics from a retained directory handle. Windows also rejects a reparse-point attribute on each opened directory or file handle. Alpha.13 has no link-enabling CLI option. Repeated hostile race stress remains a stable-release gate.
 
 ## Overlap (ZIP)
 

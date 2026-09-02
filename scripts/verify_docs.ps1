@@ -207,6 +207,14 @@ foreach ($workflow in @(
 if (-not $ciDistributionWorkflow.Contains('scripts/verify_crate_package.ps1', [StringComparison]::Ordinal)) {
     throw 'Required CI does not enforce the exact source crate package contract'
 }
+foreach ($script in @(
+    'scripts/verify_adopter_contract.ps1',
+    'scripts/verify_candidate_surface.ps1'
+)) {
+    if (-not $ciDistributionWorkflow.Contains($script, [StringComparison]::Ordinal)) {
+        throw "Required CI does not enforce $script"
+    }
+}
 
 $workflowTitleTemplate = [regex]::Match(
     $releaseWorkflow,

@@ -1,6 +1,6 @@
 # Codec and acceleration backends
 
-> Deferred engineering track for acceleration. Alpha.6 has no runtime backend scheduler, GPU path, QAT path, or alternate codec selection. The current ZIP Deflate implementation uses `flate2` with the pure-Rust `zlib-rs` backend and verifies exact compressed-input consumption. Planned ZIP methods such as Zstd and XZ are codec adapters on the product path, not hardware backends; they still require exact consumption and a justified tiny dependency. See the [roadmap codec destination](../ROADMAP.md#common-compression-one-boundary).
+> Deferred engineering track for acceleration. Alpha.13 has no runtime backend scheduler, GPU path, QAT path, or hardware codec selection. The current ZIP Deflate implementation uses `flate2` with the pure-Rust `zlib-rs` backend and verifies exact compressed-input consumption. The shipped zstd and XZ TAR wrappers are product codec adapters, not hardware backends. Further ZIP codec work still requires exact consumption and a justified small dependency. See the [format support architecture](format-support.md).
 
 Backends may optimize verification or realization. They may not define interpretation, paths, policy, findings, verification completeness, or tree identity.
 
@@ -43,10 +43,10 @@ The likely order is:
 
 Embarrassingly parallel tools (ZipDiff classification, benign-corpus measurement) may use `std::thread` and `SEALR_JOBS` without touching the library TCB. They must still emit byte-stable aggregates.
 
-GPU, QAT, Mojo, CubeCL, mmap, DirectStorage, and specialized codecs remain research options. None is on the active Phase 0.1 path.
+GPU, QAT, Mojo, CubeCL, mmap, DirectStorage, and specialized backends remain research options. None is on the active external-adoption path.
 
 ## Reporting rule
 
 Every benchmark names the source corpus, destination, verification controls, backend, cold or warm state, CPU time, wall time, peak memory, open-handle peak, and bytes avoided through reuse. Security controls remain enabled.
 
-See [architecture.md](architecture.md#performance-architecture) and [ROADMAP.md](../ROADMAP.md#deferred-performance-track).
+See [architecture.md](architecture.md#performance-architecture) and the [roadmap's later performance work](../ROADMAP.md#authenticated-claims-and-performance).

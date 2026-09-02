@@ -1,6 +1,6 @@
 # Public API surface contract
 
-> Status: the role-grouped inventory of the supported `sealr` crate surface, paired with its machine half: `crates/sealr/tests/api_surface.rs` imports every supported item by exact path and pins the core operation signatures through function-pointer coercions, so a removal, rename, or pinned-signature change fails compilation. Additions are permitted pre-freeze and land in both halves in the same change. The shape decisions behind this surface are recorded in the [API contract](api.md).
+> Status: the role-grouped inventory of the supported `sealr` crate surface, paired with its machine half: `crates/sealr/tests/api_surface.rs` imports every supported item by exact path and pins the core operation signatures through function-pointer coercions, so a removal, rename, or pinned-signature change fails compilation. Additions are permitted pre-freeze and land in both halves in the same change. The shape decisions behind this surface are recorded in the [API contract](api.md). Classification of that surface for the first external pilot is the [candidate surface inventory](candidate-surface.md); that inventory is not a freeze.
 
 Everything supported flows through the crate root's re-exports plus the two public modules, `sealr::wheel` and `sealr::canonical_json`. Internal laboratories and fuzz bridges are `#[doc(hidden)]` behind private features and are not part of this contract.
 

@@ -1,0 +1,174 @@
+{
+  "schema": "sealr.external-adopter-pilot.v1",
+  "status": "verified-baseline-awaiting-external-adopter-and-new-pilot-release",
+  "release": {
+    "version": "0.1.0-alpha.13",
+    "tag": "v0.1.0-alpha.13",
+    "commit": "2fab2cfcd54dc065d02e25e74c3bfb227555ca90",
+    "rust_version": "1.98",
+    "role": "technical-baseline-not-publication-candidate"
+  },
+  "crate": {
+    "package": "sealr",
+    "requirement": "=0.1.0-alpha.13",
+    "registry": "crates-io",
+    "delivery": "verified-tag-package-not-for-retroactive-publication",
+    "publication_source": "new-clean-release-tag-required",
+    "packaged_with": "cargo 1.98.0",
+    "source_package_sha256": "fb70684a71ec770bdf151176ef624244dd571de2c37bc7860e45db4c2607743e",
+    "source_package_bytes": 553812,
+    "manifest_template": "crates/sealr/examples/pypa_installer_handoff/Cargo.toml.example"
+  },
+  "pilot_release_gate": {
+    "version": "unassigned-new-prerelease",
+    "select_after_adopter_scope": true,
+    "clean_protected_main_tag": true,
+    "matching_source_and_native_release": true,
+    "truthful_packaged_documentation": true,
+    "registry_readback_required": true,
+    "retroactive_alpha13_publication": false
+  },
+  "native": {
+    "target": "x86_64-unknown-linux-gnu",
+    "archive": "sealr-0.1.0-alpha.13-x86_64-unknown-linux-gnu.tar.gz",
+    "archive_sha256": "8f74d52566a275193261d82d3977e0b469b4c6c7d1a3f588f0b3a982a1f5892d",
+    "archive_bytes": 3040308,
+    "runner": "ubuntu-24.04",
+    "operating_system": "Ubuntu 24.04",
+    "architecture": "x86_64",
+    "abi": "glibc 2.39",
+    "kernel": "Linux 6.8 or later; supervised mode additionally requires Landlock ABI 3 and x86_64 seccomp",
+    "supervised_floor": "Landlock ABI 3 plus the documented x86_64 seccomp filter",
+    "worker_manifest": "libexec/sealr/sealr-worker.manifest",
+    "worker_manifest_schema": "sealr.worker-artifact.v1",
+    "worker_target": "x86_64-unknown-linux-musl",
+    "worker_bootstrap_abi": 1,
+    "worker_feature_id": 2,
+    "verifier": "sealr-identity-verifier"
+  },
+  "semantics": {
+    "interpretation_profile": "sealr.profile.zip.portable-utf8.v1",
+    "interpretation_profile_sha256": "acee86158d481adff96da0277a470ba753d6208ede74bc48586bb0134db5152e",
+    "policy": "sealr:policy/default/v1",
+    "policy_sha256": "8298b205c981ed140a52ba555c0499712436969faf4ebc28d88d8d9e7024c340",
+    "consumer_profile": "sealr.consumer.python-wheel.v1",
+    "consumer_profile_sha256": "2fd5f81e38b6ad483fa0e998f665cc466a9bd9816382299f4a64a0202f4a91bb",
+    "specification_snapshot": "pypa-wheel-core-metadata-2026-08-28",
+    "view_schema": "sealr.view.v2",
+    "receipt_schema": "sealr.receipt.v3",
+    "canonicalization": "rfc8785"
+  },
+  "handoff": {
+    "report_schema": "sealr.pypa-wheel-source-example.v1",
+    "adapter": "pypa-installer-1.0.1-wheel-source",
+    "target_model": "pypa-installer-1.0.1-linux-posix",
+    "installer_version": "1.0.1",
+    "installer_filename": "installer-1.0.1-py3-none-any.whl",
+    "installer_sha256": "011d045df8b954ced7dde3a7e42ae4418da40ecda7990f2d11d5ed7c146fd98b"
+  },
+  "selection": {
+    "consumer_kind": "publisher-or-registry-or-build-backend-or-installer",
+    "platform": "x86_64-unknown-linux-gnu",
+    "workflow": "python-wheel",
+    "maintainer_independence": true,
+    "must_own_ci": true,
+    "sealr_fork_or_copied_fixture": false
+  },
+  "forbidden_acquisition": [
+    "local-path-dependency",
+    "mutable-branch",
+    "unpublished-workspace-crate",
+    "internal-feature",
+    "wheel-laboratory",
+    "cli-internals",
+    "private-semantic-records"
+  ],
+  "required_proofs": [
+    "authenticated-native-archive",
+    "version-match-before-source-transfer",
+    "independent-canonical-evidence-verification",
+    "source-unavailable-before-consumer",
+    "no-post-admission-wheel-open",
+    "bounded-capability-member-transfer",
+    "exact-output-and-mode-audit",
+    "failure-class-separation"
+  ],
+  "negative_matrix": [
+    {
+      "id": "native-archive-integrity",
+      "mutation": "Native archive checksum or provenance mismatch",
+      "required_result": "Stop before extraction or execution"
+    },
+    {
+      "id": "worker-manifest-mismatch",
+      "mutation": "Worker manifest release, target, ABI, length, or digest mismatch",
+      "required_result": "Stop before source transfer"
+    },
+    {
+      "id": "helper-feature-mismatch",
+      "mutation": "Helper feature-generation mismatch",
+      "required_result": "Stop before source transfer"
+    },
+    {
+      "id": "canonical-evidence-mutation",
+      "mutation": "Canonical view, receipt, pair, or observed-source mutation",
+      "required_result": "Independent verification failure"
+    },
+    {
+      "id": "manifest-mutation",
+      "mutation": "Raw or out-of-band manifest mutation",
+      "required_result": "Stop before Python effects"
+    },
+    {
+      "id": "staged-member-mutation",
+      "mutation": "Staged member content mutation",
+      "required_result": "Stop before Python effects"
+    },
+    {
+      "id": "lying-record",
+      "mutation": "Lying wheel `RECORD`",
+      "required_result": "Wheel denial before install effects"
+    },
+    {
+      "id": "post-boundary-wheel-open",
+      "mutation": "Post-boundary `.whl` open",
+      "required_result": "Immediate bridge failure"
+    },
+    {
+      "id": "output-set-drift",
+      "mutation": "Missing, extra, linked, replaced, or mode-drifted output",
+      "required_result": "Realization audit failure"
+    },
+    {
+      "id": "worker-lifecycle-failure",
+      "mutation": "Worker timeout, crash, or unclean exit",
+      "required_result": "Infrastructure failure with no released partial member bytes"
+    },
+    {
+      "id": "unsafe-destination",
+      "mutation": "Existing destination or unsafe ancestor",
+      "required_result": "Effect failure without overwrite"
+    }
+  ],
+  "report_fields": [
+    "adopter-repository-and-commit",
+    "locked-crate-version-and-registry-checksum",
+    "native-archive-filename-and-sha256",
+    "sealr-release-tag-commit",
+    "supported-os-python-installer-and-target-model",
+    "corpus-selection-rule-and-byte-addressed-manifest",
+    "outcome-counts-by-class",
+    "investigated-rejection-clusters",
+    "setup-and-public-api-friction",
+    "requested-semantic-or-schema-changes",
+    "no-reopen-and-negative-test-results",
+    "explicit-nonclaims"
+  ],
+  "nonclaims": [
+    "not-production-containment",
+    "not-malware-detection",
+    "not-general-poetry-support",
+    "not-crates-io-alpha13",
+    "not-supply-chain-independent-verifier"
+  ]
+}

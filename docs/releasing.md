@@ -1,6 +1,6 @@
 # Release process
 
-Releases come only from the current protected `main` commit. The tag workflow stages an attested draft. It never publishes. A trusted local promotion script revalidates live repository controls and publishes only the exact verified draft through the operator's existing administrative GitHub session.
+GitHub releases come only from the protected `main` commit selected by their immutable tag. The tag workflow stages an attested draft. It never publishes. A trusted local promotion script revalidates live repository controls and publishes only the exact verified draft through the operator's existing administrative GitHub session. A source-crate publication for that same release must be planned in the tagged documentation and reproduce the tagged source package through the separate procedure below; it does not publish the moving default branch.
 
 Verification commands for the current published prerelease are maintained in [release-verification.md](release-verification.md). Each new immutable GitHub release body is taken exactly from its tagged release-note file.
 
@@ -114,5 +114,41 @@ The promotion script polls the published release and requires:
 - the release tag still resolving to the captured protected `main` commit.
 
 The final operator record includes the release URL and ID, tag commit, CI run ID, Release workflow run ID, and asset digests.
+
+## Publish the source crate for the pilot
+
+> Status as of 2026-09-01: no pilot release is assigned or published. Alpha.13 is a verified technical baseline, not the upload candidate. Its immutable packaged README says it is GitHub-only, so it must not be retroactively published to crates.io. The GitHub release workflow and `publish_release.ps1` do not publish source crates.
+
+Select the adopter and exact pilot scope before assigning a new prerelease. The candidate must update its workspace version, lockfile, copied handoff pin, changelog, release notes, release workflow constants, and [adopter contract](adopter-pilot.md) together. Its tagged README must accurately describe both the crates.io source distribution and the matching authenticated native release. Required CI and the ordinary GitHub release process must pass before source upload.
+
+crates.io versions cannot be overwritten. Publish only from a clean detached checkout of the new immutable release tag, using the package toolchain pinned by that release. Never upload from the moving default branch, a dirty checkout, an older tag whose documentation denies publication, or a repackaged source tree.
+
+Before upload, require all of the following:
+
+1. The registry name and exact candidate version have the expected state. If the name has become occupied by an unintended owner, stop and revise the distribution plan rather than publishing under an inferred alternative.
+2. `HEAD`, the dereferenced candidate tag, the GitHub release tag, and the contract commit are identical, and `git status --short` is empty.
+3. The tagged README and release notes describe crates.io publication accurately and contain no obsolete GitHub-only claim for the candidate.
+4. `cargo --version` reports the release's pinned Cargo version.
+5. `scripts/verify_crate_package.ps1` passes from that checkout.
+6. `cargo publish --locked -p sealr --dry-run` passes.
+7. The resulting `.crate` size and SHA-256 are recorded before upload, and a second clean package run reproduces both exactly.
+8. The authenticated crates.io session belongs to the intended publisher. Do not supply a token on the command line, print it, or store it in this repository.
+
+The final mutation is deliberately one command with no version override:
+
+```powershell
+cargo publish --locked -p sealr
+```
+
+Immediately afterward, query crates.io from outside the Sealr workspace so Cargo cannot satisfy the request from the local package. Require all of the following before declaring the source half available:
+
+- `cargo info --registry crates-io sealr@<VERSION>` resolves the exact candidate version;
+- the crates.io index entry names that version and its checksum equals the pre-upload package digest;
+- the downloaded registry `.crate` has the recorded size and digest;
+- `cargo owner --list sealr` contains exactly the intended owner set;
+- a fresh copy of the candidate's PyPA handoff generates its lockfile without `patch.crates-io`, builds with `--locked`, resolves the registry checksum, and activates no internal Sealr feature;
+- the authenticated native archive reports the same release version and still passes its checksum and provenance verification.
+
+If upload state is ambiguous, do not retry blindly. Read the registry and index first. After successful readback, update the machine contract's delivery and top-level status, update the adopter documentation, and preserve the registry checksum, package digest, owner list, and clean-consumer result. Those documentation changes report the completed mutation; they do not authorize it.
 
 The public repository uses only standard GitHub-hosted runners. Do not select larger runners or paid external release services without a separate cost review.
