@@ -20,7 +20,7 @@
   },
   "image_transcript_variant": "unix",
   "images": {
-    "sealr-inspect-allowed-terminal-dark.png": "eea12c867492abe68b052796cd764926f99d6ca9eb43370024b8687af70b1c77",
+    "sealr-inspect-allowed-terminal-dark.png": "aed93860b0cc789fe1272e5407c10de184880c827757fdd0221ee4f078ca7b9e",
     "sealr-inspect-allowed-terminal-light.png": "19b0c2720466e63f2f70f7386d80d7837aacc9688a24fb5bdb4d5ca7ac693c95",
     "sealr-materialize-allowed-terminal-dark.png": "d72d726b11525aa71f5d28cc6a29a40021a6ac338aad9f07eaaa263af965a2d3",
     "sealr-materialize-allowed-terminal-light.png": "87383ab9958341011241310768df80b6d66267326a5686bb13fac00653f8e4b5",

@@ -72,5 +72,7 @@ checks the measured tool version and produces both light and dark themes.
 
 CI checks fixture and native transcript hashes against the committed asset
 manifest, then verifies all six PNG hashes, dimensions, density, size, and
-metadata policy. Screenshots are reviewed visually after capture. CI does not
+metadata policy. Review the saved PNGs themselves after capture, including the
+panel's full size and readable text in both themes. File dimensions alone do
+not detect content captured at the wrong browser scale. CI does not
 claim a pixel comparison. See the [capture policy](usage.md#documentation-capture-policy).
