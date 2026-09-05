@@ -6,6 +6,8 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+## [0.1.0-alpha.14] - 2026-09-04
+
 ### Fixed
 
 - Require explicit Deflate stream completion before admitting a ZIP member or finishing gzip framing. A producer-derived wheel with BFINAL cleared previously passed with unchanged plaintext, matching CRC32 and sizes, and complete compressed-input consumption even though the stream never ended. The shared bounded reader now requires `StreamEnd`; ZIP32, ZIP64, supervised verification, later capability reads, and gzip use the same completion rule. Existing malformed-stream diagnostic identities remain unchanged. No runtime dependency, profile identity, or unsafe code was added.
@@ -458,7 +460,8 @@ First public development preview of the ZIP boundary.
 
 This preview is not a production-ready security boundary and has not received an external security audit. See the security limitations in the README and the reporting policy in `SECURITY.md` before evaluating it.
 
-[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.13...HEAD
+[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.14...HEAD
+[0.1.0-alpha.14]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.13...v0.1.0-alpha.14
 [0.1.0-alpha.13]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.12...v0.1.0-alpha.13
 [0.1.0-alpha.12]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.11...v0.1.0-alpha.12
 [0.1.0-alpha.11]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.10...v0.1.0-alpha.11

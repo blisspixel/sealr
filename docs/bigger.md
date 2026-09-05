@@ -1,6 +1,6 @@
 # Reusable admitted trees
 
-> Target research direction. Alpha.13 does not implement projection, mounting, content-addressed reuse, overlays, or lazy verification. The [active execution queue](../ROADMAP.md#active-execution-queue) puts independent adoption and candidate stability before this work.
+> Target research direction. Alpha.14 does not implement projection, mounting, content-addressed reuse, overlays, or lazy verification. The [active execution queue](../ROADMAP.md#active-execution-queue) puts independent adoption and candidate stability before this work.
 
 The larger opportunity is not faster extraction. It is letting multiple consumers use the exact admitted tree without assigning the archive another meaning.
 

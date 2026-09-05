@@ -14,7 +14,7 @@ concurrency:
 
 env:
   MACOSX_DEPLOYMENT_TARGET: "15.0"
-  RELEASE_VERSION: 0.1.0-alpha.13
+  RELEASE_VERSION: 0.1.0-alpha.14
   RUST_VERSION: 1.98.0
 
 jobs:
@@ -436,7 +436,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          release_title="sealr ${RELEASE_VERSION}: supervised wheel handoff and exact Poetry 2.4.2 fixture"
+          release_title="sealr ${RELEASE_VERSION}: complete Deflate streams and Unicode wheel evidence"
           notes_file="docs/releases/v${RELEASE_VERSION}.md"
           if [[ ! -f "${notes_file}" ]]; then
             echo "::error::missing release notes: ${notes_file}"

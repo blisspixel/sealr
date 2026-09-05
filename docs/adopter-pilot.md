@@ -1,10 +1,25 @@
 # External adopter pilot contract
 
-Updated 2026-09-02.
+Updated 2026-09-04.
 
 > Status: verified technical baseline for the first external pilot. No external adopter has passed this contract. No separately maintained consumer has been selected, and no publishable pilot release has been assigned. Alpha.13 must not be retroactively published to crates.io because its immutable packaged README explicitly describes it as GitHub-only. Repository fixtures remain mechanism evidence only.
 
 This document turns the roadmap's usefulness gate into one exact integration boundary. The machine-readable source is [`tests/package-contract/adopter-pilot.json`](../tests/package-contract/adopter-pilot.json), enforced by `scripts/verify_adopter_contract.ps1` in required CI. It pins the verified Alpha.13 mechanism baseline and the rules a new prerelease must satisfy before the external pilot starts. The [candidate surface inventory](candidate-surface.md) classifies the public identities this pilot may pin; it is not a freeze.
+
+## Current evaluation source
+
+The `sealr.external-adopter-pilot.v2` contract separates historical artifact
+identities from the source currently under evaluation. Current evaluation pins
+`sealr = "=0.1.0-alpha.14"` and matching Alpha.14 native companions. The copied
+handoff manifest and workspace package version must agree with that requirement.
+Alpha.14 remains GitHub-only and does not assign a registry pilot release.
+
+Alpha.13 is historical reproduction evidence, not the recommended evaluation
+release: Alpha.14 fixes incomplete Deflate stream admission. The historical
+commit, source-package digest, and native archive digest below still describe
+Alpha.13 exactly and must not be reassigned to Alpha.14. Neither GitHub-only
+prerelease may be retroactively published to crates.io. The new-release gate
+continues to require truthful tagged documentation and an agreed adopter scope.
 
 ## Adopter selection
 

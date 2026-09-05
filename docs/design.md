@@ -1,6 +1,6 @@
 # Design principles
 
-> Published Alpha.13 behavior is defined by the [README](../README.md), [API contract](api.md), and [security policy](../SECURITY.md). Product sequencing is defined only by the [roadmap](../ROADMAP.md).
+> Published Alpha.14 behavior is defined by the [README](../README.md), [API contract](api.md), and [security policy](../SECURITY.md). Product sequencing is defined only by the [roadmap](../ROADMAP.md).
 
 Sealr is trying to become a dependable archive-to-tree admission boundary. It is not trying to be a general unarchiver, codec benchmark, or scheduler.
 
@@ -8,7 +8,7 @@ Sealr is trying to become a dependable archive-to-tree admission boundary. It is
 
 One bounded source invocation receives one versioned interpretation. Inspect, materialize, evidence, and future consumers must use the same immutable representation. No recovery parser or downstream reparse may assign a second meaning to the archive.
 
-Alpha.13 preserves this rule through the compatibility `apply()` path and the explicit supervised path, both using one versioned, effect-independent `ArchiveIR`. Inspect, materialize, verified-member reads, and the wheel evaluator consume the admitted representation and private or borrowed snapshot without another structural parse. Preview layout and content-tree identities are derived from that representation.
+Alpha.14 preserves this rule through the compatibility `apply()` path and the explicit supervised path, both using one versioned, effect-independent `ArchiveIR`. Inspect, materialize, verified-member reads, and the wheel evaluator consume the admitted representation and private or borrowed snapshot without another structural parse. Preview layout and content-tree identities are derived from that representation.
 
 ## Admission and effects are different facts
 
@@ -22,7 +22,7 @@ The explicit x86_64 Linux worker reduces authority for supported ZIP32 payload v
 
 ## Evidence names only established facts
 
-Alpha.13 emits deterministic unsigned evidence, opt-in byte-exact canonical evidence, and preview semantic tree roots. The packaged independent verifier checks canonical evidence but does not authenticate it. Sealr does not yet emit a stable lock, authenticated archive-decision claim, or formal proof. Future evidence keeps source, interpretation, layout, content, policy, and effect identities distinct.
+Alpha.14 emits deterministic unsigned evidence, opt-in byte-exact canonical evidence, and preview semantic tree roots. The packaged independent verifier checks canonical evidence but does not authenticate it. Sealr does not yet emit a stable lock, authenticated archive-decision claim, or formal proof. Future evidence keeps source, interpretation, layout, content, policy, and effect identities distinct.
 
 ## Compatibility is measured
 

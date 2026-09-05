@@ -83,13 +83,12 @@ The complete runnable version, including a hostile `..` container refused before
 
 The longer-term aim is an archive-to-tree admission boundary whose decision and evidence can be reused by other systems. Usefulness is not “more unzip.” It is: same bytes and policy produce one tree or no tree on Linux, macOS, and Windows, and the next tool consumes that tree instead of opening the ZIP again. The [usefulness test](docs/usefulness.md) is the quality bar.
 
-> Status: `v0.1.0-alpha.13` is the thirteenth development preview of the archive boundary. It is useful for evaluation, integration work, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. Alpha.13 retains the twelve deliberately narrow container and codec selections released through Alpha.12 across ZIP32, strict ZIP64, portable and restricted TAR dialects, exact gzip, zstd, xz, and bzip2 wrappers, and a Copy-only 7z container. Every nondefault format is selected explicitly and does not widen or alias the ZIP32 compatibility default. An explicit x86_64 Linux mode moves supported ZIP32 payload verification, stage writes, and later non-retained reads into an authenticated worker restricted with Landlock ABI 3 and seccomp, while the supervisor retains structural planning and publication authority; unsupported worker selections never fall back to in-process execution.
+> Status: `v0.1.0-alpha.14` is the fourteenth development preview of the archive boundary. It is useful for evaluation, integration work, and adversarial testing. It is not ready to protect a production host from arbitrary hostile archives. Alpha.14 retains the twelve deliberately narrow container and codec selections released through Alpha.12 across ZIP32, strict ZIP64, portable and restricted TAR dialects, exact gzip, zstd, xz, and bzip2 wrappers, and a Copy-only 7z container. Every nondefault format is selected explicitly and does not widen or alias the ZIP32 compatibility default. An explicit x86_64 Linux mode moves supported ZIP32 payload verification, stage writes, and later non-retained reads into an authenticated worker restricted with Landlock ABI 3 and seccomp, while the supervisor retains structural planning and publication authority; unsupported worker selections never fall back to in-process execution.
 
-> Release contents: Alpha.13 released full-integrity supervised prefix reads, a packaged public-API-only PyPA `WheelSource` handoff for exact installer 1.0.1, and an exact repository-owned Poetry 2.4.2 update fixture. Rust retains the admitted plan, Python receives only a reduced digest-bound manifest and verified member blobs, and the realized output set, executable modes, and identity are audited exactly. The Poetry fixture preserves lock validation and real update uninstall while placing PREPARED before uninstall or target writes. This remains repository evidence, not external adoption or general Poetry support. The [Alpha.13 release notes](docs/releases/v0.1.0-alpha.13.md) define the complete delta and remaining limitations. This GitHub-only prerelease does not publish a crate to crates.io.
+> Release contents: Alpha.14 fixes incomplete Deflate stream admission and adds a [24-artifact Unicode and streaming wheel producer matrix](docs/wheel-producer-compatibility.md). The shared bounded reader requires explicit stream completion in ZIP verification, later capability reads, and gzip framing. Six admitted fixtures exercise Unicode across all five wheel install schemes and both descriptor forms; eighteen negative cases pin exact refusal boundaries. Required Linux CI completes twelve supervised installer handoffs with independent evidence verification, source deletion, and exact output and mode audits. The [Alpha.14 release notes](docs/releases/v0.1.0-alpha.14.md) define the complete delta and remaining limitations. This GitHub-only prerelease does not publish a crate to crates.io.
 
 ## Why this exists
 
-Current main also includes a [24-artifact Unicode and streaming wheel producer matrix](docs/wheel-producer-compatibility.md). It exposed and fixed an incomplete Deflate stream admission defect, and adds source-deletion, native materialization, and copied supervised installer checks. This work is pending the next prerelease; Alpha.13 remains the published baseline described above.
 
 Agents, package systems, upload handlers, and data pipelines routinely receive archives from outside their trust boundary. Archive formats encode filesystem topology as well as content, and different parsers can assign different meanings to the same bytes.
 
@@ -110,7 +109,7 @@ Every outcome contains:
 
 ## Current implementation boundary
 
-Alpha.13 retains the twelve explicit container and codec selections released through Alpha.12: classic ZIP32 with stored or Deflate members, strict ZIP64, raw portable ustar, restricted raw POSIX PAX, restricted raw old-GNU long-name TAR, gzip-wrapped portable ustar, gzip-wrapped restricted PAX and GNU long-name TAR, zstd-, xz-, and bzip2-wrapped portable ustar, and a Copy-only 7z container. ZIP32 additionally offers separate compatibility, strict ASCII, and portable UTF-8 name profiles. Every nondefault format is explicit and in process. `apply()` and the `zip` CLI selection remain ZIP32 and never alias to another profile.
+Alpha.14 retains the twelve explicit container and codec selections released through Alpha.12: classic ZIP32 with stored or Deflate members, strict ZIP64, raw portable ustar, restricted raw POSIX PAX, restricted raw old-GNU long-name TAR, gzip-wrapped portable ustar, gzip-wrapped restricted PAX and GNU long-name TAR, zstd-, xz-, and bzip2-wrapped portable ustar, and a Copy-only 7z container. ZIP32 additionally offers separate compatibility, strict ASCII, and portable UTF-8 name profiles. Every nondefault format is explicit and in process. `apply()` and the `zip` CLI selection remain ZIP32 and never alias to another profile.
 
 - CD-first parsing with exact EOCD, central-directory, local-header, and data-descriptor agreement.
 - Rejection of hidden stream records, unreferenced layout bytes, overlapping records, spanned archives, traditional or strong encryption indicators, masked headers, unsupported methods, and mismatched flags or metadata. Every ZIP32 profile rejects ZIP64 markers rather than treating them as an alternate encoding of the ZIP32 selection.
@@ -182,7 +181,7 @@ The repository pins Rust 1.98.0 in `rust-toolchain.toml`; rustup selects it auto
 
 The crate's current minimum supported Rust version is 1.98, declared through `rust-version`. CI selects exactly 1.98.0. Preview releases may raise this minimum only as a documented compatibility change; patch releases within a stable 1.x line will not.
 
-Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.13` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.13). Runnable checksum and provenance commands are in [release verification](https://github.com/blisspixel/sealr/blob/main/docs/release-verification.md). Every archive extracts the `sealr` CLI and independent `sealr-identity-verifier` companion.
+Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.14` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.14). Runnable checksum and provenance commands are in [release verification](https://github.com/blisspixel/sealr/blob/main/docs/release-verification.md). Every archive extracts the `sealr` CLI and independent `sealr-identity-verifier` companion.
 
 ```text
 # After checksumming and extracting the native archive:
@@ -192,7 +191,7 @@ Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0
 # Materialize into a new destination below an existing parent.
 ./sealr path/to/archive.zip --dest ./out
 
-# Alpha.13 can emit and independently check exact evidence.
+# Alpha.14 can emit and independently check exact evidence.
 ./sealr path/to/archive.zip --view view.json --receipt receipt.json --canonical
 ./sealr-identity-verifier evidence \
   --view view.json --receipt receipt.json --source path/to/archive.zip
@@ -290,11 +289,11 @@ The semantic walkthrough is enforced by CLI integration tests on the native plat
 
 ## What comes next
 
-The next milestone is one external adopter pilot. A separately maintained publisher, registry, build backend, or installer must use `VerifiedArchive` and independently checked canonical evidence as authoritative, then complete after the original wheel becomes unavailable and without invoking another ZIP parser. The [pilot contract](docs/adopter-pilot.md) pins the verified Alpha.13 mechanism baseline, the new-release gate, semantic identities, negative matrix, and evidence the downstream project must return.
+The next milestone is one external adopter pilot. A separately maintained publisher, registry, build backend, or installer must use `VerifiedArchive` and independently checked canonical evidence as authoritative, then complete after the original wheel becomes unavailable and without invoking another ZIP parser. The [pilot contract](docs/adopter-pilot.md) preserves the historical Alpha.13 mechanism baseline and separately pins the current evaluation source, the new-release gate, semantic identities, negative matrix, and evidence the downstream project must return.
 
 That work comes before more format breadth because it tests the product claim and exposes public API, packaging, compatibility, and failure-model problems while they are still safe to change. In parallel, the project will target the wheel evidence gaps the current 300-artifact inventory did not cover, prepare a candidate API and identity freeze, accumulate assurance history, close crash-recovery and durability gaps, measure the TCB, and prepare an independent review scope.
 
-The [roadmap](ROADMAP.md) now contains only current sequencing and stable gates. The [near-term execution plan](docs/near-term.md) defines the adopter work packages and acceptance criteria. Completed Alpha.1 through Alpha.13 detail is in the [milestone history](docs/milestones.md) and versioned [release notes](docs/releases/v0.1.0-alpha.13.md). The CLI still has no wheel installation mode.
+The [roadmap](ROADMAP.md) now contains only current sequencing and stable gates. The [near-term execution plan](docs/near-term.md) defines the adopter work packages and acceptance criteria. Completed Alpha.1 through Alpha.14 detail is in the [milestone history](docs/milestones.md) and versioned [release notes](docs/releases/v0.1.0-alpha.14.md). The CLI still has no wheel installation mode.
 
 ## Research basis
 
@@ -314,9 +313,9 @@ The [roadmap](ROADMAP.md) now contains only current sequencing and stable gates.
 |---|---|
 | [Documentation index](docs/index.md) | Guided map of current contracts, security material, plans, and operations |
 | [Near-term execution plan](docs/near-term.md) | External-adoption work packages, parallel evidence tracks, and acceptance criteria |
-| [External adopter pilot contract](docs/adopter-pilot.md) | Verified Alpha.13 baseline, new-release gate, downstream proof, negative matrix, and report requirements |
+| [External adopter pilot contract](docs/adopter-pilot.md) | Historical baseline, current evaluation source, new-release gate, downstream proof, negative matrix, and report requirements |
 | [Candidate surface inventory](docs/candidate-surface.md) | Classified public identities for the first pilot; not a freeze |
-| [Milestone history](docs/milestones.md) | Alpha.1 through Alpha.13 outcomes with links to immutable release detail |
+| [Milestone history](docs/milestones.md) | Alpha.1 through Alpha.14 outcomes with links to immutable release detail |
 | [Distribution contract](docs/distribution-contract.md) | Exact source-package scope, SemVer and MSRV policy, and native archive floors |
 | [Copyable PyPA `WheelSource` handoff](crates/sealr/examples/pypa_installer_handoff/README.md) | Public-API-only supervised admission, reduced manifest, source deletion, real installer effects, and exact result audit |
 | [Exact Poetry 2.4.2 repository fixture](tests/poetry-consumer/README.md) | Lock-preserving update ordering, PREPARED-boundary source removal, host-and-bridge wheel-open denial, stock parity, and exact realization audit |
@@ -325,7 +324,7 @@ The [roadmap](ROADMAP.md) now contains only current sequencing and stable gates.
 | [Private semantic record](docs/semantic-record.md) | Crate-private Alpha.6 planning/completion codec, worker executors, validation rules, evidence, and remaining gates |
 | [Roadmap](ROADMAP.md) | Current execution order, stable gates, later work, and decision rules |
 | [Safety specification](docs/safety.md) | Normative safety rules and supported boundary |
-| [API contract](docs/api.md) | Published Alpha.13 Rust and JSON surface |
+| [API contract](docs/api.md) | Published Alpha.14 Rust and JSON surface |
 | [Release verification](docs/release-verification.md) | Checksums, provenance, tag, and immutable release verification |
 | [Evidence encoding contract](docs/evidence-encoding.md) | The default declaration-order encoding and opt-in RFC 8785 canonical evidence lineage |
 

@@ -2,7 +2,7 @@
 
 [package]
 name = "sealr"
-version = "0.1.0-alpha.13"
+version = "0.1.0-alpha.14"
 edition = "2021"
 rust-version = "1.93"
 license = "Apache-2.0"
