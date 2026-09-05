@@ -1,6 +1,6 @@
 # Implementation and security boundary
 
-This reference describes the Alpha.14 implementation and its limits. Start with the [getting started guide](getting-started.md), or use the [documentation index](index.md) to find a specific contract.
+This reference describes the Alpha.15 implementation and its limits. Start with the [getting started guide](getting-started.md), or use the [documentation index](index.md) to find a specific contract.
 
 ## Why this exists
 
@@ -23,7 +23,7 @@ Every outcome contains:
 
 ## Current implementation boundary
 
-Alpha.14 retains the twelve explicit container and codec selections released through Alpha.12: classic ZIP32 with stored or Deflate members, strict ZIP64, raw portable ustar, restricted raw POSIX PAX, restricted raw old-GNU long-name TAR, gzip-wrapped portable ustar, gzip-wrapped restricted PAX and GNU long-name TAR, zstd-, xz-, and bzip2-wrapped portable ustar, and a Copy-only 7z container. ZIP32 additionally offers separate compatibility, strict ASCII, and portable UTF-8 name profiles. Every nondefault format is explicit and in process. `apply()` and the `zip` CLI selection remain ZIP32 and never alias to another profile.
+Alpha.15 retains the twelve explicit container and codec selections released through Alpha.12: classic ZIP32 with stored or Deflate members, strict ZIP64, raw portable ustar, restricted raw POSIX PAX, restricted raw old-GNU long-name TAR, gzip-wrapped portable ustar, gzip-wrapped restricted PAX and GNU long-name TAR, zstd-, xz-, and bzip2-wrapped portable ustar, and a Copy-only 7z container. ZIP32 additionally offers separate compatibility, strict ASCII, and portable UTF-8 name profiles. Every nondefault format is explicit and in process. `apply()` and the `zip` CLI selection remain ZIP32 and never alias to another profile.
 
 - CD-first parsing with exact EOCD, central-directory, local-header, and data-descriptor agreement.
 - Rejection of hidden stream records, unreferenced layout bytes, overlapping records, spanned archives, traditional or strong encryption indicators, masked headers, unsupported methods, and mismatched flags or metadata. Every ZIP32 profile rejects ZIP64 markers rather than treating them as an alternate encoding of the ZIP32 selection.

@@ -1,7 +1,7 @@
 # CLI walkthrough
 
 Inspect an archive, reject a parent path, and publish the verified tree. These
-examples use Linux terminal notation and the current Alpha.14 CLI.
+examples use Linux terminal notation and the current Alpha.15 CLI.
 
 The images are rendered summaries of measured JSON view and receipt streams.
 They are paired with copyable commands and expected outcomes. They do not show

@@ -10,7 +10,7 @@ Archive bytes -> versioned interpretation -> verified admitted tree
 All stages                                 -> evidence
 ```
 
-The latest release is `v0.1.0-alpha.14`. It proves the boundary inside this repository through a supported wheel evaluator, an authenticated reduced-authority Linux worker, an independently implemented evidence verifier, a copyable PyPA `WheelSource` handoff, and an exact Poetry 2.4.2 fixture. It does not yet prove that another project can depend on this boundary successfully.
+The latest release is `v0.1.0-alpha.15`. It exercises the boundary through a supported wheel evaluator, an authenticated reduced-authority Linux worker, an independently implemented evidence verifier, complete installer handoffs, and a concrete publisher content decision. A separate owner-maintained validation repository now consumes real release artifacts. Independently maintained adoption remains unproven.
 
 That missing external proof now determines the order of work. Parser breadth is frozen until the usefulness, stability, and review gates below are met.
 
@@ -26,7 +26,7 @@ That missing external proof now determines the order of work. Parser breadth is 
 | Distribution | The `sealr` crate package and three native package floors are checked in CI with Rust 1.98 | Select and exercise an ordinary prerelease delivery path for the adopter |
 | Assurance | Required deterministic gates and scheduled discovery are active | Accumulate the defined history, close material race and lifecycle gaps, and complete independent review |
 
-The [current release notes](docs/releases/v0.1.0-alpha.14.md) define the Alpha.14 delta and limitations. The [milestone history](docs/milestones.md) links every earlier preview to its immutable release notes. Current executable behavior remains in the [implementation boundary](docs/implementation.md), [API contract](docs/api.md), and [security policy](SECURITY.md).
+The [current release notes](docs/releases/v0.1.0-alpha.15.md) define the Alpha.15 delta and limitations. The [milestone history](docs/milestones.md) links every earlier preview to its immutable release notes. Current executable behavior remains in the [implementation boundary](docs/implementation.md), [API contract](docs/api.md), and [security policy](SECURITY.md).
 
 ## Why external adoption is next
 
@@ -57,9 +57,9 @@ The [usefulness test](docs/usefulness.md) defines the product proof. The [near-t
 
 Target one separately maintained publisher, registry, build backend, or installer with a narrow wheel workflow on x86_64 Linux, where Sealr's strongest worker boundary is available.
 
-The owner-maintained [downstream validation project](https://github.com/blisspixel/sealr-validation) now exercises real Deepr, Primr, and Recon release wheels against immutable Alpha.14 source and authenticated native artifacts. Deepr's existing wheel-content check is the strongest integration candidate. This separate validation project prepares the handoff and exposes integration friction; it does not satisfy independent adoption. A local Deepr installation audited 834 output files in 217 seconds, so per-member worker overhead needs measurement before agreeing a practical adopter budget.
+The owner-maintained [downstream validation project](https://github.com/blisspixel/sealr-validation) now exercises real Deepr, Primr, and Recon release wheels against immutable Alpha.14 source and authenticated native artifacts. The new [wheel-content gate](docs/wheel-content-gate.md) implements Deepr's concrete dashboard and runtime requirements through the verified capability. It independently checks evidence and deletes its private source before evaluating the wheel and making the decision. The caller's original is preserved. This gate creates no installation output. It prepares the integration and exposes practical costs; it does not satisfy independent adoption or replace Deepr's production release workflow.
 
-The [capability reuse experiment](docs/capability-reuse-experiment.md) separates a narrow consumer working set from full installation. It proposes measuring existing bounded retention before changing worker lifetimes or source-binding validation. It also defines an optional visual that makes the source-deletion boundary observable.
+The [capability reuse experiment](docs/capability-reuse-experiment.md) separates a narrow consumer working set from full installation. It measures existing bounded retention before changing worker lifetimes or source-binding validation. The first phase measurements locate most full-install time in member staging, while the narrow content decision avoids that phase. The next adopter discussion should agree the exact decision and its resource budget. If that scope differs from the existing full-installer pilot contract, revise that contract explicitly before claiming the gate passed. An optional source-deletion visual remains a separate proposal.
 
 The exact baseline artifact, semantic, handoff, negative-test, and reporting requirements are now pinned by the [external adopter pilot contract](docs/adopter-pilot.md). Required CI rejects drift between that contract, the package manifests, native floor, profile and policy identities, consumer digest, helper protocol, evidence schemas, and installer bridge. No external adopter has accepted the contract and no publishable pilot release has been assigned. Alpha.13 remains historical reproduction evidence and must not be retroactively uploaded because its immutable packaged README describes it as GitHub-only. Current evaluation requires Alpha.14 or later because it fixes incomplete Deflate stream admission.
 
@@ -169,7 +169,7 @@ Choose the work that most increases justified trust in the boundary per unit of 
 | Question | Source |
 |---|---|
 | What works now? | [README](README.md), [API contract](docs/api.md), and [security policy](SECURITY.md) |
-| What changed in each preview? | [Milestone history](docs/milestones.md), [changelog](CHANGELOG.md), and [release notes](docs/releases/v0.1.0-alpha.14.md) |
+| What changed in each preview? | [Milestone history](docs/milestones.md), [changelog](CHANGELOG.md), and [release notes](docs/releases/v0.1.0-alpha.15.md) |
 | What is the next bounded plan? | [Near-term execution plan](docs/near-term.md) |
 | What may the first pilot pin? | [Candidate surface inventory](docs/candidate-surface.md) |
 | What proves usefulness? | [Usefulness test](docs/usefulness.md) |

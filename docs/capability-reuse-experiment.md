@@ -1,7 +1,41 @@
 # Reuse the established authority
 
-Status: proposed experiment after Alpha.14. This document changes no supported
-API, retention limit, worker protocol, or security claim.
+Status: the first nine-install experiment completed against immutable Alpha.14.
+Alpha.15 adds the resulting narrow [publisher content gate](wheel-content-gate.md).
+No retention limit, worker protocol, or source-binding check changed.
+
+## What the first run established
+
+All nine installations preserved exact source, tree, artifact, plan, realization,
+canonical evidence, and installed-file parity within each wheel. The three
+worker version, target, and ABI refusals also passed. The
+[complete downstream report and output inventories](https://github.com/blisspixel/sealr-validation/tree/main/experiments/retention/observed-linux-wsl)
+preserve every phase time, retention outcome, and input pin.
+
+| Wheel | No retention | Four semantic members | 64-member working set |
+|---|---:|---:|---:|
+| Deepr | 225.607 s | 224.128 s | 215.493 s |
+| Primr | 86.891 s | 81.820 s | 70.096 s |
+| Recon | 8.246 s | 8.124 s | 6.097 s |
+
+These are single sequential observations on Linux x86_64 under WSL2, with other
+work active on the machine. Order, cache, scheduler, and storage effects were
+not controlled. They are not a benchmark, significance claim, or latency promise.
+
+In Deepr's baseline, 209.286 seconds were spent staging member blobs. Four
+retained metadata members reduced wheel evaluation from 1.028 to 0.015 seconds,
+but staging still took 209.261 seconds. A small metadata working set therefore
+addresses metadata consumption; it does not remove full-install staging.
+
+That finding produced a more useful first integration: the content gate can
+make Deepr's actual publisher decision without installing files. In a separate
+Alpha.14 prototype probe, four retained members totaling 91,892 bytes completed
+the full gate in 0.386 seconds, compared with 1.389 seconds with no retention.
+Both decisions independently verified evidence, removed the private source
+before evaluation, and preserved the same semantic identities and content counts.
+The local probe is additional single-run evidence, not a comparison of equivalent
+work with complete installation. Alpha.15's required CI checks correctness using
+its own matching source and native package; it enforces no timing threshold.
 
 ## Start with the consumer's decision
 
@@ -12,9 +46,9 @@ and a small metadata set. A complete installation needs every planned member.
 
 The owner-maintained [downstream validation project](https://github.com/blisspixel/sealr-validation)
 uses real Deepr, Primr, and Recon release wheels with immutable Alpha.14 source
-and authenticated native artifacts. A local Linux Deepr inspect handoff took
-217 seconds and audited 834 installed output files. That single observation is
-integration feedback, not a benchmark or a claim about which stage dominates.
+and authenticated native artifacts. Each strategy audited 834, 549, and 199
+installed outputs respectively. It remains integration preparation, not
+independently maintained adoption.
 
 ## The repeated work
 
@@ -45,14 +79,15 @@ interfaces do not otherwise guarantee. A file length or claimed digest cannot
 replace observing the actual bytes. Removing checks from those interfaces would
 weaken the boundary.
 
-## First experiment: an explicit working set
+## Reproduce the explicit working set
 
-Use existing public `RetentionPlan` APIs in a separately labeled experimental
-consumer. Keep the validation project's exact copied handoff as the baseline.
-Do not edit its provenance-pinned files and still claim an unchanged copy.
+The separately labeled experimental consumer uses the existing public
+`RetentionPlan` API. The validation project's exact copied handoff is unchanged;
+the experimental staging module is mechanically verified to differ only in
+timing observations, result fields, and its relative bridge include path.
 
-Prepare exact path lists once from public verified member inventories, pin them
-beside each wheel's source digest, and run three strategies on the same wheels:
+Exact path lists are pinned from public verified member inventories beside each
+wheel's source digest. Three strategies consume the same wheels:
 
 | Strategy | Requested retained bytes |
 |---|---|
@@ -60,7 +95,7 @@ beside each wheel's source digest, and run three strategies on the same wheels:
 | Semantic working set | Exact `METADATA`, `WHEEL`, `RECORD`, and existing `entry_points.txt` members |
 | Bounded working set | Semantic paths plus deterministically selected small members, at most 64 paths, 256 KiB per member, and 1 MiB total |
 
-Start with nine complete installations across the three wheels. Record
+The first run completed nine installations across the three wheels. Reproductions record
 admission, evaluation, staging, installation, and output-audit time separately.
 Record requested and fulfilled retention, retained bytes, and any unsuccessful
 retention status. Repeat only after the first pass establishes correctness and

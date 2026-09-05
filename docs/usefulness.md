@@ -50,4 +50,4 @@ Alpha.8 demonstrates items 1 and 2 through the public prerelease API. Alpha.12 d
 
 See [semantic-model.md](semantic-model.md#the-consumption-rule), the [wheel profile](profiles/python-wheel-v1.md), [theory.md](theory.md), and the [active roadmap](../ROADMAP.md#active-execution-queue).
 
-Alpha.14 adds the [controlled Unicode and streaming producer matrix](wheel-producer-compatibility.md) and closes an incomplete Deflate stream admission defect. Its copied handoff evidence strengthens the repository proof; the external usefulness gate remains open.
+Alpha.15 adds the [controlled Unicode and streaming producer matrix](wheel-producer-compatibility.md) and closes an incomplete Deflate stream admission defect. Its copied handoff evidence strengthens the repository proof; the external usefulness gate remains open.

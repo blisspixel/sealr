@@ -29,7 +29,7 @@ crc32fast.workspace = true
 getrandom = { workspace = true, optional = true }
 sha2.workspace = true
 thiserror.workspace = true
-sealr = { version = "=0.1.0-alpha.14", path = "../../crates/sealr", features = ["__internal-worker-lab"] }
+sealr = { version = "=0.1.0-alpha.15", path = "../../crates/sealr", features = ["__internal-worker-lab"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4.7"

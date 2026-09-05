@@ -366,7 +366,7 @@ dependencies = [
 
 [[package]]
 name = "sealr"
-version = "0.1.0-alpha.14"
+version = "0.1.0-alpha.15"
 dependencies = [
  "bzip2",
  "cap-fs-ext",

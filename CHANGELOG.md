@@ -6,6 +6,19 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+## [0.1.0-alpha.15] - 2026-09-05
+
+### Added
+
+- Added a public-API wheel-content gate based on Deepr's actual dashboard and runtime asset requirements. It independently verifies canonical evidence, deletes a bounded private source copy before wheel evaluation, and makes the content decision through `VerifiedArchive` without installation or another parser. The caller's wheel is preserved. Exact optional metadata retention uses the existing public limits.
+- Added twelve grouped regression tests covering valid wheel business-policy mutations, directory substitutions, unrelated corrupt and incomplete payloads, archive ambiguity, wheel-semantic denial, retention identity parity, and source removal with a failed reopen and successful capability read. Required Linux CI also checks the real pinned release wheel with authenticated native companions.
+- Added measured bounded-retention guidance from the separate owner-maintained validation repository, distinguishing a narrow acceptance decision from complete installation. The measurements do not claim independent adoption or a general performance improvement.
+
+### Changed
+
+- Added a simple vector logo, light and dark variants, an identity specimen, and a documented visual style. Refreshed all six Linux walkthrough captures from the current CLI and kept detailed integration guidance under `docs/`.
+- Updated the roadmap around the measured adopter decision. Parser breadth, public API, interpretation and policy identities, worker protocol, runtime dependencies, and existing verification guarantees remain unchanged.
+
 ## [0.1.0-alpha.14] - 2026-09-04
 
 ### Fixed
@@ -460,7 +473,8 @@ First public development preview of the ZIP boundary.
 
 This preview is not a production-ready security boundary and has not received an external security audit. See the security limitations in the README and the reporting policy in `SECURITY.md` before evaluating it.
 
-[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.14...HEAD
+[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.15...HEAD
+[0.1.0-alpha.15]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.14...v0.1.0-alpha.15
 [0.1.0-alpha.14]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.13...v0.1.0-alpha.14
 [0.1.0-alpha.13]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.12...v0.1.0-alpha.13
 [0.1.0-alpha.12]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.11...v0.1.0-alpha.12

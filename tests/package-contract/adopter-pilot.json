@@ -172,8 +172,8 @@
     "not-supply-chain-independent-verifier"
   ],
   "current_source": {
-    "version": "0.1.0-alpha.14",
-    "requirement": "=0.1.0-alpha.14",
+    "version": "0.1.0-alpha.15",
+    "requirement": "=0.1.0-alpha.15",
     "delivery": "github-only-prerelease",
     "baseline_relationship": "historical-baseline-superseded-by-deflate-completion-fix"
   }

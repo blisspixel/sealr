@@ -1,4 +1,7 @@
-# sealr
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/brand/sealr-wordmark-dark.svg">
+  <img alt="Sealr" src="docs/assets/brand/sealr-wordmark-light.svg" width="240">
+</picture>
 
 [![CI](https://github.com/blisspixel/sealr/actions/workflows/ci.yml/badge.svg)](https://github.com/blisspixel/sealr/actions/workflows/ci.yml)
 
@@ -17,7 +20,7 @@ silently give the same bytes a different meaning.
 ## Try it
 
 Download the native Linux, macOS, or Windows archive from
-[`v0.1.0-alpha.14`](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.14)
+[`v0.1.0-alpha.15`](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.15)
 and [verify the release](docs/release-verification.md) before running it.
 
 ```sh
@@ -51,7 +54,7 @@ Inspecting a two-member ZIP verifies both members without writing a destination:
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-light.png">
-  <img alt="Linux terminal summary of Alpha.14 verifying two ZIP members with no destination written." src="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-light.png" width="1000">
+  <img alt="Linux terminal summary of Alpha.15 verifying two ZIP members with no destination written." src="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-light.png" width="1000">
 </picture>
 
 This is a rendered summary of verified CLI output. The
@@ -60,9 +63,9 @@ materialization, both themes, and reproduction instructions.
 
 ## Current status
 
-Alpha.14 fixes incomplete Deflate stream admission and adds 24 reproducible
-Unicode and streaming wheel fixtures. Native CI covers Linux, macOS, and Windows.
-See the [release notes](docs/releases/v0.1.0-alpha.14.md) for the measured changes.
+Alpha.15 adds a practical wheel-content release check, measured retention
+guidance, and a consistent visual identity. Native CI covers Linux, macOS, and Windows.
+See the [release notes](docs/releases/v0.1.0-alpha.15.md) for the measured changes.
 
 Sealr is a development preview for integration and adversarial testing. It has
 no independent security audit or stable production release. Receipts are unsigned,
@@ -74,10 +77,10 @@ supported formats, the explicit Linux worker, resource limits, and open gaps.
 
 ## What comes next
 
-Make a real downstream acceptance decision depend on the verified capability.
-The [separate validation project](https://github.com/blisspixel/sealr-validation)
-exercises released Deepr, Primr, and Recon wheels. Deepr's existing wheel-content
-check is the clearest next integration seam.
+Move the [wheel-content gate](docs/wheel-content-gate.md) into a separately
+maintained publisher workflow. The
+[validation project](https://github.com/blisspixel/sealr-validation) exercises
+released Deepr, Primr, and Recon wheels and measures explicit retention choices.
 
 That work tests API, acquisition, compatibility, and failure handling before
 more format breadth. The [roadmap](ROADMAP.md) and

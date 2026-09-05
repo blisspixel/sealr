@@ -8,7 +8,7 @@ The repository pins Rust 1.98.0 in `rust-toolchain.toml`; rustup selects it auto
 
 The crate's current minimum supported Rust version is 1.98, declared through `rust-version`. CI selects exactly 1.98.0. Preview releases may raise this minimum only as a documented compatibility change; patch releases within a stable 1.x line will not.
 
-Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.14` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.14). Runnable checksum and provenance commands are in [release verification](https://github.com/blisspixel/sealr/blob/main/docs/release-verification.md). Every archive extracts the `sealr` CLI and independent `sealr-identity-verifier` companion.
+Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.15` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.15). Runnable checksum and provenance commands are in [release verification](https://github.com/blisspixel/sealr/blob/main/docs/release-verification.md). Every archive extracts the `sealr` CLI and independent `sealr-identity-verifier` companion.
 
 ```text
 # After checksumming and extracting the native archive:
@@ -18,7 +18,7 @@ Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0
 # Materialize into a new destination below an existing parent.
 ./sealr path/to/archive.zip --dest ./out
 
-# Alpha.14 can emit and independently check exact evidence.
+# Alpha.15 can emit and independently check exact evidence.
 ./sealr path/to/archive.zip --view view.json --receipt receipt.json --canonical
 ./sealr-identity-verifier evidence \
   --view view.json --receipt receipt.json --source path/to/archive.zip
@@ -76,6 +76,10 @@ fn main() {
 ```
 
 The complete runnable version, including a hostile `..` container refused before any capability exists and an admitted container whose lying `RECORD` is denied with an exact finding, is `cargo run --locked -p sealr --example wheel_admission`. A second example, `cargo run --locked -p sealr --example same_digest_different_tree`, turns the archive-confusion research into a capability-path artifact: one archive digest, an identical archive tree under two filenames, distinct filename-bound identities, and a typed refusal for a third. [The write-up](same-digest-different-tree.md) explains why same digest is not same tree. The packaged [copyable PyPA `WheelSource` handoff](../crates/sealr/examples/pypa_installer_handoff/README.md) shows the complete supervised installer boundary using only public Sealr APIs.
+
+## Check publisher contents without installing
+
+The [wheel-content gate](wheel-content-gate.md) shows a real publisher decision after supervised admission, independent evidence verification, and deletion of a private source copy. It checks Deepr dashboard and runtime assets through the verified inventory and installs no files. Exact metadata retention can keep the evaluation working set local while every archive member still receives full verification.
 
 ## Choose a format
 

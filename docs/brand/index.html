@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Sealr visual identity</title>
+<style>
+* { box-sizing: border-box; }
+body { margin: 0; background: #f6f8f7; color: #162724; font: 16px/1.6 system-ui, sans-serif; }
+main { max-width: 1120px; margin: auto; padding: 64px 40px; }
+header { margin-bottom: 40px; max-width: 700px; }
+.eyebrow { color: #0f766e; font: 12px/1.5 ui-monospace, monospace; letter-spacing: .12em; text-transform: uppercase; }
+h1 { margin: 12px 0; font-size: clamp(32px, 5vw, 48px); line-height: 1.15; letter-spacing: -.035em; font-weight: 600; }
+p { color: #53675f; }
+a { color: #0f766e; text-underline-offset: 4px; }
+a:focus-visible { outline: 3px solid currentColor; outline-offset: 4px; }
+.themes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px; }
+.panel { border: 1px solid #d9e3dd; border-radius: 16px; padding: 32px; min-width: 0; }
+.light { background: white; }
+.dark { background: #101917; color: #eef6f3; border-color: #34483e; }
+.dark p { color: #a6bbb1; }
+.label { margin: 0 0 40px; font: 12px/1.5 ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; }
+.wordmark { width: 256px; max-width: 100%; height: auto; display: block; margin: 0 auto 48px; }
+.sizes { display: flex; flex-wrap: wrap; align-items: center; gap: clamp(12px, 2vw, 24px); padding-top: 24px; border-top: 1px solid #d9e3dd; }
+.dark .sizes { border-color: #34483e; }
+.sizes figure { margin: 0; display: grid; gap: 12px; justify-items: center; align-self: end; }
+figcaption { font: 11px/1.5 ui-monospace, monospace; color: #53675f; }
+.dark figcaption { color: #a6bbb1; }
+.note { display: grid; grid-template-columns: 1fr 1fr; gap: 48px; margin-top: 36px; }
+h2 { margin: 0; font-size: 16px; font-weight: 600; }
+.note p { margin: 8px 0 0; font-size: 14px; }
+footer { border-top: 1px solid #d9e3dd; margin-top: 40px; padding-top: 20px; font-size: 13px; }
+@media (max-width: 650px) { main { padding: 32px 20px; } .themes, .note { grid-template-columns: 1fr; } .note { gap: 24px; } }
+@media (prefers-color-scheme: dark) { body { background: #17231f; color: #eef6f3; } p { color: #a6bbb1; } a, .eyebrow { color: #5eead4; } .light { color: #162724; } .light p { color: #53675f; } footer { border-color: #34483e; } }
+</style>
+<main>
+  <header>
+    <div class="eyebrow">Sealr / Visual identity</div>
+    <h1>One archive.<br>One meaning.</h1>
+    <p>A continuous letter inside one closed boundary. Simple geometry,
+      quiet typography, and a restrained accent keep the work in focus.</p>
+  </header>
+  <section class="themes" aria-label="Logo variants">
+    <div class="panel light">
+      <p class="label">Light surface</p>
+      <img class="wordmark" src="../assets/brand/sealr-wordmark-light.svg" alt="Sealr">
+      <div class="sizes" aria-label="Mark at four sizes">
+        <figure><img src="../assets/brand/sealr-mark-light.svg" alt="" width="64" height="64"><figcaption>64 px</figcaption></figure>
+        <figure><img src="../assets/brand/sealr-mark-light.svg" alt="" width="32" height="32"><figcaption>32 px</figcaption></figure>
+        <figure><img src="../assets/brand/sealr-mark-light.svg" alt="" width="24" height="24"><figcaption>24 px</figcaption></figure>
+        <figure><img src="../assets/brand/sealr-mark-light.svg" alt="" width="16" height="16"><figcaption>16 px</figcaption></figure>
+      </div>
+    </div>
+    <div class="panel dark">
+      <p class="label">Dark surface</p>
+      <img class="wordmark" src="../assets/brand/sealr-wordmark-dark.svg" alt="Sealr">
+      <div class="sizes" aria-label="Mark at four sizes">
+        <figure><img src="../assets/brand/sealr-mark-dark.svg" alt="" width="64" height="64"><figcaption>64 px</figcaption></figure>
+        <figure><img src="../assets/brand/sealr-mark-dark.svg" alt="" width="32" height="32"><figcaption>32 px</figcaption></figure>
+        <figure><img src="../assets/brand/sealr-mark-dark.svg" alt="" width="24" height="24"><figcaption>24 px</figcaption></figure>
+        <figure><img src="../assets/brand/sealr-mark-dark.svg" alt="" width="16" height="16"><figcaption>16 px</figcaption></figure>
+      </div>
+    </div>
+  </section>
+  <section class="note" aria-label="Design principles">
+    <div><h2>Keep the boundary clear.</h2><p>The enclosure stays closed. The letter stays continuous.
+      Preserve the shape and give it room to breathe.</p></div>
+    <div><h2>Let evidence carry the claim.</h2><p>The accent identifies Sealr. Actual verdicts remain explicit
+      in text, with their evidence and limitations close by.</p></div>
+  </section>
+  <footer><a href="../brand.md">Assets and usage guide</a> · <a href="../index.md">Documentation</a></footer>
+</main>
+</html>

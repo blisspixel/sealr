@@ -8,7 +8,7 @@ $ErrorActionPreference = 'Stop'
 
 $Repository = 'blisspixel/sealr'
 $DefaultBranch = 'main'
-$Version = '0.1.0-alpha.14'
+$Version = '0.1.0-alpha.15'
 $ReleaseTag = "v$Version"
 $ReleaseTitle = "sealr ${Version}: complete Deflate streams and Unicode wheel evidence"
 $CiWorkflow = '.github/workflows/ci.yml'

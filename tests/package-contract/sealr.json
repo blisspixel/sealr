@@ -14,6 +14,8 @@
     "LICENSE",
     "README.md",
     "examples/classify_zipdiff.rs",
+    "examples/deepr_content_gate/main.rs",
+    "examples/deepr_content_gate/tests.rs",
     "examples/pypa_installer_handoff/Cargo.toml.example",
     "examples/pypa_installer_handoff/README.md",
     "examples/pypa_installer_handoff/main.rs",

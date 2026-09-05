@@ -63,9 +63,9 @@ copied manifest. Apply the same patch while creating the lockfile and building:
 
 ```bash
 cargo generate-lockfile \
-  --config 'patch.crates-io.sealr.path="/absolute/path/to/sealr-0.1.0-alpha.14"'
+  --config 'patch.crates-io.sealr.path="/absolute/path/to/sealr-0.1.0-alpha.15"'
 cargo build --locked --release \
-  --config 'patch.crates-io.sealr.path="/absolute/path/to/sealr-0.1.0-alpha.14"'
+  --config 'patch.crates-io.sealr.path="/absolute/path/to/sealr-0.1.0-alpha.15"'
 ```
 
 After this exact Sealr version is available from the configured registry, the
