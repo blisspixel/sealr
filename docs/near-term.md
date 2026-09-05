@@ -2,7 +2,7 @@
 
 Updated 2026-09-04.
 
-> Status: active after `v0.1.0-alpha.13`. This page defines the work needed to turn Sealr's repository-owned wheel proof into one independently maintained adoption, then use that evidence to prepare a stable semantic surface. Completed preview work is indexed in the [milestone history](milestones.md).
+> Status: active after `v0.1.0-alpha.14`. This page defines the work needed to turn Sealr's repository-owned wheel proof into one independently maintained adoption, then use that evidence to prepare a stable semantic surface. Completed preview work is indexed in the [milestone history](milestones.md).
 
 The near-term objective is not another format. It is a consumer outside this repository that treats `VerifiedArchive` and independently checked canonical evidence as authoritative.
 
@@ -23,7 +23,7 @@ This scope exercises the strongest implemented boundary without claiming general
 
 The copyable [PyPA `WheelSource` handoff](../crates/sealr/examples/pypa_installer_handoff/README.md) proves that the public pieces compose, but its local `patch.crates-io` flow is a repository packaging test. An external pilot needs an ordinary, versioned acquisition path.
 
-The [external adopter pilot contract](adopter-pilot.md) now pins the verified Alpha.13 technical baseline, Linux native floor, worker ABI and feature generation, interpretation and policy identities, wheel consumer digest, evidence schemas, installer bridge, required negative matrix, and pilot report. Required CI verifies those declarations against their implementation sources. Alpha.13 must not be retroactively published because its immutable packaged README says it is GitHub-only. Adopter selection and a new, internally consistent pilot prerelease remain open.
+The [external adopter pilot contract](adopter-pilot.md) now preserves the historical Alpha.13 technical baseline and separately pins the current evaluation source, Linux native floor, worker ABI and feature generation, interpretation and policy identities, wheel consumer digest, evidence schemas, installer bridge, required negative matrix, and pilot report. Required CI verifies those declarations against their implementation sources. Alpha.13 must not be retroactively published because its immutable packaged README says it is GitHub-only. Adopter selection and a new, internally consistent pilot prerelease remain open.
 
 1. Choose the pilot with a maintainer who can make independent integration and release decisions.
 2. Agree on one exact use case, target platform, Python version, installer version, resource budget, and failure policy.

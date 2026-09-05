@@ -1,6 +1,6 @@
 # Milestone history
 
-Updated 2026-09-01.
+Updated 2026-09-04.
 
 This page records what each published preview established. It replaces completed milestone logs that previously lived in the roadmap and near-term plan. The per-release notes are the detailed, versioned source for contents, limitations, compatibility changes, and verification instructions. The [changelog](../CHANGELOG.md) is the compact file-level history.
 
@@ -23,6 +23,7 @@ All previews remain non-production releases. A completed milestone means its bou
 | Alpha.11 | 2026-08-28 | Restricted raw POSIX PAX with a closed two-key language, exact precedence provenance, independent covering replay, and no new runtime dependency | [Release notes](releases/v0.1.0-alpha.11.md) |
 | Alpha.12 | 2026-08-30 | Canonical evidence, packaged independent verification, validated policy files, repository PyPA conformance, six additional TAR and codec selections, and Copy-only 7z | [Release notes](releases/v0.1.0-alpha.12.md) |
 | Alpha.13 | 2026-08-31 | Full-integrity supervised prefix reads, a packaged public-API-only PyPA `WheelSource` handoff, and an exact Poetry 2.4.2 repository fixture | [Release notes](releases/v0.1.0-alpha.13.md) |
+| Alpha.14 | 2026-09-04 | Explicit Deflate completion, 24 Unicode and streaming wheel producer vectors, twelve complete supervised installer runs, and machine-checked adopter and candidate inventories | [Release notes](releases/v0.1.0-alpha.14.md) |
 
 ## Durable detail by topic
 

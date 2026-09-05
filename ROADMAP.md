@@ -10,7 +10,7 @@ Archive bytes -> versioned interpretation -> verified admitted tree
 All stages                                 -> evidence
 ```
 
-The latest release is `v0.1.0-alpha.13`. It proves the boundary inside this repository through a supported wheel evaluator, an authenticated reduced-authority Linux worker, an independently implemented evidence verifier, a copyable PyPA `WheelSource` handoff, and an exact Poetry 2.4.2 fixture. It does not yet prove that another project can depend on this boundary successfully.
+The latest release is `v0.1.0-alpha.14`. It proves the boundary inside this repository through a supported wheel evaluator, an authenticated reduced-authority Linux worker, an independently implemented evidence verifier, a copyable PyPA `WheelSource` handoff, and an exact Poetry 2.4.2 fixture. It does not yet prove that another project can depend on this boundary successfully.
 
 That missing external proof now determines the order of work. Parser breadth is frozen until the usefulness, stability, and review gates below are met.
 
@@ -26,7 +26,7 @@ That missing external proof now determines the order of work. Parser breadth is 
 | Distribution | The `sealr` crate package and three native package floors are checked in CI with Rust 1.98 | Select and exercise an ordinary prerelease delivery path for the adopter |
 | Assurance | Required deterministic gates and scheduled discovery are active | Accumulate the defined history, close material race and lifecycle gaps, and complete independent review |
 
-The [current release notes](docs/releases/v0.1.0-alpha.13.md) define the Alpha.13 delta and limitations. The [milestone history](docs/milestones.md) links every earlier preview to its immutable release notes. Current executable behavior remains in the [README](README.md), [API contract](docs/api.md), and [security policy](SECURITY.md).
+The [current release notes](docs/releases/v0.1.0-alpha.14.md) define the Alpha.14 delta and limitations. The [milestone history](docs/milestones.md) links every earlier preview to its immutable release notes. Current executable behavior remains in the [README](README.md), [API contract](docs/api.md), and [security policy](SECURITY.md).
 
 ## Why external adoption is next
 
@@ -57,7 +57,7 @@ The [usefulness test](docs/usefulness.md) defines the product proof. The [near-t
 
 Target one separately maintained publisher, registry, build backend, or installer with a narrow wheel workflow on x86_64 Linux, where Sealr's strongest worker boundary is available.
 
-The exact baseline artifact, semantic, handoff, negative-test, and reporting requirements are now pinned by the [external adopter pilot contract](docs/adopter-pilot.md). Required CI rejects drift between that contract, the package manifests, native floor, profile and policy identities, consumer digest, helper protocol, evidence schemas, and installer bridge. No external adopter has accepted the contract and no publishable pilot release has been assigned. Alpha.13 remains the verified baseline and must not be retroactively uploaded because its immutable packaged README describes it as GitHub-only.
+The exact baseline artifact, semantic, handoff, negative-test, and reporting requirements are now pinned by the [external adopter pilot contract](docs/adopter-pilot.md). Required CI rejects drift between that contract, the package manifests, native floor, profile and policy identities, consumer digest, helper protocol, evidence schemas, and installer bridge. No external adopter has accepted the contract and no publishable pilot release has been assigned. Alpha.13 remains historical reproduction evidence and must not be retroactively uploaded because its immutable packaged README describes it as GitHub-only. Current evaluation requires Alpha.14 or later because it fixes incomplete Deflate stream admission.
 
 The pilot must:
 
@@ -165,7 +165,7 @@ Choose the work that most increases justified trust in the boundary per unit of 
 | Question | Source |
 |---|---|
 | What works now? | [README](README.md), [API contract](docs/api.md), and [security policy](SECURITY.md) |
-| What changed in each preview? | [Milestone history](docs/milestones.md), [changelog](CHANGELOG.md), and [release notes](docs/releases/v0.1.0-alpha.13.md) |
+| What changed in each preview? | [Milestone history](docs/milestones.md), [changelog](CHANGELOG.md), and [release notes](docs/releases/v0.1.0-alpha.14.md) |
 | What is the next bounded plan? | [Near-term execution plan](docs/near-term.md) |
 | What may the first pilot pin? | [Candidate surface inventory](docs/candidate-surface.md) |
 | What proves usefulness? | [Usefulness test](docs/usefulness.md) |

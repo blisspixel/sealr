@@ -1,5 +1,11 @@
 # Distribution contract
 
+Current evaluation uses Alpha.14, including its Deflate completion correction,
+with matching source and authenticated native companions. It remains a GitHub-only
+prerelease. The Alpha.13 package measurements below are historical reproducibility
+evidence, and the adopter contract now records the current source separately.
+Neither GitHub-only release is a retroactive crates.io publication candidate.
+
 > Status: executable pre-1.0 contract. This page defines what the repository is prepared to publish and how native archives are tested. It does not announce a stable release or widen the security claims in the README.
 
 Sealr has two separate distribution promises:

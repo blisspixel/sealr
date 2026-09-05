@@ -1,6 +1,6 @@
 # Documentation
 
-Start with the [README](../README.md) for the latest published Alpha.13 boundary, clearly marked current-main additions, and a short walkthrough. This index separates current contracts from plans and research notes.
+Start with the [README](../README.md) for the latest published Alpha.14 boundary, clearly marked current-main additions, and a short walkthrough. This index separates current contracts from plans and research notes.
 
 ## Start and integrate
 
@@ -10,9 +10,10 @@ Start with the [README](../README.md) for the latest published Alpha.13 boundary
 | [API contract](api.md) | Current Rust and JSON surface, plus clearly marked target notation |
 | [Copyable PyPA `WheelSource` handoff](../crates/sealr/examples/pypa_installer_handoff/README.md) | Public-API-only supervised admission, reduced digest-bound manifest, source deletion, real installer effects, and Rust-owned result audit |
 | [External adopter pilot contract](adopter-pilot.md) | Verified baseline, new-release gate, semantic identities, downstream proof, negative matrix, and report requirements |
+| [Unicode and streaming wheel evidence](wheel-producer-compatibility.md) | Reproducible producer matrix, exact refusals, and complete capability handoffs |
 | [Candidate surface inventory](candidate-surface.md) | Classified public identities for the first pilot; inventory only, not a freeze |
 | [Exact Poetry 2.4.2 repository fixture](../tests/poetry-consumer/README.md) | Hash-pinned private update seam, PREPARED ordering, abort safety, stock parity, and realization audit |
-| [Current release notes](releases/v0.1.0-alpha.13.md) | Alpha.13 contents and limitations |
+| [Current release notes](releases/v0.1.0-alpha.14.md) | Alpha.14 contents and limitations |
 | [Release verification](release-verification.md) | Verify checksums, provenance, tag, and immutable release state |
 | [Distribution contract](distribution-contract.md) | Exact source-package scope, compatibility policy, and native archive floors |
 
@@ -76,9 +77,10 @@ Repository vulnerability reporting and supported-version policy are in [SECURITY
 | Document | Purpose |
 |---|---|
 | [Roadmap](../ROADMAP.md) | Current execution order, stable gates, later work, and decision rules |
-| [Near-term execution plan](near-term.md) | Post-Alpha.13 external-adoption work packages and acceptance criteria |
+| [Near-term execution plan](near-term.md) | Post-Alpha.14 external-adoption work packages and acceptance criteria |
+| [Unicode and streaming wheel evidence](wheel-producer-compatibility.md) | Reproducible producer matrix, exact refusals, and complete capability handoffs |
 | [Candidate surface inventory](candidate-surface.md) | Inventory of public identities the first pilot may pin; not a freeze |
-| [Milestone history](milestones.md) | Alpha.1 through Alpha.13 outcomes with links to immutable release notes and maintained topic contracts |
+| [Milestone history](milestones.md) | Alpha.1 through Alpha.14 outcomes with links to immutable release notes and maintained topic contracts |
 | [Vision](vision.md) | Durable category and priorities |
 | [Usefulness test](usefulness.md) | Proof that a downstream consumer stops reparsing |
 | [Same digest is not same tree](same-digest-different-tree.md) | The archive-confusion lesson as a runnable capability-path demonstration |

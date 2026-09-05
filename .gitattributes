@@ -4,6 +4,7 @@ Cargo.lock text eol=lf
 LICENSE text eol=lf
 *.md text eol=lf
 *.ps1 text eol=lf
+*.py text eol=lf
 *.rs text eol=lf
 *.sh text eol=lf
 *.toml text eol=lf
@@ -12,6 +13,7 @@ LICENSE text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
 *.hbs text eol=lf
+*.example text eol=lf
 *.json text eol=lf
 fuzz/corpus/** binary
 fuzz/dictionaries/** text eol=lf

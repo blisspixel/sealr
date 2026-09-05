@@ -64,11 +64,14 @@ function Assert-ExactStringList {
 Assert-ExactProperties -Value $contract -Expected @(
     'schema', 'status', 'release', 'crate', 'pilot_release_gate', 'native', 'semantics',
     'handoff', 'selection', 'forbidden_acquisition', 'required_proofs', 'negative_matrix',
-    'report_fields', 'nonclaims'
+    'report_fields', 'nonclaims', 'current_source'
 ) -Label 'adopter contract'
 Assert-ExactProperties -Value $contract.release -Expected @(
     'version', 'tag', 'commit', 'rust_version', 'role'
 ) -Label 'adopter release'
+Assert-ExactProperties -Value $contract.current_source -Expected @(
+    'version', 'requirement', 'delivery', 'baseline_relationship'
+) -Label 'current evaluation source'
 Assert-ExactProperties -Value $contract.crate -Expected @(
     'package', 'requirement', 'registry', 'delivery', 'publication_source', 'packaged_with',
     'source_package_sha256', 'source_package_bytes', 'manifest_template'
@@ -98,7 +101,7 @@ Assert-ExactProperties -Value $contract.selection -Expected @(
     'sealr_fork_or_copied_fixture'
 ) -Label 'adopter selection'
 
-Assert-Equal 'sealr.external-adopter-pilot.v1' $contract.schema 'adopter schema'
+Assert-Equal 'sealr.external-adopter-pilot.v2' $contract.schema 'adopter schema'
 Assert-Equal 'verified-baseline-awaiting-external-adopter-and-new-pilot-release' $contract.status 'adopter status'
 Assert-Equal '0.1.0-alpha.13' $contract.release.version 'baseline release version'
 Assert-Equal '2fab2cfcd54dc065d02e25e74c3bfb227555ca90' $contract.release.commit 'baseline release commit'
@@ -109,7 +112,7 @@ if ([string]$contract.release.version -notmatch '^0\.1\.0-alpha\.[1-9][0-9]*$' -
 }
 Assert-Equal "=$($contract.release.version)" $contract.crate.requirement 'adopter crate requirement'
 Assert-Equal "sealr-$($contract.release.version)-$($contract.native.target).tar.gz" $contract.native.archive 'adopter native archive'
-Assert-Equal 'technical-baseline-not-publication-candidate' $contract.release.role 'baseline release role'
+Assert-Equal 'historical-technical-baseline-not-current-evaluation-release' $contract.release.role 'baseline release role'
 Assert-Equal 'new-clean-release-tag-required' $contract.crate.publication_source 'crate publication source'
 Assert-Equal 'cargo 1.98.0' $contract.crate.packaged_with 'crate packaging toolchain'
 if ([string]$contract.crate.source_package_sha256 -notmatch '^[0-9a-f]{64}$' -or
@@ -139,7 +142,14 @@ $package = @($metadata.packages | Where-Object { $_.name -ceq $contract.crate.pa
 if ($package.Count -ne 1) {
     throw 'adopter crate package is missing or duplicated in workspace metadata'
 }
-Assert-Equal $contract.release.version $package[0].version 'adopter crate version'
+Assert-Equal $contract.current_source.version $package[0].version 'current evaluation crate version'
+if ([string]$contract.current_source.version -notmatch '^0\.1\.0-alpha\.(?<preview>[1-9][0-9]*)$' -or
+    [int]$Matches.preview -lt 14) {
+    throw 'current evaluation requires the Deflate completion correction in Alpha.14 or later'
+}
+Assert-Equal "=$($package[0].version)" $contract.current_source.requirement 'current evaluation requirement'
+Assert-Equal 'github-only-prerelease' $contract.current_source.delivery 'current evaluation delivery'
+Assert-Equal 'historical-baseline-superseded-by-deflate-completion-fix' $contract.current_source.baseline_relationship 'historical baseline relationship'
 Assert-Equal $contract.release.rust_version $package[0].rust_version 'adopter crate Rust version'
 if (@($package[0].publish).Count -ne 1) {
     throw 'adopter crate must allow exactly one registry'
@@ -159,7 +169,7 @@ if (-not [IO.File]::Exists($manifestPath)) {
 $manifest = Get-Content -Raw -LiteralPath $manifestPath
 $dependency = [regex]::Match($manifest, '(?m)^sealr = "(?<value>[^"]+)"\r?$').Groups['value'].Value
 $manifestRust = [regex]::Match($manifest, '(?m)^rust-version = "(?<value>[^"]+)"\r?$').Groups['value'].Value
-Assert-Equal $contract.crate.requirement $dependency 'handoff Sealr dependency'
+Assert-Equal $contract.current_source.requirement $dependency 'handoff Sealr dependency'
 Assert-Equal $contract.release.rust_version $manifestRust 'handoff Rust version'
 Assert-Equal 'verified-tag-package-not-for-retroactive-publication' $contract.crate.delivery 'crate delivery state'
 
@@ -294,6 +304,8 @@ foreach ($row in $matrix) {
 }
 
 $pilotDoc = Get-Content -Raw -LiteralPath (Join-Path $workspace 'docs/adopter-pilot.md')
+Assert-Contains $pilotDoc $contract.schema 'adopter contract schema documentation'
+Assert-Contains $pilotDoc $contract.current_source.requirement 'current evaluation source documentation'
 foreach ($term in @(
     'No external adopter has passed this contract.',
     'must not be retroactively published to crates.io',
