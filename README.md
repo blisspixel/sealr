@@ -67,7 +67,7 @@ See the [release notes](docs/releases/v0.1.0-alpha.14.md) for the measured chang
 Sealr is a development preview for integration and adversarial testing. It has
 no independent security audit or stable production release. Receipts are unsigned,
 and admission does not establish that a program is safe to execute.
-Alpha.14 is published on GitHub; it is not available on crates.io.
+This GitHub-only prerelease does not publish a crate to crates.io.
 
 The [implementation and security boundary](docs/implementation.md) describes
 supported formats, the explicit Linux worker, resource limits, and open gaps.

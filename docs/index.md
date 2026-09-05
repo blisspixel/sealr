@@ -86,6 +86,7 @@ Repository vulnerability reporting and supported-version policy are in [SECURITY
 | [Milestone history](milestones.md) | Alpha.1 through Alpha.14 outcomes with links to immutable release notes and maintained topic contracts |
 | [Vision](vision.md) | Durable category and priorities |
 | [Usefulness test](usefulness.md) | Proof that a downstream consumer stops reparsing |
+| [Capability reuse experiment](capability-reuse-experiment.md) | Proposed bounded working-set measurement and evidence-backed visual concept |
 | [Same digest is not same tree](same-digest-different-tree.md) | The archive-confusion lesson as a runnable capability-path demonstration |
 | [Competitive context](competitive.md) | Category boundaries and alternatives |
 | [Related work](who-else.md) | Projects and research that inform the design |
