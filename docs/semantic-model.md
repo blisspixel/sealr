@@ -1,6 +1,6 @@
 # Semantic model
 
-> Status: target architecture. This document does not describe capabilities already present unless a section is explicitly labeled current. The current alpha behavior is defined by the [README](../README.md), [API contract](api.md), and [security limitations](../README.md#security-limitations).
+> Status: target architecture. This document does not describe capabilities already present unless a section is explicitly labeled current. The current alpha behavior is defined by the [README](../README.md), [API contract](api.md), and [security limitations](implementation.md#security-limitations).
 
 ## Product boundary
 

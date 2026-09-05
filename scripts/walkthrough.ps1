@@ -170,6 +170,9 @@ try {
     $materializedRelative = 'target/readme-walkthrough/materialized'
     $blockedRelative = 'target/readme-walkthrough/blocked'
     $displayBinary = "target/release/sealr$executableSuffix"
+    $displayPrompt = if ([System.OperatingSystem]::IsWindows()) { 'PS>' } else { '$' }
+    $displayContinuation = if ([System.OperatingSystem]::IsWindows()) { '`' } else { '\' }
+    $continuationPrompt = if ([System.OperatingSystem]::IsWindows()) { '>>' } else { '>' }
 
     $inspect = Invoke-Sealr -CliArguments ([string[]]@($allowedRelative))
     Write-RawScenario -Name 'inspect' -Result $inspect
@@ -212,7 +215,7 @@ try {
     Assert-Equal -Expected 0 -Actual $stages.Count -Label 'stale stage count'
 
     $inspectLines = @(
-        "PS> $displayBinary $allowedRelative",
+        "$displayPrompt $displayBinary $allowedRelative",
         "exit: $($inspect.ExitCode)",
         "verdict: $($inspectView.verdict)",
         "wrote: $($inspectView.wrote.ToString().ToLowerInvariant())",
@@ -231,8 +234,8 @@ try {
     Write-Transcript -Name '01-inspect-allowed' -Lines $inspectLines
 
     $rejectLines = @(
-        "PS> $displayBinary $rejectedRelative ``",
-        ">>  --dest $blockedRelative",
+        "$displayPrompt $displayBinary $rejectedRelative $displayContinuation",
+        "$continuationPrompt  --dest $blockedRelative",
         "exit: $($reject.ExitCode)",
         "verdict: $($rejectView.verdict)",
         "wrote: $($rejectView.wrote.ToString().ToLowerInvariant())",
@@ -245,8 +248,8 @@ try {
     Write-Transcript -Name '02-reject-parent-path' -Lines $rejectLines
 
     $materializeLines = @(
-        "PS> $displayBinary $allowedRelative ``",
-        ">>  --dest $materializedRelative",
+        "$displayPrompt $displayBinary $allowedRelative $displayContinuation",
+        "$continuationPrompt  --dest $materializedRelative",
         "exit: $($materialize.ExitCode)",
         "verdict: $($materializedView.verdict)",
         "wrote: $($materializedView.wrote.ToString().ToLowerInvariant())",
@@ -261,6 +264,7 @@ try {
 
     $manifest = [ordered]@{
         schema = 'sealr.walkthrough.v1'
+        tool_version = [string]$inspectReceipt.tool.version
         fixtures = [ordered]@{
             allowed = [ordered]@{ path = $allowedRelative; sha256 = $AllowedDigest }
             rejected = [ordered]@{ path = $rejectedRelative; sha256 = $RejectedDigest }

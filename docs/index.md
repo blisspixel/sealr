@@ -1,11 +1,13 @@
 # Documentation
 
-Start with the [README](../README.md) for the latest published Alpha.14 boundary, clearly marked current-main additions, and a short walkthrough. This index separates current contracts from plans and research notes.
+Start with the [getting started guide](getting-started.md) and [illustrated CLI walkthrough](walkthrough.md). This index separates current contracts from plans and research notes. The [README](../README.md) provides a short introduction and current release status.
 
 ## Start and integrate
 
 | Document | Purpose |
 |---|---|
+| [Getting started](getting-started.md) | Native installation, source builds, evidence verification, and Rust capability example |
+| [Illustrated walkthrough](walkthrough.md) | Linux examples for inspection, path rejection, and materialization |
 | [Usage](usage.md) | Current CLI behavior and examples |
 | [API contract](api.md) | Current Rust and JSON surface, plus clearly marked target notation |
 | [Copyable PyPA `WheelSource` handoff](../crates/sealr/examples/pypa_installer_handoff/README.md) | Public-API-only supervised admission, reduced digest-bound manifest, source deletion, real installer effects, and Rust-owned result audit |
@@ -21,6 +23,7 @@ Start with the [README](../README.md) for the latest published Alpha.14 boundary
 
 | Document | Purpose |
 |---|---|
+| [Implementation and security boundary](implementation.md) | Current implementation, measured evidence, limits, and research basis |
 | [Safety specification](safety.md) | Normative safety rules |
 | [Threat model](threat-model.md) | Adversaries, exclusions, and parser-differential threats |
 | [Invariants](invariants.md) | Properties that implementation and evidence must preserve |
@@ -83,6 +86,7 @@ Repository vulnerability reporting and supported-version policy are in [SECURITY
 | [Milestone history](milestones.md) | Alpha.1 through Alpha.14 outcomes with links to immutable release notes and maintained topic contracts |
 | [Vision](vision.md) | Durable category and priorities |
 | [Usefulness test](usefulness.md) | Proof that a downstream consumer stops reparsing |
+| [Capability reuse experiment](capability-reuse-experiment.md) | Proposed bounded working-set measurement and evidence-backed visual concept |
 | [Same digest is not same tree](same-digest-different-tree.md) | The archive-confusion lesson as a runnable capability-path demonstration |
 | [Competitive context](competitive.md) | Category boundaries and alternatives |
 | [Related work](who-else.md) | Projects and research that inform the design |

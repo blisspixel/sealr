@@ -44,7 +44,7 @@ if ([string]$manifest.tool_version -ne $versionMatch.Groups[1].Value) {
 if ([string]$manifest.presentation -ne 'rendered-terminal-style-summary') {
     throw "unexpected walkthrough presentation: $($manifest.presentation)"
 }
-if ([string]$manifest.image_transcript_variant -ne 'windows') {
+if ([string]$manifest.image_transcript_variant -ne 'unix') {
     throw "unexpected walkthrough image transcript variant: $($manifest.image_transcript_variant)"
 }
 

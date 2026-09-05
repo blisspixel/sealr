@@ -6,7 +6,7 @@ Goals: no path escape, no disk/RAM bomb, no silent corruption, no extra files (A
 
 Language: MUST / SHOULD / MAY.
 
-This is the target safety specification. The [README](../README.md#security-limitations), [API contract](api.md), and [security policy](../SECURITY.md) record current implementation status; the [roadmap](../ROADMAP.md) defines sequencing and stable gates. Options described as future policy surfaces are not accepted by the current CLI.
+This is the target safety specification. The [Implementation boundary](implementation.md#security-limitations), [API contract](api.md), and [security policy](../SECURITY.md) record current implementation status; the [roadmap](../ROADMAP.md) defines sequencing and stable gates. Options described as future policy surfaces are not accepted by the current CLI.
 
 ## Path jail (hard, not a flag)
 

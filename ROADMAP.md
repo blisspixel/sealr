@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-09-04.
+Updated 2026-09-05.
 
 Sealr's product is the boundary:
 
@@ -26,7 +26,7 @@ That missing external proof now determines the order of work. Parser breadth is 
 | Distribution | The `sealr` crate package and three native package floors are checked in CI with Rust 1.98 | Select and exercise an ordinary prerelease delivery path for the adopter |
 | Assurance | Required deterministic gates and scheduled discovery are active | Accumulate the defined history, close material race and lifecycle gaps, and complete independent review |
 
-The [current release notes](docs/releases/v0.1.0-alpha.14.md) define the Alpha.14 delta and limitations. The [milestone history](docs/milestones.md) links every earlier preview to its immutable release notes. Current executable behavior remains in the [README](README.md), [API contract](docs/api.md), and [security policy](SECURITY.md).
+The [current release notes](docs/releases/v0.1.0-alpha.14.md) define the Alpha.14 delta and limitations. The [milestone history](docs/milestones.md) links every earlier preview to its immutable release notes. Current executable behavior remains in the [implementation boundary](docs/implementation.md), [API contract](docs/api.md), and [security policy](SECURITY.md).
 
 ## Why external adoption is next
 
@@ -56,6 +56,10 @@ The [usefulness test](docs/usefulness.md) defines the product proof. The [near-t
 ### 1. Complete one external adopter pilot
 
 Target one separately maintained publisher, registry, build backend, or installer with a narrow wheel workflow on x86_64 Linux, where Sealr's strongest worker boundary is available.
+
+The owner-maintained [downstream validation project](https://github.com/blisspixel/sealr-validation) now exercises real Deepr, Primr, and Recon release wheels against immutable Alpha.14 source and authenticated native artifacts. Deepr's existing wheel-content check is the strongest integration candidate. This separate validation project prepares the handoff and exposes integration friction; it does not satisfy independent adoption. A local Deepr installation audited 834 output files in 217 seconds, so per-member worker overhead needs measurement before agreeing a practical adopter budget.
+
+The [capability reuse experiment](docs/capability-reuse-experiment.md) separates a narrow consumer working set from full installation. It proposes measuring existing bounded retention before changing worker lifetimes or source-binding validation. It also defines an optional visual that makes the source-deletion boundary observable.
 
 The exact baseline artifact, semantic, handoff, negative-test, and reporting requirements are now pinned by the [external adopter pilot contract](docs/adopter-pilot.md). Required CI rejects drift between that contract, the package manifests, native floor, profile and policy identities, consumer digest, helper protocol, evidence schemas, and installer bridge. No external adopter has accepted the contract and no publishable pilot release has been assigned. Alpha.13 remains historical reproduction evidence and must not be retroactively uploaded because its immutable packaged README describes it as GitHub-only. Current evaluation requires Alpha.14 or later because it fixes incomplete Deflate stream admission.
 
@@ -173,4 +177,4 @@ Choose the work that most increases justified trust in the boundary per unit of 
 | Which formats and codecs are supported or gated? | [Format support architecture](docs/format-support.md) |
 | What assurance exists? | [Assurance](docs/assurance.md) and [promotion contract](docs/assurance-promotion.md) |
 | What can be distributed? | [Distribution contract](docs/distribution-contract.md) |
-| What remains a security limitation? | [README security limitations](README.md#security-limitations) and [threat model](docs/threat-model.md) |
+| What remains a security limitation? | [Implementation security limitations](docs/implementation.md#security-limitations) and [threat model](docs/threat-model.md) |

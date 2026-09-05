@@ -13,6 +13,12 @@ if (-not $walkthroughRoot.StartsWith($targetRoot, [System.StringComparison]::Ord
 
 $transcriptRoot = Join-Path $walkthroughRoot 'transcripts'
 $renderRoot = Join-Path $walkthroughRoot 'render'
+$measured = Get-Content -Raw -LiteralPath (Join-Path $walkthroughRoot 'manifest.json') | ConvertFrom-Json
+$workspaceManifest = Get-Content -Raw -LiteralPath (Join-Path $workspace 'Cargo.toml')
+$version = [regex]::Match($workspaceManifest, '(?m)^version = "([^"]+)"$').Groups[1].Value
+if ([string]::IsNullOrWhiteSpace($version) -or [string]$measured.tool_version -ne $version) {
+    throw 'walkthrough was not measured with the current workspace version'
+}
 New-Item -ItemType Directory -Force -Path $renderRoot | Out-Null
 
 $scenarios = @(
@@ -49,7 +55,7 @@ $themes = @(
 function Get-LineClass {
     param([Parameter(Mandatory)][string]$Line)
 
-    if ($Line.StartsWith('PS>') -or $Line.StartsWith('>>')) { return 'command' }
+    if ($Line.StartsWith('PS>') -or $Line.StartsWith('>>') -or $Line.StartsWith('$ ') -or $Line.StartsWith('> ')) { return 'command' }
     if ($Line -match '^verdict: allowed$|^wrote: true$|exists true$|^destination exists: false$|^outside file exists: false$') { return 'success' }
     if ($Line -match '^verdict: rejected$|path\.dotdot') { return 'danger' }
     if ($Line -match '^receipt:|sha256:|^  signed:|^receipt view sha256:') { return 'muted' }
@@ -106,11 +112,12 @@ header {
   border-bottom: 1px solid $($theme.Border);
 }
 header strong { color: $($theme.Accent); font-size: 20px; letter-spacing: 0.02em; }
+header small { color: $($theme.Muted); font-size: 14px; font-weight: normal; margin-left: 12px; }
 header span { color: $($theme.Muted); font-size: 16px; }
 pre {
   margin: 0;
   padding: 25px 28px;
-  font: 18px/1.48 "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font: 17px/1.55 "Cascadia Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   white-space: pre-wrap;
   tab-size: 2;
 }
@@ -124,7 +131,7 @@ pre span { display: inline; }
 </head>
 <body>
 <main aria-label="sealr terminal walkthrough">
-  <header><strong>sealr</strong><span>$($scenario.Label)</span></header>
+  <header><strong>sealr <small>$version</small></strong><span>$($scenario.Label)</span></header>
   <pre>$content</pre>
 </main>
 </body>
