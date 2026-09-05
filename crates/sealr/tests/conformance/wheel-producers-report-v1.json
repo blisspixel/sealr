@@ -1,0 +1,1156 @@
+{
+  "fixtures": [
+    {
+      "archive_findings": [],
+      "consumer_profile_digest": "2fd5f81e38b6ad483fa0e998f665cc466a9bd9816382299f4a64a0202f4a91bb",
+      "descriptor_members": 0,
+      "id": "stored-seekable",
+      "identities": {
+        "archive_tree_sha256": "cbc0db6cf2e3d46b7308f651ad229100ec92cbe2b86f2fb95ecd3716980573c1",
+        "artifact_sha256": "86774945b678053e2eca40152ea079a81b4cc3a231f2e33cc15df68fdd39ed56",
+        "install_plan_sha256": "05c35fcf888ae3cbbe5c9d7ec3f980d0d4266f962dcfb03592c267d33d881d12",
+        "realization_sha256": null,
+        "source_sha256": "f37227fef51dde6d4e24ad211259cfc57bb7307a780346ee4194b421d130710a"
+      },
+      "member_count": 14,
+      "methods": [
+        0
+      ],
+      "outcome": "admitted",
+      "plan": [
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo-1.0.dist-info/METADATA",
+          "scheme": "purelib",
+          "sha256": "2feb74bd077b97326283df4a92d3bb28e6931c8b4e9fe7593682a5520409c625",
+          "size": 47,
+          "source_member_index": 5,
+          "source_path": "demo-1.0.dist-info/METADATA",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo-1.0.dist-info/WHEEL",
+          "scheme": "purelib",
+          "sha256": "b02015febc2d46241a5f15f929f31c416bf4c33e55eb2fb07cfea61bde1acd0d",
+          "size": 94,
+          "source_member_index": 7,
+          "source_path": "demo-1.0.dist-info/WHEEL",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/__init__.py",
+          "scheme": "purelib",
+          "sha256": "e13df8c44af5dea1e412403910b99cc5a48f2ccbf68a66b3374d6ab9cef9fc65",
+          "size": 10,
+          "source_member_index": 8,
+          "source_path": "demo/__init__.py",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/café.py",
+          "scheme": "purelib",
+          "sha256": "eb1cd1ad630d331986f24350114a5d91b7f93c7ce14b5f4a7225ee904cba1d7e",
+          "size": 10,
+          "source_member_index": 9,
+          "source_path": "demo/café.py",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/data,one.txt",
+          "scheme": "purelib",
+          "sha256": "d7470b38a86b884d33dc5b855885249718f9bdf4106e170d916d9fd4083c3772",
+          "size": 16,
+          "source_member_index": 10,
+          "source_path": "demo/data,one.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/empty.txt",
+          "scheme": "purelib",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0,
+          "source_member_index": 11,
+          "source_path": "demo/empty.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/δοκιμή.txt",
+          "scheme": "purelib",
+          "sha256": "c826c53ddca3b69beb3083cda6a1d716335f4c43f0188466013d78f073158a66",
+          "size": 13,
+          "source_member_index": 12,
+          "source_path": "demo/δοκιμή.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/日本語.txt",
+          "scheme": "purelib",
+          "sha256": "ce2da52bd7a8e8bc5259be173aef66098d88e094defda6457090aa3437f16757",
+          "size": 11,
+          "source_member_index": 13,
+          "source_path": "demo/日本語.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "extra/café.txt",
+          "scheme": "purelib",
+          "sha256": "19fbaf1208ed3bd8ccc8eb7d3191307bc59071dcf290088407e1edf597d86c86",
+          "size": 8,
+          "source_member_index": 3,
+          "source_path": "demo-1.0.data/purelib/extra/café.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "extra/λ.txt",
+          "scheme": "platlib",
+          "sha256": "8cf43ce2d5bf4ddf341afa062c57c28976e447bc48cbac75835ad191e4a341d4",
+          "size": 8,
+          "source_member_index": 2,
+          "source_path": "demo-1.0.data/platlib/extra/λ.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "source-executable",
+          "relative_path": "café",
+          "scheme": "scripts",
+          "sha256": "a4db9a26482774a24c2f3e689c9f9214a324ba27b5f44b393a7b2a38e218066b",
+          "size": 23,
+          "source_member_index": 4,
+          "source_path": "demo-1.0.data/scripts/café",
+          "transform": "rewrite-python-shebang"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "café.h",
+          "scheme": "headers",
+          "sha256": "e5e9194a05324a882f5362444c48fcf3ee2631e4f78361910ff58ebd795d0560",
+          "size": 15,
+          "source_member_index": 1,
+          "source_path": "demo-1.0.data/headers/café.h",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "share/日本語.txt",
+          "scheme": "data",
+          "sha256": "6667b2d1aab6a00caa5aee5af8ad9f1465e567abf1c209d15727d57b3e8f6e5f",
+          "size": 5,
+          "source_member_index": 0,
+          "source_path": "demo-1.0.data/data/share/日本語.txt",
+          "transform": "copy"
+        }
+      ],
+      "source_sha256": "f37227fef51dde6d4e24ad211259cfc57bb7307a780346ee4194b421d130710a",
+      "unicode_members": 8
+    },
+    {
+      "archive_findings": [],
+      "consumer_profile_digest": "2fd5f81e38b6ad483fa0e998f665cc466a9bd9816382299f4a64a0202f4a91bb",
+      "descriptor_members": 14,
+      "id": "stored-streamed",
+      "identities": {
+        "archive_tree_sha256": "cbc0db6cf2e3d46b7308f651ad229100ec92cbe2b86f2fb95ecd3716980573c1",
+        "artifact_sha256": "fdad7049380d86b80a84359ddb260bbe702c6c2ffdfff0286471a469451cf4e6",
+        "install_plan_sha256": "73f05ae2915c6b2651d2b6a0bc9522de092976b9f10b521c2f7def96d226a239",
+        "realization_sha256": null,
+        "source_sha256": "10ea3ab3c1e50e9d546cb3e1627b2590ef49957138450e04b30b69bdaba80ace"
+      },
+      "member_count": 14,
+      "methods": [
+        0
+      ],
+      "outcome": "admitted",
+      "plan": [
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo-1.0.dist-info/METADATA",
+          "scheme": "purelib",
+          "sha256": "2feb74bd077b97326283df4a92d3bb28e6931c8b4e9fe7593682a5520409c625",
+          "size": 47,
+          "source_member_index": 5,
+          "source_path": "demo-1.0.dist-info/METADATA",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo-1.0.dist-info/WHEEL",
+          "scheme": "purelib",
+          "sha256": "b02015febc2d46241a5f15f929f31c416bf4c33e55eb2fb07cfea61bde1acd0d",
+          "size": 94,
+          "source_member_index": 7,
+          "source_path": "demo-1.0.dist-info/WHEEL",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/__init__.py",
+          "scheme": "purelib",
+          "sha256": "e13df8c44af5dea1e412403910b99cc5a48f2ccbf68a66b3374d6ab9cef9fc65",
+          "size": 10,
+          "source_member_index": 8,
+          "source_path": "demo/__init__.py",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/café.py",
+          "scheme": "purelib",
+          "sha256": "eb1cd1ad630d331986f24350114a5d91b7f93c7ce14b5f4a7225ee904cba1d7e",
+          "size": 10,
+          "source_member_index": 9,
+          "source_path": "demo/café.py",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/data,one.txt",
+          "scheme": "purelib",
+          "sha256": "d7470b38a86b884d33dc5b855885249718f9bdf4106e170d916d9fd4083c3772",
+          "size": 16,
+          "source_member_index": 10,
+          "source_path": "demo/data,one.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/empty.txt",
+          "scheme": "purelib",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0,
+          "source_member_index": 11,
+          "source_path": "demo/empty.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/δοκιμή.txt",
+          "scheme": "purelib",
+          "sha256": "c826c53ddca3b69beb3083cda6a1d716335f4c43f0188466013d78f073158a66",
+          "size": 13,
+          "source_member_index": 12,
+          "source_path": "demo/δοκιμή.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/日本語.txt",
+          "scheme": "purelib",
+          "sha256": "ce2da52bd7a8e8bc5259be173aef66098d88e094defda6457090aa3437f16757",
+          "size": 11,
+          "source_member_index": 13,
+          "source_path": "demo/日本語.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "extra/café.txt",
+          "scheme": "purelib",
+          "sha256": "19fbaf1208ed3bd8ccc8eb7d3191307bc59071dcf290088407e1edf597d86c86",
+          "size": 8,
+          "source_member_index": 3,
+          "source_path": "demo-1.0.data/purelib/extra/café.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "extra/λ.txt",
+          "scheme": "platlib",
+          "sha256": "8cf43ce2d5bf4ddf341afa062c57c28976e447bc48cbac75835ad191e4a341d4",
+          "size": 8,
+          "source_member_index": 2,
+          "source_path": "demo-1.0.data/platlib/extra/λ.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "source-executable",
+          "relative_path": "café",
+          "scheme": "scripts",
+          "sha256": "a4db9a26482774a24c2f3e689c9f9214a324ba27b5f44b393a7b2a38e218066b",
+          "size": 23,
+          "source_member_index": 4,
+          "source_path": "demo-1.0.data/scripts/café",
+          "transform": "rewrite-python-shebang"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "café.h",
+          "scheme": "headers",
+          "sha256": "e5e9194a05324a882f5362444c48fcf3ee2631e4f78361910ff58ebd795d0560",
+          "size": 15,
+          "source_member_index": 1,
+          "source_path": "demo-1.0.data/headers/café.h",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "share/日本語.txt",
+          "scheme": "data",
+          "sha256": "6667b2d1aab6a00caa5aee5af8ad9f1465e567abf1c209d15727d57b3e8f6e5f",
+          "size": 5,
+          "source_member_index": 0,
+          "source_path": "demo-1.0.data/data/share/日本語.txt",
+          "transform": "copy"
+        }
+      ],
+      "source_sha256": "10ea3ab3c1e50e9d546cb3e1627b2590ef49957138450e04b30b69bdaba80ace",
+      "unicode_members": 8
+    },
+    {
+      "archive_findings": [],
+      "consumer_profile_digest": "2fd5f81e38b6ad483fa0e998f665cc466a9bd9816382299f4a64a0202f4a91bb",
+      "descriptor_members": 14,
+      "id": "stored-unsigned",
+      "identities": {
+        "archive_tree_sha256": "cbc0db6cf2e3d46b7308f651ad229100ec92cbe2b86f2fb95ecd3716980573c1",
+        "artifact_sha256": "0531adad5ab05dc2458b59ed5d3584db0951ecdadbb23cdeb8ccce835308d28e",
+        "install_plan_sha256": "e8b196be53448c48cb3ca337c58fc3313ea8e6979e8047a104dfda9e05e1c522",
+        "realization_sha256": null,
+        "source_sha256": "1bd5a6ea2b30992a66e52c7a50dd255316ea6746ec27d961f6744ab2eca8268d"
+      },
+      "member_count": 14,
+      "methods": [
+        0
+      ],
+      "outcome": "admitted",
+      "plan": [
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo-1.0.dist-info/METADATA",
+          "scheme": "purelib",
+          "sha256": "2feb74bd077b97326283df4a92d3bb28e6931c8b4e9fe7593682a5520409c625",
+          "size": 47,
+          "source_member_index": 5,
+          "source_path": "demo-1.0.dist-info/METADATA",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo-1.0.dist-info/WHEEL",
+          "scheme": "purelib",
+          "sha256": "b02015febc2d46241a5f15f929f31c416bf4c33e55eb2fb07cfea61bde1acd0d",
+          "size": 94,
+          "source_member_index": 7,
+          "source_path": "demo-1.0.dist-info/WHEEL",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/__init__.py",
+          "scheme": "purelib",
+          "sha256": "e13df8c44af5dea1e412403910b99cc5a48f2ccbf68a66b3374d6ab9cef9fc65",
+          "size": 10,
+          "source_member_index": 8,
+          "source_path": "demo/__init__.py",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/café.py",
+          "scheme": "purelib",
+          "sha256": "eb1cd1ad630d331986f24350114a5d91b7f93c7ce14b5f4a7225ee904cba1d7e",
+          "size": 10,
+          "source_member_index": 9,
+          "source_path": "demo/café.py",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/data,one.txt",
+          "scheme": "purelib",
+          "sha256": "d7470b38a86b884d33dc5b855885249718f9bdf4106e170d916d9fd4083c3772",
+          "size": 16,
+          "source_member_index": 10,
+          "source_path": "demo/data,one.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/empty.txt",
+          "scheme": "purelib",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0,
+          "source_member_index": 11,
+          "source_path": "demo/empty.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/δοκιμή.txt",
+          "scheme": "purelib",
+          "sha256": "c826c53ddca3b69beb3083cda6a1d716335f4c43f0188466013d78f073158a66",
+          "size": 13,
+          "source_member_index": 12,
+          "source_path": "demo/δοκιμή.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/日本語.txt",
+          "scheme": "purelib",
+          "sha256": "ce2da52bd7a8e8bc5259be173aef66098d88e094defda6457090aa3437f16757",
+          "size": 11,
+          "source_member_index": 13,
+          "source_path": "demo/日本語.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "extra/café.txt",
+          "scheme": "purelib",
+          "sha256": "19fbaf1208ed3bd8ccc8eb7d3191307bc59071dcf290088407e1edf597d86c86",
+          "size": 8,
+          "source_member_index": 3,
+          "source_path": "demo-1.0.data/purelib/extra/café.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "extra/λ.txt",
+          "scheme": "platlib",
+          "sha256": "8cf43ce2d5bf4ddf341afa062c57c28976e447bc48cbac75835ad191e4a341d4",
+          "size": 8,
+          "source_member_index": 2,
+          "source_path": "demo-1.0.data/platlib/extra/λ.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "source-executable",
+          "relative_path": "café",
+          "scheme": "scripts",
+          "sha256": "a4db9a26482774a24c2f3e689c9f9214a324ba27b5f44b393a7b2a38e218066b",
+          "size": 23,
+          "source_member_index": 4,
+          "source_path": "demo-1.0.data/scripts/café",
+          "transform": "rewrite-python-shebang"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "café.h",
+          "scheme": "headers",
+          "sha256": "e5e9194a05324a882f5362444c48fcf3ee2631e4f78361910ff58ebd795d0560",
+          "size": 15,
+          "source_member_index": 1,
+          "source_path": "demo-1.0.data/headers/café.h",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "share/日本語.txt",
+          "scheme": "data",
+          "sha256": "6667b2d1aab6a00caa5aee5af8ad9f1465e567abf1c209d15727d57b3e8f6e5f",
+          "size": 5,
+          "source_member_index": 0,
+          "source_path": "demo-1.0.data/data/share/日本語.txt",
+          "transform": "copy"
+        }
+      ],
+      "source_sha256": "1bd5a6ea2b30992a66e52c7a50dd255316ea6746ec27d961f6744ab2eca8268d",
+      "unicode_members": 8
+    },
+    {
+      "archive_findings": [
+        "zip.diff.a2_size"
+      ],
+      "id": "stored-descriptor-crc",
+      "outcome": "archive-rejected",
+      "source_sha256": "99a03bd09a8eee2ca08fcd7818a481317b138ea95c1958e092786a02f1d056f7"
+    },
+    {
+      "archive_findings": [
+        "zip.diff.a2_size"
+      ],
+      "id": "stored-descriptor-compressed-size",
+      "outcome": "archive-rejected",
+      "source_sha256": "f09103c4f9fbc58e7c3f2648762af65ce0f5cd837d5037122cedc2bdeefd6333"
+    },
+    {
+      "archive_findings": [
+        "zip.diff.a2_size"
+      ],
+      "id": "stored-descriptor-expanded-size",
+      "outcome": "archive-rejected",
+      "source_sha256": "bc3f3937b65c7c8bf519d7900db958e1a4b5b4eba30cbd2b5c0f61b30afc693b"
+    },
+    {
+      "archive_findings": [
+        "zip.encoding"
+      ],
+      "id": "stored-unflagged-utf8",
+      "outcome": "archive-rejected",
+      "source_sha256": "0e1f2ff6fefe7913989b27a005a38fde9a97936d971dc507430877a88d796203"
+    },
+    {
+      "archive_findings": [
+        "zip.flags"
+      ],
+      "id": "stored-flag-disagreement",
+      "outcome": "archive-rejected",
+      "source_sha256": "760fde2ad49b7cb5e9c8ab4c01eda6af4169da2982484b1af093dc9e49febf8e"
+    },
+    {
+      "archive_findings": [
+        "crc.mismatch"
+      ],
+      "id": "stored-payload-tamper",
+      "outcome": "archive-rejected",
+      "source_sha256": "3f38ff401adc73c427b1168a89290bcab5645098c1db4084eff86b496a38f38a"
+    },
+    {
+      "archive_findings": [],
+      "descriptor_members": 14,
+      "id": "stored-record-tamper",
+      "member_count": 14,
+      "methods": [
+        0
+      ],
+      "outcome": "wheel-denied",
+      "source_sha256": "ee74ad4a47c8b9ee143eeac561729e6f8093e7157e10ceabca1d6dee39a5ac35",
+      "unicode_members": 8,
+      "wheel_findings": [
+        "wheel.record-hash-mismatch"
+      ]
+    },
+    {
+      "archive_findings": [],
+      "consumer_profile_digest": "2fd5f81e38b6ad483fa0e998f665cc466a9bd9816382299f4a64a0202f4a91bb",
+      "descriptor_members": 0,
+      "id": "deflate-seekable",
+      "identities": {
+        "archive_tree_sha256": "cbc0db6cf2e3d46b7308f651ad229100ec92cbe2b86f2fb95ecd3716980573c1",
+        "artifact_sha256": "cd438b1e164d0a964168eadd5345b16c347e38c340a3818861a66264f4a4ba17",
+        "install_plan_sha256": "4c912e01685e6d2ecee0514e0cd88c281f22a03b57a61b558be6803b685101f0",
+        "realization_sha256": null,
+        "source_sha256": "3ac01a8fda0bf1d189b3ac59796993cea0cc6e2edec30a4ab04a0847e63b1a03"
+      },
+      "member_count": 14,
+      "methods": [
+        8
+      ],
+      "outcome": "admitted",
+      "plan": [
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo-1.0.dist-info/METADATA",
+          "scheme": "purelib",
+          "sha256": "2feb74bd077b97326283df4a92d3bb28e6931c8b4e9fe7593682a5520409c625",
+          "size": 47,
+          "source_member_index": 5,
+          "source_path": "demo-1.0.dist-info/METADATA",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo-1.0.dist-info/WHEEL",
+          "scheme": "purelib",
+          "sha256": "b02015febc2d46241a5f15f929f31c416bf4c33e55eb2fb07cfea61bde1acd0d",
+          "size": 94,
+          "source_member_index": 7,
+          "source_path": "demo-1.0.dist-info/WHEEL",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/__init__.py",
+          "scheme": "purelib",
+          "sha256": "e13df8c44af5dea1e412403910b99cc5a48f2ccbf68a66b3374d6ab9cef9fc65",
+          "size": 10,
+          "source_member_index": 8,
+          "source_path": "demo/__init__.py",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/café.py",
+          "scheme": "purelib",
+          "sha256": "eb1cd1ad630d331986f24350114a5d91b7f93c7ce14b5f4a7225ee904cba1d7e",
+          "size": 10,
+          "source_member_index": 9,
+          "source_path": "demo/café.py",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/data,one.txt",
+          "scheme": "purelib",
+          "sha256": "d7470b38a86b884d33dc5b855885249718f9bdf4106e170d916d9fd4083c3772",
+          "size": 16,
+          "source_member_index": 10,
+          "source_path": "demo/data,one.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/empty.txt",
+          "scheme": "purelib",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0,
+          "source_member_index": 11,
+          "source_path": "demo/empty.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/δοκιμή.txt",
+          "scheme": "purelib",
+          "sha256": "c826c53ddca3b69beb3083cda6a1d716335f4c43f0188466013d78f073158a66",
+          "size": 13,
+          "source_member_index": 12,
+          "source_path": "demo/δοκιμή.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/日本語.txt",
+          "scheme": "purelib",
+          "sha256": "ce2da52bd7a8e8bc5259be173aef66098d88e094defda6457090aa3437f16757",
+          "size": 11,
+          "source_member_index": 13,
+          "source_path": "demo/日本語.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "extra/café.txt",
+          "scheme": "purelib",
+          "sha256": "19fbaf1208ed3bd8ccc8eb7d3191307bc59071dcf290088407e1edf597d86c86",
+          "size": 8,
+          "source_member_index": 3,
+          "source_path": "demo-1.0.data/purelib/extra/café.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "extra/λ.txt",
+          "scheme": "platlib",
+          "sha256": "8cf43ce2d5bf4ddf341afa062c57c28976e447bc48cbac75835ad191e4a341d4",
+          "size": 8,
+          "source_member_index": 2,
+          "source_path": "demo-1.0.data/platlib/extra/λ.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "source-executable",
+          "relative_path": "café",
+          "scheme": "scripts",
+          "sha256": "a4db9a26482774a24c2f3e689c9f9214a324ba27b5f44b393a7b2a38e218066b",
+          "size": 23,
+          "source_member_index": 4,
+          "source_path": "demo-1.0.data/scripts/café",
+          "transform": "rewrite-python-shebang"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "café.h",
+          "scheme": "headers",
+          "sha256": "e5e9194a05324a882f5362444c48fcf3ee2631e4f78361910ff58ebd795d0560",
+          "size": 15,
+          "source_member_index": 1,
+          "source_path": "demo-1.0.data/headers/café.h",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "share/日本語.txt",
+          "scheme": "data",
+          "sha256": "6667b2d1aab6a00caa5aee5af8ad9f1465e567abf1c209d15727d57b3e8f6e5f",
+          "size": 5,
+          "source_member_index": 0,
+          "source_path": "demo-1.0.data/data/share/日本語.txt",
+          "transform": "copy"
+        }
+      ],
+      "source_sha256": "3ac01a8fda0bf1d189b3ac59796993cea0cc6e2edec30a4ab04a0847e63b1a03",
+      "unicode_members": 8
+    },
+    {
+      "archive_findings": [],
+      "consumer_profile_digest": "2fd5f81e38b6ad483fa0e998f665cc466a9bd9816382299f4a64a0202f4a91bb",
+      "descriptor_members": 14,
+      "id": "deflate-streamed",
+      "identities": {
+        "archive_tree_sha256": "cbc0db6cf2e3d46b7308f651ad229100ec92cbe2b86f2fb95ecd3716980573c1",
+        "artifact_sha256": "9dbb8c5bb27aed9c694556475d8bf3ec950340229fae92ff0c5f3210b26b0afe",
+        "install_plan_sha256": "7708a4cc44863933fa1f42edf618bdcd39cc39b7b9502fe15e35d0fb02dc7b27",
+        "realization_sha256": null,
+        "source_sha256": "7cc8d7897fec2a90b7a4ce37a17fa8c60974f807392a4654a8e07ca5f94756b0"
+      },
+      "member_count": 14,
+      "methods": [
+        8
+      ],
+      "outcome": "admitted",
+      "plan": [
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo-1.0.dist-info/METADATA",
+          "scheme": "purelib",
+          "sha256": "2feb74bd077b97326283df4a92d3bb28e6931c8b4e9fe7593682a5520409c625",
+          "size": 47,
+          "source_member_index": 5,
+          "source_path": "demo-1.0.dist-info/METADATA",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo-1.0.dist-info/WHEEL",
+          "scheme": "purelib",
+          "sha256": "b02015febc2d46241a5f15f929f31c416bf4c33e55eb2fb07cfea61bde1acd0d",
+          "size": 94,
+          "source_member_index": 7,
+          "source_path": "demo-1.0.dist-info/WHEEL",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/__init__.py",
+          "scheme": "purelib",
+          "sha256": "e13df8c44af5dea1e412403910b99cc5a48f2ccbf68a66b3374d6ab9cef9fc65",
+          "size": 10,
+          "source_member_index": 8,
+          "source_path": "demo/__init__.py",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/café.py",
+          "scheme": "purelib",
+          "sha256": "eb1cd1ad630d331986f24350114a5d91b7f93c7ce14b5f4a7225ee904cba1d7e",
+          "size": 10,
+          "source_member_index": 9,
+          "source_path": "demo/café.py",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/data,one.txt",
+          "scheme": "purelib",
+          "sha256": "d7470b38a86b884d33dc5b855885249718f9bdf4106e170d916d9fd4083c3772",
+          "size": 16,
+          "source_member_index": 10,
+          "source_path": "demo/data,one.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/empty.txt",
+          "scheme": "purelib",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0,
+          "source_member_index": 11,
+          "source_path": "demo/empty.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/δοκιμή.txt",
+          "scheme": "purelib",
+          "sha256": "c826c53ddca3b69beb3083cda6a1d716335f4c43f0188466013d78f073158a66",
+          "size": 13,
+          "source_member_index": 12,
+          "source_path": "demo/δοκιμή.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/日本語.txt",
+          "scheme": "purelib",
+          "sha256": "ce2da52bd7a8e8bc5259be173aef66098d88e094defda6457090aa3437f16757",
+          "size": 11,
+          "source_member_index": 13,
+          "source_path": "demo/日本語.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "extra/café.txt",
+          "scheme": "purelib",
+          "sha256": "19fbaf1208ed3bd8ccc8eb7d3191307bc59071dcf290088407e1edf597d86c86",
+          "size": 8,
+          "source_member_index": 3,
+          "source_path": "demo-1.0.data/purelib/extra/café.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "extra/λ.txt",
+          "scheme": "platlib",
+          "sha256": "8cf43ce2d5bf4ddf341afa062c57c28976e447bc48cbac75835ad191e4a341d4",
+          "size": 8,
+          "source_member_index": 2,
+          "source_path": "demo-1.0.data/platlib/extra/λ.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "source-executable",
+          "relative_path": "café",
+          "scheme": "scripts",
+          "sha256": "a4db9a26482774a24c2f3e689c9f9214a324ba27b5f44b393a7b2a38e218066b",
+          "size": 23,
+          "source_member_index": 4,
+          "source_path": "demo-1.0.data/scripts/café",
+          "transform": "rewrite-python-shebang"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "café.h",
+          "scheme": "headers",
+          "sha256": "e5e9194a05324a882f5362444c48fcf3ee2631e4f78361910ff58ebd795d0560",
+          "size": 15,
+          "source_member_index": 1,
+          "source_path": "demo-1.0.data/headers/café.h",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "share/日本語.txt",
+          "scheme": "data",
+          "sha256": "6667b2d1aab6a00caa5aee5af8ad9f1465e567abf1c209d15727d57b3e8f6e5f",
+          "size": 5,
+          "source_member_index": 0,
+          "source_path": "demo-1.0.data/data/share/日本語.txt",
+          "transform": "copy"
+        }
+      ],
+      "source_sha256": "7cc8d7897fec2a90b7a4ce37a17fa8c60974f807392a4654a8e07ca5f94756b0",
+      "unicode_members": 8
+    },
+    {
+      "archive_findings": [],
+      "consumer_profile_digest": "2fd5f81e38b6ad483fa0e998f665cc466a9bd9816382299f4a64a0202f4a91bb",
+      "descriptor_members": 14,
+      "id": "deflate-unsigned",
+      "identities": {
+        "archive_tree_sha256": "cbc0db6cf2e3d46b7308f651ad229100ec92cbe2b86f2fb95ecd3716980573c1",
+        "artifact_sha256": "6152992cef6746b8225783ce702f698bd7c326cf8b9a5e938d16f9961fa2ccdd",
+        "install_plan_sha256": "8089884db4a9617851a2d6541097f20bac4646f15a80d41f848df31abb1e1f9c",
+        "realization_sha256": null,
+        "source_sha256": "3cee1c48ec4c079348ed3ad52fd207f23ef198e0bc9ec8235da1a8d4fca153b1"
+      },
+      "member_count": 14,
+      "methods": [
+        8
+      ],
+      "outcome": "admitted",
+      "plan": [
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo-1.0.dist-info/METADATA",
+          "scheme": "purelib",
+          "sha256": "2feb74bd077b97326283df4a92d3bb28e6931c8b4e9fe7593682a5520409c625",
+          "size": 47,
+          "source_member_index": 5,
+          "source_path": "demo-1.0.dist-info/METADATA",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo-1.0.dist-info/WHEEL",
+          "scheme": "purelib",
+          "sha256": "b02015febc2d46241a5f15f929f31c416bf4c33e55eb2fb07cfea61bde1acd0d",
+          "size": 94,
+          "source_member_index": 7,
+          "source_path": "demo-1.0.dist-info/WHEEL",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/__init__.py",
+          "scheme": "purelib",
+          "sha256": "e13df8c44af5dea1e412403910b99cc5a48f2ccbf68a66b3374d6ab9cef9fc65",
+          "size": 10,
+          "source_member_index": 8,
+          "source_path": "demo/__init__.py",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/café.py",
+          "scheme": "purelib",
+          "sha256": "eb1cd1ad630d331986f24350114a5d91b7f93c7ce14b5f4a7225ee904cba1d7e",
+          "size": 10,
+          "source_member_index": 9,
+          "source_path": "demo/café.py",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/data,one.txt",
+          "scheme": "purelib",
+          "sha256": "d7470b38a86b884d33dc5b855885249718f9bdf4106e170d916d9fd4083c3772",
+          "size": 16,
+          "source_member_index": 10,
+          "source_path": "demo/data,one.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/empty.txt",
+          "scheme": "purelib",
+          "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+          "size": 0,
+          "source_member_index": 11,
+          "source_path": "demo/empty.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/δοκιμή.txt",
+          "scheme": "purelib",
+          "sha256": "c826c53ddca3b69beb3083cda6a1d716335f4c43f0188466013d78f073158a66",
+          "size": 13,
+          "source_member_index": 12,
+          "source_path": "demo/δοκιμή.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "demo/日本語.txt",
+          "scheme": "purelib",
+          "sha256": "ce2da52bd7a8e8bc5259be173aef66098d88e094defda6457090aa3437f16757",
+          "size": 11,
+          "source_member_index": 13,
+          "source_path": "demo/日本語.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "extra/café.txt",
+          "scheme": "purelib",
+          "sha256": "19fbaf1208ed3bd8ccc8eb7d3191307bc59071dcf290088407e1edf597d86c86",
+          "size": 8,
+          "source_member_index": 3,
+          "source_path": "demo-1.0.data/purelib/extra/café.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "extra/λ.txt",
+          "scheme": "platlib",
+          "sha256": "8cf43ce2d5bf4ddf341afa062c57c28976e447bc48cbac75835ad191e4a341d4",
+          "size": 8,
+          "source_member_index": 2,
+          "source_path": "demo-1.0.data/platlib/extra/λ.txt",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "source-executable",
+          "relative_path": "café",
+          "scheme": "scripts",
+          "sha256": "a4db9a26482774a24c2f3e689c9f9214a324ba27b5f44b393a7b2a38e218066b",
+          "size": 23,
+          "source_member_index": 4,
+          "source_path": "demo-1.0.data/scripts/café",
+          "transform": "rewrite-python-shebang"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "café.h",
+          "scheme": "headers",
+          "sha256": "e5e9194a05324a882f5362444c48fcf3ee2631e4f78361910ff58ebd795d0560",
+          "size": 15,
+          "source_member_index": 1,
+          "source_path": "demo-1.0.data/headers/café.h",
+          "transform": "copy"
+        },
+        {
+          "entry_point": null,
+          "executable": "not-executable",
+          "relative_path": "share/日本語.txt",
+          "scheme": "data",
+          "sha256": "6667b2d1aab6a00caa5aee5af8ad9f1465e567abf1c209d15727d57b3e8f6e5f",
+          "size": 5,
+          "source_member_index": 0,
+          "source_path": "demo-1.0.data/data/share/日本語.txt",
+          "transform": "copy"
+        }
+      ],
+      "source_sha256": "3cee1c48ec4c079348ed3ad52fd207f23ef198e0bc9ec8235da1a8d4fca153b1",
+      "unicode_members": 8
+    },
+    {
+      "archive_findings": [
+        "zip.diff.a2_size"
+      ],
+      "id": "deflate-descriptor-crc",
+      "outcome": "archive-rejected",
+      "source_sha256": "954afb915b82c0c87083989d17b5e1278d260db2484d5de2e7fac5b7ad8eeec2"
+    },
+    {
+      "archive_findings": [
+        "zip.diff.a2_size"
+      ],
+      "id": "deflate-descriptor-compressed-size",
+      "outcome": "archive-rejected",
+      "source_sha256": "4d181912362406c2fd5da4ab521f920089ce90a9f4fa3c204198a30b56414e52"
+    },
+    {
+      "archive_findings": [
+        "zip.diff.a2_size"
+      ],
+      "id": "deflate-descriptor-expanded-size",
+      "outcome": "archive-rejected",
+      "source_sha256": "9683c5dbc4d2cf286e0f7be87c81ef4b39957b38e1afc974673f222f9f760237"
+    },
+    {
+      "archive_findings": [
+        "zip.encoding"
+      ],
+      "id": "deflate-unflagged-utf8",
+      "outcome": "archive-rejected",
+      "source_sha256": "c3c5eb77c4347c4249bcfd890ab8abaeb281788c0a214456d627c647da176431"
+    },
+    {
+      "archive_findings": [
+        "zip.flags"
+      ],
+      "id": "deflate-flag-disagreement",
+      "outcome": "archive-rejected",
+      "source_sha256": "38596312aded3ebfd1320f3fc04671dfe8b234f1a5a63fd8de60d80389a8b0c9"
+    },
+    {
+      "archive_findings": [
+        "codec.deflate.invalid_stream"
+      ],
+      "id": "deflate-missing-stream-end",
+      "outcome": "archive-rejected",
+      "source_sha256": "97b4a1de7aeed63a0cb18a388cca40d543a4008ec7f00bd7f3e0b5d2c2e4b64d"
+    },
+    {
+      "archive_findings": [],
+      "descriptor_members": 14,
+      "id": "deflate-record-tamper",
+      "member_count": 14,
+      "methods": [
+        8
+      ],
+      "outcome": "wheel-denied",
+      "source_sha256": "b818d65274b9149edc7c7e149c4dbe0aea367a54c20135da1de29f5038ecdc72",
+      "unicode_members": 8,
+      "wheel_findings": [
+        "wheel.record-hash-mismatch"
+      ]
+    },
+    {
+      "archive_findings": [
+        "path.unicode"
+      ],
+      "id": "nfd",
+      "outcome": "archive-rejected",
+      "source_sha256": "e009e885944ef70fd389214ccd2308cf54951445ac2e399906e170605c1e62b6"
+    },
+    {
+      "archive_findings": [
+        "path.case_fold"
+      ],
+      "id": "casefold-collision",
+      "outcome": "archive-rejected",
+      "source_sha256": "d9d3b1557a126f890b526f8862e1bb486ff2531cc37ede2c894ef1796c0678e2"
+    },
+    {
+      "archive_findings": [
+        "path.case_fold"
+      ],
+      "id": "full-casefold-collision",
+      "outcome": "archive-rejected",
+      "source_sha256": "83f239baaa47f15176e8d90302e889f850056c85a7cef22a9b96504e3d1c4cf5"
+    },
+    {
+      "archive_findings": [
+        "path.dotdot"
+      ],
+      "id": "path-traversal",
+      "outcome": "archive-rejected",
+      "source_sha256": "88876dc9f18e6dfae1630276cce43cd7ad69f22da50c2561be7aecd571618d81"
+    }
+  ],
+  "interpretation_profile": "sealr.profile.zip.portable-utf8.v1",
+  "policy": "sealr:policy/default/v1",
+  "schema": "sealr.wheel-producer-report.v1",
+  "vectors_sha256": "00499d1447d19096fdac6a85a29a032a899a83add0c0c230d56dcf2c8c129273"
+}

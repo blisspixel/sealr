@@ -3,8 +3,9 @@
 use std::io::{BufRead, Read, Write};
 
 use crc32fast::Hasher as Crc;
-use flate2::bufread::DeflateDecoder;
 use sha2::{Digest, Sha256};
+
+use crate::deflate::DeflateDecoder;
 
 use crate::findings::{Finding, FindingCode};
 use crate::ir::{IrMember, MemberEvidence};
