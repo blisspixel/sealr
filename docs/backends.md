@@ -1,6 +1,6 @@
 # Codec and acceleration backends
 
-> Deferred engineering track for acceleration. Alpha.14 has no runtime backend scheduler, GPU path, QAT path, or hardware codec selection. The current ZIP Deflate implementation uses `flate2` with the pure-Rust `zlib-rs` backend and verifies exact compressed-input consumption. The shipped zstd and XZ TAR wrappers are product codec adapters, not hardware backends. Further ZIP codec work still requires exact consumption and a justified small dependency. See the [format support architecture](format-support.md).
+> Deferred engineering track for acceleration. Alpha.15 has no runtime backend scheduler, GPU path, QAT path, or hardware codec selection. The current ZIP Deflate implementation uses `flate2` with the pure-Rust `zlib-rs` backend and verifies exact compressed-input consumption. The shipped zstd and XZ TAR wrappers are product codec adapters, not hardware backends. Further ZIP codec work still requires exact consumption and a justified small dependency. See the [format support architecture](format-support.md).
 
 Backends may optimize verification or realization. They may not define interpretation, paths, policy, findings, verification completeness, or tree identity.
 

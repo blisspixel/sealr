@@ -25,7 +25,7 @@ The working hypothesis is modest:
 4. downstream consumers use the admitted representation instead of reparsing the source;
 5. Linux, macOS, and Windows produce the same semantic tree evidence for the same profile.
 
-Alpha.14 combines reusable verified admission over a private random-access snapshot with twelve explicit interpretation selections, preview tree identities, canonical evidence, a packaged independent verifier, a supported wheel evaluator, and an explicit reduced-authority x86_64 Linux path. It does not yet establish stable lock semantics, external adoption, cross-platform worker isolation, or a production-ready contract.
+Alpha.15 combines reusable verified admission over a private random-access snapshot with twelve explicit interpretation selections, preview tree identities, canonical evidence, a packaged independent verifier, a supported wheel evaluator, and an explicit reduced-authority x86_64 Linux path. It does not yet establish stable lock semantics, external adoption, cross-platform worker isolation, or a production-ready contract.
 
 ## What not to optimize for first
 

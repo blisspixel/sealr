@@ -1,12 +1,14 @@
 # Near-term execution plan
 
-Updated 2026-09-04.
+Updated 2026-09-05.
 
-> Status: active after `v0.1.0-alpha.14`. This page defines the work needed to turn Sealr's repository-owned wheel proof into one independently maintained adoption, then use that evidence to prepare a stable semantic surface. Completed preview work is indexed in the [milestone history](milestones.md).
+> Status: active after `v0.1.0-alpha.15`. This page defines the work needed to turn Sealr's repository-owned wheel proof into one independently maintained adoption, then use that evidence to prepare a stable semantic surface. Completed preview work is indexed in the [milestone history](milestones.md).
 
 The near-term objective is not another format. It is a consumer outside this repository that treats `VerifiedArchive` and independently checked canonical evidence as authoritative.
 
 ## Target outcome
+
+Alpha.15 now includes a [concrete wheel-content gate](wheel-content-gate.md). Its measured path avoids full installation and exposes the actual publisher decision. Use that example and the [retention measurements](capability-reuse-experiment.md) to agree the consumer scope and resource budget with a maintainer. The current full-installer pilot contract remains unfulfilled; a narrower publisher pilot requires an explicit contract revision.
 
 The first external pilot should be deliberately narrow:
 

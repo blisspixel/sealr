@@ -10,10 +10,10 @@ publish = false
 
 [dependencies]
 clap.workspace = true
-sealr = { version = "=0.1.0-alpha.14", path = "../../crates/sealr" }
-sealr-identity-verifier = { version = "=0.1.0-alpha.14", path = "../identity-verifier" }
+sealr = { version = "=0.1.0-alpha.15", path = "../../crates/sealr" }
+sealr-identity-verifier = { version = "=0.1.0-alpha.15", path = "../identity-verifier" }
 serde.workspace = true
 serde_json.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
-sealr-worker-bootstrap-lab = { version = "=0.1.0-alpha.14", path = "../worker-bootstrap", default-features = false }
+sealr-worker-bootstrap-lab = { version = "=0.1.0-alpha.15", path = "../worker-bootstrap", default-features = false }

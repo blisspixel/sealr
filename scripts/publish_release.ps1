@@ -8,9 +8,9 @@ $ErrorActionPreference = 'Stop'
 
 $Repository = 'blisspixel/sealr'
 $DefaultBranch = 'main'
-$Version = '0.1.0-alpha.14'
+$Version = '0.1.0-alpha.15'
 $ReleaseTag = "v$Version"
-$ReleaseTitle = "sealr ${Version}: complete Deflate streams and Unicode wheel evidence"
+$ReleaseTitle = "sealr ${Version}: capability-only publisher checks and measured retention"
 $CiWorkflow = '.github/workflows/ci.yml'
 $ReleaseWorkflow = '.github/workflows/release.yml'
 $GithubActionsAppId = 15368

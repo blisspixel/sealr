@@ -258,7 +258,7 @@ JSONL output, mounts, folder scans, force replacement, other isolation backends,
 
 ## Target CLI experience
 
-Alpha.14 intentionally exposes the underlying JSON contract. It is useful for validation but is not the finished human interface.
+Alpha.15 intentionally exposes the underlying JSON contract. It is useful for validation but is not the finished human interface.
 
 After the semantic outcome model stabilizes, the default terminal experience should be concise and task-oriented:
 
@@ -291,7 +291,7 @@ Job-oriented verbs such as `gate`, `verify`, `materialize`, and `explain` follow
 ## Documentation capture policy
 
 The [walkthrough](walkthrough.md) owns the screenshots and reproduction commands.
-The images are rendered terminal summaries of the current Alpha.14 JSON view
+The images are rendered terminal summaries of the current Alpha.15 JSON view
 and receipt streams, captured from a Linux run with shell notation. They remain
 paired with copyable commands and expected text. The README shows one overview
 image; detailed scenarios belong in the walkthrough.

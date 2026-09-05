@@ -1,6 +1,6 @@
 # Milestone history
 
-Updated 2026-09-04.
+Updated 2026-09-05.
 
 This page records what each published preview established. It replaces completed milestone logs that previously lived in the roadmap and near-term plan. The per-release notes are the detailed, versioned source for contents, limitations, compatibility changes, and verification instructions. The [changelog](../CHANGELOG.md) is the compact file-level history.
 
@@ -24,6 +24,7 @@ All previews remain non-production releases. A completed milestone means its bou
 | Alpha.12 | 2026-08-30 | Canonical evidence, packaged independent verification, validated policy files, repository PyPA conformance, six additional TAR and codec selections, and Copy-only 7z | [Release notes](releases/v0.1.0-alpha.12.md) |
 | Alpha.13 | 2026-08-31 | Full-integrity supervised prefix reads, a packaged public-API-only PyPA `WheelSource` handoff, and an exact Poetry 2.4.2 repository fixture | [Release notes](releases/v0.1.0-alpha.13.md) |
 | Alpha.14 | 2026-09-04 | Explicit Deflate completion, 24 Unicode and streaming wheel producer vectors, twelve complete supervised installer runs, and machine-checked adopter and candidate inventories | [Release notes](releases/v0.1.0-alpha.14.md) |
+| Alpha.15 | 2026-09-05 | Capability-only publisher content decision, measured bounded-retention guidance, and a consistent visual identity with current Linux examples | [Release notes](releases/v0.1.0-alpha.15.md) |
 
 ## Durable detail by topic
 
@@ -46,4 +47,4 @@ The milestone sequence produced detailed contracts that remain active even thoug
 
 The former roadmap and near-term plan accumulated implementation diaries for Alpha.4 through Alpha.13 beside still-open work. That made completed detail look active, duplicated release notes and topic contracts, and obscured the actual next decision.
 
-Historical facts now live in immutable release notes and the maintained topic documents above. The root [roadmap](../ROADMAP.md) contains only current sequencing and stable gates. The [near-term plan](near-term.md) contains only post-Alpha.13 execution work.
+Historical facts now live in immutable release notes and the maintained topic documents above. The root [roadmap](../ROADMAP.md) contains only current sequencing and stable gates. The [near-term plan](near-term.md) contains only the remaining adopter and readiness work.

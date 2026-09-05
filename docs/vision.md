@@ -1,6 +1,6 @@
 # Vision: one archive, one tree, evidence
 
-> This document describes the product direction. Published Alpha.14 behavior is defined by the [README](../README.md) and [API contract](api.md). The target semantic design is specified in [semantic-model.md](semantic-model.md).
+> This document describes the product direction. Published Alpha.15 behavior is defined by the [README](../README.md) and [API contract](api.md). The target semantic design is specified in [semantic-model.md](semantic-model.md).
 
 Sealr is not a general-purpose unarchiver, archive GUI, malware scanner, agent-execution proxy, model verifier, credential broker, or enterprise control plane.
 
@@ -63,7 +63,7 @@ The product bar is high-consequence ingest: fail closed, one interpretation, evi
 
 ## Product priorities
 
-The current implementation order is in the [roadmap](../ROADMAP.md), and the bounded post-Alpha.14 work is in the [near-term execution plan](near-term.md).
+The current implementation order is in the [roadmap](../ROADMAP.md), and the bounded post-Alpha.15 work is in the [near-term execution plan](near-term.md).
 
 ### 1. External usefulness
 
@@ -102,7 +102,7 @@ That surface compounds semantic knowledge, compatibility data, test fixtures, au
 
 ## Evidence discipline
 
-Alpha.14 receipts are deterministic unsigned evidence records, and the opt-in canonical lineage can be checked by the independently implemented packaged verifier. They are not authenticated attestations. Future authenticated claims should use standard envelopes and verified identities, keep interpretation, verification, admission, and effect claims distinct, and use SBOM formats only where a consumer profile establishes package or component semantics.
+Alpha.15 receipts are deterministic unsigned evidence records, and the opt-in canonical lineage can be checked by the independently implemented packaged verifier. They are not authenticated attestations. Future authenticated claims should use standard envelopes and verified identities, keep interpretation, verification, admission, and effect claims distinct, and use SBOM formats only where a consumer profile establishes package or component semantics.
 
 Do not use a numeric risk score. Current findings provide stable codes, severity, member context, and detail. The target finding schema adds explicit rule versions, phases, deterministic evidence, source spans where applicable, and remediation without turning the human message into the machine contract.
 
@@ -133,13 +133,13 @@ The complete task-oriented map is the [documentation index](index.md).
 
 | Document | Purpose |
 |---|---|
-| [near-term.md](near-term.md) | Post-Alpha.14 external-adoption work packages and acceptance gates |
+| [near-term.md](near-term.md) | Post-Alpha.15 external-adoption work packages and acceptance gates |
 | [adopter-pilot.md](adopter-pilot.md) | Exact first-pilot baseline, proofs, and nonclaims |
 | [candidate-surface.md](candidate-surface.md) | Classified public identities; inventory, not a freeze |
 | [milestones.md](milestones.md) | Completed preview outcomes and links to immutable release detail |
 | [profiles/python-wheel-v1.md](profiles/python-wheel-v1.md) | First-consumer design and corpus plan |
 | [semantic-model.md](semantic-model.md) | Target outcome axes, `ArchiveIR`, identities, profiles, locks, and sequencing |
-| [api.md](api.md) | Implemented Alpha.14 contract and future type-state direction |
+| [api.md](api.md) | Implemented Alpha.15 contract and future type-state direction |
 | [architecture.md](architecture.md) | Current trust boundaries and target pipeline |
 | [threat-model.md](threat-model.md) | Adversaries and protected properties |
 | [invariants.md](invariants.md) | Testable safety invariants |

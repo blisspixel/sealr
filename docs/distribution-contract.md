@@ -1,6 +1,6 @@
 # Distribution contract
 
-Current evaluation uses Alpha.14, including its Deflate completion correction,
+Current evaluation uses Alpha.15, including its Deflate completion correction,
 with matching source and authenticated native companions. It remains a GitHub-only
 prerelease. The Alpha.13 package measurements below are historical reproducibility
 evidence, and the adopter contract now records the current source separately.

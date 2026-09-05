@@ -30,23 +30,25 @@ $scenarios = @(
 $themes = @(
     @{
         Name = 'light'
-        Canvas = '#f6f8fa'
+        Canvas = '#f6f8f7'
         Panel = '#ffffff'
-        Border = '#d0d7de'
-        Text = '#1f2328'
-        Muted = '#59636e'
-        Accent = '#0969da'
+        Border = '#d9e3dd'
+        Text = '#162724'
+        Muted = '#53675f'
+        Accent = '#0f766e'
+        MarkInk = '#ffffff'
         Success = '#1a7f37'
         Danger = '#cf222e'
     },
     @{
         Name = 'dark'
-        Canvas = '#0d1117'
-        Panel = '#161b22'
-        Border = '#30363d'
-        Text = '#f0f6fc'
-        Muted = '#9198a1'
-        Accent = '#58a6ff'
+        Canvas = '#101917'
+        Panel = '#17231f'
+        Border = '#34483e'
+        Text = '#eef6f3'
+        Muted = '#a6bbb1'
+        Accent = '#5eead4'
+        MarkInk = '#102b27'
         Success = '#3fb950'
         Danger = '#ff7b72'
     }
@@ -111,7 +113,8 @@ header {
   padding: 0 28px;
   border-bottom: 1px solid $($theme.Border);
 }
-header strong { color: $($theme.Accent); font-size: 20px; letter-spacing: 0.02em; }
+header strong { display: flex; align-items: center; gap: 8px; color: $($theme.Text); font-size: 20px; letter-spacing: 0.02em; }
+header svg { width: 28px; height: 28px; flex: none; }
 header small { color: $($theme.Muted); font-size: 14px; font-weight: normal; margin-left: 12px; }
 header span { color: $($theme.Muted); font-size: 16px; }
 pre {
@@ -131,7 +134,7 @@ pre span { display: inline; }
 </head>
 <body>
 <main aria-label="sealr terminal walkthrough">
-  <header><strong>sealr <small>$version</small></strong><span>$($scenario.Label)</span></header>
+  <header><strong><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" aria-hidden="true"><rect x="4" y="4" width="56" height="56" rx="15" fill="$($theme.Accent)"/><path d="M43 18H28a7 7 0 0 0 0 14h8a7 7 0 0 1 0 14H21" fill="none" stroke="$($theme.MarkInk)" stroke-width="6" stroke-linecap="round"/></svg>sealr <small>$version</small></strong><span>$($scenario.Label)</span></header>
   <pre>$content</pre>
 </main>
 </body>
