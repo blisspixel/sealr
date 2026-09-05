@@ -89,6 +89,8 @@ The longer-term aim is an archive-to-tree admission boundary whose decision and 
 
 ## Why this exists
 
+Current main also includes a [24-artifact Unicode and streaming wheel producer matrix](docs/wheel-producer-compatibility.md). It exposed and fixed an incomplete Deflate stream admission defect, and adds source-deletion, native materialization, and copied supervised installer checks. This work is pending the next prerelease; Alpha.13 remains the published baseline described above.
+
 Agents, package systems, upload handlers, and data pipelines routinely receive archives from outside their trust boundary. Archive formats encode filesystem topology as well as content, and different parsers can assign different meanings to the same bytes.
 
 The 2025 ZipDiff study compared 50 ZIP parsers across 19 languages, found that almost every parser pair disagreed somewhere, and classified 14 ambiguity types. Its public artifact includes constructors for those cases. A 2025 `uv` advisory then documented that one wheel digest could expand differently across installers, and PyPI added upload-time rejection for several ambiguous ZIP structures. These results motivate testing parser agreement instead of assuming it.

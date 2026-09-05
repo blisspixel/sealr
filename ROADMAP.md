@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-09-02.
+Updated 2026-09-04.
 
 Sealr's product is the boundary:
 
@@ -115,6 +115,8 @@ All rows must be green before a stable release.
 Preview releases may deliver individual gates before 1.0. A version label is not permission to ship a red gate.
 
 ## Work that remains parallel
+
+The first targeted compatibility increment is implemented: a [24-artifact Unicode and streaming producer matrix](docs/wheel-producer-compatibility.md), source-deletion and native materialization regressions, and the copied supervised installer checks. It exposed an incomplete Deflate stream that retained matching plaintext and checksums; the shared decoder now requires explicit stream completion. The next compatibility increment should use real adopter artifacts and an independently maintained downstream CI path.
 
 These tracks may proceed while the adopter pilot runs because they strengthen the existing boundary without adding another interpretation:
 

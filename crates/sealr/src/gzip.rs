@@ -7,8 +7,8 @@ use std::cell::RefCell;
 use std::io::{self, BufReader, Read};
 use std::rc::Rc;
 
+use crate::deflate::DeflateDecoder;
 use crc32fast::Hasher as Crc;
-use flate2::bufread::DeflateDecoder;
 
 use crate::findings::{Finding, FindingCode};
 use crate::ir::ByteRange;
@@ -1146,6 +1146,17 @@ mod tests {
 
     fn decode(bytes: &[u8]) -> Result<DecodedGzipMember, GzipError> {
         decode_single_member(&SourceSnapshot::borrowed(None, bytes), LARGE_LIMITS)
+    }
+
+    #[test]
+    fn an_unterminated_deflate_block_cannot_borrow_the_gzip_trailer() {
+        let mut bytes = fixture(0, b"LATIN = 1\n");
+        assert_ne!(bytes[10] & 1, 0, "fixture must begin with a final block");
+        bytes[10] &= !1;
+        assert!(decode(&bytes).is_err());
+        for removed in 1..=8 {
+            assert!(decode(&bytes[..bytes.len() - removed]).is_err());
+        }
     }
 
     #[test]

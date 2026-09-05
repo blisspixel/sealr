@@ -6,6 +6,15 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+### Fixed
+
+- Require explicit Deflate stream completion before admitting a ZIP member or finishing gzip framing. A producer-derived wheel with BFINAL cleared previously passed with unchanged plaintext, matching CRC32 and sizes, and complete compressed-input consumption even though the stream never ended. The shared bounded reader now requires `StreamEnd`; ZIP32, ZIP64, supervised verification, later capability reads, and gzip use the same completion rule. Existing malformed-stream diagnostic identities remain unchanged. No runtime dependency, profile identity, or unsafe code was added.
+
+### Added
+
+- Added a reproducible 24-artifact CPython wheel matrix covering eight Unicode paths across all five install schemes, Store and Deflate, signed and unsigned streaming descriptors, CSV-quoted RECORD paths, empty members, and exact structural and semantic denials. The packaged cross-platform regression removes each source before consumer evaluation and checks inspect/materialize parity against committed observations.
+- Added required Linux checks for twelve complete supervised installations through the copied public-API handoff and eighteen negative cases, with independent evidence verification, source deletion, bounded capability reads, and exact output and mode audits. These controlled producer fixtures do not claim external adoption or increase the published-package inventory count.
+
 ### Changed
 
 - Refocused the roadmap on external adoption, candidate stability, lifecycle closure, independent review, and the stable-release gates. Completed Alpha.1 through Alpha.13 planning detail now lives in a linked milestone history and immutable release notes, while the near-term plan defines only post-Alpha.13 adopter work and parallel evidence tracks.

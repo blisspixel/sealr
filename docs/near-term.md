@@ -1,6 +1,6 @@
 # Near-term execution plan
 
-Updated 2026-09-02.
+Updated 2026-09-04.
 
 > Status: active after `v0.1.0-alpha.13`. This page defines the work needed to turn Sealr's repository-owned wheel proof into one independently maintained adoption, then use that evidence to prepare a stable semantic surface. Completed preview work is indexed in the [milestone history](milestones.md).
 
@@ -78,6 +78,8 @@ Exit criteria:
 ## Parallel track A: targeted wheel compatibility
 
 The current [v5 wheel inventory](wheel-compatibility-v5.md) contains 300 exact artifacts, 280 admissions, and 20 investigated denials. It observed no Unicode member paths, so simply increasing the same sample would not close the most relevant evidence gap.
+
+The [targeted producer matrix](wheel-producer-compatibility.md) now adds 24 reproducible controlled artifacts: six admissions, sixteen archive refusals, and two semantic denials. It covers Unicode paths across all install schemes and both descriptor forms for Store and Deflate, with source-deletion and native materialization checks plus the copied supervised installer handoff. It also exposed and closed an incomplete Deflate stream admission defect. These are producer fixtures, so real published-wheel acquisition and downstream feedback remain open.
 
 Prioritize:
 

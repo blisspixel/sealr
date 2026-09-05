@@ -198,6 +198,12 @@ jobs:
           tests/corpus/wheels/report-v5.json
           docs/wheel-compatibility-v5.md
 
+      - name: Verify Unicode and streaming wheel producer evidence
+        run: >-
+          cargo run --locked -p sealr-wheel-lab --bin wheel_producers -- verify
+          crates/sealr/tests/conformance/wheel-producers-v1.json
+          crates/sealr/tests/conformance/wheel-producers-report-v1.json
+
       - name: Build optimized workspace
         run: cargo build --locked --release --workspace --all-features
 
@@ -404,6 +410,17 @@ jobs:
           test ! -e "${runtime}/controlled-inspect-input/demo-1.0-py3-none-any.whl"
           test ! -e "${runtime}/controlled-materialize-input/demo-1.0-py3-none-any.whl"
           test -d "${runtime}/controlled-raw-tree"
+
+      - name: Verify producer matrix through the copied WheelSource handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(cargo metadata --locked --no-deps --format-version 1 |
+            jq --raw-output '.packages[] | select(.name == "sealr") | .version')"
+          python3 scripts/verify_wheel_producer_handoff.py \
+            --handoff "${RUNNER_TEMP}/sealr-pypa-installer-handoff/target/release/sealr-pypa-installer-handoff" \
+            --native "${RUNNER_TEMP}/sealr-native-handoff/sealr-${version}-x86_64-unknown-linux-gnu" \
+            --installer-root "${SEALR_HANDOFF_RUNTIME}/installer-extracted"
 
       - name: Run exact Poetry 2.4.2 repository fixture
         shell: bash
