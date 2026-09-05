@@ -258,7 +258,7 @@ JSONL output, mounts, folder scans, force replacement, other isolation backends,
 
 ## Target CLI experience
 
-Alpha.6 intentionally exposes the underlying JSON contract. It is useful for validation but is not the finished human interface.
+Alpha.14 intentionally exposes the underlying JSON contract. It is useful for validation but is not the finished human interface.
 
 After the semantic outcome model stabilizes, the default terminal experience should be concise and task-oriented:
 
@@ -288,13 +288,22 @@ The target CLI follows these rules:
 
 Job-oriented verbs such as `gate`, `verify`, `materialize`, and `explain` follow the semantic types. They must not freeze the current combined verdict under a more polished surface.
 
-## README capture policy
+## Documentation capture policy
 
-The committed images are rendered terminal-style summaries derived from the current Alpha.6 JSON view and receipt streams. They remain paired with copyable commands and expected text. The visible summary uses a stable subset even though Alpha.6 includes outcome axes and identities in the underlying JSON. Whenever visible output changes, the walkthrough fixtures and transcripts must be regenerated from the locally built release-profile binary, semantic assertions must run first, and both light and dark screenshots must be recaptured.
+The [walkthrough](walkthrough.md) owns the screenshots and reproduction commands.
+The images are rendered terminal summaries of the current Alpha.14 JSON view
+and receipt streams, captured from a Linux run with shell notation. They remain
+paired with copyable commands and expected text. The README shows one overview
+image; detailed scenarios belong in the walkthrough.
 
-Current CI regenerates fixture and native transcript inputs, checks their SHA-256 values against the manifest's Unix or Windows variant, and verifies the exact PNG hashes, asset set, format, dimensions, density, and metadata policy. A future pixel-level renderer comparison is deliberately not claimed.
+Regenerate fixtures and transcripts from the release-profile binary, run the
+semantic assertions, and recapture both themes whenever visible output changes.
+The renderer binds the displayed version to the measured receipt. CI checks
+fixture and native transcript hashes and every PNG's hash, format, dimensions,
+density, size, and metadata policy. A pixel comparison is not claimed.
 
-Screenshots demonstrate released behavior. They are never the only instructions and are not updated to show planned commands before those commands exist.
+Screenshots demonstrate released behavior and never replace text instructions
+or show planned commands as though they already exist.
 
 ## Design references
 
