@@ -436,7 +436,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          release_title="sealr ${RELEASE_VERSION}: complete Deflate streams and Unicode wheel evidence"
+          release_title="sealr ${RELEASE_VERSION}: capability-only publisher checks and measured retention"
           notes_file="docs/releases/v${RELEASE_VERSION}.md"
           if [[ ! -f "${notes_file}" ]]; then
             echo "::error::missing release notes: ${notes_file}"

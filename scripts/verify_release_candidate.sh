@@ -3,7 +3,7 @@ set -euo pipefail
 
 selector="scripts/release_candidate.jq"
 tag="v0.1.0-alpha.15"
-title="sealr 0.1.0-alpha.15: complete Deflate streams and Unicode wheel evidence"
+title="sealr 0.1.0-alpha.15: capability-only publisher checks and measured retention"
 notes=$'# sealr 0.1.0-alpha.15\n'
 allowed='[
   "SHA256SUMS",
