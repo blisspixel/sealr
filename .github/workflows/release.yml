@@ -1,0 +1,955 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MACOSX_DEPLOYMENT_TARGET: "15.0"
+  RELEASE_VERSION: 0.1.0-alpha.16
+  RUST_VERSION: 1.98.0
+
+jobs:
+  validate:
+    name: Validate release tag
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install pinned Rust
+        run: rustup toolchain install "${RUST_VERSION}" --profile minimal
+
+      - name: Select pinned Rust
+        run: rustup default "${RUST_VERSION}"
+
+      - name: Verify tag, version, and protected main
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          expected_tag="v${RELEASE_VERSION}"
+          if [[ "${GITHUB_REF_TYPE}" != "tag" || "${GITHUB_REF_NAME}" != "${expected_tag}" ]]; then
+            echo "::error::expected release tag ${expected_tag}, got ${GITHUB_REF_NAME}"
+            exit 1
+          fi
+          if [[ "$(git cat-file -t "${GITHUB_REF}")" != "tag" ]]; then
+            echo "::error::release tag must be annotated"
+            exit 1
+          fi
+
+          mapfile -t versions < <(
+            cargo metadata --locked --no-deps --format-version 1 |
+              jq -r '.packages[].version' |
+              sort -u
+          )
+          if [[ "${#versions[@]}" -ne 1 || "${versions[0]}" != "${RELEASE_VERSION}" ]]; then
+            echo "::error::workspace package versions must all equal ${RELEASE_VERSION}"
+            printf 'observed version: %s\n' "${versions[@]:-none}"
+            exit 1
+          fi
+
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+          tag_commit="$(git rev-list -n 1 "${GITHUB_REF}")"
+          main_commit="$(git rev-parse refs/remotes/origin/main)"
+          if [[ "${tag_commit}" != "${main_commit}" ]]; then
+            echo "::error::release tag must point to the current protected main commit"
+            echo "tag commit:  ${tag_commit}"
+            echo "main commit: ${main_commit}"
+            exit 1
+          fi
+
+          if [[ -n "$(git status --short)" ]]; then
+            echo "::error::release checkout is not clean"
+            git status --short
+            exit 1
+          fi
+
+      - name: Require exact protected main CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_PROMPT_DISABLED: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag_commit="$(git rev-list -n 1 "${GITHUB_REF}")"
+          required_jobs=(
+            "Format, lint, test, and docs"
+            "Test on windows-2022"
+            "Test on macos-15"
+            "ZipDiff 14-class gate"
+            "Supply chain"
+            "Real-kernel Landlock ABI 2 floor"
+          )
+          run_json=""
+          for attempt in {1..90}; do
+            runs_json="$(
+              gh api --method GET \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs" \
+                -f branch=main \
+                -f event=push \
+                -f head_sha="${tag_commit}" \
+                -f per_page=10
+            )"
+            run_json="$(
+              jq -c \
+                --arg sha "${tag_commit}" '
+                  [.workflow_runs[] |
+                    select(
+                      .head_sha == $sha and
+                      .head_branch == "main" and
+                      .event == "push" and
+                      (.path | startswith(".github/workflows/ci.yml"))
+                    )] |
+                  if length == 0 then empty else max_by(.run_number) end
+                ' <<<"${runs_json}"
+            )"
+            if [[ -n "${run_json}" ]]; then
+              status="$(jq -r '.status' <<<"${run_json}")"
+              conclusion="$(jq -r '.conclusion // ""' <<<"${run_json}")"
+              if [[ "${status}" == "completed" && "${conclusion}" == "success" ]]; then
+                break
+              fi
+              if [[ "${status}" == "completed" ]]; then
+                echo "::error::exact main CI concluded ${conclusion}"
+                exit 1
+              fi
+            fi
+            if [[ "${attempt}" -eq 90 ]]; then
+              echo "::error::exact main CI did not complete successfully within 30 minutes"
+              exit 1
+            fi
+            sleep 20
+          done
+
+          run_id="$(jq -r '.id' <<<"${run_json}")"
+          run_attempt="$(jq -r '.run_attempt' <<<"${run_json}")"
+          jobs_json="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/attempts/${run_attempt}/jobs" \
+              -f per_page=100
+          )"
+          for required in "${required_jobs[@]}"; do
+            count="$(jq --arg name "${required}" '[.jobs[] | select(.name == $name)] | length' <<<"${jobs_json}")"
+            if [[ "${count}" -ne 1 ]]; then
+              echo "::error::expected exactly one CI job named ${required}, found ${count}"
+              exit 1
+            fi
+            if ! jq -e \
+              --arg name "${required}" '
+                .jobs[] |
+                select(.name == $name) |
+                .status == "completed" and .conclusion == "success"
+              ' <<<"${jobs_json}" >/dev/null; then
+              echo "::error::required CI job did not complete successfully: ${required}"
+              exit 1
+            fi
+          done
+
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+          if [[ "$(git rev-parse refs/remotes/origin/main)" != "${tag_commit}" ]]; then
+            echo "::error::protected main advanced while release validation was running"
+            exit 1
+          fi
+          echo "exact protected main CI passed: run ${run_id}, attempt ${run_attempt}"
+
+      - name: Require exact protected main fuzz evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_PROMPT_DISABLED: "1"
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag_commit="$(git rev-list -n 1 "${GITHUB_REF}")"
+          runs_json="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/actions/workflows/fuzz.yml/runs" \
+              -f branch=main \
+              -f event=workflow_dispatch \
+              -f head_sha="${tag_commit}" \
+              -f per_page=20
+          )"
+          run_json="$(
+            jq -c \
+              --arg sha "${tag_commit}" '
+                [.workflow_runs[] |
+                  select(
+                    .head_sha == $sha and
+                    .head_branch == "main" and
+                    .event == "workflow_dispatch" and
+                    (.path | startswith(".github/workflows/fuzz.yml"))
+                  )] |
+                if length == 0 then empty else max_by(.run_number) end
+              ' <<<"${runs_json}"
+          )"
+          if [[ -z "${run_json}" ]]; then
+            echo "::error::no on-demand fuzz run exists for the exact release commit"
+            exit 1
+          fi
+          if [[ "$(jq -r '.status' <<<"${run_json}")" != "completed" ||
+                "$(jq -r '.conclusion // ""' <<<"${run_json}")" != "success" ]]; then
+            echo "::error::exact on-demand fuzz run is not successful"
+            exit 1
+          fi
+
+          run_id="$(jq -r '.id' <<<"${run_json}")"
+          run_attempt="$(jq -r '.run_attempt' <<<"${run_json}")"
+          jobs_json="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/attempts/${run_attempt}/jobs" \
+              -f per_page=100
+          )"
+          required_fuzz_jobs=(
+            "Bounded worker protocol"
+            "Bounded semantic records"
+            "Bounded raw POSIX ustar"
+            "Bounded raw POSIX PAX"
+            "Bounded raw GNU long-name TAR"
+            "Bounded RFC 1952 gzip"
+            "Bounded public TAR gzip ustar"
+            "Bounded strict ZIP64"
+            "Bounded gzip-wrapped restricted PAX TAR"
+            "Bounded gzip-wrapped GNU long-name TAR"
+            "Bounded zstd-wrapped portable ustar TAR"
+            "Bounded xz-wrapped portable ustar TAR"
+            "Bounded bzip2-wrapped portable ustar TAR"
+            "Bounded Copy-only 7z container"
+          )
+          for required in "${required_fuzz_jobs[@]}"; do
+            count="$(jq --arg name "${required}" '[.jobs[] | select(.name == $name)] | length' <<<"${jobs_json}")"
+            if [[ "${count}" -ne 1 ]]; then
+              echo "::error::expected exactly one fuzz job named ${required}, found ${count}"
+              exit 1
+            fi
+            if ! jq -e \
+              --arg name "${required}" '
+                .jobs[] |
+                select(.name == $name) |
+                .status == "completed" and .conclusion == "success"
+              ' <<<"${jobs_json}" >/dev/null; then
+              echo "::error::required fuzz job did not complete successfully: ${required}"
+              exit 1
+            fi
+          done
+
+          git fetch --no-tags origin "+refs/heads/main:refs/remotes/origin/main"
+          if [[ "$(git rev-parse refs/remotes/origin/main)" != "${tag_commit}" ]]; then
+            echo "::error::protected main advanced after exact fuzz evidence"
+            exit 1
+          fi
+          echo "exact protected main fuzz passed: run ${run_id}, attempt ${run_attempt}"
+
+  build:
+    name: Build and test on ${{ matrix.os }}
+    needs: validate
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - windows-2022
+          - macos-15
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install pinned Rust
+        shell: pwsh
+        run: rustup toolchain install $env:RUST_VERSION --profile minimal
+
+      - name: Select pinned Rust
+        shell: pwsh
+        run: rustup default $env:RUST_VERSION
+
+      - name: Assert native package floor
+        shell: pwsh
+        run: |
+          $target = if ($IsLinux) {
+            'x86_64-unknown-linux-gnu'
+          } elseif ($IsMacOS) {
+            'aarch64-apple-darwin'
+          } else {
+            'x86_64-pc-windows-msvc'
+          }
+          pwsh -NoLogo -NoProfile -File scripts/verify_native_floor.ps1 -ExpectedTarget $target
+
+      - name: Install production Linux helper target
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: rustup target add x86_64-unknown-linux-musl
+
+      - name: Run optimized tests
+        run: cargo test --locked --release --workspace --all-features
+
+      - name: Build release binaries
+        run: cargo build --locked --release -p sealr-cli -p sealr-identity-verifier
+
+      - name: Build production Linux helper and package verifier
+        if: runner.os == 'Linux'
+        shell: pwsh
+        run: |
+          cargo build --locked --release -p sealr-worker-bootstrap-lab `
+            --no-default-features --bin sealr-worker `
+            --target x86_64-unknown-linux-musl
+          cargo build --locked --release -p sealr-worker-bootstrap-lab `
+            --features lab --bin sealr-worker-bootstrap-lab
+          cargo build --locked --release -p sealr-wheel-lab
+          cargo package --locked -p sealr
+          cargo build --locked --release `
+            --manifest-path tests/packaged-consumer/Cargo.toml
+
+      - name: Package and verify native release archive
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $targetLine = rustc -vV | Select-String -Pattern '^host: '
+          if ($null -eq $targetLine) {
+            throw "rustc did not report its host target"
+          }
+          $targetTriple = $targetLine.Line.Substring(6).Trim()
+          $extension = if ($IsWindows) { 'zip' } else { 'tar.gz' }
+          $verifierName = if ($IsWindows) { 'sealr-identity-verifier.exe' } else { 'sealr-identity-verifier' }
+          $archivePath = Join-Path $PWD "dist/sealr-$env:RELEASE_VERSION-$targetTriple.$extension"
+          $packageArguments = @{
+            Version = $env:RELEASE_VERSION
+            TargetTriple = $targetTriple
+            IdentityVerifierBinary = Join-Path $PWD "target/release/$verifierName"
+            OutputDirectory = 'dist'
+          }
+          $verifyArguments = @{
+            ArchivePath = $archivePath
+            Version = $env:RELEASE_VERSION
+            TargetTriple = $targetTriple
+          }
+          if ($IsLinux) {
+            $packageArguments.HelperBinary = 'target/x86_64-unknown-linux-musl/release/sealr-worker'
+            $verifyArguments.LabBinary = 'target/release/sealr-worker-bootstrap-lab'
+            $verifyArguments.WheelLabBinary = 'target/release/sealr-wheel-lab'
+            $verifyArguments.PackagedConsumerBinary = 'tests/packaged-consumer/target/release/sealr-packaged-consumer'
+          }
+          & scripts/package_native.ps1 @packageArguments
+          & scripts/verify_native_package.ps1 @verifyArguments
+
+      - name: Upload native release archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-${{ matrix.os }}-${{ steps.package.outputs.target }}
+          path: ${{ steps.package.outputs.archive }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  stage:
+    name: Attest and stage prerelease draft
+    needs:
+      - validate
+      - build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_PROMPT_DISABLED: "1"
+    steps:
+      - name: Check out tagged release notes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Download native release archives
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+
+      - name: Verify archive set and create checksums
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+
+          mapfile -t assets < <(
+            find . -maxdepth 1 -type f \
+              \( -name 'sealr-*.zip' -o -name 'sealr-*.tar.gz' \) \
+              -printf '%f\n' |
+              sort
+          )
+          expected_assets=(
+            "sealr-${RELEASE_VERSION}-aarch64-apple-darwin.tar.gz"
+            "sealr-${RELEASE_VERSION}-x86_64-pc-windows-msvc.zip"
+            "sealr-${RELEASE_VERSION}-x86_64-unknown-linux-gnu.tar.gz"
+          )
+          if [[ "${#assets[@]}" -ne "${#expected_assets[@]}" ]]; then
+            echo "::error::expected exactly ${#expected_assets[@]} native release archives, found ${#assets[@]}"
+            printf 'asset: %s\n' "${assets[@]:-none}"
+            exit 1
+          fi
+          for index in "${!expected_assets[@]}"; do
+            if [[ "${assets[index]}" != "${expected_assets[index]}" ]]; then
+              echo "::error::release asset mismatch at index ${index}"
+              echo "expected: ${expected_assets[index]}"
+              echo "actual:   ${assets[index]}"
+              exit 1
+            fi
+          done
+
+          sha256sum "${assets[@]}" > SHA256SUMS
+          sha256sum --check SHA256SUMS
+
+      - name: Attest native release archives
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/SHA256SUMS
+
+      - name: Create or resume the exact prerelease draft
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          release_title="sealr ${RELEASE_VERSION}: typed outcomes and tested consumer migrations"
+          notes_file="docs/releases/v${RELEASE_VERSION}.md"
+          if [[ ! -f "${notes_file}" ]]; then
+            echo "::error::missing release notes: ${notes_file}"
+            exit 1
+          fi
+          mapfile -t local_assets < <(find dist -maxdepth 1 -type f -printf '%f\n' | sort)
+          if [[ "${#local_assets[@]}" -ne 4 ]]; then
+            echo "::error::expected exactly four local release assets"
+            exit 1
+          fi
+          local_assets_json="$(
+            printf '%s\n' "${local_assets[@]}" |
+              jq -Rsc 'split("\n")[:-1]'
+          )"
+
+          verify_live_source() {
+            local ref_json tag_json main_json tag_object_id
+            ref_json="$(
+              gh api --method GET \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/${GITHUB_REPOSITORY}/git/ref/tags/${GITHUB_REF_NAME}"
+            )"
+            if [[ "$(jq -r '.object.type' <<<"${ref_json}")" != "tag" ]]; then
+              echo "::error::remote release tag is not annotated"
+              exit 1
+            fi
+            tag_object_id="$(
+              jq -er '.object.sha | select(type == "string" and test("^[0-9a-f]{40}$"))' \
+                <<<"${ref_json}"
+            )"
+            tag_json="$(
+              gh api --method GET \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/${GITHUB_REPOSITORY}/git/tags/${tag_object_id}"
+            )"
+            main_json="$(
+              gh api --method GET \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/${GITHUB_REPOSITORY}/git/ref/heads/main"
+            )"
+            if ! jq -e \
+              --arg tag "${GITHUB_REF_NAME}" \
+              --arg sha "${GITHUB_SHA}" '
+                .tag == $tag and
+                .object.type == "commit" and
+                .object.sha == $sha
+              ' <<<"${tag_json}" >/dev/null ||
+              ! jq -e --arg sha "${GITHUB_SHA}" '
+                .object.type == "commit" and .object.sha == $sha
+              ' <<<"${main_json}" >/dev/null; then
+              echo "::error::remote annotated tag or protected main moved"
+              exit 1
+            fi
+          }
+
+          get_release_pages() {
+            gh api --method GET --paginate --slurp \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases?per_page=100"
+          }
+
+          classify_release_pages() {
+            jq -ce \
+              --arg tag "${GITHUB_REF_NAME}" \
+              --arg name "${release_title}" \
+              --rawfile notes "${notes_file}" \
+              --argjson allowed "${local_assets_json}" \
+              -f scripts/release_candidate.jq
+          }
+
+          require_safe_classification() {
+            local classification="${1}"
+            if ! jq -e '
+              (.exact | length) <= 1 and
+              (.recovery | length) <= 1 and
+              (.suspicious | length) == (.recovery | length) and
+              ((.exact | length) + (.recovery | length)) <= 1
+            ' <<<"${classification}" >/dev/null; then
+              echo "::error::release discovery is ambiguous or contains an unsafe near-match"
+              exit 1
+            fi
+          }
+
+          validate_candidate_state() {
+            local candidate_json="${1}"
+            local candidate_id="${2}"
+            local candidate_pages candidate_classification expected_upload_url
+            candidate_pages="$(jq -cn --argjson candidate "${candidate_json}" '[[$candidate]]')"
+            candidate_classification="$(classify_release_pages <<<"${candidate_pages}")"
+            expected_upload_url="https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${candidate_id}/assets{?name,label}"
+            if ! jq -e \
+              --argjson id "${candidate_id}" \
+              --arg upload_url "${expected_upload_url}" '
+                (.exact | length) <= 1 and
+                (.recovery | length) <= 1 and
+                (.suspicious | length) == (.recovery | length) and
+                ((.valid_exact | length) + (.recovery | length)) == 1 and
+                ((.valid_exact + .recovery)[0].id == $id) and
+                ((.valid_exact + .recovery)[0].upload_url == $upload_url)
+              ' <<<"${candidate_classification}" >/dev/null; then
+              echo "::error::release is not the expected resumable draft"
+              exit 1
+            fi
+          }
+
+          verify_live_source
+          release_pages="$(get_release_pages)"
+          classification="$(classify_release_pages <<<"${release_pages}")"
+          require_safe_classification "${classification}"
+          candidate_count="$(
+            jq -er '(.exact | length) + (.recovery | length)' \
+              <<<"${classification}"
+          )"
+
+          existing_release=""
+          existing_release_id=""
+          case "${candidate_count}" in
+            0)
+              confirmation_pages="$(get_release_pages)"
+              confirmation="$(classify_release_pages <<<"${confirmation_pages}")"
+              require_safe_classification "${confirmation}"
+              if [[ "$(jq -er '(.exact | length) + (.recovery | length)' <<<"${confirmation}")" -ne 0 ]]; then
+                echo "::error::release candidate appeared before creation"
+                exit 1
+              fi
+              create_payload="$(
+                jq -cn \
+                  --arg tag "${GITHUB_REF_NAME}" \
+                  --arg target "${GITHUB_SHA}" \
+                  --arg name "${release_title}" \
+                  --rawfile body "${notes_file}" '
+                    {
+                      tag_name: $tag,
+                      target_commitish: $target,
+                      name: $name,
+                      body: $body,
+                      draft: true,
+                      prerelease: true,
+                      make_latest: "false"
+                    }
+                  '
+              )"
+              existing_release="$(
+                gh api --method POST \
+                  -H "X-GitHub-Api-Version: 2026-03-10" \
+                  "repos/${GITHUB_REPOSITORY}/releases" \
+                  --input - <<<"${create_payload}"
+              )"
+              existing_release_id="$(
+                jq -er '.id | select(type == "number" and . > 0)' \
+                  <<<"${existing_release}"
+              )"
+              ;;
+            1)
+              existing_release_id="$(
+                jq -er '(.exact + .recovery)[0].id |
+                  select(type == "number" and . > 0)' \
+                  <<<"${classification}"
+              )"
+              ;;
+            *)
+              echo "::error::unexpected release candidate count"
+              exit 1
+              ;;
+          esac
+
+          existing_release="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}"
+          )"
+          validate_candidate_state "${existing_release}" "${existing_release_id}"
+
+          list_identity_stable=false
+          for attempt in {1..10}; do
+            verify_live_source
+            existing_release="$(
+              gh api --method GET \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}"
+            )"
+            validate_candidate_state "${existing_release}" "${existing_release_id}"
+            confirmation_pages="$(get_release_pages)"
+            confirmation="$(classify_release_pages <<<"${confirmation_pages}")"
+            require_safe_classification "${confirmation}"
+            if jq -e --argjson id "${existing_release_id}" '
+              ((.valid_exact | length) + (.recovery | length)) == 1 and
+              (.valid_exact + .recovery)[0].id == $id
+            ' <<<"${confirmation}" >/dev/null; then
+              list_identity_stable=true
+              break
+            fi
+            if [[ "$(jq -er '(.exact | length) + (.recovery | length)' <<<"${confirmation}")" -ne 0 ]]; then
+              echo "::error::release identity changed before numeric rebinding"
+              exit 1
+            fi
+            if [[ "${attempt}" -lt 10 ]]; then
+              sleep 3
+            fi
+          done
+          if [[ "${list_identity_stable}" != "true" ]]; then
+            echo "::error::release list did not stabilize before numeric rebinding"
+            exit 1
+          fi
+
+          update_payload="$(
+            jq -cn \
+              --arg tag "${GITHUB_REF_NAME}" \
+              --arg target "${GITHUB_SHA}" \
+              --arg name "${release_title}" \
+              --rawfile body "${notes_file}" '
+                {
+                  tag_name: $tag,
+                  target_commitish: $target,
+                  name: $name,
+                  body: $body,
+                  draft: true,
+                  prerelease: true,
+                  make_latest: "false"
+                }
+              '
+          )"
+          rebound=false
+          for attempt in {1..5}; do
+            verify_live_source
+            existing_release="$(
+              gh api --method PATCH \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}" \
+                --input - <<<"${update_payload}"
+            )"
+            validate_candidate_state "${existing_release}" "${existing_release_id}"
+
+            confirmation_pages="$(get_release_pages)"
+            confirmation="$(classify_release_pages <<<"${confirmation_pages}")"
+            require_safe_classification "${confirmation}"
+            if jq -e --argjson id "${existing_release_id}" '
+              (.exact | length) == 1 and
+              (.valid_exact | length) == 1 and
+              (.recovery | length) == 0 and
+              (.suspicious | length) == 0 and
+              .exact[0].id == $id and
+              .valid_exact[0].id == $id
+            ' <<<"${confirmation}" >/dev/null; then
+              rebound=true
+              break
+            fi
+            rebound_candidate_count="$(
+              jq -er '(.exact | length) + (.recovery | length)' \
+                <<<"${confirmation}"
+            )"
+            if [[ "${rebound_candidate_count}" -eq 0 ]]; then
+              if [[ "${attempt}" -lt 5 ]]; then
+                sleep 2
+              fi
+              continue
+            fi
+            if ! jq -e --argjson id "${existing_release_id}" '
+              (.exact | length) == 0 and
+              (.recovery | length) == 1 and
+              (.suspicious | length) == 1 and
+              .recovery[0].id == $id
+            ' <<<"${confirmation}" >/dev/null; then
+              echo "::error::release identity changed during numeric rebinding"
+              exit 1
+            fi
+            if [[ "${attempt}" -lt 5 ]]; then
+              sleep 2
+            fi
+          done
+          if [[ "${rebound}" != "true" ]]; then
+            echo "::error::GitHub did not stabilize the numeric release tag binding"
+            exit 1
+          fi
+          existing_release="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}"
+          )"
+          validate_candidate_state "${existing_release}" "${existing_release_id}"
+          if [[ "$(jq -r '.tag_name' <<<"${existing_release}")" != "${GITHUB_REF_NAME}" ]]; then
+            echo "::error::numeric release did not retain the expected tag"
+            exit 1
+          fi
+          verify_live_source
+
+          existing_asset_count="$(jq -er '.assets | length' <<<"${existing_release}")"
+          if [[ "${existing_asset_count}" -gt 4 ]] || ! jq -e '
+            [.assets[].id] as $ids |
+            ($ids | length) == ($ids | unique | length)
+          ' <<<"${existing_release}" >/dev/null; then
+            echo "::error::existing draft asset count or IDs are unsafe"
+            exit 1
+          fi
+          mapfile -t existing_assets < <(jq -r '.assets[].name' <<<"${existing_release}")
+          for asset in "${existing_assets[@]}"; do
+            if [[ ! -f "dist/${asset}" ]] || ! jq -e \
+              --arg name "${asset}" '
+                [.assets[] |
+                  select(
+                    .name == $name and
+                    (.id | type == "number" and . > 0) and
+                    .uploader.login == "github-actions[bot]" and
+                    (
+                      (
+                        .state == "uploaded" and
+                        .size > 0 and
+                        (.digest | type == "string" and test("^sha256:[0-9a-f]{64}$"))
+                      ) or
+                      .state == "starter"
+                    )
+                  )] |
+                length == 1
+              ' <<<"${existing_release}" >/dev/null; then
+              echo "::error::existing draft contains an unsafe asset: ${asset}"
+              exit 1
+            fi
+          done
+
+          mapfile -t existing_asset_ids < <(jq -r '.assets[].id' <<<"${existing_release}")
+          for asset_id in "${existing_asset_ids[@]}"; do
+            expected_asset="$(
+              jq -ce --argjson id "${asset_id}" '.assets[] | select(.id == $id)' \
+                <<<"${existing_release}"
+            )"
+            asset_json="$(
+              gh api --method GET \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
+            )"
+            if ! jq -e --argjson expected "${expected_asset}" '
+              .id == $expected.id and
+              .name == $expected.name and
+              .state == $expected.state and
+              .size == $expected.size and
+              .digest == $expected.digest and
+              .uploader.login == $expected.uploader.login
+            ' <<<"${asset_json}" >/dev/null; then
+              echo "::error::release asset changed before numeric deletion: ${asset_id}"
+              exit 1
+            fi
+            asset_name="$(jq -er '.name' <<<"${asset_json}")"
+            local_digest="sha256:$(sha256sum "dist/${asset_name}" | cut -d' ' -f1)"
+            local_size="$(stat -c '%s' -- "dist/${asset_name}")"
+            if jq -e \
+              --arg digest "${local_digest}" \
+              --argjson size "${local_size}" '
+                .state == "uploaded" and
+                .size == $size and
+                .digest == $digest
+              ' <<<"${asset_json}" >/dev/null; then
+              continue
+            fi
+            gh api --method DELETE --silent \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
+          done
+
+          existing_release="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}"
+          )"
+          if ! jq -e \
+            --arg tag "${GITHUB_REF_NAME}" \
+            --arg name "${release_title}" \
+            --argjson id "${existing_release_id}" \
+            --rawfile notes "${notes_file}" '
+              .id == $id and
+              .tag_name == $tag and
+              .name == $name and
+              .body == $notes and
+              .draft == true and
+              .prerelease == true and
+              .immutable == false and
+              .author.login == "github-actions[bot]" and
+              (.assets | length) <= 4
+            ' <<<"${existing_release}" >/dev/null; then
+            echo "::error::release changed before numeric asset uploads"
+            exit 1
+          fi
+          validate_candidate_state "${existing_release}" "${existing_release_id}"
+          mapfile -t retained_assets < <(jq -r '.assets[].name' <<<"${existing_release}")
+          for asset in "${retained_assets[@]}"; do
+            local_digest="sha256:$(sha256sum "dist/${asset}" | cut -d' ' -f1)"
+            local_size="$(stat -c '%s' -- "dist/${asset}")"
+            if ! jq -e \
+              --arg name "${asset}" \
+              --arg digest "${local_digest}" \
+              --argjson size "${local_size}" '
+                [.assets[] |
+                  select(
+                    .name == $name and
+                    .state == "uploaded" and
+                    .size == $size and
+                    .digest == $digest and
+                    .uploader.login == "github-actions[bot]"
+                  )] |
+                length == 1
+              ' <<<"${existing_release}" >/dev/null; then
+              echo "::error::retained release asset differs from the local build: ${asset}"
+              exit 1
+            fi
+          done
+
+          for asset in "${local_assets[@]}"; do
+            if jq -e --arg name "${asset}" '
+              [.assets[] | select(.name == $name)] | length == 1
+            ' <<<"${existing_release}" >/dev/null; then
+              continue
+            fi
+            local_digest="sha256:$(sha256sum "dist/${asset}" | cut -d' ' -f1)"
+            local_size="$(stat -c '%s' -- "dist/${asset}")"
+            case "${asset}" in
+              *.zip) content_type="application/zip" ;;
+              *.tar.gz) content_type="application/gzip" ;;
+              SHA256SUMS) content_type="text/plain; charset=utf-8" ;;
+              *)
+                echo "::error::unsupported release asset type: ${asset}"
+                exit 1
+                ;;
+            esac
+            encoded_asset="$(jq -rn --arg value "${asset}" '$value | @uri')"
+            upload_response="$(
+              curl --fail-with-body --silent --show-error \
+                --proto '=https' \
+                --request POST \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "X-GitHub-Api-Version: 2026-03-10" \
+                -H "Content-Type: ${content_type}" \
+                --data-binary "@dist/${asset}" \
+                --url "https://uploads.github.com/repos/${GITHUB_REPOSITORY}/releases/${existing_release_id}/assets?name=${encoded_asset}"
+            )"
+            if ! jq -e \
+              --arg name "${asset}" \
+              --arg type "${content_type}" \
+              --arg digest "${local_digest}" \
+              --argjson size "${local_size}" '
+                (.id | type == "number") and .id > 0 and
+                .name == $name and
+                .state == "uploaded" and
+                .content_type == $type and
+                .size == $size and
+                .digest == $digest and
+                .uploader.login == "github-actions[bot]"
+              ' <<<"${upload_response}" >/dev/null; then
+              echo "::error::uploaded asset failed identity or digest verification: ${asset}"
+              exit 1
+            fi
+          done
+
+          readback_pages="$(get_release_pages)"
+          readback_classification="$(classify_release_pages <<<"${readback_pages}")"
+          require_safe_classification "${readback_classification}"
+          if ! jq -e --argjson id "${existing_release_id}" '
+            (.exact | length) == 1 and
+            (.valid_exact | length) == 1 and
+            (.recovery | length) == 0 and
+            (.suspicious | length) == 0 and
+            .exact[0].id == $id and
+            .valid_exact[0].id == $id
+          ' <<<"${readback_classification}" >/dev/null; then
+            echo "::error::draft release readback did not preserve the exact numeric identity"
+            exit 1
+          fi
+          readback_release_id="${existing_release_id}"
+          release_json="$(
+            gh api --method GET \
+              -H "X-GitHub-Api-Version: 2026-03-10" \
+              "repos/${GITHUB_REPOSITORY}/releases/${readback_release_id}"
+          )"
+          validate_candidate_state "${release_json}" "${readback_release_id}"
+          if [[ "$(jq -r '.draft' <<<"${release_json}")" != "true" || \
+                "$(jq -r '.prerelease' <<<"${release_json}")" != "true" || \
+                "$(jq -r '.immutable' <<<"${release_json}")" != "false" || \
+                "$(jq -r '.author.login' <<<"${release_json}")" != "github-actions[bot]" || \
+                "$(jq -r '.id' <<<"${release_json}")" != "${readback_release_id}" || \
+                "$(jq -r '.tag_name' <<<"${release_json}")" != "${GITHUB_REF_NAME}" || \
+                "$(jq -r '.name' <<<"${release_json}")" != "${release_title}" ]]; then
+            echo "::error::draft release identity did not pass readback verification"
+            exit 1
+          fi
+          if ! jq -e --rawfile notes "${notes_file}" '.body == $notes' <<<"${release_json}" >/dev/null; then
+            echo "::error::draft release body differs from the tagged release notes"
+            exit 1
+          fi
+
+          mapfile -t local_assets < <(find dist -maxdepth 1 -type f -printf '%f\n' | sort)
+          mapfile -t remote_assets < <(jq -r '.assets[].name' <<<"${release_json}" | sort)
+          if [[ "${#local_assets[@]}" -ne 4 || \
+                "$(printf '%s\n' "${local_assets[@]}")" != "$(printf '%s\n' "${remote_assets[@]}")" ]]; then
+            echo "::error::draft release asset set differs from the exact local four-asset set"
+            exit 1
+          fi
+          for asset in "${local_assets[@]}"; do
+            local_digest="sha256:$(sha256sum "dist/${asset}" | cut -d' ' -f1)"
+            if ! jq -e \
+              --arg name "${asset}" \
+              --arg digest "${local_digest}" '
+                [.assets[] |
+                  select(
+                    .name == $name and
+                    .state == "uploaded" and
+                    .size > 0 and
+                    .digest == $digest and
+                    .uploader.login == "github-actions[bot]"
+                  )] |
+                length == 1
+              ' <<<"${release_json}" >/dev/null; then
+              echo "::error::draft asset failed state, size, or digest verification: ${asset}"
+              exit 1
+            fi
+          done
+          verify_live_source
+          echo "verified prerelease draft; publication requires scripts/publish_release.ps1"

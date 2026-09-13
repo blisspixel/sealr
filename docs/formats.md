@@ -1,0 +1,101 @@
+# Format strategy
+
+> Current implementation: classic ZIP32 with Store and Deflate, an explicit in-process strict ZIP64 preview under policy v3, raw portable POSIX ustar, strict single-member gzip-wrapped portable ustar under policy v4, restricted raw POSIX PAX under policy v5, restricted raw GNU long-name TAR under policy v6, the gzip-wrapped restricted PAX and GNU long-name compositions under policy v7, the zstd-wrapped portable ustar profile under policy v8, the xz-wrapped portable ustar profile under policy v9, the bzip2-wrapped portable ustar profile under policy v10, and the restricted Copy-only 7z container under policy v11. Additional codecs and the other tracked families remain profile-specific work. Format sequencing is governed by the [roadmap](../ROADMAP.md) and the detailed [format support architecture](format-support.md).
+
+## Current archive profiles
+
+Sealr exposes four separately identified ZIP32 interpretations. The compatibility default accepts ASCII or explicitly flagged strict UTF-8 names. Strict ASCII v2 rejects non-ASCII names. Portable UTF-8 v1 is the supported Unicode profile. Wheel UTF-8 v1 preserves the narrower Alpha.7 research language. None changes the default. All four share these structural rules:
+
+- central-directory-first structure discovery;
+- exact EOCD, central header, local header, and data-descriptor agreement;
+- no hidden, overlapping, prefixed, trailing, ZIP64, spanned, encrypted, or recovery-parsed structure;
+- methods 0 and 8 only;
+- exactly one raw DEFLATE stream consuming every declared compressed byte;
+- profile-specific ASCII or strict UTF-8 NFC path rules, with no CP437 fallback;
+- no links, devices, nested extraction, or archive mode restoration.
+
+The separately identified [strict ZIP64 profile](profiles/zip64-strict-ascii-v1.md) is selected explicitly and authorized by policy v3. It reuses Store and Deflate but has its own sentinel, extra-field, end-record, locator, descriptor, IR, covering, and `sealrTreeV3` rules. ZIP32 selection never retries or aliases to it, and authenticated worker execution fails closed until semantic-record v3.
+
+The separately identified [portable ustar profile](profiles/tar-ustar-portable-v1.md) validates exact ustar magic, version, checksums, bounded octal fields, record geometry, padding, and termination. It accepts regular files and directories only, uses TAR-native IR evidence and `sealrTreeV2` layout identity, and shares the portable path, quota, verification, retention, read, and atomic materialization core.
+
+The separately identified [gzip-wrapped portable ustar profile](profiles/tar-gzip-ustar-portable-v1.md) authorizes exactly one RFC 1952 member with Deflate payload, closed optional-field grammar, no trailing input, and verified FHCRC when present, CRC32, ISIZE, exact compressed consumption, output, and expansion bounds. It keeps the original gzip and decoded TAR as distinct immutable snapshot domains, uses wrapper-native plus TAR-native evidence, requires one exact transform and composite audit, and publishes `sealrTreeV4`. It adds no runtime dependency.
+
+The separately identified [restricted POSIX PAX profile](profiles/tar-pax-portable-v1.md) is selected as `ArchiveFormat::TarPax`, serialized as `tar-pax`, and authorized only by policy v5. It accepts exact portable-ustar physical headers plus bounded `x` and `g` extension payloads containing only canonical `path` and `size` records. A fixed four-field state model resolves local, then global, then underlying ustar values and preserves exact provenance in `sealr.archive-ir.tar-pax.v1`. An independent audit reparses the source covering and replays precedence before `sealrTreeV5` is available. It adds no runtime dependency and does not widen raw ustar or imply general PAX compatibility.
+
+The separately identified [restricted GNU long-name profile](profiles/tar-gnu-longname-portable-v1.md) is selected as `ArchiveFormat::TarGnuLongName`, serialized as `tar-gnu-longname`, and authorized only by policy v6. It requires exact old-GNU magic and admits one bounded pathname-only `L` carrier consumed by exactly the next ordinary member, recording header-or-carrier provenance in `sealr.archive-ir.tar-gnu-longname.v1` and publishing `sealrTreeV6`. Long links, sparse files, base-256 numbers, PAX mixing, orphan carriers, and recovery remain denied.
+
+The separately identified [gzip-wrapped restricted PAX](profiles/tar-gzip-pax-portable-v1.md) and [gzip-wrapped GNU long-name](profiles/tar-gzip-gnu-longname-portable-v1.md) compositions are authorized only by policy v7 as `tar-gzip-pax` and `tar-gzip-gnu-longname`. Each reuses the exact Alpha.10 single-member gzip transform over its frozen raw dialect, keeps the original gzip and decoded TAR as distinct immutable snapshot domains, audits the wrapper and the inner dialect independently, and publishes `sealrTreeV7` or `sealrTreeV8` while preserving the format-neutral content root. They add no runtime dependency, and no composition widens, detects, or aliases another selection.
+
+The separately identified [zstd-wrapped portable ustar profile](profiles/tar-zstd-ustar-portable-v1.md) is authorized only by policy v8 as `tar-zstd-ustar`. It is the first promoted codec adapter beyond Deflate: exactly one RFC 8878 standard frame with skippable frames and dictionaries denied, an 8 MiB pre-allocation window ceiling, checksum and content size verified when present, and the frozen portable ustar language over the derived domain. It publishes `sealrTreeV9`, preserves the format-neutral content root, and adds exactly the two reviewed runtime packages the codec dependency gates budget allows.
+
+The separately identified [xz-wrapped portable ustar profile](profiles/tar-xz-ustar-portable-v1.md) is authorized only by policy v9 as `tar-xz-ustar`. It is the second promoted codec adapter: exactly one XZ stream of one to 4096 LZMA2-only blocks with an 8 MiB dictionary ceiling, CRC32/CRC64/SHA-256 checks verified twice and check `None` denied, declared block sizes verified both-or-neither, and index, backward size, and reserved bits enforced by Sealr's own footer-first container parse. It publishes `sealrTreeV10`, preserves the format-neutral content root, and adds exactly the one reviewed runtime package (`lzma-rust2`) inside the codec dependency gates budget.
+
+The separately identified [bzip2-wrapped portable ustar profile](profiles/tar-bzip2-ustar-portable-v1.md) is authorized only by policy v10 as `tar-bzip2-ustar`. It is the third promoted codec adapter: exactly one bzip2 stream of one to 65,536 blocks whose bit-aligned container Sealr replays independently — a unique-shift footer recovery, a full block-magic scan, and a combined-CRC chain fold that must reproduce the footer exactly — with bzip1, randomized blocks, empty streams, and pbzip2-style concatenation denied. It publishes `sealrTreeV11`, preserves the format-neutral content root, and adds exactly the two reviewed runtime packages (`bzip2`, `libbz2-rs-sys`) the codec dependency gates budget allows.
+
+The separately identified [restricted Copy-only 7z container profile](profiles/7z-copy-portable-v1.md) is authorized only by policy v11 as `7z-copy`. It is the first Gate C container step: exactly one raw-header, single-volume 7z whose every coder is Copy, with minimal-integer encodings, a dense no-gap covering, every container CRC32 verified by Sealr itself, and stock packed headers rejected as unsupported with the producer remedy named. It publishes `sealrTreeV12`, adds zero runtime dependencies, and proves cross-container content parity for the first time: a Copy 7z of the conformance member set shares the TAR family's `sealrTreeV1` content root.
+
+The [API contract](api.md), [safety specification](safety.md), and [finding registry](findings.md) are normative for current behavior.
+
+## Common codecs
+
+The product destination includes the lossless methods ordinary ZIP and TAR producers actually emit. They are codec adapters, not a second unarchiver. Current support and dependency gates are in the [format support architecture](format-support.md); sequencing is in the [later roadmap](../ROADMAP.md#format-and-codec-breadth).
+
+ZIP methods in scope: Store, Deflate, Deflate64, BZip2, LZMA, XZ, and Zstandard. TAR wrappers in scope: uncompressed, gzip, zstd, xz, bzip2, and LZ4 frame. Each adapter must consume declared compressed input exactly, bind every transform and snapshot domain, bound its window and output, fail closed, and reuse the same path, quota, verification, and publication core.
+
+PPMd and encrypted payload decoding are outside the current default direction. RAR4 and RAR5 remain separate research targets subject to decoder-license and trusted-code decisions. Shelling out to another extractor is out of scope. ZIP64 is a structural profile, not a codec.
+
+## Expansion rule
+
+Formats are not added as checkboxes. Each needs:
+
+1. a versioned interpretation profile;
+2. a canonical mapping into `ArchiveIR`;
+3. exact source-range and codec-consumption rules;
+4. resource and path policies;
+5. a hostile and benign corpus;
+6. a concrete consumer whose semantics are understood;
+7. identical canonical evidence on supported Linux, macOS, and Windows targets.
+
+## Wheel profiles are two layers
+
+The supported wheel evaluator does not turn the generic ZIP policy into a package installer.
+
+1. `sealr.profile.zip.portable-utf8.v1` defines the supported container language. It requires strict UTF-8 NFC member names, rejects legacy CP437 and alternate Unicode-name extras, permits exact data descriptors, and uses exhaustive flag and extra-field tables.
+2. `sealr.consumer.python-wheel.v1` binds the exact artifact filename, validates verified `WHEEL`, `METADATA`, and `RECORD` members, and produces a scheme-relative installation plan.
+
+The first layer constructs one archive tree. The second assigns Python packaging meaning to that tree. Neither may reparse the source. The detailed supported-preview rules and corpus plan are in the [Python wheel profile](profiles/python-wheel-v1.md).
+
+## Planned order
+
+| Format or profile | Status | Entry condition |
+|---|---|---|
+| Strict ZIP32 Store and Deflate | Alpha.4 compatibility default | Immutable v1 preview boundary |
+| Exact strict ASCII ZIP profile | Alpha.4 implementation complete | Opt-in v2 has an exhaustive flag table, denies every extra field, and is measured against the pinned pilot |
+| Private file-backed ZIP snapshot | Alpha.5 released | Copy-hash-retain source capability, checked random access, native mutation controls, required resource bounds, and scheduled 3 GiB sparse evidence |
+| Supervised Linux ZIP worker | Alpha.6 released | Explicit x86_64 Linux activation, authenticated packaged helper, Landlock ABI 3 plus seccomp, source replay, and supervisor audit and publication |
+| Portable UTF-8 ZIP path and tree profile | Alpha.8 supported preview | Strict UTF-8 NFC, explicit flagging, no extras, component ceilings, target collision model, and independent vector |
+| Raw portable POSIX ustar | Alpha.9 supported preview | Explicit selection, policy v2 authorization, no new runtime dependency, TAR-native evidence, independent roots, external producer corpus, native package and fuzz gates |
+| Strict ZIP64 | Alpha.10 in-process preview | Explicit policy v3 selection, exact saturated legacy and redundant ZIP64 field agreement, `sealrTreeV3`, and worker refusal pending semantic-record v3 |
+| gzip-wrapped portable ustar | Alpha.10 in-process preview | Explicit policy v4 selection, two immutable domains, exact single-member RFC 1952 consumption and checksums, existing `flate2`, `sealrTreeV4`, and worker refusal pending a later semantic record |
+| Restricted raw POSIX PAX | Alpha.11 in-process preview | Explicit policy v5 selection, only canonical `path` and `size` records, exact precedence provenance, `sealrTreeV5`, zero new dependencies, and fail-closed worker refusal |
+| GNU long-name TAR dialect | Alpha.12 in-process preview | Exact GNU magic plus one `L` carrier consumed by one following ordinary member; long links, sparse files, base-256 numbers, PAX mixing, and recovery denied; policy v6, `sealrTreeV6`, fail-closed worker refusal |
+| gzip-wrapped restricted PAX and GNU TAR | Alpha.12 in-process previews | Reuse the exact Alpha.10 transform over each frozen raw dialect under policy v7, with separate `sealrTreeV7` and `sealrTreeV8` composition identities, the shared content root, and fail-closed worker refusal |
+| zstd TAR wrapper | Alpha.12 in-process preview under policy v8 | Promoted through the executed ruzstd Gate B review: exact single-frame consumption, 8 MiB window ceiling, verified-when-present integrity, two-package dependency delta, `sealrTreeV9`, and fail-closed worker refusal |
+| xz TAR wrapper | Alpha.12 in-process preview under policy v9 | Promoted through the executed lzma-rust2 Gate B review: exact single-stream consumption, LZMA2-only blocks under an 8 MiB dictionary ceiling, twice-verified checks with `None` denied, one-package dependency delta, `sealrTreeV10`, and fail-closed worker refusal |
+| bzip2 TAR wrapper | Alpha.12 in-process preview under policy v10 | Promoted through the executed bzip2/libbz2-rs-sys Gate B review: exact single-stream consumption, bit-level independent container replay with chain-fold verification, format-capped decoder memory, two-package dependency delta, `sealrTreeV11`, and fail-closed worker refusal |
+| 7z Copy container | Alpha.12 in-process preview under policy v11 | The executed Gate C first step: raw-header Copy-only structure with zero new dependencies, minimal-integer and dense-covering rules, all CRCs Sealr-verified, `sealrTreeV12`, cross-container content parity, and fail-closed worker refusal |
+| LZ4 frame wrapper | Deferred while parser breadth is frozen | Resume only after usefulness, compatibility, and review milestones, with exact input, memory, work, checksum, and dependency evidence |
+| ZIP Zstd, XZ/LZMA, BZip2, Deflate64 adapters | After each codec promotion | Same exact-consumption, bounded-window, and dependency rules as Deflate; no second parser |
+| Wheel-oriented UTF-8 ZIP profile | Alpha.7 research evidence preserved | Exact research bytes remain available for historical verification |
+| Python wheel consumer profile | Alpha.8 supported preview | Verified-member API plus wheel metadata, `RECORD`, artifact identity, scheme-relative install-plan rules, and public-surface corpus replay |
+| JAR, wheel, and NuGet | ZIP consumer profiles | Package-specific manifests, signatures, and effects specified independently |
+| APK | ZIP-derived structural plus consumer profile | APK signing block and signature semantics cannot pass through ordinary unique-covering ZIP unchanged |
+| OCI layers | TAR dialect plus stateful consumer | Whiteouts, links, metadata, and prior-tree application specified independently |
+| cpio, ar, deb, RPM, and CAB | Tracked structural and composed profiles | Local parsers, promoted codecs only, equivalent covering, identity, package, and fuzz evidence |
+| 7z LZMA/LZMA2 members and packed headers | Next Gate C steps | Reuse the reviewed lzma-rust2 adapter over the landed Copy-first structure; packed-header admission decided with that review; no full extractor crate |
+| RAR4 and RAR5 | Separate research gates | Store-first structure, licensing decision, solid and volume authority model, and equivalent assurance evidence |
+| Encrypted or spanned archives | Refused in the current direction | Separate key, volume, and streaming trust models would be required |
+
+## No permissive fallback
+
+Unsupported input receives structured evidence. Sealr does not shell out to another extractor, normalize a rejected archive by best effort, or retry through a more permissive parser.

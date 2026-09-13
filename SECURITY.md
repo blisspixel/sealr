@@ -1,0 +1,70 @@
+# Security policy
+
+sealr treats archive interpretation and materialization as a security boundary. The project has an alpha preview line but no stable or production-supported release. Responsible reports are welcome now.
+
+## Report a vulnerability
+
+Do not open a public issue for an exploitable path escape, parser differential, resource-exhaustion bypass, receipt-integrity flaw, or sandbox escape.
+
+Use [GitHub private vulnerability reporting](https://github.com/blisspixel/sealr/security/advisories/new). If that channel is unavailable, open a public issue that contains no vulnerability details and asks for a private contact channel.
+
+Include, when possible:
+
+- the smallest archive fixture or a deterministic generator;
+- the policy id and digest;
+- the observed outcome and expected finding code;
+- operating system, filesystem, and tool version;
+- whether inspect and materialize disagree;
+- whether any path outside the requested destination was read or written.
+
+Do not include malware or sensitive third-party data. A synthetic proof is preferred.
+
+## Current status
+
+There is no production-ready or stable supported version. This source tree targets Alpha.16 and remains an alpha preview; its release page records publication state. The current limitations are listed in [README.md](README.md). The complete pinned ZipDiff construction corpus is enforced in CI. Twelve explicit container and codec selections cover the ZIP32 default, strict ZIP64, portable and restricted TAR dialects, exact gzip, zstd, xz, and bzip2 wrappers, and a Copy-only 7z container. None widens, detects, retries, or aliases through an older default. Each wrapper retains the exact source and one bounded immutable decoded TAR, independently audits both domains and their transform binding, and creates no destination stage before that composite authority passes. Authenticated worker execution accepts only the supported ZIP32 semantic records and rejects every ZIP64, TAR, and 7z selection without fallback until later records can represent their evidence. Production containment, legacy CP437, signed receipts, broader TAR dialects, additional compression methods, and the remaining major-format families are not complete.
+
+Materialization is supported on Linux, macOS, and Windows. Other platforms reject materialization with `materialize.unsupported` rather than falling back to a weaker publication primitive.
+
+## Materialization boundary
+
+The destination parent must already exist. sealr opens that directory as a capability, refuses an existing destination, creates a random 128-bit same-volume stage, writes members through retained no-follow component handles, and publishes only with a native no-replace operation. A missing parent is rejected and is not created as a side effect.
+
+On Linux and macOS, the opened parent must be owned by the effective user or root. Group-writable or other-writable parents are accepted only when the sticky bit is set. A sticky directory owned by any other user is rejected because that owner can mutate its entries. Root-owned sticky directories are trusted only because root is outside the in-process adversary boundary. The created stage must be owned by the effective user and must not grant group or other permissions.
+
+On macOS, sealr additionally queries the opened parent and stage descriptors with `acl_get_fd_np`. Any extended ACL, or an ACL query whose result cannot be established, rejects materialization with `materialize.unsafe_parent`. This closes grants that are not represented by the BSD mode bits.
+
+On Windows, sealr first requires the retained parent to report non-remote, writable NTFS with persistent ACLs. It creates the stage relative to that handle with `NtCreateFile`, `FILE_CREATE`, reparse-point-open semantics, and a security descriptor whose object owner is the effective token user and whose protected DACL contains one inheritable allow ACE for that SID. It verifies that descriptor through the returned handle before member writes, retains the handle without delete sharing, then publishes the same object relative to the parent handle with `NtSetInformationFile` and replacement disabled. This removes inherited DACL grants to other principals, prevents a raced destination overwrite, and prevents stage-object substitution within the documented filesystem boundary. Descendants retain the sole TokenUser ACE but receive the creating token's default owner. A principal matching that owner SID can change a descendant DACL and is outside the containment promise.
+
+Receipts record the materialization backend, stage mode, stage-creation primitive, member-resolution primitive, durability choice, publication primitive, outcome, and cleanup result. On Windows they also record the storage-policy observations and whether the stage ACL was verified, without serializing a SID or volume identity. This is operational evidence, not authentication: receipts remain unsigned in the preview line.
+
+## Platform FFI boundary
+
+Runtime `unsafe` is confined to four platform modules: the macOS descriptor-ACL module, the Windows native volume, token, security-descriptor, stage, and publication module, and the Linux supervised-execution and worker-protocol modules. The parsing, verification, and identity path — every module that interprets untrusted bytes — contains no `unsafe`, and the [TCB report](docs/tcb-report.md) generator fails if runtime `unsafe` appears outside those platform prefixes. These modules are the explicit platform-FFI audit boundary. Changes to them require platform tests and review of pointer lifetime, structure layout, handle ownership, share modes, no-replace semantics, and operating-system error conversion.
+
+## Change control for the trusted computing base
+
+The TCB is measured per release in the committed [TCB report](docs/tcb-report.md), regenerated by `scripts/generate_tcb_report.ps1` and drift-checked by `scripts/verify_tcb_report.ps1`. TCB pull requests follow the size and non-author review discipline in [CONTRIBUTING.md](CONTRIBUTING.md); the non-author requirement is an open 1.0 gate while the project has a single maintainer, tracked rather than waived.
+
+## Residual privilege boundary
+
+The in-process materializer does not claim containment from root, an administrator, SYSTEM, a principal matching the effective token's default-owner SID, a process running as the same security principal, Linux capabilities or Windows privileges that override filesystem access checks, filter drivers, debugging rights, or handle-duplication rights. Those actors can act with the library's authority or interfere below its namespace controls. The explicit x86_64 Linux worker constrains payload verification, stage writes, and later reads, but structural planning remains in the supervisor and a distinct service identity or equivalent mandatory-access-control boundary is required to contain another process running as the same user.
+
+## High-value security properties
+
+A high-value report demonstrates that, under the default policy, sealr:
+
+- publishes a member outside the requested destination;
+- follows a hostile symlink or reparse point;
+- accepts two inconsistent interpretations of one archive;
+- treats a ZIP32 selection as permission to interpret ZIP64, or reports ZIP64 worker isolation without semantic-record v3;
+- exceeds a declared policy cap without rejection;
+- publishes a destination after a rejected member;
+- lets inspect and materialize produce different member trees;
+- omits or misbinds the source, policy, view, or findings in a receipt;
+- reports isolation as active when it was not enforced.
+
+See [the threat model](docs/threat-model.md), [the invariants](docs/invariants.md), and [the finding registry](docs/findings.md).
+
+## Non-goals
+
+sealr does not claim malware detection, content safety, package-graph verification, or that CRC32 is authentication. A successful verdict means the archive passed the selected structural and materialization policy. It does not mean the files are trustworthy to execute.

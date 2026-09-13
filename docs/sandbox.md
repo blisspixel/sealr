@@ -1,0 +1,106 @@
+# Reduced-authority execution
+
+> Implemented explicit Linux reduced-authority path with repository conformance. Default APIs remain in process, while `apply_supervised`, `inspect_supervised`, and `--worker-manifest` select the authenticated fail-closed worker without fallback. Structural planning remains supervisor-owned.
+
+The public worker path preserves the canonical `ArchiveIR`, retained snapshot relationship, and bounded `VerifiedArchive` capability rather than creating a CLI-only second meaning. Private semantic records carry the required plan and completion authority. Protocol v1 remains a separate transport foundation and does not carry that meaning.
+
+The private file-backed `SourceSnapshot` prerequisite landed in [Alpha.5](releases/v0.1.0-alpha.5.md). [Worker protocol v1](worker-protocol.md) defines bounded control and reduced result frames. The first Alpha.6 executable slice was a separate nonsemantic authority bootstrap: pair source and optional stage roles with out-of-band descriptors, validate and close authority, install restrictions before source access, report readiness, then exit and reap without interpreting an archive. This measured the process boundary without forcing v1 into the public semantic API; the later sealed semantic bridge remains separate from protocol v1.
+
+The executable representation slice uses [private semantic records](semantic-record.md). It binds planning IR, completion verification state, and supervisor-selected retention without defining a public wire protocol. The supported Linux supervisor and feature-gated repository lab carry the canonical plan through an immutable sealed memfd and bind it to the restricted worker's exact file-backed snapshot. The generic adapter consumes the actual sealed-plan profile, policy, budget, target, consumer, effect, member-sync, target identity, and retention fields, executes only planned Store and Deflate payload ranges without invoking the structural parser, and captures selected bytes through those verifier calls. It returns canonical completion and retained-content bundles through separately sealed memfds. The source and handoff descriptors remain live through worker observation, exit, and reap. The supervisor first treats both outputs as untrusted proposals, then replays the accepted plan against its retained exact source and requires byte-for-byte agreement. Only then may `apply_supervised` construct public outcome and capability state, audit a materialized stage, or publish it.
+
+Correctness cannot depend on a kernel sandbox. Path, structure, quota, codec, content, and publication invariants remain mandatory. Process confinement reduces the authority available if that logic is compromised.
+
+## Current bootstrap evidence
+
+`sealr-worker-bootstrap-lab` and its child-only `sealr-worker` are non-published workspace artifacts and are absent from native release archives. The helper's production-only build accepts no command or fault selector. The lab requires its explicit absolute path, exact byte length, and SHA-256. It pins the object through `openat2` with beneath, no-symlink, and no-magic-link resolution; streams the same opened bytes into an executable memfd; independently verifies the retained length and digest; and requires write, future-write, grow, shrink, and seal locks, plus the executable seal when supported by the running kernel. The retained read-only descriptor stays close-on-exec and alive through spawn. After binding a pidfd, the supervisor requires a nonce-correlated helper hello and compares the running `/proc/<pid>/exe` object with the retained memfd before sending bootstrap or archive descriptors. Missing, substituted, malformed, mismatched, or unverifiable helpers fail without fallback and are terminated and reaped.
+
+The helper uses a private 96-byte protocol over `SOCK_SEQPACKET` and a raw `recvmsg` path that validates every returned `cmsghdr` with Linux `CMSG_ALIGN` rules. It accepts exactly one `SCM_RIGHTS` record, rejects unknown, malformed, and multiple-rights control records, distinguishes short data, `MSG_TRUNC`, and `MSG_CTRUNC`, and receives descriptors close-on-exec. Every complete installed descriptor is owned before an ancillary or framing rejection can return. A minimal pre-exec hook marks unrelated descriptors close-on-exec. The child is bound to its expected parent, verifies the Unix sequenced-packet control peer and credential settings, closes inherited descriptors before authentication, and proves that child-entry `close_range(CLOSE_RANGE_UNSHARE)` closes a deliberate probe. Standard input remains the control channel; standard output and error stay attached to inert `/dev/null` objects so capabilities cannot reuse those conventional descriptor numbers. Normal inspect, read, materialize, mutation, timeout, and repeated lifecycle cases use the authenticated helper. Deliberate restriction, ancillary, exit, and stall injections alone use the separate lab executable.
+
+The optional stage arrives first. After validating its identity, owner, mode, and type, the child directly queries the running Landlock ABI, rejects a value below 3, sets `no_new_privs`, and handles every filesystem right in the fixed ABI 3 policy. The synthetic stage-probe route grants only `WRITE_FILE`, `MAKE_DIR`, and `MAKE_REG`; the materialize route adds `READ_DIR` so the shared component writer can traverse its own newly created directories. On the required x86_64 Linux runner the child then installs a classic seccomp-BPF filter with thread synchronization. The filter kills a wrong audit architecture or x32 syscall entry and returns `EPERM` for process and thread creation, execution, namespace changes, permission and ownership mutation, extended-attribute mutation, and `ioctl`. Safe direct probes exercise representative syscalls and stage mutations before readiness. The synthetic read-only source is transferred only after the supervisor observes correlated readiness, one thread, `NoNewPrivs: 1`, seccomp filter mode, at least one installed filter, and the exact child descriptor set through procfs.
+
+The conformance command exercises source-only and staged success, outside and sibling denial, stage-local creation, writable and nonregular sources, wrong lengths and identities, missing or injected authority, operation mismatch, extra source descriptors, deterministic ABI-floor, ABI-probe, and seccomp-installation failure, exact source-phase short-data, `MSG_TRUNC`, and `MSG_CTRUNC` cases, and a kernel-generated timestamp header that must be rejected as unknown ancillary. Unit regressions additionally prove that descriptors installed with rejected short, truncated, unknown, malformed, and multiple-rights control data are closed. Canonical semantic planning, completion, retained-content, full-read, and prefix-read request records cross in bounded `SLRBLOB1` memfds with required write, grow, shrink, and seal seals. The receiver checks descriptor type and access, the caller-declared and envelope lengths, role, reserved fields, the 64 MiB payload cap, independently recomputed SHA-256, and exact operation, source, request, profile, policy, resource, target, consumer, effect, retention, and plan binding. Missing seals, declared-length drift, operation drift, role confusion, and full/prefix cross-kind confusion are rejected through the process boundary. The deterministic ZIP fixture includes Store and Deflate members; inspect execution invokes no structural parser and verifies exactly two planned payloads. A separate read boundary handles each selected verified full or prefix request through a fresh restricted worker with no stage or destination authority and one write-only pipe. Full reads retain the exact member. Prefix reads retain only the requested bytes while counting and hashing the complete stream. Evidence covers zero, short, exact, and generous Store and Deflate caps, pre-spawn, queued, and active cancellation, timeout, post-result crash, corruption after the retained prefix, recovery, 64 alternating full and prefix reads, last-owner cleanup, and the descriptor baseline. A private writer route receives only a supervisor-created stage root, the exact source, and a sealed materialization plan. It shares the production component writer and verifier, returns a sealed completion proposal, closes through clean exit and exact reap, and only then permits retained-source replay, exact stage audit, and supervisor-only no-replace publication. Targeted writer evidence covers post-reap mutation, destination appearance, cleanup failure, four crash barriers, and two stalls. The seccomp deny set now also closes rename, link, unlink, symlink, device creation, mount, truncate, and new socket paths before source transfer. Twenty-two point-specific abrupt exits span exec entry through exit acknowledgement on the original path, including plan receive, validation, acceptance, and completion sealing. Eleven stalls add plan receive and acceptance to the earlier pre-bootstrap through post-ack sequence. The supervisor control endpoint is nonblocking; one absolute monotonic deadline covers each complete send-and-response round while `poll` observes both the socket and pidfd. Expiry kills through the pidfd. Every abrupt exit and stall proves its exact classification, bounded reap, unchanged source and outside sentinel, phase-appropriate stage state, cleanup only after reap, and an absent fixture root. One required 500-iteration campaign cycles the closed 44-case bootstrap matrix, and a separate 500-iteration campaign alternates writer publication, audit mutation, destination race, cleanup failure, pre-result crash, and post-result crash. After every iteration each campaign requires an empty supervisor child list, the baseline supervisor descriptor count, exact retained source identity and bytes, an unchanged outside sentinel, and checked cleanup. The parent observes exact stage, source, sealed-plan, and sealed-completion descriptor identity and access state while the child is paused. Required Linux CI runs this command in the existing `CI` workflow:
+
+```text
+rustup target add x86_64-unknown-linux-musl
+cargo build --locked --release -p sealr-worker-bootstrap-lab --no-default-features --bin sealr-worker --target x86_64-unknown-linux-musl
+worker="$PWD/target/x86_64-unknown-linux-musl/release/sealr-worker"
+worker_bytes="$(stat --format=%s "$worker")"
+worker_sha256="$(sha256sum "$worker" | cut --delimiter=' ' --fields=1)"
+cargo run --locked --release -p sealr-worker-bootstrap-lab --features lab --bin sealr-worker-bootstrap-lab -- conformance --worker "$worker" --bytes "$worker_bytes" --sha256 "$worker_sha256"
+```
+
+This evidence does not show that structural parsing ran confined: the supervisor still authors the plan before transfer. The authenticated helper has the fixed [Linux release package contract](helper-packaging.md), remains absent from historical releases through Alpha.5, and is consumed only by the explicit Alpha.6 supervised paths. Default `apply`, `apply_with_options`, and CLI execution remain unchanged, while the CLI can select the same fail-closed boundary through `--worker-manifest`. Deterministic restriction injections prove lifecycle behavior. The separate required [real-kernel gate](../tests/kernel-floor/README.md) boots hash-pinned Debian 6.1.0-15-amd64 under QEMU TCG, independently requires Landlock ABI 2, and proves both public operations fail with typed `RestrictionUnavailable` before source transfer. It also requires no fallback, destination creation, leaked stage, outside-sentinel mutation, or surviving child. Disabled-Landlock and seccomp-disabled real-kernel variants remain unmeasured. The filter is a measured deny set, not a complete syscall allowlist. It denies creation of new network sockets and connection entry, but no general IPC, CPU, memory, or same-user containment is claimed, and seccomp fails closed outside x86_64 Linux. The bootstrap and writer campaigns repeat deterministic lifecycle schedules, not every native race or a near-ceiling retained-transfer or read resource measurement. Proposal validation alone does not prove content digests; retained-source replay closes that gate while deliberately reusing the bounded verifier implementation.
+
+## Target supervisor and worker
+
+The trusted supervisor will:
+
+1. acquire the immutable archive snapshot;
+2. open and retain the destination parent;
+3. create and retain the private stage;
+4. authenticate and start a child-only worker with only bounded archive and stage capabilities;
+5. retain the final destination name and all publication authority;
+6. treat the worker result as untrusted;
+7. terminate and reap the worker boundary and prove that no descendant retains writable stage authority;
+8. validate the chosen complete semantic evidence and audit the staged tree;
+9. publish without replacement or clean up and report failure.
+
+The worker will:
+
+1. validate a bounded, versioned control frame;
+2. install the platform restriction before reading the first archive byte;
+3. close unnecessary control and inherited handles;
+4. interpret, verify, and write only through its archive and stage capabilities;
+5. return the bounded private handoff required by the semantic-ownership decision;
+6. never receive the destination parent, final name, recovery key, or publication authority.
+
+Protocol v1 is only the bounded transport foundation for this split. It does not carry a complete `ArchiveIR`, snapshot ownership, later verified-read authority, or independent interpretation, admission, verification, effect, and lifecycle axes. Its request-bound validator enforces returned profile and resource claims but cannot bind source or policy fields that the result does not echo. The [semantic-ownership decision](decisions/0001-alpha6-semantic-ownership.md) instead supplies private split-phase semantic, full-read and prefix-read, reaped-writer, authenticated-helper, fixed-package, and generic self-bound worker machinery. Public inspect activation uses an explicit fail-closed supervisor, preserves existing public outcome and receipt ownership, and installs a hidden capability backend without silent fallback. A complete record is not automatically an independently checkable certificate, so the worker remains in the semantic trusted computing base for every source-to-record fact the supervisor does not recompute.
+
+## Linux first
+
+Linux is the first supported enforced worker platform. The bootstrap sets `no_new_privs`, probes the running Landlock ABI, requires its fixed ABI 3 rights set, grants only the measured stage operations, and installs its architecture-checked seccomp deny set before source transfer. The supported Linux path requires a Landlock capability floor that includes `REFER` and `TRUNCATE`, currently ABI 3. A weaker kernel reports isolation unavailable and cannot satisfy the enforced-worker gate.
+
+Descriptor authority and path grants are different facts. Landlock does not revoke authority already available through inherited open descriptors, so worker startup must close everything except the bounded control channel, read-only source snapshot, and stage capabilities. The receipt lists those inherited authorities separately from handled pathname rights.
+
+Landlock network controls vary by ABI and do not justify a blanket no-network claim. The worker does not need network access, so the measured x86_64 filter denies new socket, socketpair, connect, bind, listen, and accept paths before source transfer while preserving the already authenticated control socket. Network and syscall confinement remain recorded separately. The filter also prevents process and thread creation and denies permission mutation, rename, link, unlink, symlink, device creation, mount, and truncate operations. The private writer lab now proves clean exit and exact reap before completion validation, source replay, stage audit, cleanup, or supervisor-only publication. A complete syscall allowlist remains deferred until the public parser and writer surface is measured.
+
+Landlock setup failure or insufficient handled rights cannot satisfy the reduced-authority release gate. A future explicit degraded mode may still rely on userspace invariants, but its receipt and exit behavior must not look equivalent to enforced isolation.
+
+Native syscall traces must cover Store, Deflate, rejection, cleanup, worker crash, and publication handoff before an architecture-sensitive seccomp allowlist is proposed.
+
+## macOS and Windows
+
+Alpha.6 keeps native macOS and Windows materialization gates, but no worker containment claim exists on either platform.
+
+A future macOS worker needs a supported packaging and restriction mechanism with native tests. A future Windows worker must evaluate AppContainer, restricted-token, job-object, handle-inheritance, and filesystem ACL behavior together. Neither platform will inherit a Linux claim by analogy.
+
+Until those boundaries exist, receipts report process isolation unavailable while native parser, materializer, and semantic determinism tests remain mandatory.
+
+## Projection is separate
+
+A future read-only projection is a representation of the admitted tree, not a sandbox. It may reduce eager writes and expose a verification frontier, but it does not prevent a caller from copying observed bytes elsewhere. Projection follows the common IR, immutable snapshot, cache identity, and worker design; no platform-specific mount is on the active implementation queue.
+
+## Evidence
+
+The target receipt distinguishes:
+
+- in-process and worker modes;
+- restriction requested, enforced, unavailable, or setup-failed;
+- platform and Landlock ABI where applicable;
+- handled and granted rights;
+- inherited archive and stage descriptor authority;
+- worker exit and protocol status;
+- staged-tree audit outcome;
+- supervisor-owned publication and cleanup outcome.
+
+These fields remain evidence about the control path. Authentication requires the later canonical evidence and signing work.
+
+## Explicit nonclaims
+
+- A worker does not contain root, administrators, SYSTEM, kernel or filter drivers, debug or handle-duplication privilege, or another process running under the same unrestricted principal.
+- Landlock does not constrain a separate same-user process.
+- Projection does not provide process confinement.
+- Seccomp does not replace filesystem containment.
+- A library call will not unexpectedly sandbox its caller.
+
+See [architecture.md](architecture.md#reduced-authority-worker), [threat-model.md](threat-model.md), and the [roadmap worker gate](../ROADMAP.md#stable-10-gates).

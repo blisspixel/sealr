@@ -1,0 +1,512 @@
+{
+  "schema": "sealr.wheel-compatibility-report.v2",
+  "predecessor_report_sha256": "7e4ccd81f36dfdc2d21427f15add02de8403831e1db27c155976ce2b7cfc674d",
+  "manifest_sha256": "71ec8026d04d6fdde9fa58fa9f3b84acd54c3a82b5f0a13bd1aff1b6ab4419a5",
+  "query_date": "2026-08-22",
+  "selection_method": "Stratified pilot of 20 named projects: eight universal wheels and four artifacts from each of Linux x86_64, Windows x86_64, and macOS. For each project, use the current non-yanked release returned by the PyPI JSON API on the query date and the lexicographically first exact universal or CPython 3.12 platform match; cryptography and psutil use compatible abi3 wheels. Projects were chosen to exercise packaging tools, pure libraries, native extensions, and large scientific artifacts. This is judgmental coverage, not a representative sample.",
+  "analyzer": "sealr-wheel-inventory.v2",
+  "interpretation_profile": "sealr.profile.zip.wheel-utf8.v1",
+  "interpretation_profile_sha256": "757ead2782ab9f352fc1ff386733020e4cb114aa43aa1b756f6b7001d4c4cd5f",
+  "artifact_count": 20,
+  "source_bytes": 90417280,
+  "summary": {
+    "outcomes": {
+      "admitted": 16,
+      "denied": 2,
+      "unsupported": 2
+    },
+    "metadata_versions": {
+      "2.1": 2,
+      "2.4": 14
+    },
+    "generators": {
+      "flit 3.12.0": 2,
+      "hatchling 1.29.0": 1,
+      "maturin (1.14.1)": 3,
+      "meson": 2,
+      "poetry-core 2.3.1": 1,
+      "setuptools (75.3.3)": 1,
+      "setuptools (77.0.1)": 1,
+      "setuptools (82.0.1)": 2,
+      "setuptools (83.0.0)": 1,
+      "setuptools (84.0.0)": 2
+    },
+    "data_schemes": {},
+    "filename_tags": {
+      "cp311-abi3-manylinux_2_28_x86_64": 1,
+      "cp312-cp312-macosx_11_0_arm64": 1,
+      "cp312-cp312-macosx_11_0_universal2": 1,
+      "cp312-cp312-manylinux_2_26_x86_64": 1,
+      "cp312-cp312-manylinux_2_27_x86_64": 2,
+      "cp312-cp312-manylinux_2_28_x86_64": 3,
+      "cp312-cp312-win_amd64": 3,
+      "cp37-abi3-win_amd64": 1,
+      "py3-none-any": 6
+    },
+    "finding_artifacts": {
+      "quota.ratio": 1,
+      "wheel.header-duplicate": 1,
+      "wheel.metadata-version-unsupported": 2
+    },
+    "finding_occurrences": {
+      "quota.ratio": 3,
+      "wheel.header-duplicate": 1,
+      "wheel.metadata-version-unsupported": 2
+    },
+    "creator_systems": {
+      "0": 1762,
+      "3": 2615
+    },
+    "artifacts_with_unicode_paths": 0,
+    "executable_members": 61
+  },
+  "artifacts": [
+    {
+      "project": "cffi",
+      "version": "2.1.1",
+      "cohort": "macos-arm64",
+      "filename": "cffi-2.1.1-cp312-cp312-macosx_11_0_arm64.whl",
+      "sha256": "f81b3b8f3d4e343550fa4baa0e479bba9f2d29ce9c2e9b51d1ce1718d7442fcf",
+      "size": 184719,
+      "outcome": "denied",
+      "findings": [
+        {
+          "stage": "wheel-metadata",
+          "code": "wheel.header-duplicate",
+          "detail": "metadata field Generator is duplicated",
+          "path": null
+        }
+      ],
+      "metadata_version": null,
+      "generator": null,
+      "data_schemes": [],
+      "filename_tags": [],
+      "unicode_paths": 0,
+      "creator_systems": {},
+      "executable_members": 0
+    },
+    {
+      "project": "cryptography",
+      "version": "50.0.0",
+      "cohort": "linux-x86_64",
+      "filename": "cryptography-50.0.0-cp311-abi3-manylinux_2_28_x86_64.whl",
+      "sha256": "b42a28c1844fd9de8f3f7d540e36b66f3a9c83fceac7170ebc7a6a19edd9dcae",
+      "size": 4734609,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.4",
+      "generator": "maturin (1.14.1)",
+      "data_schemes": [],
+      "filename_tags": [
+        "cp311-abi3-manylinux_2_28_x86_64"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "3": 141
+      },
+      "executable_members": 1
+    },
+    {
+      "project": "grpcio",
+      "version": "1.83.0",
+      "cohort": "macos-universal2",
+      "filename": "grpcio-1.83.0-cp312-cp312-macosx_11_0_universal2.whl",
+      "sha256": "33898e6a28e4ae598f1577cb1c4fec2a15c033d0ec52b9b45a09610dd045b9da",
+      "size": 12160538,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.4",
+      "generator": "setuptools (77.0.1)",
+      "data_schemes": [],
+      "filename_tags": [
+        "cp312-cp312-macosx_11_0_universal2"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "3": 66
+      },
+      "executable_members": 1
+    },
+    {
+      "project": "hatchling",
+      "version": "1.32.0",
+      "cohort": "universal",
+      "filename": "hatchling-1.32.0-py3-none-any.whl",
+      "sha256": "0e17c9c3b9aa7c625acc8d0f5b622f107d5049af9ecf5ada4de1aada5be7cdbc",
+      "size": 78435,
+      "outcome": "unsupported",
+      "findings": [
+        {
+          "stage": "core-metadata",
+          "code": "wheel.metadata-version-unsupported",
+          "detail": "Core Metadata version \"2.5\" is not supported",
+          "path": null
+        }
+      ],
+      "metadata_version": null,
+      "generator": null,
+      "data_schemes": [],
+      "filename_tags": [],
+      "unicode_paths": 0,
+      "creator_systems": {},
+      "executable_members": 0
+    },
+    {
+      "project": "lxml",
+      "version": "6.1.2",
+      "cohort": "linux-x86_64",
+      "filename": "lxml-6.1.2-cp312-cp312-manylinux_2_26_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "04cf9e3f4ee9cab9d9ba05401bef8668840fa9620fcd4d8e85a2d2fd0b0fa960",
+      "size": 5244532,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.4",
+      "generator": "setuptools (84.0.0)",
+      "data_schemes": [],
+      "filename_tags": [
+        "cp312-cp312-manylinux_2_26_x86_64",
+        "cp312-cp312-manylinux_2_28_x86_64"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "3": 188
+      },
+      "executable_members": 7
+    },
+    {
+      "project": "numpy",
+      "version": "2.5.2",
+      "cohort": "linux-x86_64",
+      "filename": "numpy-2.5.2-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "3cdec01fa790a186d430433fdd4d4ffb70eed6f0eeb4bf05c8dbe2dce0a9bcb8",
+      "size": 16722264,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.4",
+      "generator": "meson",
+      "data_schemes": [],
+      "filename_tags": [
+        "cp312-cp312-manylinux_2_27_x86_64",
+        "cp312-cp312-manylinux_2_28_x86_64"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "3": 1044
+      },
+      "executable_members": 23
+    },
+    {
+      "project": "orjson",
+      "version": "3.12.0",
+      "cohort": "windows-x86_64",
+      "filename": "orjson-3.12.0-cp312-cp312-win_amd64.whl",
+      "sha256": "010811c1b69773450a01cef97727a67b223242f350b77d4ca000e59a9ef2155a",
+      "size": 122106,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.4",
+      "generator": "maturin (1.14.1)",
+      "data_schemes": [],
+      "filename_tags": [
+        "cp312-cp312-win_amd64"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "0": 11
+      },
+      "executable_members": 1
+    },
+    {
+      "project": "packaging",
+      "version": "26.3",
+      "cohort": "universal",
+      "filename": "packaging-26.3-py3-none-any.whl",
+      "sha256": "d7193f7c8e4e93f444fde0262bf90af30e16fa0ad0ad44cb553c87339b23cd1c",
+      "size": 129956,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.4",
+      "generator": "flit 3.12.0",
+      "data_schemes": [],
+      "filename_tags": [
+        "py3-none-any"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "3": 29
+      },
+      "executable_members": 0
+    },
+    {
+      "project": "pandas",
+      "version": "3.0.5",
+      "cohort": "windows-x86_64",
+      "filename": "pandas-3.0.5-cp312-cp312-win_amd64.whl",
+      "sha256": "80a611068e8a3ac23f7398c6c14eb46dc974e5cc9997f653e2dcfd1da74edd41",
+      "size": 9831691,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.1",
+      "generator": "meson",
+      "data_schemes": [],
+      "filename_tags": [
+        "cp312-cp312-win_amd64"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "0": 1725
+      },
+      "executable_members": 0
+    },
+    {
+      "project": "pillow",
+      "version": "12.3.0",
+      "cohort": "linux-x86_64",
+      "filename": "pillow-12.3.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl",
+      "sha256": "78cb2c6865a35ab8ff8b75fd122f6033b92a62c82801110e48ddd6c936a45d91",
+      "size": 6940830,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.4",
+      "generator": "setuptools (82.0.1)",
+      "data_schemes": [],
+      "filename_tags": [
+        "cp312-cp312-manylinux_2_27_x86_64",
+        "cp312-cp312-manylinux_2_28_x86_64"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "3": 145
+      },
+      "executable_members": 26
+    },
+    {
+      "project": "pip",
+      "version": "26.2.1",
+      "cohort": "universal",
+      "filename": "pip-26.2.1-py3-none-any.whl",
+      "sha256": "71138adf1f4ca900cdb7d289c21b7494329f2332b6d85f0e1c42108c0384ed3e",
+      "size": 1816632,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.4",
+      "generator": "flit 3.12.0",
+      "data_schemes": [],
+      "filename_tags": [
+        "py3-none-any"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "3": 476
+      },
+      "executable_members": 1
+    },
+    {
+      "project": "psutil",
+      "version": "7.2.2",
+      "cohort": "windows-x86_64",
+      "filename": "psutil-7.2.2-cp37-abi3-win_amd64.whl",
+      "sha256": "eb7e81434c8d223ec4a219b5fc1c47d0417b12be7ea866e24fb5ad6e84b3d988",
+      "size": 137737,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.1",
+      "generator": "setuptools (75.3.3)",
+      "data_schemes": [],
+      "filename_tags": [
+        "cp37-abi3-win_amd64"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "0": 16
+      },
+      "executable_members": 0
+    },
+    {
+      "project": "pydantic-core",
+      "version": "2.48.0",
+      "cohort": "macos-arm64",
+      "filename": "pydantic_core-2.48.0-cp312-cp312-macosx_11_0_arm64.whl",
+      "sha256": "998fe237ad91f8b6a216a344a70cc566557b3c905c4c12c319426425476ddc5a",
+      "size": 1935770,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.4",
+      "generator": "maturin (1.14.1)",
+      "data_schemes": [],
+      "filename_tags": [
+        "cp312-cp312-macosx_11_0_arm64"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "3": 10
+      },
+      "executable_members": 1
+    },
+    {
+      "project": "regex",
+      "version": "2026.7.19",
+      "cohort": "windows-x86_64",
+      "filename": "regex-2026.7.19-cp312-cp312-win_amd64.whl",
+      "sha256": "e30d40268a28d54ce0437031750497004c22602b8e3ab891f759b795a003b312",
+      "size": 277777,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.4",
+      "generator": "setuptools (83.0.0)",
+      "data_schemes": [],
+      "filename_tags": [
+        "cp312-cp312-win_amd64"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "0": 10
+      },
+      "executable_members": 0
+    },
+    {
+      "project": "requests",
+      "version": "2.34.2",
+      "cohort": "universal",
+      "filename": "requests-2.34.2-py3-none-any.whl",
+      "sha256": "2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0",
+      "size": 73075,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.4",
+      "generator": "setuptools (82.0.1)",
+      "data_schemes": [],
+      "filename_tags": [
+        "py3-none-any"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "3": 26
+      },
+      "executable_members": 0
+    },
+    {
+      "project": "rich",
+      "version": "15.0.0",
+      "cohort": "universal",
+      "filename": "rich-15.0.0-py3-none-any.whl",
+      "sha256": "33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb",
+      "size": 310654,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.4",
+      "generator": "poetry-core 2.3.1",
+      "data_schemes": [],
+      "filename_tags": [
+        "py3-none-any"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "3": 105
+      },
+      "executable_members": 0
+    },
+    {
+      "project": "scipy",
+      "version": "1.18.1",
+      "cohort": "macos-arm64",
+      "filename": "scipy-1.18.1-cp312-cp312-macosx_12_0_arm64.whl",
+      "sha256": "e708533e8b2ae2497d65346538a7dcc92814410b25b81432eac66de0f2af8265",
+      "size": 28733332,
+      "outcome": "denied",
+      "findings": [
+        {
+          "stage": "container",
+          "code": "quota.ratio",
+          "detail": "declared 577633:2463 exceeds 100:1",
+          "path": "scipy/stats/tests/data/nist_anova/SmLs09.dat"
+        },
+        {
+          "stage": "container",
+          "code": "quota.ratio",
+          "detail": "declared 451566:2098 exceeds 100:1",
+          "path": "scipy/stats/tests/data/nist_anova/SmLs03.dat"
+        },
+        {
+          "stage": "container",
+          "code": "quota.ratio",
+          "detail": "declared 523605:2310 exceeds 100:1",
+          "path": "scipy/stats/tests/data/nist_anova/SmLs06.dat"
+        }
+      ],
+      "metadata_version": null,
+      "generator": null,
+      "data_schemes": [],
+      "filename_tags": [],
+      "unicode_paths": 0,
+      "creator_systems": {},
+      "executable_members": 0
+    },
+    {
+      "project": "setuptools",
+      "version": "84.0.0",
+      "cohort": "universal",
+      "filename": "setuptools-84.0.0-py3-none-any.whl",
+      "sha256": "51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670",
+      "size": 818216,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.4",
+      "generator": "setuptools (84.0.0)",
+      "data_schemes": [],
+      "filename_tags": [
+        "py3-none-any"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "3": 343
+      },
+      "executable_members": 0
+    },
+    {
+      "project": "urllib3",
+      "version": "2.7.0",
+      "cohort": "universal",
+      "filename": "urllib3-2.7.0-py3-none-any.whl",
+      "sha256": "9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897",
+      "size": 131087,
+      "outcome": "admitted",
+      "findings": [],
+      "metadata_version": "2.4",
+      "generator": "hatchling 1.29.0",
+      "data_schemes": [],
+      "filename_tags": [
+        "py3-none-any"
+      ],
+      "unicode_paths": 0,
+      "creator_systems": {
+        "3": 42
+      },
+      "executable_members": 0
+    },
+    {
+      "project": "wheel",
+      "version": "0.48.0",
+      "cohort": "universal",
+      "filename": "wheel-0.48.0-py3-none-any.whl",
+      "sha256": "3217dcc807155e45db462d7ef2431f5ddda0d7273b700d05a67b271ceb1287ab",
+      "size": 33320,
+      "outcome": "unsupported",
+      "findings": [
+        {
+          "stage": "core-metadata",
+          "code": "wheel.metadata-version-unsupported",
+          "detail": "Core Metadata version \"2.5\" is not supported",
+          "path": null
+        }
+      ],
+      "metadata_version": null,
+      "generator": null,
+      "data_schemes": [],
+      "filename_tags": [],
+      "unicode_paths": 0,
+      "creator_systems": {},
+      "executable_members": 0
+    }
+  ]
+}

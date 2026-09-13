@@ -1,0 +1,20 @@
+[package]
+name = "sealr-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "CLI façade for the sealr archive boundary"
+repository.workspace = true
+publish = false
+
+[[bin]]
+name = "sealr"
+path = "src/main.rs"
+doc = false
+
+[dependencies]
+clap.workspace = true
+sealr = { version = "0.1.0-alpha.16", path = "../sealr" }
+serde.workspace = true
+serde_json.workspace = true

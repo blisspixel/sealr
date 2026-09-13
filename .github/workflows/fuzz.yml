@@ -1,0 +1,681 @@
+name: Scheduled fuzz
+
+on:
+  schedule:
+    - cron: "31 8 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-fuzz-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  protocol:
+    name: Bounded worker protocol
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned nightly
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Verify seed and configuration manifest
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Fuzz bounded protocol decoders
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/sealr-fuzz-artifacts/"
+          mkdir -p "${artifact_dir}"
+          cargo +nightly-2026-08-01 fuzz run \
+            --fuzz-dir fuzz \
+            --jobs 1 \
+            protocol_decoders \
+            -- \
+            -jobs=1 \
+            -max_len=4194304 \
+            -max_total_time=600 \
+            -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="${artifact_dir}" \
+            -dict=fuzz/dictionaries/protocol_dictionary \
+            -print_final_stats=1
+
+      - name: Preserve reproducer after a failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: protocol-decoder-reproducer
+          path: ${{ runner.temp }}/sealr-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  semantic:
+    name: Bounded semantic records
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned nightly
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Verify seed and configuration manifest
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Fuzz bounded semantic records
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/sealr-semantic-fuzz-artifacts/"
+          mkdir -p "${artifact_dir}"
+          cargo +nightly-2026-08-01 fuzz run \
+            --fuzz-dir fuzz \
+            --jobs 1 \
+            semantic_records \
+            -- \
+            -jobs=1 \
+            -max_len=4194304 \
+            -max_total_time=600 \
+            -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="${artifact_dir}" \
+            -dict=fuzz/dictionaries/semantic_record_dictionary \
+            -print_final_stats=1
+
+      - name: Preserve reproducer after a failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: semantic-record-reproducer
+          path: ${{ runner.temp }}/sealr-semantic-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  tar_ustar:
+    name: Bounded raw POSIX ustar
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned nightly
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Verify seed and configuration manifest
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Fuzz bounded raw POSIX ustar
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/sealr-tar-ustar-fuzz-artifacts/"
+          mkdir -p "${artifact_dir}"
+          cargo +nightly-2026-08-01 fuzz run \
+            --fuzz-dir fuzz \
+            --jobs 1 \
+            tar_ustar_portable_v1 \
+            -- \
+            -jobs=1 \
+            -max_len=4194304 \
+            -max_total_time=600 \
+            -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="${artifact_dir}" \
+            -dict=fuzz/dictionaries/tar_ustar_portable_v1_dictionary \
+            -print_final_stats=1
+
+      - name: Preserve reproducer after a failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tar-ustar-reproducer
+          path: ${{ runner.temp }}/sealr-tar-ustar-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  tar_pax:
+    name: Bounded raw POSIX PAX
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned nightly
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Verify seed and configuration manifest
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Fuzz bounded raw POSIX PAX
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/sealr-tar-pax-fuzz-artifacts/"
+          mkdir -p "${artifact_dir}"
+          cargo +nightly-2026-08-01 fuzz run \
+            --fuzz-dir fuzz \
+            --jobs 1 \
+            tar_pax_portable_v1 \
+            -- \
+            -jobs=1 \
+            -max_len=4194304 \
+            -max_total_time=600 \
+            -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="${artifact_dir}" \
+            -dict=fuzz/dictionaries/tar_pax_portable_v1_dictionary \
+            -print_final_stats=1
+
+      - name: Preserve reproducer after a failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tar-pax-reproducer
+          path: ${{ runner.temp }}/sealr-tar-pax-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  tar_gnu_longname:
+    name: Bounded raw GNU long-name TAR
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned nightly
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Verify seed and configuration manifest
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Fuzz bounded raw GNU long-name TAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/sealr-tar-gnu-longname-fuzz-artifacts/"
+          mkdir -p "${artifact_dir}"
+          cargo +nightly-2026-08-01 fuzz run \
+            --fuzz-dir fuzz \
+            --sanitizer address \
+            --jobs 1 \
+            tar_gnu_longname_portable_v1 \
+            -- \
+            -jobs=1 \
+            -max_len=4194304 \
+            -max_total_time=600 \
+            -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="${artifact_dir}" \
+            -dict=fuzz/dictionaries/tar_gnu_longname_portable_v1_dictionary \
+            -print_final_stats=1
+
+      - name: Preserve reproducer after a failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tar-gnu-longname-reproducer
+          path: ${{ runner.temp }}/sealr-tar-gnu-longname-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  gzip:
+    name: Bounded RFC 1952 gzip
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned nightly
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Verify seed and configuration manifest
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Fuzz bounded RFC 1952 gzip
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/sealr-gzip-fuzz-artifacts/"
+          mkdir -p "${artifact_dir}"
+          cargo +nightly-2026-08-01 fuzz run \
+            --fuzz-dir fuzz \
+            --jobs 1 \
+            gzip_rfc1952_single_member_v1 \
+            -- \
+            -jobs=1 \
+            -max_len=1048576 \
+            -max_total_time=600 \
+            -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="${artifact_dir}" \
+            -dict=fuzz/dictionaries/gzip_rfc1952_single_member_v1_dictionary \
+            -print_final_stats=1
+
+      - name: Preserve reproducer after a failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: gzip-rfc1952-reproducer
+          path: ${{ runner.temp }}/sealr-gzip-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  tar_gzip_ustar:
+    name: Bounded public TAR gzip ustar
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned nightly
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Verify seed and configuration manifest
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Fuzz bounded public TAR gzip ustar
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/sealr-tar-gzip-fuzz-artifacts/"
+          mkdir -p "${artifact_dir}"
+          cargo +nightly-2026-08-01 fuzz run \
+            --fuzz-dir fuzz \
+            --sanitizer address \
+            --jobs 1 \
+            tar_gzip_ustar_portable_v1 \
+            -- \
+            -jobs=1 \
+            -max_len=262144 \
+            -max_total_time=600 \
+            -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="${artifact_dir}" \
+            -dict=fuzz/dictionaries/tar_gzip_ustar_portable_v1_dictionary \
+            -print_final_stats=1
+
+      - name: Preserve reproducer after a failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tar-gzip-ustar-reproducer
+          path: ${{ runner.temp }}/sealr-tar-gzip-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  zip64:
+    name: Bounded strict ZIP64
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned nightly
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Verify seed and configuration manifest
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Fuzz bounded strict ZIP64 planning
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/sealr-zip64-fuzz-artifacts/"
+          mkdir -p "${artifact_dir}"
+          cargo +nightly-2026-08-01 fuzz run \
+            --fuzz-dir fuzz \
+            --jobs 1 \
+            zip64_strict_ascii_v1 \
+            -- \
+            -jobs=1 \
+            -max_len=1048576 \
+            -max_total_time=600 \
+            -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="${artifact_dir}" \
+            -dict=fuzz/dictionaries/zip64_strict_ascii_v1_dictionary \
+            -print_final_stats=1
+
+      - name: Preserve reproducer after a failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: zip64-strict-reproducer
+          path: ${{ runner.temp }}/sealr-zip64-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  tar_gzip_pax:
+    name: Bounded gzip-wrapped restricted PAX TAR
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned nightly
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Verify seed and configuration manifest
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Fuzz bounded gzip-wrapped restricted PAX TAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/sealr-tar-gzip-pax-fuzz-artifacts/"
+          mkdir -p "${artifact_dir}"
+          cargo +nightly-2026-08-01 fuzz run \
+            --fuzz-dir fuzz \
+            --sanitizer address \
+            --jobs 1 \
+            tar_gzip_pax_portable_v1 \
+            -- \
+            -jobs=1 \
+            -max_len=262144 \
+            -max_total_time=600 \
+            -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="${artifact_dir}" \
+            -dict=fuzz/dictionaries/tar_gzip_pax_portable_v1_dictionary \
+            -print_final_stats=1
+
+      - name: Preserve reproducer after a failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tar-gzip-pax-reproducer
+          path: ${{ runner.temp }}/sealr-tar-gzip-pax-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  tar_gzip_gnu_longname:
+    name: Bounded gzip-wrapped GNU long-name TAR
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned nightly
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Verify seed and configuration manifest
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Fuzz bounded gzip-wrapped GNU long-name TAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/sealr-tar-gzip-gnu-longname-fuzz-artifacts/"
+          mkdir -p "${artifact_dir}"
+          cargo +nightly-2026-08-01 fuzz run \
+            --fuzz-dir fuzz \
+            --sanitizer address \
+            --jobs 1 \
+            tar_gzip_gnu_longname_portable_v1 \
+            -- \
+            -jobs=1 \
+            -max_len=262144 \
+            -max_total_time=600 \
+            -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="${artifact_dir}" \
+            -dict=fuzz/dictionaries/tar_gzip_gnu_longname_portable_v1_dictionary \
+            -print_final_stats=1
+
+      - name: Preserve reproducer after a failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tar-gzip-gnu-longname-reproducer
+          path: ${{ runner.temp }}/sealr-tar-gzip-gnu-longname-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  tar_zstd_ustar:
+    name: Bounded zstd-wrapped portable ustar TAR
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned nightly
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Verify seed and configuration manifest
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Fuzz bounded zstd-wrapped portable ustar TAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/sealr-tar-zstd-fuzz-artifacts/"
+          mkdir -p "${artifact_dir}"
+          cargo +nightly-2026-08-01 fuzz run \
+            --fuzz-dir fuzz \
+            --sanitizer address \
+            --jobs 1 \
+            tar_zstd_ustar_portable_v1 \
+            -- \
+            -jobs=1 \
+            -max_len=262144 \
+            -max_total_time=600 \
+            -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="${artifact_dir}" \
+            -dict=fuzz/dictionaries/tar_zstd_ustar_portable_v1_dictionary \
+            -print_final_stats=1
+
+      - name: Preserve reproducer after a failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tar-zstd-ustar-reproducer
+          path: ${{ runner.temp }}/sealr-tar-zstd-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  tar_xz_ustar:
+    name: Bounded xz-wrapped portable ustar TAR
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned nightly
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Verify seed and configuration manifest
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Fuzz bounded xz-wrapped portable ustar TAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/sealr-tar-xz-fuzz-artifacts/"
+          mkdir -p "${artifact_dir}"
+          cargo +nightly-2026-08-01 fuzz run \
+            --fuzz-dir fuzz \
+            --sanitizer address \
+            --jobs 1 \
+            tar_xz_ustar_portable_v1 \
+            -- \
+            -jobs=1 \
+            -max_len=262144 \
+            -max_total_time=600 \
+            -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="${artifact_dir}" \
+            -dict=fuzz/dictionaries/tar_xz_ustar_portable_v1_dictionary \
+            -print_final_stats=1
+
+      - name: Preserve reproducer after a failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tar-xz-ustar-reproducer
+          path: ${{ runner.temp }}/sealr-tar-xz-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  tar_bzip2_ustar:
+    name: Bounded bzip2-wrapped portable ustar TAR
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned nightly
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Verify seed and configuration manifest
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Fuzz bounded bzip2-wrapped portable ustar TAR
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/sealr-tar-bzip2-fuzz-artifacts/"
+          mkdir -p "${artifact_dir}"
+          cargo +nightly-2026-08-01 fuzz run \
+            --fuzz-dir fuzz \
+            --sanitizer address \
+            --jobs 1 \
+            tar_bzip2_ustar_portable_v1 \
+            -- \
+            -jobs=1 \
+            -max_len=262144 \
+            -max_total_time=600 \
+            -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="${artifact_dir}" \
+            -dict=fuzz/dictionaries/tar_bzip2_ustar_portable_v1_dictionary \
+            -print_final_stats=1
+
+      - name: Preserve reproducer after a failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tar-bzip2-ustar-reproducer
+          path: ${{ runner.temp }}/sealr-tar-bzip2-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+
+  sevenz_copy:
+    name: Bounded Copy-only 7z container
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned nightly
+        run: rustup toolchain install nightly-2026-08-01 --profile minimal
+
+      - name: Install pinned cargo-fuzz
+        run: cargo +nightly-2026-08-01 install cargo-fuzz --version 0.13.2 --locked
+
+      - name: Verify seed and configuration manifest
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Fuzz bounded Copy-only 7z container
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_dir="${RUNNER_TEMP}/sealr-sevenz-copy-fuzz-artifacts/"
+          mkdir -p "${artifact_dir}"
+          cargo +nightly-2026-08-01 fuzz run \
+            --fuzz-dir fuzz \
+            --sanitizer address \
+            --jobs 1 \
+            sevenz_copy_portable_v1 \
+            -- \
+            -jobs=1 \
+            -max_len=262144 \
+            -max_total_time=600 \
+            -timeout=5 \
+            -rss_limit_mb=1024 \
+            -artifact_prefix="${artifact_dir}" \
+            -dict=fuzz/dictionaries/sevenz_copy_portable_v1_dictionary \
+            -print_final_stats=1
+
+      - name: Preserve reproducer after a failure
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: sevenz-copy-reproducer
+          path: ${{ runner.temp }}/sealr-sevenz-copy-fuzz-artifacts/
+          if-no-files-found: ignore
+          retention-days: 7
+

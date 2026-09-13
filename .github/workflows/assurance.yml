@@ -1,0 +1,263 @@
+name: Scheduled assurance discovery
+
+on:
+  schedule:
+    - cron: '29 9 * * 3'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: assurance-discovery-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: 1.98.0
+  KANI_VERSION: 0.67.0
+  CARGO_MUTANTS_VERSION: 27.1.0
+  CARGO_LLVM_COV_VERSION: 0.9.0
+  CARGO_SEMVER_CHECKS_VERSION: 0.49.0
+  CARGO_SEMVER_CHECKS_ARCHIVE_SHA256: 72f6834d75d28a66e02c9fd6a230ce901bb30eee6067b85867a97445df040e4a
+  SEMVER_BASELINE_TAG: v0.1.0-alpha.12
+  SEMVER_BASELINE_REV: 9d762a596624415b8499b774707d018cf128dbd6
+  SEMVER_BASELINE_VERSION: 0.1.0-alpha.12
+
+jobs:
+  kani:
+    name: Bounded scalar model checking
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Kani
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install kani-verifier --version "${KANI_VERSION}" --locked
+          cargo kani setup
+          cargo kani --version | grep --fixed-strings "${KANI_VERSION}"
+
+      - name: Prove bounded scalar kernels
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/assurance-discovery
+          cargo kani --manifest-path verification/kani/Cargo.toml --package sealr --default-unwind 1 2>&1 |
+            tee target/assurance-discovery/kani.log
+
+      - name: Upload bounded model-checking report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kani-${{ github.sha }}
+          path: target/assurance-discovery/kani.log
+          if-no-files-found: error
+          retention-days: 30
+
+  mutation:
+    name: Targeted mutation discovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust
+        run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
+
+      - name: Select pinned Rust
+        run: rustup default ${{ env.RUST_VERSION }}
+
+      - name: Install pinned cargo-mutants
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install cargo-mutants --version "${CARGO_MUTANTS_VERSION}" --locked
+          cargo-mutants mutants --version | grep --fixed-strings "${CARGO_MUTANTS_VERSION}"
+
+      - name: Discover weak scalar assertions
+        shell: bash
+        run: |
+          set -uo pipefail
+          mkdir -p target/assurance-discovery
+          set +e
+          cargo-mutants mutants \
+            --no-config \
+            --package sealr \
+            --file crates/sealr/src/interval.rs \
+            --file crates/sealr/src/quota.rs \
+            --file crates/sealr/src/ratio.rs \
+            --re 'CheckedInterval::from_offset_len|QuotaState::consume|ratio_exceeds' \
+            --exclude-re 'kani_proofs' \
+            --jobs 2 \
+            --timeout 120 \
+            --output target/assurance-discovery/mutation \
+            --no-times \
+            --colors never \
+            --annotations none \
+            --cargo-arg=--locked \
+            -- --lib
+          status=$?
+          set -e
+          printf '%s\n' "${status}" > target/assurance-discovery/mutation/exit-code.txt
+          test -f target/assurance-discovery/mutation/mutants.out/outcomes.json
+          case "${status}" in
+            0|2|3)
+              ;;
+            *)
+              echo "cargo-mutants infrastructure, usage, filter, or baseline failed with ${status}" >&2
+              exit "${status}"
+              ;;
+          esac
+
+      - name: Upload mutation discovery report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mutation-discovery-${{ github.sha }}
+          path: target/assurance-discovery/mutation
+          if-no-files-found: error
+          retention-days: 30
+
+  coverage:
+    name: Source coverage discovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust
+        run: >-
+          rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
+          --component llvm-tools-preview
+
+      - name: Select pinned Rust
+        run: rustup default ${{ env.RUST_VERSION }}
+
+      - name: Install pinned cargo-llvm-cov
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo install cargo-llvm-cov --version "${CARGO_LLVM_COV_VERSION}" --locked
+          cargo llvm-cov --version | grep --fixed-strings "${CARGO_LLVM_COV_VERSION}"
+
+      - name: Measure source coverage for discovery
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/assurance-discovery
+          cargo llvm-cov \
+            --locked \
+            --package sealr \
+            --all-features \
+            --json \
+            --summary-only \
+            --output-path target/assurance-discovery/coverage.json
+          test -s target/assurance-discovery/coverage.json
+
+      - name: Upload source coverage discovery report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: coverage-discovery-${{ github.sha }}
+          path: target/assurance-discovery/coverage.json
+          if-no-files-found: error
+          retention-days: 30
+
+  semver:
+    name: Public API compatibility discovery
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository and tags
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Install pinned Rust
+        run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
+
+      - name: Select pinned Rust
+        run: rustup default ${{ env.RUST_VERSION }}
+
+      - name: Authenticate pinned cargo-semver-checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="target/assurance-discovery/semver"
+          archive="${report}/cargo-semver-checks.tar.gz"
+          tool_dir="${report}/tool"
+          mkdir -p "${tool_dir}"
+          curl \
+            --proto '=https' \
+            --tlsv1.2 \
+            --fail \
+            --location \
+            --retry 3 \
+            --output "${archive}" \
+            "https://github.com/obi1kenobi/cargo-semver-checks/releases/download/v${CARGO_SEMVER_CHECKS_VERSION}/cargo-semver-checks-x86_64-unknown-linux-gnu.tar.gz"
+          echo "${CARGO_SEMVER_CHECKS_ARCHIVE_SHA256}  ${archive}" |
+            sha256sum --check
+          tar --extract --gzip --file "${archive}" --directory "${tool_dir}"
+          test -x "${tool_dir}/cargo-semver-checks"
+          test "$("${tool_dir}/cargo-semver-checks" --version)" = \
+            "cargo-semver-checks ${CARGO_SEMVER_CHECKS_VERSION}"
+
+      - name: Compare the packaged Alpha.12 public API
+        shell: bash
+        run: |
+          set -euo pipefail
+          report="target/assurance-discovery/semver"
+          baseline_source="${RUNNER_TEMP}/sealr-semver-baseline-source"
+          baseline_target="${RUNNER_TEMP}/sealr-semver-baseline-target"
+          baseline_package="${baseline_target}/package/sealr-${SEMVER_BASELINE_VERSION}"
+          tool="${report}/tool/cargo-semver-checks"
+          mkdir -p "${baseline_source}" "${baseline_target}"
+          {
+            "${tool}" --version
+            rustc --version
+            cargo --version
+            actual_revision="$(git rev-parse "${SEMVER_BASELINE_TAG}^{commit}")"
+            test "${actual_revision}" = "${SEMVER_BASELINE_REV}"
+            printf 'baseline tag: %s\nbaseline revision: %s\n' \
+              "${SEMVER_BASELINE_TAG}" "${actual_revision}"
+            git archive --format=tar "${SEMVER_BASELINE_REV}" |
+              tar --extract --directory "${baseline_source}"
+            CARGO_TARGET_DIR="${baseline_target}" cargo package \
+              --locked \
+              --allow-dirty \
+              --manifest-path "${baseline_source}/crates/sealr/Cargo.toml"
+            test -f "${baseline_package}/Cargo.toml"
+            "${tool}" check-release \
+              --manifest-path crates/sealr/Cargo.toml \
+              --baseline-root "${baseline_package}" \
+              --release-type minor
+          } 2>&1 | tee "${report}/semver.log"
+          grep --extended-regexp '^  (struct|field) ' "${report}/semver.log" \
+            > "${report}/known-warnings.txt" || test "$?" -eq 1
+          sed --in-place --regexp-extended \
+            -e 's/^  //' \
+            -e 's/, previously in file .*$//' \
+            -e 's/ in file .*$//' \
+            -e 's/ in \/.*$//' \
+            "${report}/known-warnings.txt"
+          diff --unified \
+            tests/assurance/semver-alpha12-known-warnings.txt \
+            "${report}/known-warnings.txt"
+          grep --fixed-strings --quiet \
+            '196 checks: 196 pass, 57 skip' \
+            "${report}/semver.log"
+
+      - name: Upload public API compatibility report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: semver-discovery-${{ github.sha }}
+          path: target/assurance-discovery/semver/semver.log
+          if-no-files-found: error
+          retention-days: 30

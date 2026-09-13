@@ -1,0 +1,11 @@
+[package]
+name = "sealr-worker-protocol"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Bounded supervisor-worker protocol for Sealr"
+repository.workspace = true
+publish = false
+
+[dependencies]

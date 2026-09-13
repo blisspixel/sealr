@@ -1,0 +1,678 @@
+{
+  "schema": "sealr.assurance-history.v1",
+  "repository": "blisspixel/sealr",
+  "observed_at": "2026-09-13T14:52:54.387295+00:00",
+  "status": "complete",
+  "checks": [
+    {
+      "category": "bounded-model-checking",
+      "status": "ineligible",
+      "eligible": false,
+      "promoted": false,
+      "consecutive_successful_distinct_commits": 1,
+      "observations": [
+        {
+          "run_id": 33615049485,
+          "commit": "2fab2cfcd54dc065d02e25e74c3bfb227555ca90",
+          "event": "schedule",
+          "branch": "main",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/33615049485",
+          "created_at": "2026-09-02T09:36:36Z",
+          "observed_at": "2026-09-13T14:53:04.301185+00:00",
+          "latest_attempt": 1,
+          "checked_attempt": 1,
+          "commit_tree": "ec3d50091840dbbb7542b09d19a92467ee81fd86",
+          "original_conclusion": "success",
+          "latest_conclusion": "success",
+          "domain_fingerprint": "335bbe301ee8e3749c3c4b2a43686cee7fc1355a34229b196886dd14c28c6195",
+          "jobs": [
+            {
+              "id": 100198831193,
+              "name": "Bounded scalar model checking",
+              "status": "completed",
+              "conclusion": "success"
+            }
+          ],
+          "decision": "different_evidence_domain"
+        },
+        {
+          "run_id": 34335686928,
+          "commit": "8090a6bb6b0a6cc51461d2bce18966eb1a323434",
+          "event": "schedule",
+          "branch": "main",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/34335686928",
+          "created_at": "2026-09-09T09:36:49Z",
+          "observed_at": "2026-09-13T14:53:05.361566+00:00",
+          "latest_attempt": 1,
+          "checked_attempt": 1,
+          "commit_tree": "ceb47eda2d558ad23cd5ab0f06e4689f8d971870",
+          "original_conclusion": "success",
+          "latest_conclusion": "success",
+          "domain_fingerprint": "534be87c35c78acfcc3c919d78f9a0c88f7a8e1735b6f271479b44181f54f4c3",
+          "jobs": [
+            {
+              "id": 102414406361,
+              "name": "Bounded scalar model checking",
+              "status": "completed",
+              "conclusion": "success"
+            }
+          ],
+          "decision": "counted"
+        }
+      ],
+      "check_id": "kani.scalar-kernels.v1",
+      "promotable": true,
+      "current_domain_fingerprint": "534be87c35c78acfcc3c919d78f9a0c88f7a8e1735b6f271479b44181f54f4c3",
+      "required_jobs": [
+        "Bounded scalar model checking"
+      ],
+      "domain_source_blob_count": 9,
+      "domain_inputs": {
+        "files": [
+          ".github/workflows/assurance.yml",
+          "crates/sealr/src/interval.rs",
+          "crates/sealr/src/quota.rs",
+          "crates/sealr/src/ratio.rs",
+          "scripts/verify_assurance.ps1",
+          "tests/assurance/manifest.json"
+        ],
+        "prefixes": [
+          "verification/kani/"
+        ],
+        "contract": "tests/assurance/promotion-ledger.json category record excluding history, eligibility, and promotion flags"
+      },
+      "workflow": ".github/workflows/assurance.yml",
+      "workflow_id": 343066452,
+      "qualifying_run_ids": [
+        34335686928
+      ]
+    },
+    {
+      "category": "mutation-discovery",
+      "status": "ineligible",
+      "eligible": false,
+      "promoted": false,
+      "consecutive_successful_distinct_commits": 2,
+      "observations": [
+        {
+          "run_id": 33615049485,
+          "commit": "2fab2cfcd54dc065d02e25e74c3bfb227555ca90",
+          "event": "schedule",
+          "branch": "main",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/33615049485",
+          "created_at": "2026-09-02T09:36:36Z",
+          "observed_at": "2026-09-13T14:53:05.361566+00:00",
+          "latest_attempt": 1,
+          "checked_attempt": 1,
+          "commit_tree": "ec3d50091840dbbb7542b09d19a92467ee81fd86",
+          "original_conclusion": "success",
+          "latest_conclusion": "success",
+          "domain_fingerprint": "9e6adbdf7dc282869803a4af5be994ded38cc5ac825d7aceab154664ac6ec67e",
+          "jobs": [
+            {
+              "id": 100198831076,
+              "name": "Targeted mutation discovery",
+              "status": "completed",
+              "conclusion": "success"
+            }
+          ],
+          "decision": "counted"
+        },
+        {
+          "run_id": 34335686928,
+          "commit": "8090a6bb6b0a6cc51461d2bce18966eb1a323434",
+          "event": "schedule",
+          "branch": "main",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/34335686928",
+          "created_at": "2026-09-09T09:36:49Z",
+          "observed_at": "2026-09-13T14:53:06.007788+00:00",
+          "latest_attempt": 1,
+          "checked_attempt": 1,
+          "commit_tree": "ceb47eda2d558ad23cd5ab0f06e4689f8d971870",
+          "original_conclusion": "success",
+          "latest_conclusion": "success",
+          "domain_fingerprint": "9e6adbdf7dc282869803a4af5be994ded38cc5ac825d7aceab154664ac6ec67e",
+          "jobs": [
+            {
+              "id": 102414406476,
+              "name": "Targeted mutation discovery",
+              "status": "completed",
+              "conclusion": "success"
+            }
+          ],
+          "decision": "counted"
+        }
+      ],
+      "check_id": "mutation.scalar-kernels.v1",
+      "promotable": false,
+      "current_domain_fingerprint": "9e6adbdf7dc282869803a4af5be994ded38cc5ac825d7aceab154664ac6ec67e",
+      "required_jobs": [
+        "Targeted mutation discovery"
+      ],
+      "domain_source_blob_count": 6,
+      "domain_inputs": {
+        "files": [
+          ".github/workflows/assurance.yml",
+          "crates/sealr/src/interval.rs",
+          "crates/sealr/src/quota.rs",
+          "crates/sealr/src/ratio.rs",
+          "scripts/verify_assurance.ps1",
+          "tests/assurance/manifest.json"
+        ],
+        "prefixes": [],
+        "contract": "tests/assurance/promotion-ledger.json category record excluding history, eligibility, and promotion flags"
+      },
+      "workflow": ".github/workflows/assurance.yml",
+      "workflow_id": 343066452,
+      "qualifying_run_ids": [
+        33615049485,
+        34335686928
+      ]
+    },
+    {
+      "category": "coverage-discovery",
+      "status": "ineligible",
+      "eligible": false,
+      "promoted": false,
+      "consecutive_successful_distinct_commits": 2,
+      "observations": [
+        {
+          "run_id": 33615049485,
+          "commit": "2fab2cfcd54dc065d02e25e74c3bfb227555ca90",
+          "event": "schedule",
+          "branch": "main",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/33615049485",
+          "created_at": "2026-09-02T09:36:36Z",
+          "observed_at": "2026-09-13T14:53:06.007788+00:00",
+          "latest_attempt": 1,
+          "checked_attempt": 1,
+          "commit_tree": "ec3d50091840dbbb7542b09d19a92467ee81fd86",
+          "original_conclusion": "success",
+          "latest_conclusion": "success",
+          "domain_fingerprint": "37ea70010b66359bae1793bf8da6f84acdb359f6942a38f2b446d4dea5db66d6",
+          "jobs": [
+            {
+              "id": 100198831141,
+              "name": "Source coverage discovery",
+              "status": "completed",
+              "conclusion": "success"
+            }
+          ],
+          "decision": "counted"
+        },
+        {
+          "run_id": 34335686928,
+          "commit": "8090a6bb6b0a6cc51461d2bce18966eb1a323434",
+          "event": "schedule",
+          "branch": "main",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/34335686928",
+          "created_at": "2026-09-09T09:36:49Z",
+          "observed_at": "2026-09-13T14:53:07.004647+00:00",
+          "latest_attempt": 1,
+          "checked_attempt": 1,
+          "commit_tree": "ceb47eda2d558ad23cd5ab0f06e4689f8d971870",
+          "original_conclusion": "success",
+          "latest_conclusion": "success",
+          "domain_fingerprint": "37ea70010b66359bae1793bf8da6f84acdb359f6942a38f2b446d4dea5db66d6",
+          "jobs": [
+            {
+              "id": 102414406564,
+              "name": "Source coverage discovery",
+              "status": "completed",
+              "conclusion": "success"
+            }
+          ],
+          "decision": "counted"
+        }
+      ],
+      "check_id": "coverage.sealr-source.v1",
+      "promotable": false,
+      "current_domain_fingerprint": "37ea70010b66359bae1793bf8da6f84acdb359f6942a38f2b446d4dea5db66d6",
+      "required_jobs": [
+        "Source coverage discovery"
+      ],
+      "domain_source_blob_count": 3,
+      "domain_inputs": {
+        "files": [
+          ".github/workflows/assurance.yml",
+          "scripts/verify_assurance.ps1",
+          "tests/assurance/manifest.json"
+        ],
+        "prefixes": [],
+        "contract": "tests/assurance/promotion-ledger.json category record excluding history, eligibility, and promotion flags"
+      },
+      "workflow": ".github/workflows/assurance.yml",
+      "workflow_id": 343066452,
+      "qualifying_run_ids": [
+        33615049485,
+        34335686928
+      ]
+    },
+    {
+      "category": "public-api-compatibility",
+      "status": "ineligible",
+      "eligible": false,
+      "promoted": false,
+      "consecutive_successful_distinct_commits": 2,
+      "observations": [
+        {
+          "run_id": 33615049485,
+          "commit": "2fab2cfcd54dc065d02e25e74c3bfb227555ca90",
+          "event": "schedule",
+          "branch": "main",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/33615049485",
+          "created_at": "2026-09-02T09:36:36Z",
+          "observed_at": "2026-09-13T14:53:07.778683+00:00",
+          "latest_attempt": 1,
+          "checked_attempt": 1,
+          "commit_tree": "ec3d50091840dbbb7542b09d19a92467ee81fd86",
+          "original_conclusion": "success",
+          "latest_conclusion": "success",
+          "domain_fingerprint": "b7f0a382d0ddafe156395b0a50193eaa457f8eb2c86787f4798165d4eefcfcca",
+          "jobs": [
+            {
+              "id": 100198831058,
+              "name": "Public API compatibility discovery",
+              "status": "completed",
+              "conclusion": "success"
+            }
+          ],
+          "decision": "counted"
+        },
+        {
+          "run_id": 34335686928,
+          "commit": "8090a6bb6b0a6cc51461d2bce18966eb1a323434",
+          "event": "schedule",
+          "branch": "main",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/34335686928",
+          "created_at": "2026-09-09T09:36:49Z",
+          "observed_at": "2026-09-13T14:53:08.007140+00:00",
+          "latest_attempt": 1,
+          "checked_attempt": 1,
+          "commit_tree": "ceb47eda2d558ad23cd5ab0f06e4689f8d971870",
+          "original_conclusion": "success",
+          "latest_conclusion": "success",
+          "domain_fingerprint": "b7f0a382d0ddafe156395b0a50193eaa457f8eb2c86787f4798165d4eefcfcca",
+          "jobs": [
+            {
+              "id": 102414406510,
+              "name": "Public API compatibility discovery",
+              "status": "completed",
+              "conclusion": "success"
+            }
+          ],
+          "decision": "counted"
+        }
+      ],
+      "check_id": "semver.public-api-alpha12.v1",
+      "promotable": true,
+      "current_domain_fingerprint": "b7f0a382d0ddafe156395b0a50193eaa457f8eb2c86787f4798165d4eefcfcca",
+      "required_jobs": [
+        "Public API compatibility discovery"
+      ],
+      "domain_source_blob_count": 4,
+      "domain_inputs": {
+        "files": [
+          ".github/workflows/assurance.yml",
+          "scripts/verify_assurance.ps1",
+          "tests/assurance/manifest.json",
+          "tests/assurance/semver-alpha12-known-warnings.txt"
+        ],
+        "prefixes": [],
+        "contract": "tests/assurance/promotion-ledger.json category record excluding history, eligibility, and promotion flags"
+      },
+      "workflow": ".github/workflows/assurance.yml",
+      "workflow_id": 343066452,
+      "qualifying_run_ids": [
+        33615049485,
+        34335686928
+      ]
+    },
+    {
+      "category": "coverage-guided-fuzzing",
+      "status": "ineligible",
+      "eligible": false,
+      "promoted": false,
+      "consecutive_successful_distinct_commits": 1,
+      "observations": [
+        {
+          "run_id": 32708222003,
+          "commit": "2bdecc97442e6c5fdc27fb08e7f80db706d74cf6",
+          "event": "schedule",
+          "branch": "main",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/32708222003",
+          "created_at": "2026-08-24T08:49:04Z",
+          "observed_at": "2026-09-13T14:53:11.548825+00:00",
+          "latest_attempt": 1,
+          "checked_attempt": null,
+          "commit_tree": "404aa16f7ea4d98584971162f6a50417a16b4224",
+          "missing_contract_path": "tests/assurance/promotion-ledger.json",
+          "decision": "contract_not_present",
+          "jobs": []
+        },
+        {
+          "run_id": 33374414460,
+          "commit": "2fab2cfcd54dc065d02e25e74c3bfb227555ca90",
+          "event": "schedule",
+          "branch": "main",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/33374414460",
+          "created_at": "2026-08-31T08:45:35Z",
+          "observed_at": "2026-09-13T14:53:14.674343+00:00",
+          "latest_attempt": 1,
+          "checked_attempt": 1,
+          "commit_tree": "ec3d50091840dbbb7542b09d19a92467ee81fd86",
+          "original_conclusion": "success",
+          "latest_conclusion": "success",
+          "domain_fingerprint": "16f046f6daadea878b2bc136cab6a95e2b93aa59ce2f3b7aeda771dde7653110",
+          "jobs": [
+            {
+              "id": 99432547141,
+              "name": "Bounded strict ZIP64",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 99432547307,
+              "name": "Bounded worker protocol",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 99432547310,
+              "name": "Bounded gzip-wrapped restricted PAX TAR",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 99432547358,
+              "name": "Bounded RFC 1952 gzip",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 99432547368,
+              "name": "Bounded semantic records",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 99432547387,
+              "name": "Bounded Copy-only 7z container",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 99432547397,
+              "name": "Bounded zstd-wrapped portable ustar TAR",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 99432547437,
+              "name": "Bounded bzip2-wrapped portable ustar TAR",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 99432547446,
+              "name": "Bounded raw POSIX PAX",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 99432547456,
+              "name": "Bounded public TAR gzip ustar",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 99432547467,
+              "name": "Bounded raw POSIX ustar",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 99432547476,
+              "name": "Bounded xz-wrapped portable ustar TAR",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 99432547503,
+              "name": "Bounded gzip-wrapped GNU long-name TAR",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 99432547540,
+              "name": "Bounded raw GNU long-name TAR",
+              "status": "completed",
+              "conclusion": "success"
+            }
+          ],
+          "decision": "different_evidence_domain"
+        },
+        {
+          "run_id": 34102390215,
+          "commit": "8090a6bb6b0a6cc51461d2bce18966eb1a323434",
+          "event": "schedule",
+          "branch": "main",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/34102390215",
+          "created_at": "2026-09-07T08:46:30Z",
+          "observed_at": "2026-09-13T14:53:16.086503+00:00",
+          "latest_attempt": 1,
+          "checked_attempt": 1,
+          "commit_tree": "ceb47eda2d558ad23cd5ab0f06e4689f8d971870",
+          "original_conclusion": "success",
+          "latest_conclusion": "success",
+          "domain_fingerprint": "e76fc323b12e8372ab98e0c4e429f88e2ac7fddee6e50d78bf807ecaacf9558a",
+          "jobs": [
+            {
+              "id": 101679546432,
+              "name": "Bounded public TAR gzip ustar",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 101679546587,
+              "name": "Bounded bzip2-wrapped portable ustar TAR",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 101679546599,
+              "name": "Bounded worker protocol",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 101679546658,
+              "name": "Bounded gzip-wrapped GNU long-name TAR",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 101679546661,
+              "name": "Bounded RFC 1952 gzip",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 101679546667,
+              "name": "Bounded Copy-only 7z container",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 101679546676,
+              "name": "Bounded raw POSIX ustar",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 101679546718,
+              "name": "Bounded raw GNU long-name TAR",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 101679546739,
+              "name": "Bounded zstd-wrapped portable ustar TAR",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 101679546741,
+              "name": "Bounded xz-wrapped portable ustar TAR",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 101679546748,
+              "name": "Bounded semantic records",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 101679546785,
+              "name": "Bounded raw POSIX PAX",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 101679546823,
+              "name": "Bounded gzip-wrapped restricted PAX TAR",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 101679546880,
+              "name": "Bounded strict ZIP64",
+              "status": "completed",
+              "conclusion": "success"
+            }
+          ],
+          "decision": "counted"
+        }
+      ],
+      "check_id": "fuzz.protocol-semantic-and-tar.v2",
+      "promotable": true,
+      "current_domain_fingerprint": "e76fc323b12e8372ab98e0c4e429f88e2ac7fddee6e50d78bf807ecaacf9558a",
+      "required_jobs": [
+        "Bounded Copy-only 7z container",
+        "Bounded RFC 1952 gzip",
+        "Bounded bzip2-wrapped portable ustar TAR",
+        "Bounded gzip-wrapped GNU long-name TAR",
+        "Bounded gzip-wrapped restricted PAX TAR",
+        "Bounded public TAR gzip ustar",
+        "Bounded raw GNU long-name TAR",
+        "Bounded raw POSIX PAX",
+        "Bounded raw POSIX ustar",
+        "Bounded semantic records",
+        "Bounded strict ZIP64",
+        "Bounded worker protocol",
+        "Bounded xz-wrapped portable ustar TAR",
+        "Bounded zstd-wrapped portable ustar TAR"
+      ],
+      "domain_source_blob_count": 275,
+      "domain_inputs": {
+        "files": [
+          ".github/workflows/fuzz.yml",
+          "fuzz/Cargo.lock",
+          "fuzz/Cargo.toml",
+          "scripts/verify_fuzz_seeds.ps1"
+        ],
+        "prefixes": [
+          "fuzz/"
+        ],
+        "contract": "tests/assurance/promotion-ledger.json category record excluding history, eligibility, and promotion flags"
+      },
+      "workflow": ".github/workflows/fuzz.yml",
+      "workflow_id": 340360834,
+      "qualifying_run_ids": [
+        34102390215
+      ]
+    },
+    {
+      "category": "native-resource-evidence",
+      "status": "ineligible",
+      "eligible": false,
+      "promoted": false,
+      "consecutive_successful_distinct_commits": 0,
+      "observations": [
+        {
+          "run_id": 33482339571,
+          "commit": "2fab2cfcd54dc065d02e25e74c3bfb227555ca90",
+          "event": "schedule",
+          "branch": "main",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/33482339571",
+          "created_at": "2026-09-01T07:28:58Z",
+          "observed_at": "2026-09-13T14:53:21.034197+00:00",
+          "latest_attempt": 1,
+          "checked_attempt": 1,
+          "commit_tree": "ec3d50091840dbbb7542b09d19a92467ee81fd86",
+          "original_conclusion": "success",
+          "latest_conclusion": "success",
+          "domain_fingerprint": "9621b2d1dfabd328e7f2fc5c18394afb72e445cdbec11b4651ff1cbe01b2d6e1",
+          "jobs": [
+            {
+              "id": 99774540067,
+              "name": "3 GiB sparse gate on ubuntu-24.04",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 99774540273,
+              "name": "3 GiB sparse gate on macos-15",
+              "status": "completed",
+              "conclusion": "success"
+            },
+            {
+              "id": 99774540437,
+              "name": "3 GiB sparse gate on windows-2022",
+              "status": "completed",
+              "conclusion": "success"
+            }
+          ],
+          "decision": "different_evidence_domain"
+        }
+      ],
+      "check_id": "resource.multigigabyte-sparse.v1",
+      "promotable": true,
+      "current_domain_fingerprint": "bc11d526966643c994f36a0d37f6effdf5d4e82396ea3ee38e12b17b8233167f",
+      "required_jobs": [
+        "3 GiB sparse gate on macos-15",
+        "3 GiB sparse gate on ubuntu-24.04",
+        "3 GiB sparse gate on windows-2022"
+      ],
+      "domain_source_blob_count": 4,
+      "domain_inputs": {
+        "files": [
+          ".github/workflows/resource-evidence.yml",
+          "Cargo.lock",
+          "Cargo.toml",
+          "crates/sealr/tests/bounded_path_memory.rs"
+        ],
+        "prefixes": [],
+        "contract": "tests/assurance/promotion-ledger.json category record excluding history, eligibility, and promotion flags"
+      },
+      "workflow": ".github/workflows/resource-evidence.yml",
+      "workflow_id": 340348009,
+      "qualifying_run_ids": []
+    }
+  ],
+  "minimum_distinct_commits": 10,
+  "bounds": {
+    "history_pages_per_workflow": 2,
+    "runs_per_page": 100,
+    "jobs_per_attempt": 100,
+    "api_response_bytes": 4194304,
+    "source_file_bytes": 1048576,
+    "api_calls": 200,
+    "observation_seconds": 300,
+    "request_seconds": 30,
+    "observation_timestamp_wait_seconds": 1.25
+  },
+  "nonclaim": "Read-only readiness observation. No ledger mutation, promotion, independent human review, artifact verification, or claim of correctness. All reruns reset history; conservative source fingerprints may reset after harmless changes.",
+  "subject_revision": "8090a6bb6b0a6cc51461d2bce18966eb1a323434"
+}

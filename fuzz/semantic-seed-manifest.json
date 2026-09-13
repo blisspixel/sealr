@@ -1,0 +1,46 @@
+{
+  "schema": "sealr.semantic-fuzz-seeds.v1",
+  "target": "semantic_records",
+  "toolchain": "nightly-2026-08-01",
+  "cargoFuzzVersion": "0.13.2",
+  "libfuzzerSysVersion": "0.4.13",
+  "bounds": {
+    "maxInputBytes": 4194304,
+    "maxTotalSeconds": 600,
+    "perInputTimeoutSeconds": 5,
+    "rssLimitMiB": 1024,
+    "jobs": 1
+  },
+  "failureArtifact": {
+    "directoryName": "sealr-semantic-fuzz-artifacts",
+    "uploadOn": "failure",
+    "retentionDays": 7
+  },
+  "dictionary": {
+    "path": "fuzz/dictionaries/semantic_record_dictionary",
+    "bytes": 119,
+    "sha256": "984313810e9f0c9e8453252fae00372e2421c46ddbcc87ac57738c9be33899b2"
+  },
+  "seeds": [
+    {
+      "path": "fuzz/corpus/semantic_records/correlation",
+      "bytes": 35,
+      "sha256": "d17607265e5b7cf465ce918370fc93d3614cb204794e30425a1dd81c1ec68a40"
+    },
+    {
+      "path": "fuzz/corpus/semantic_records/empty",
+      "bytes": 1,
+      "sha256": "01ba4719c80b6fe911b091a7c05124b64eeece964e09c058ef8f9805daca546b"
+    },
+    {
+      "path": "fuzz/corpus/semantic_records/field-mutations",
+      "bytes": 57,
+      "sha256": "3ea1ff52c19b6df6b6addb53e3249bfc9e2ef46812503374b7be8a7bc39337f0"
+    },
+    {
+      "path": "fuzz/corpus/semantic_records/header",
+      "bytes": 9,
+      "sha256": "e72430d55440df4f4df1b9e7b5fcc91940814ac840ece61f89c150dd70008dea"
+    }
+  ]
+}

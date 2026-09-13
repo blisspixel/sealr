@@ -1,0 +1,750 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  MACOSX_DEPLOYMENT_TARGET: "15.0"
+  RUST_VERSION: 1.98.0
+
+jobs:
+  quality:
+    name: Format, lint, test, and docs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Validate workflow syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="${RUNNER_TEMP}/actionlint.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "${archive}" \
+            https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  ${archive}" |
+            sha256sum --check
+          tar -C "${RUNNER_TEMP}" -xzf "${archive}" actionlint
+          "${RUNNER_TEMP}/actionlint"
+
+      - name: Verify release candidate selection
+        shell: bash
+        run: bash scripts/verify_release_candidate.sh
+
+      - name: Parse PowerShell automation
+        shell: pwsh
+        run: |
+          $errors = $null
+          Get-ChildItem -LiteralPath scripts -Filter '*.ps1' | ForEach-Object {
+            $null = [System.Management.Automation.Language.Parser]::ParseFile(
+              $_.FullName,
+              [ref]$null,
+              [ref]$errors
+            )
+            if ($errors.Count -ne 0) {
+              throw "PowerShell parse failed for $($_.Name): $($errors -join '; ')"
+            }
+          }
+
+      - name: Verify documentation contracts
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_docs.ps1
+
+      - name: Verify external adopter bundle contract
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_adopter_contract.ps1
+
+      - name: Verify candidate surface inventory
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_candidate_surface.ps1
+
+      - name: Verify trusted-computing-base report
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_tcb_report.ps1
+
+      - name: Verify fuzz seeds and bounds
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1
+
+      - name: Verify assurance and promotion contracts
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_assurance.ps1
+
+      - name: Verify assurance history collection and proposals offline
+        run: python3 -m unittest discover -s tests/assurance -p "test_*.py"
+
+      - name: Install pinned Rust
+        run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal --component clippy,rustfmt
+
+      - name: Select pinned Rust
+        run: rustup default ${{ env.RUST_VERSION }}
+
+      - name: Assert Linux package floor
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_native_floor.ps1 -ExpectedTarget x86_64-unknown-linux-gnu
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: Run tests
+        run: cargo test --locked --workspace --all-features
+
+      - name: Verify copyable handoff child deadlines
+        run: cargo test --locked -p sealr --example pypa_installer_handoff
+
+      - name: Verify capability-only wheel-content decisions
+        run: cargo test --locked -p sealr --example deepr_content_gate
+
+      - name: Stress native materialization lifecycle
+        run: cargo run --locked --release -p sealr-materialization-lifecycle
+
+      - name: Measure near-limit semantic completion heap
+        run: >-
+          cargo test --locked --release -p sealr --lib
+          semantic_record::peak_live::completion_reconstruction_peak_live_is_bounded --
+          --ignored --exact --nocapture --test-threads=1
+
+      - name: Verify Linux authority bootstrap
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup target add x86_64-unknown-linux-musl
+          cargo build --locked --release -p sealr-worker-bootstrap-lab \
+            --no-default-features --bin sealr-worker \
+            --target x86_64-unknown-linux-musl
+          worker="${PWD}/target/x86_64-unknown-linux-musl/release/sealr-worker"
+          readelf --file-header "${worker}" | grep --extended-regexp --quiet \
+            'Class:[[:space:]]+ELF64'
+          readelf --file-header "${worker}" | grep --extended-regexp --quiet \
+            'Machine:[[:space:]]+Advanced Micro Devices X86-64'
+          if readelf --program-headers "${worker}" | grep --quiet 'INTERP'; then
+            echo 'production helper must not contain a program interpreter' >&2
+            exit 1
+          fi
+          if "${worker}" >/dev/null 2>&1; then
+            echo 'production helper accepted direct invocation' >&2
+            exit 1
+          fi
+          if "${worker}" --help >/dev/null 2>&1; then
+            echo 'production helper exposed a command surface' >&2
+            exit 1
+          fi
+          worker_bytes="$(stat --format=%s "${worker}")"
+          worker_sha256="$(sha256sum "${worker}" | cut --delimiter=' ' --fields=1)"
+          cargo run --locked --release -p sealr-worker-bootstrap-lab \
+            --features lab --bin sealr-worker-bootstrap-lab -- \
+            conformance --worker "${worker}" --bytes "${worker_bytes}" \
+            --sha256 "${worker_sha256}"
+
+      - name: Compile fuzz targets
+        run: cargo check --locked --manifest-path fuzz/Cargo.toml --bins
+
+      - name: Compile Kani proof manifest with production Rust
+        run: cargo check --locked --manifest-path verification/kani/Cargo.toml
+
+      - name: Verify independent identity conformance
+        run: >-
+          cargo run --locked -p sealr-identity-verifier --
+          crates/sealr/tests/conformance/identity-v1.json
+
+      - name: Verify canonical evidence conformance
+        run: >-
+          cargo run --locked -p sealr-identity-verifier --
+          crates/sealr/tests/conformance/evidence-v1.json
+
+      - name: Verify committed wheel compatibility report
+        run: >-
+          cargo run --locked -p sealr-wheel-lab --bin sealr-wheel-lab -- verify-report
+          tests/corpus/wheels/manifest.json
+          tests/corpus/wheels/report.json
+          docs/wheel-compatibility-pilot.md
+
+      - name: Verify committed wheel semantic inventory
+        run: >-
+          cargo run --locked -p sealr-wheel-lab --bin wheel_inventory_v2 -- verify
+          tests/corpus/wheels/manifest.json
+          tests/corpus/wheels/report-v2.json
+          docs/wheel-compatibility-v2.md
+
+      - name: Verify supported-preview wheel inventory
+        run: >-
+          cargo run --locked -p sealr-wheel-lab --bin wheel_inventory_v3 -- verify
+          tests/corpus/wheels/manifest.json
+          tests/corpus/wheels/report-v3.json
+          docs/wheel-compatibility-v3.md
+
+      - name: Verify stratified wheel inventory v4
+        run: >-
+          cargo run --locked -p sealr-wheel-inventory-v4 --bin wheel_inventory_v4 -- verify
+          tests/corpus/wheels/manifest-v4.json
+          tests/corpus/wheels/report-v4.json
+          docs/wheel-compatibility-v4.md
+
+      - name: Verify stratified wheel inventory v5
+        run: >-
+          cargo run --locked -p sealr-wheel-inventory-v5 --bin wheel_inventory_v5 -- verify
+          tests/corpus/wheels/manifest-v5.json
+          tests/corpus/wheels/report-v5.json
+          docs/wheel-compatibility-v5.md
+
+      - name: Verify Unicode and streaming wheel producer evidence
+        run: >-
+          cargo run --locked -p sealr-wheel-lab --bin wheel_producers -- verify
+          crates/sealr/tests/conformance/wheel-producers-v1.json
+          crates/sealr/tests/conformance/wheel-producers-report-v1.json
+
+      - name: Build optimized workspace
+        run: cargo build --locked --release --workspace --all-features
+
+      - name: Build extracted-package consumers
+        run: |
+          cargo package --locked -p sealr
+          cargo build --locked --release \
+            --manifest-path target/package/sealr-0.1.0-alpha.16/Cargo.toml \
+            --target-dir "${RUNNER_TEMP}/sealr-extracted-examples" \
+            --example pypa_installer_handoff --example deepr_content_gate
+          handoff="${RUNNER_TEMP}/sealr-pypa-installer-handoff"
+          cp --recursive \
+            target/package/sealr-0.1.0-alpha.16/examples/pypa_installer_handoff \
+            "${handoff}"
+          mv "${handoff}/Cargo.toml.example" "${handoff}/Cargo.toml"
+          cargo generate-lockfile \
+            --manifest-path "${handoff}/Cargo.toml" \
+            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.16'"
+          cargo build --locked --release \
+            --manifest-path "${handoff}/Cargo.toml" \
+            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.16'"
+          cargo build --locked --release --manifest-path tests/packaged-consumer/Cargo.toml
+          cargo build --locked --release \
+            --manifest-path tests/pypa-installer-consumer/Cargo.toml
+          tree="$(cargo tree --locked \
+            --manifest-path tests/pypa-installer-consumer/Cargo.toml \
+            --edges normal,build)"
+          if grep --extended-regexp --quiet \
+            'sealr-(wheel-lab|cli|protocol)|__internal-' <<<"${tree}"; then
+            echo 'packaged PyPA consumer reached a repository-only dependency' >&2
+            exit 1
+          fi
+          manifest="$(cargo metadata --locked --format-version 1 \
+            --manifest-path tests/pypa-installer-consumer/Cargo.toml |
+            jq --raw-output '.packages[] | select(.name == "sealr") | .manifest_path')"
+          test "${manifest}" = \
+            "${PWD}/target/package/sealr-0.1.0-alpha.16/Cargo.toml"
+          copied_manifest="$(cargo metadata --locked --format-version 1 \
+            --manifest-path "${handoff}/Cargo.toml" \
+            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.16'" |
+            jq --raw-output '.packages[] | select(.name == "sealr") | .manifest_path')"
+          test "${copied_manifest}" = \
+            "${PWD}/target/package/sealr-0.1.0-alpha.16/Cargo.toml"
+          features="$(cargo metadata --locked --format-version 1 \
+            --manifest-path "${handoff}/Cargo.toml" \
+            --config "patch.crates-io.sealr.path='${PWD}/target/package/sealr-0.1.0-alpha.16'" |
+            jq --compact-output \
+              '[.resolve.nodes[] | select(.id | startswith("path+file:") and contains("#sealr@")) | .features]')"
+          jq --exit-status 'length == 1' <<<"${features}" >/dev/null
+          if grep --quiet '__internal-' <<<"${features}"; then
+            echo 'copyable handoff enabled an internal Sealr feature' >&2
+            exit 1
+          fi
+
+      - name: Run packaged PyPA repository conformance
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          runtime="$(mktemp --directory /tmp/sealr-handoff.XXXXXX)"
+          printf 'SEALR_HANDOFF_RUNTIME=%s\n' "${runtime}" >>"${GITHUB_ENV}"
+          download="${runtime}/installer-download"
+          extracted="${runtime}/installer-extracted"
+          mkdir --parents "${download}" "${extracted}"
+          python3 -m pip download \
+            --disable-pip-version-check \
+            --no-deps \
+            --only-binary=:all: \
+            --require-hashes \
+            --requirement \
+              target/package/sealr-0.1.0-alpha.16/examples/pypa_installer_handoff/requirements.txt \
+            --dest "${download}"
+          installer="${download}/installer-1.0.1-py3-none-any.whl"
+          echo "011d045df8b954ced7dde3a7e42ae4418da40ecda7990f2d11d5ed7c146fd98b  ${installer}" |
+            sha256sum --check
+          python3 -m zipfile -e "${installer}" "${extracted}"
+          mkdir --parents \
+            "${runtime}/real-input" \
+            "${runtime}/controlled" \
+            "${runtime}/controlled-inspect-input" \
+            "${runtime}/controlled-materialize-input"
+          cp "${installer}" \
+            "${runtime}/real-input/installer-1.0.1-py3-none-any.whl"
+          cargo run --locked --release \
+            --manifest-path tests/pypa-installer-consumer/Cargo.toml -- \
+            --python /usr/bin/python3 \
+            --installer-root "${extracted}" \
+            --verifier "${PWD}/target/release/sealr-identity-verifier" \
+            --real-wheel "${installer}" \
+            --bridge \
+              "${PWD}/target/package/sealr-0.1.0-alpha.16/examples/pypa_installer_handoff/wheel_source.py" \
+            --controlled-wheel-output \
+              "${runtime}/controlled/demo-1.0-py3-none-any.whl"
+          cp "${runtime}/controlled/demo-1.0-py3-none-any.whl" \
+            "${runtime}/controlled-inspect-input/demo-1.0-py3-none-any.whl"
+          cp "${runtime}/controlled/demo-1.0-py3-none-any.whl" \
+            "${runtime}/controlled-materialize-input/demo-1.0-py3-none-any.whl"
+
+      - name: Verify crate publication contract
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_crate_package.ps1
+
+      - name: Verify native release package contract
+        shell: pwsh
+        run: |
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          $versions = @($metadata.packages.version | Sort-Object -Unique)
+          if ($versions.Count -ne 1) {
+            throw "workspace packages do not have one release version: $($versions -join ', ')"
+          }
+          $archive = Join-Path $PWD "target/native-package-contract/sealr-$($versions[0])-x86_64-unknown-linux-gnu.tar.gz"
+          pwsh -NoLogo -NoProfile -File scripts/package_native.ps1 `
+            -Version $versions[0] `
+            -TargetTriple x86_64-unknown-linux-gnu `
+            -IdentityVerifierBinary target/release/sealr-identity-verifier `
+            -HelperBinary target/x86_64-unknown-linux-musl/release/sealr-worker `
+            -OutputDirectory target/native-package-contract
+          pwsh -NoLogo -NoProfile -File scripts/verify_native_package.ps1 `
+            -ArchivePath $archive `
+            -Version $versions[0] `
+            -TargetTriple x86_64-unknown-linux-gnu `
+            -LabBinary target/release/sealr-worker-bootstrap-lab `
+            -WheelLabBinary target/release/sealr-wheel-lab `
+            -PackagedConsumerBinary tests/packaged-consumer/target/release/sealr-packaged-consumer
+
+      - name: Run copyable WheelSource handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(cargo metadata --locked --no-deps --format-version 1 |
+            jq --raw-output '.packages[] | select(.name == "sealr") | .version')"
+          package="${RUNNER_TEMP}/sealr-native-handoff"
+          mkdir --parents "${package}"
+          tar --extract --gzip \
+            --file "target/native-package-contract/sealr-${version}-x86_64-unknown-linux-gnu.tar.gz" \
+            --directory "${package}"
+          native="${package}/sealr-${version}-x86_64-unknown-linux-gnu"
+          example="${RUNNER_TEMP}/sealr-pypa-installer-handoff/target/release/sealr-pypa-installer-handoff"
+          runtime="${SEALR_HANDOFF_RUNTIME}"
+          installer_root="${runtime}/installer-extracted"
+          real_log="$("${example}" \
+            --consume-wheel \
+              "${runtime}/real-input/installer-1.0.1-py3-none-any.whl" \
+            --worker-manifest "${native}/libexec/sealr/sealr-worker.manifest" \
+            --verifier "${native}/sealr-identity-verifier" \
+            --python /usr/bin/python3 \
+            --installer-root "${installer_root}" \
+            --output-root "${runtime}/real-output")"
+          controlled_inspect_log="$("${example}" \
+            --consume-wheel \
+              "${runtime}/controlled-inspect-input/demo-1.0-py3-none-any.whl" \
+            --worker-manifest "${native}/libexec/sealr/sealr-worker.manifest" \
+            --verifier "${native}/sealr-identity-verifier" \
+            --python /usr/bin/python3 \
+            --installer-root "${installer_root}" \
+            --output-root "${runtime}/controlled-inspect-output")"
+          controlled_materialize_log="$("${example}" \
+            --consume-wheel \
+              "${runtime}/controlled-materialize-input/demo-1.0-py3-none-any.whl" \
+            --worker-manifest "${native}/libexec/sealr/sealr-worker.manifest" \
+            --verifier "${native}/sealr-identity-verifier" \
+            --python /usr/bin/python3 \
+            --installer-root "${installer_root}" \
+            --output-root "${runtime}/controlled-materialize-output" \
+            --materialize-raw "${runtime}/controlled-raw-tree")"
+          real_report="$(tail --lines=1 <<<"${real_log}")"
+          controlled_inspect_report="$(tail --lines=1 <<<"${controlled_inspect_log}")"
+          controlled_materialize_report="$(tail --lines=1 <<<"${controlled_materialize_log}")"
+          printf '%s\n%s\n%s\n' \
+            "${real_report}" \
+            "${controlled_inspect_report}" \
+            "${controlled_materialize_report}"
+          jq --exit-status '
+            .schema == "sealr.pypa-wheel-source-example.v1" and
+            .source_deleted_before_python == true and
+            .source_sha256 == "011d045df8b954ced7dde3a7e42ae4418da40ecda7990f2d11d5ed7c146fd98b" and
+            .installed_files == 23 and
+            .raw_materialized == false
+          ' <<<"${real_report}"
+          jq --exit-status '
+            .schema == "sealr.pypa-wheel-source-example.v1" and
+            .source_deleted_before_python == true and
+            .source_sha256 == "078364afdeda960f1e0df0959d9cafcdb067b2c3c8c2999c0cea7cd521c466ec" and
+            .archive_tree_sha256 == "7336763b06639d2cc5a1ee004adf6c42a0a15e6ace846e0457299f3010011f82" and
+            .artifact_sha256 == "986f82074b5ac802253ba317579bf1500a28947e022b0c27581180ea05004c55" and
+            .install_plan_sha256 == "54b263d0c136a522fa08e0b5d582a5bdfb5203af970e5a84c786ef549a19dac8" and
+            .realization_sha256 == "5978f3ebecb5a2ff85567240a2a659c01c4212e0a770ca8ba4d13b6bbe97f228" and
+            .installed_files == 12 and
+            .raw_materialized == false
+          ' <<<"${controlled_inspect_report}"
+          jq --null-input --exit-status \
+            --argjson inspect "${controlled_inspect_report}" \
+            --argjson materialize "${controlled_materialize_report}" '
+              $materialize.schema == "sealr.pypa-wheel-source-example.v1" and
+              $materialize.source_deleted_before_python == true and
+              $materialize.raw_materialized == true and
+              $materialize.installed_files == $inspect.installed_files and
+              $materialize.source_sha256 == $inspect.source_sha256 and
+              $materialize.archive_tree_sha256 == $inspect.archive_tree_sha256 and
+              $materialize.artifact_sha256 == $inspect.artifact_sha256 and
+              $materialize.install_plan_sha256 == $inspect.install_plan_sha256 and
+              $materialize.realization_sha256 == $inspect.realization_sha256
+            '
+          test ! -e "${runtime}/real-input/installer-1.0.1-py3-none-any.whl"
+          test ! -e "${runtime}/controlled-inspect-input/demo-1.0-py3-none-any.whl"
+          test ! -e "${runtime}/controlled-materialize-input/demo-1.0-py3-none-any.whl"
+          test -d "${runtime}/controlled-raw-tree"
+
+      - name: Verify producer matrix through the copied WheelSource handoff
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(cargo metadata --locked --no-deps --format-version 1 |
+            jq --raw-output '.packages[] | select(.name == "sealr") | .version')"
+          python3 scripts/verify_wheel_producer_handoff.py \
+            --handoff "${RUNNER_TEMP}/sealr-pypa-installer-handoff/target/release/sealr-pypa-installer-handoff" \
+            --native "${RUNNER_TEMP}/sealr-native-handoff/sealr-${version}-x86_64-unknown-linux-gnu" \
+            --installer-root "${SEALR_HANDOFF_RUNTIME}/installer-extracted"
+
+      - name: Verify the packaged publisher content gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(cargo metadata --locked --no-deps --format-version 1 |
+            jq --raw-output '.packages[] | select(.name == "sealr") | .version')"
+          python3 scripts/verify_deepr_content_gate.py \
+            --example "${RUNNER_TEMP}/sealr-extracted-examples/release/examples/deepr_content_gate" \
+            --native "${RUNNER_TEMP}/sealr-native-handoff/sealr-${version}-x86_64-unknown-linux-gnu" \
+            --report target/deepr-content-gate-smoke.json
+
+      - name: Run exact Poetry 2.4.2 repository fixture
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          runtime="${SEALR_HANDOFF_RUNTIME}"
+          wheelhouse="${runtime}/poetry-wheelhouse"
+          controller="${runtime}/poetry-controller"
+          fixture_runtime="/tmp/sealr-poetry-2.4.2-fixture"
+          test ! -e "${fixture_runtime}"
+          mkdir --parents "${wheelhouse}" "${fixture_runtime}"
+          python3 -m pip download \
+            --disable-pip-version-check \
+            --no-deps \
+            --only-binary=:all: \
+            --require-hashes \
+            --requirement tests/poetry-consumer/requirements.txt \
+            --requirement tests/poetry-consumer/pip-requirement.txt \
+            --dest "${wheelhouse}"
+          python3 -m venv --without-pip "${controller}"
+          python3 -m pip --python "${controller}/bin/python" install \
+            --disable-pip-version-check \
+            --no-index \
+            --no-deps \
+            --no-compile \
+            "${wheelhouse}"/*.whl
+          "${controller}/bin/python" -I -m pip check
+          version="$(cargo metadata --locked --no-deps --format-version 1 |
+            jq --raw-output '.packages[] | select(.name == "sealr") | .version')"
+          native="${RUNNER_TEMP}/sealr-native-handoff/sealr-${version}-x86_64-unknown-linux-gnu"
+          handoff="${RUNNER_TEMP}/sealr-pypa-installer-handoff/target/release/sealr-pypa-installer-handoff"
+          report="$("${controller}/bin/python" -I \
+            tests/poetry-consumer/poetry_driver.py \
+            --handoff "${handoff}" \
+            --bridge \
+              "${PWD}/target/package/sealr-${version}/examples/pypa_installer_handoff/wheel_source.py" \
+            --worker-manifest "${native}/libexec/sealr/sealr-worker.manifest" \
+            --verifier "${native}/sealr-identity-verifier" \
+            --installer-root "${runtime}/installer-extracted" \
+            --wheelhouse "${wheelhouse}" \
+            --wheelhouse-manifest "${PWD}/tests/poetry-consumer/wheelhouse.json" \
+            --requirements "${PWD}/tests/poetry-consumer/requirements.txt" \
+            --pip-requirement "${PWD}/tests/poetry-consumer/pip-requirement.txt" \
+            --controlled-wheel "${runtime}/controlled/demo-1.0-py3-none-any.whl" \
+            --project "${PWD}/tests/poetry-consumer/project" \
+            --runtime "${fixture_runtime}")"
+          printf '%s\n' "${report}"
+          jq --exit-status '
+            .schema == "sealr.poetry-2.4.2-conformance.v1" and
+            .platform == "ubuntu-24.04-x86_64-cpython-3.12" and
+            .poetry == "2.4.2" and
+            .poetry_core == "2.4.0" and
+            .installer == "1.0.1" and
+            .wheelhouse_artifacts == 47 and
+            .runtime_distributions == 46 and
+            .source_sha256 == "078364afdeda960f1e0df0959d9cafcdb067b2c3c8c2999c0cea7cd521c466ec" and
+            .archive_tree_sha256 == "7336763b06639d2cc5a1ee004adf6c42a0a15e6ace846e0457299f3010011f82" and
+            .artifact_sha256 == "986f82074b5ac802253ba317579bf1500a28947e022b0c27581180ea05004c55" and
+            .install_plan_sha256 == "54b263d0c136a522fa08e0b5d582a5bdfb5203af970e5a84c786ef549a19dac8" and
+            .realization_sha256 == "76a81ee48ebc43ff7d6f60440dce5edd047f13f3ac9a6663fbe3f52322566142" and
+            .installed_files == 13 and
+            (.stock_target_sha256 | test("^[0-9a-f]{64}$")) and
+            .adapted_target_sha256 == .stock_target_sha256 and
+            .event_order == [
+              "poetry-download-returned",
+              "poetry-lock-hash-confirmed",
+              "prepared",
+              "wheel-open-probe-denied",
+              "real-uninstall-entered",
+              "real-uninstall-returned",
+              "permit-written",
+              "handoff-completed"
+            ] and
+            .abort_gate == "old-install-preserved-after-prepared-eof" and
+            .symlink_gate == "preflight-denied-before-prepared-or-uninstall" and
+            .physical_collision_gate == "dry-preflight-antichain-denied-both-orders" and
+            .post_prepared_wheel_open == "denied" and
+            .lock_unchanged == true
+          ' <<<"${report}"
+
+      - name: Verify README walkthrough
+        shell: pwsh
+        run: |
+          pwsh -NoLogo -NoProfile -File scripts/walkthrough.ps1 -SkipBuild
+          pwsh -NoLogo -NoProfile -File scripts/render_walkthrough.ps1
+          pwsh -NoLogo -NoProfile -File scripts/verify_walkthrough_assets.ps1
+
+      - name: Build documentation
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked -p sealr -p sealr-worker-protocol --all-features --no-deps
+
+  platform:
+    name: Test on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2022]
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust
+        run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
+
+      - name: Select pinned Rust
+        run: rustup default ${{ env.RUST_VERSION }}
+
+      - name: Assert native package floor
+        shell: pwsh
+        run: |
+          $target = if ($IsMacOS) { 'aarch64-apple-darwin' } else { 'x86_64-pc-windows-msvc' }
+          pwsh -NoLogo -NoProfile -File scripts/verify_native_floor.ps1 -ExpectedTarget $target
+
+      - name: Install 32-bit Windows target
+        if: runner.os == 'Windows'
+        run: rustup target add i686-pc-windows-msvc
+
+      - name: Check 32-bit Windows ABI
+        if: runner.os == 'Windows'
+        run: cargo check --locked -p sealr --target i686-pc-windows-msvc
+
+      - name: Run release tests
+        run: cargo test --locked --release --workspace --all-features
+
+      - name: Verify wheel-content decisions
+        run: cargo test --locked --release -p sealr --example deepr_content_gate
+
+      - name: Stress native materialization lifecycle
+        run: cargo run --locked --release -p sealr-materialization-lifecycle
+
+      - name: Measure near-limit semantic completion heap
+        run: >-
+          cargo test --locked --release -p sealr --lib
+          semantic_record::peak_live::completion_reconstruction_peak_live_is_bounded --
+          --ignored --exact --nocapture --test-threads=1
+
+      - name: Verify native release package contract
+        shell: pwsh
+        run: |
+          cargo build --locked --release -p sealr-cli -p sealr-identity-verifier
+          $metadata = cargo metadata --locked --no-deps --format-version 1 | ConvertFrom-Json
+          $versions = @($metadata.packages.version | Sort-Object -Unique)
+          if ($versions.Count -ne 1) {
+            throw "workspace packages do not have one release version: $($versions -join ', ')"
+          }
+          $targetLine = rustc -vV | Select-String -Pattern '^host: '
+          if ($null -eq $targetLine) {
+            throw 'rustc did not report its host target'
+          }
+          $targetTriple = $targetLine.Line.Substring(6).Trim()
+          $extension = if ($IsWindows) { 'zip' } else { 'tar.gz' }
+          $verifierName = if ($IsWindows) { 'sealr-identity-verifier.exe' } else { 'sealr-identity-verifier' }
+          $archive = Join-Path $PWD "target/native-package-contract/sealr-$($versions[0])-$targetTriple.$extension"
+          pwsh -NoLogo -NoProfile -File scripts/package_native.ps1 `
+            -Version $versions[0] `
+            -TargetTriple $targetTriple `
+            -IdentityVerifierBinary (Join-Path $PWD "target/release/$verifierName") `
+            -OutputDirectory target/native-package-contract
+          pwsh -NoLogo -NoProfile -File scripts/verify_native_package.ps1 `
+            -ArchivePath $archive `
+            -Version $versions[0] `
+            -TargetTriple $targetTriple
+
+  zipdiff:
+    name: ZipDiff 14-class gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      ZIPDIFF_REVISION: 7c427ed254bb3a5985d54870c12f97db78118e67
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust
+        run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
+
+      - name: Select pinned Rust
+        run: rustup default ${{ env.RUST_VERSION }}
+
+      - name: Fetch pinned ZipDiff source
+        run: |
+          set -euo pipefail
+          zipdiff_dir="${RUNNER_TEMP}/ZipDiff"
+          git init "${zipdiff_dir}"
+          git -C "${zipdiff_dir}" remote add origin https://github.com/ouuan/ZipDiff.git
+          git -C "${zipdiff_dir}" fetch --depth 1 origin "${ZIPDIFF_REVISION}"
+          git -C "${zipdiff_dir}" checkout --detach FETCH_HEAD
+          test "$(git -C "${zipdiff_dir}" rev-parse HEAD)" = "${ZIPDIFF_REVISION}"
+
+      - name: Make generated timestamps deterministic
+        run: |
+          set -euo pipefail
+          zipdiff_dir="${RUNNER_TEMP}/ZipDiff"
+          patch_file="${GITHUB_WORKSPACE}/tests/corpus/zipdiff/deterministic-timestamps.patch"
+          git -C "${zipdiff_dir}" apply --check "${patch_file}"
+          git -C "${zipdiff_dir}" apply "${patch_file}"
+          grep -Fq 'Self::new(0, 0)' "${zipdiff_dir}/zip-diff/src/fields.rs"
+
+      - name: Generate construction corpus
+        working-directory: ${{ runner.temp }}/ZipDiff/zip-diff
+        run: cargo run --locked --release --bin construction
+
+      - name: Verify construction expectations
+        run: >-
+          cargo run --locked --release -p sealr --example classify_zipdiff --
+          "${RUNNER_TEMP}/ZipDiff/constructions"
+          --expect tests/corpus/zipdiff/expectations.txt
+
+  supply-chain:
+    name: Supply chain
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pinned Rust
+        run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
+
+      - name: Select pinned Rust
+        run: rustup default ${{ env.RUST_VERSION }}
+
+      - name: Install cargo-deny
+        run: cargo install cargo-deny --version 0.20.2 --locked
+
+      - name: Check advisories, licenses, bans, and sources
+        run: |
+          cargo deny check
+          cargo deny --manifest-path fuzz/Cargo.toml check
+          cargo deny --manifest-path verification/kani/Cargo.toml check
+          cargo package --locked -p sealr
+          cargo deny --manifest-path tests/packaged-consumer/Cargo.toml check
+          cargo deny --manifest-path tests/pypa-installer-consumer/Cargo.toml check
+
+      - name: Install cargo-about
+        run: cargo install cargo-about --version 0.9.1 --locked --features cli
+
+      - name: Fetch supported release dependency graphs
+        run: |
+          cargo fetch --locked --target x86_64-unknown-linux-gnu
+          cargo fetch --locked --target aarch64-apple-darwin
+          cargo fetch --locked --target x86_64-pc-windows-msvc
+
+      - name: Verify runtime dependency budget
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_dependency_budget.ps1
+
+      - name: Verify third-party license bundles
+        shell: pwsh
+        run: pwsh -NoLogo -NoProfile -File scripts/verify_third_party_licenses.ps1
+
+  kernel-floor:
+    name: Real-kernel Landlock ABI 2 floor
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install guest tooling
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends cpio qemu-system-x86
+
+      - name: Install pinned Rust
+        run: rustup toolchain install ${{ env.RUST_VERSION }} --profile minimal
+
+      - name: Select pinned Rust
+        run: rustup default ${{ env.RUST_VERSION }}
+
+      - name: Verify fail-closed behavior on Landlock ABI 2
+        shell: bash
+        run: bash scripts/verify_kernel_floor.sh
+
+  required:
+    name: Required CI
+    if: ${{ always() }}
+    needs: [quality, platform, zipdiff, supply-chain, kernel-floor]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every promotion gate
+        env:
+          QUALITY_RESULT: ${{ needs.quality.result }}
+          PLATFORM_RESULT: ${{ needs.platform.result }}
+          ZIPDIFF_RESULT: ${{ needs.zipdiff.result }}
+          SUPPLY_CHAIN_RESULT: ${{ needs['supply-chain'].result }}
+          KERNEL_FLOOR_RESULT: ${{ needs['kernel-floor'].result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          failed=0
+          for gate in \
+            QUALITY_RESULT \
+            PLATFORM_RESULT \
+            ZIPDIFF_RESULT \
+            SUPPLY_CHAIN_RESULT \
+            KERNEL_FLOOR_RESULT; do
+            result="${!gate}"
+            if [[ "${result}" != "success" ]]; then
+              echo "::error::${gate} completed as ${result}"
+              failed=1
+            fi
+          done
+          exit "${failed}"

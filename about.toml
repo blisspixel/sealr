@@ -1,0 +1,22 @@
+accepted = [
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    # The BSD-style bzip2 license, added deliberately for libbz2-rs-sys in the
+    # executed bzip2 Gate B promotion.
+    "bzip2-1.0.6",
+    "MIT",
+    "Unicode-3.0",
+    "Zlib",
+    "Unlicense",
+]
+
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+    "x86_64-pc-windows-msvc",
+]
+
+ignore-dev-dependencies = true
+# Exclude first-party workspace packages, including the crates.io-allowlisted
+# sealr crate, from release executable third-party license closures.
+private = { ignore = true, registries = ["crates-io"] }

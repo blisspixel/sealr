@@ -1,0 +1,60 @@
+{
+  "schema": "sealr.tar-zstd-fuzz-seeds.v1",
+  "target": "tar_zstd_ustar_portable_v1",
+  "toolchain": "nightly-2026-08-01",
+  "cargoFuzzVersion": "0.13.2",
+  "libfuzzerSysVersion": "0.4.13",
+  "sanitizer": "address",
+  "bounds": {
+    "maxInputBytes": 262144,
+    "maxDerivedArchiveBytes": 131072,
+    "maxMetadataBytes": 32768,
+    "maxFiles": 64,
+    "maxMemberBytes": 32768,
+    "maxTotalBytes": 65536,
+    "maxPathDepth": 16,
+    "maxRatio": 32,
+    "maxTotalSeconds": 600,
+    "perInputTimeoutSeconds": 5,
+    "rssLimitMiB": 1024,
+    "jobs": 1
+  },
+  "failureArtifact": {
+    "directoryName": "sealr-tar-zstd-fuzz-artifacts",
+    "uploadOn": "failure",
+    "retentionDays": 7
+  },
+  "dictionary": {
+    "path": "fuzz/dictionaries/tar_zstd_ustar_portable_v1_dictionary",
+    "bytes": 434,
+    "sha256": "051a6fd9df2b3048dd054c5ed3a45ba183e2fa92dc7ea0d88933441d82f2f61a"
+  },
+  "targetSource": {
+    "path": "fuzz/fuzz_targets/tar_zstd_ustar_portable_v1.rs",
+    "bytes": 2756,
+    "sha256": "96d479943121a4293a944d5c91eba7f6fae98d66987e906cb340088d133a0e13"
+  },
+  "generatorSource": {
+    "path": "fuzz/generate_tar_zstd_fuzz_seeds.ps1",
+    "bytes": 10965,
+    "sha256": "3a804db90f58a4c5ba1c94726aa5faa9da04c0db68345112fe9e1ee45302c4d8"
+  },
+  "generator": "fuzz/generate_tar_zstd_fuzz_seeds.ps1",
+  "seeds": [
+    {"path":"fuzz/corpus/tar_zstd_ustar_portable_v1/invalid-checksum-lie","bytes":2061,"sha256":"29ffc530d853c715f67f35456e4cfc4daffd6f7d1389ae990e0e05e039087a95","generated":true},
+    {"path":"fuzz/corpus/tar_zstd_ustar_portable_v1/invalid-concatenated-frames","bytes":3090,"sha256":"c49d634983f7e45adac49f205cf80386fc5a3eb53bda96bcd7891934aa200d50","generated":true},
+    {"path":"fuzz/corpus/tar_zstd_ustar_portable_v1/invalid-fcs-lie","bytes":2060,"sha256":"ca5badc51e9493e8788ba4aa338747b3da475439bfa587385397083d4da8188a","generated":true},
+    {"path":"fuzz/corpus/tar_zstd_ustar_portable_v1/invalid-inner-not-tar","bytes":67,"sha256":"fa858f83b893011bb3fc5b8176597dfa6b03c2d61789b900a4fb35426e1711a7","generated":true},
+    {"path":"fuzz/corpus/tar_zstd_ustar_portable_v1/invalid-trailing-byte","bytes":1034,"sha256":"5d323135ffcf0c36531af0ad01e5218fa10edaa48b883471710bb441efba1e55","generated":true},
+    {"path":"fuzz/corpus/tar_zstd_ustar_portable_v1/resource-derived-over-cap","bytes":132108,"sha256":"10f3b909ee7dd1fd43ed5dddb4c7f3c7b18c2d69cad7f135d01fdad06e2b3856","generated":true},
+    {"path":"fuzz/corpus/tar_zstd_ustar_portable_v1/unsupported-dictionary-bit","bytes":1034,"sha256":"03c0d2ab3bb34269d14d57e0049928725c281dd3db53089925e0727d82b5b93d","generated":true},
+    {"path":"fuzz/corpus/tar_zstd_ustar_portable_v1/unsupported-skippable-frame","bytes":12,"sha256":"585599b661429ea0f9796588ba397fd68b495e04d1262ca3194a0bfa2e97da67","generated":true},
+    {"path":"fuzz/corpus/tar_zstd_ustar_portable_v1/unsupported-window-over-cap","bytes":9,"sha256":"32144131f0fde7b82a9551c7eff8e36d43102b746809d804366fc9b124fd3e80","generated":true},
+    {"path":"fuzz/corpus/tar_zstd_ustar_portable_v1/valid-cli-default-single-segment","bytes":130,"sha256":"4a467796ef2cd9a9e1a6ed670fa1d1ef15174b95be29b087af7339c32b078dcb","generated":true},
+    {"path":"fuzz/corpus/tar_zstd_ustar_portable_v1/valid-cli-level19-single-segment","bytes":118,"sha256":"e6b8a673bb8ece00d79c26b1adc5c955e138fe2c625ff63fa04cc7cb949240bc","generated":true},
+    {"path":"fuzz/corpus/tar_zstd_ustar_portable_v1/valid-empty-ustar-windowed","bytes":1033,"sha256":"2d08aa0e3f31e62add8778fae205e74010118439487ce08a79e80f5f7ec0b7cb","generated":true},
+    {"path":"fuzz/corpus/tar_zstd_ustar_portable_v1/valid-ordinary-ustar-windowed","bytes":2057,"sha256":"ec6e1818820e4bb1663d51ce58bc3a3d9791394b3473d9f555b3a8c7bef65339","generated":true},
+    {"path":"fuzz/corpus/tar_zstd_ustar_portable_v1/valid-single-segment-fcs","bytes":2060,"sha256":"c49dc937e6248b0ba50f37ee5beb9fba9fc7fc88fbb3ae114513d026db17f860","generated":true},
+    {"path":"fuzz/corpus/tar_zstd_ustar_portable_v1/valid-two-raw-blocks","bytes":2060,"sha256":"f1d28d4c8e694b09ad46322d236092be20d81b39bb29cf6796efa2213706c5d1","generated":true}
+  ]
+}

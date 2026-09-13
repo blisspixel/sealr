@@ -1,0 +1,114 @@
+[package]
+name = "sealr-fuzz"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "=0.4.13"
+sealr = { path = "../crates/sealr", version = "=0.1.0-alpha.16", features = ["__internal-fuzzing"] }
+sealr-worker-protocol = { path = "../crates/sealr-protocol", version = "=0.1.0-alpha.16" }
+
+[[bin]]
+name = "protocol_decoders"
+path = "fuzz_targets/protocol_decoders.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "semantic_records"
+path = "fuzz_targets/semantic_records.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_ustar_portable_v1"
+path = "fuzz_targets/tar_ustar_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_pax_portable_v1"
+path = "fuzz_targets/tar_pax_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_gnu_longname_portable_v1"
+path = "fuzz_targets/tar_gnu_longname_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gzip_rfc1952_single_member_v1"
+path = "fuzz_targets/gzip_rfc1952_single_member_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "zip64_strict_ascii_v1"
+path = "fuzz_targets/zip64_strict_ascii_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_gzip_ustar_portable_v1"
+path = "fuzz_targets/tar_gzip_ustar_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_gzip_pax_portable_v1"
+path = "fuzz_targets/tar_gzip_pax_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_gzip_gnu_longname_portable_v1"
+path = "fuzz_targets/tar_gzip_gnu_longname_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_zstd_ustar_portable_v1"
+path = "fuzz_targets/tar_zstd_ustar_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_xz_ustar_portable_v1"
+path = "fuzz_targets/tar_xz_ustar_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tar_bzip2_ustar_portable_v1"
+path = "fuzz_targets/tar_bzip2_ustar_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "sevenz_copy_portable_v1"
+path = "fuzz_targets/sevenz_copy_portable_v1.rs"
+test = false
+doc = false
+bench = false
+
+[workspace]

@@ -1,0 +1,41 @@
+{
+  "schema": "sealr.consumer-migrations.v1",
+  "verdict": {
+    "id": "sealr.verdict-consumer-migration.v1",
+    "target": "Outcome axes and VerifiedArchive",
+    "consumer": "tests/packaged-consumer/src/outcome_migration.rs",
+    "cases": [
+      "inspected-capability",
+      "committed-materialization",
+      "structural-denial",
+      "crc-denial",
+      "effect-setup-failure",
+      "source-unavailable"
+    ],
+    "examples": [
+      "crates/sealr/examples/deepr_content_gate/main.rs",
+      "crates/sealr/examples/pypa_installer_handoff/main.rs"
+    ],
+    "late_effect_test": "mutated_staged_content_never_publishes",
+    "legacy_compatibility_preserved": true
+  },
+  "durability": {
+    "id": "sealr.policy-durability-migration.v1",
+    "target": "Durability",
+    "consumer": "crates/sealr/tests/durability_migration.rs",
+    "input_types": ["Policy", "PolicyDocument"],
+    "modes": [
+      { "variant": "FlushOnly", "legacy_atomic": false, "receipt": "flush-only" },
+      { "variant": "MemberSync", "legacy_atomic": true, "receipt": "member-sync" }
+    ],
+    "tests": [
+      "named_policy_durability_preserves_every_legacy_encoding",
+      "document_selection_keeps_validation_and_memoized_identity_consistent",
+      "named_rust_controls_do_not_create_a_second_json_policy_language",
+      "both_modes_materialize_and_preserve_existing_destinations"
+    ],
+    "policy_encoding_preserved": true,
+    "worker_encoding_preserved": true,
+    "power_loss_guarantee": false
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "schema": "sealr.native-package-floor.v1",
+  "targets": [
+    {
+      "target": "aarch64-apple-darwin",
+      "runner": "macos-15",
+      "operating_system": "macOS 15",
+      "architecture": "arm64",
+      "abi": "Darwin 24 with MACOSX_DEPLOYMENT_TARGET=15.0",
+      "kernel": "Darwin 24"
+    },
+    {
+      "target": "x86_64-pc-windows-msvc",
+      "runner": "windows-2022",
+      "operating_system": "Windows Server 2022 build 20348",
+      "architecture": "x64",
+      "abi": "MSVC",
+      "kernel": "Windows NT 10.0 build 20348"
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "runner": "ubuntu-24.04",
+      "operating_system": "Ubuntu 24.04",
+      "architecture": "x86_64",
+      "abi": "glibc 2.39",
+      "kernel": "Linux 6.8 or later; supervised mode additionally requires Landlock ABI 3 and x86_64 seccomp"
+    }
+  ]
+}

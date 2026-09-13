@@ -1,0 +1,191 @@
+{
+  "schema": "sealr.gzip-fuzz-seeds.v1",
+  "target": "gzip_rfc1952_single_member_v1",
+  "toolchain": "nightly-2026-08-01",
+  "cargoFuzzVersion": "0.13.2",
+  "libfuzzerSysVersion": "0.4.13",
+  "bounds": {
+    "maxInputBytes": 1048576,
+    "maxOutputBytes": 65536,
+    "maxMetadataBytes": 4096,
+    "maxTotalSeconds": 600,
+    "perInputTimeoutSeconds": 5,
+    "rssLimitMiB": 1024,
+    "jobs": 1
+  },
+  "failureArtifact": {
+    "directoryName": "sealr-gzip-fuzz-artifacts",
+    "uploadOn": "failure",
+    "retentionDays": 7
+  },
+  "dictionary": {
+    "path": "fuzz/dictionaries/gzip_rfc1952_single_member_v1_dictionary",
+    "bytes": 141,
+    "sha256": "1e778021eaca29ff444678a93ae2ceaa5956f530aa3fef47a64edfb137dbe3cf"
+  },
+  "generator": "scripts/generate_gzip_fuzz_seeds.ps1",
+  "seeds": [
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/bad-data-crc",
+      "bytes": 27,
+      "sha256": "e9c16bd0c60623f4e609ff6e1f3226375999bf8947ff50943fde9ef94b445c1d",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/bad-header-crc",
+      "bytes": 29,
+      "sha256": "a5b8c63130f15460a665bee7bf74e2bc7534770bad25b911b902489ce3be963b",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/bad-isize",
+      "bytes": 27,
+      "sha256": "176ae6c35b8fab4b352eb0b79a55f5ccf0c085464052ac524e6e777fcf37cde5",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/concatenated-members",
+      "bytes": 67,
+      "sha256": "8066e124f01fedb03d2aa9d220d28aacab46e896be3fd7ee7b8f13ae3a001b70",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/invalid-extra-declared-length-overrun",
+      "bytes": 36,
+      "sha256": "fd2c5c56b7fc622ac93975ff8bad703fff1182d0aee39b9eabb66d554d66ae60",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/invalid-extra-si2-zero",
+      "bytes": 36,
+      "sha256": "e8efdb4166e7428fbcaf924376baec13b546034ca2e5c5bb58b229e4da572378",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/invalid-extra-trailing-remainder",
+      "bytes": 37,
+      "sha256": "c228f642ec6bd0407ddd0e5d1f4f0ff6c8d8159ece2a1f7063a7af45eeda03ed",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/invalid-extra-truncated-subfield-header",
+      "bytes": 36,
+      "sha256": "cac3434f572d96940eea3d91d72c459e86b8160ccb29e7bcbf2c68664b07cc66",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/trailing-byte",
+      "bytes": 28,
+      "sha256": "ddf12c68b6eafc0a5a5ace06d101f3966a9f5c8e675ce87da97fc4a41a28b5be",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/truncated-deflate",
+      "bytes": 18,
+      "sha256": "9b6641bc6abf158511d23aabcd7bf80271f2530804466c02359a3b24e8079ab4",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/truncated-extra-length",
+      "bytes": 11,
+      "sha256": "12d75400d2d14ec7e7ca55fe5dd3c3d4c70167da3914d4e73d9c667a45f97010",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/truncated-extra-payload",
+      "bytes": 14,
+      "sha256": "fd55f471e415cbe49f5d7ed63826a03af3b18b95e4093b6cf7de4f49fe4d3f33",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/truncated-fixed-header",
+      "bytes": 9,
+      "sha256": "ea057057a20c10b7776d24a59b51a34be1ecdb5ab2da61ab222c9c9a84fc9607",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/truncated-header-crc",
+      "bytes": 11,
+      "sha256": "79c610796b5ef4d2c5b038193f66495d56f6a453c9431db6d58dea608dc5bfcc",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/truncated-trailer-crc",
+      "bytes": 20,
+      "sha256": "6f7a32cdf7d9188d883402e869bff2e26c16a02db3e9344c22b6e2e93c32f22c",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/truncated-trailer-isize",
+      "bytes": 26,
+      "sha256": "ace202ae74e56df747bfefef3da3ba9f7ca5e38f8e37ee0fb43f6122c204a132",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/unterminated-comment",
+      "bytes": 23,
+      "sha256": "55277164896af2a32a97a7a2f56e4c1a9b1392e9e9198f200ff2f975e92d177f",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/unterminated-name",
+      "bytes": 21,
+      "sha256": "70a0555f19d8d8e7a8b79e26c2cfd7bc1cfaba3178844891076c98b26d6fbbb9",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/valid-all-optional-fields",
+      "bytes": 64,
+      "sha256": "a02873ac6cce3b6027aebcb53a50b488f02ef280668de4772b9f1e3810475d24",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/valid-dynamic-deflate",
+      "bytes": 40,
+      "sha256": "dbcdd7e1351d47277af2b1522282e934a30cb5e004755ce60a3ea41961978a6f",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/valid-optional-comment",
+      "bytes": 41,
+      "sha256": "20da9de7580d25cecb909525e68cbd088e398737c2a9f7168b2014ee9fc5d34b",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/valid-optional-extra",
+      "bytes": 36,
+      "sha256": "b37c163312586789b493ab500d2bf3e905679f500ac455fde5d81d9c525ba455",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/valid-optional-header-crc",
+      "bytes": 29,
+      "sha256": "64b3bb94845d04ac6eb7e1254bbd5a7b3bcdab7d8a68b26ba3e988bf4e5cc372",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/valid-optional-name",
+      "bytes": 39,
+      "sha256": "b6992267defb2a865d93ed1716eb4e63252adba422dbfbdbd8f6b08c344c62aa",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/valid-optional-text",
+      "bytes": 27,
+      "sha256": "105f65d4a4e4abfa0fdc4aed4291b39795371b3ed99bd64793d966e0b6c295be",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/valid-stored-deflate",
+      "bytes": 27,
+      "sha256": "0bc37285f6eb4926a71e040bf5c933b75ad0dae97226fa252813372579cd0abd",
+      "generated": true
+    },
+    {
+      "path": "fuzz/corpus/gzip_rfc1952_single_member_v1/zero-padding",
+      "bytes": 31,
+      "sha256": "e042b33a857e6324ef3da88a3739e6c4b3faf2b4e004aae58c97d6bd295d16e8",
+      "generated": true
+    }
+  ]
+}

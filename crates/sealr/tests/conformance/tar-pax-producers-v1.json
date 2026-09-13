@@ -1,0 +1,140 @@
+{
+  "schema": "sealr.tar-pax-producer-fixtures.v1",
+  "fixtures": [
+    {
+      "id": "gnu-tar-1.35",
+      "producer": "GNU tar 1.35 from ubuntu@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517",
+      "command": "docker run --rm -v $OUTPUT:/out ubuntu@sha256:33ceb71981b602c1a7443a53469e4dba065f7503eab3078a2d7a57a2ab987517 sh -c 'cd /tmp && name=$(printf \"g%.0s\" $(seq 1 110)).txt && printf \"gnu pax portable\\n\" > \"$name\" && tar --format=posix --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 --mode=0644 --pax-option=delete=atime,delete=ctime,delete=mtime,exthdr.name=PaxHeaders/gnu,exthdr.mtime=0,size:=17 -cf /out/gnu.tar \"$name\"'",
+      "member_path": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg.txt",
+      "member_content_hex": "676e752070617820706f727461626c650a",
+      "base_name_hex": "67676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767",
+      "carrier_name_hex": "506178486561646572732f676e75",
+      "records": [
+        {
+          "keyword": "path",
+          "value": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg.txt",
+          "parsed_size": null
+        },
+        { "keyword": "size", "value": "17", "parsed_size": 17 }
+      ],
+      "size_source": "local:0:1",
+      "len": 10240,
+      "source_sha256": "9c2706456a5e09898c485ce0e2ebefe886a6d5d0561ad4c4b2d85675ce049081",
+      "layout_sha256": "7d4ba1ae912294a81e4bcdd66c81d84623479a64d92a9aaaa83ed07349177e44",
+      "content_sha256": "a92d4201055687bbb3f30e5923bbe324eb708f57a087f7e8b832331f5c47648c",
+      "spans": [
+        { "offset": 0, "hex": "506178486561646572732f676e75" },
+        { "offset": 100, "hex": "30303030363434" },
+        { "offset": 108, "hex": "30303030303030" },
+        { "offset": 116, "hex": "30303030303030" },
+        { "offset": 124, "hex": "3030303030303030323037" },
+        { "offset": 136, "hex": "3030303030303030303030" },
+        { "offset": 148, "hex": "303130363134" },
+        { "offset": 155, "hex": "2078" },
+        { "offset": 257, "hex": "7573746172" },
+        { "offset": 263, "hex": "3030" },
+        { "offset": 512, "hex": "31323420706174683d67676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767672e7478740a31312073697a653d31370a" },
+        { "offset": 1024, "hex": "6767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676767676730303030363434" },
+        { "offset": 1132, "hex": "30303030303030" },
+        { "offset": 1140, "hex": "30303030303030" },
+        { "offset": 1148, "hex": "3030303030303030303231" },
+        { "offset": 1160, "hex": "3030303030303030303030" },
+        { "offset": 1172, "hex": "303332303334" },
+        { "offset": 1179, "hex": "2030" },
+        { "offset": 1281, "hex": "7573746172" },
+        { "offset": 1287, "hex": "3030" },
+        { "offset": 1536, "hex": "676e752070617820706f727461626c650a" }
+      ]
+    },
+    {
+      "id": "libarchive-paxr-3.8.4",
+      "producer": "bsdtar 3.8.4 with libarchive 3.8.4 paxr",
+      "command": "$name=('b'*110)+'.txt'; [IO.File]::WriteAllBytes((Join-Path $OUTPUT $name),[Text.Encoding]::UTF8.GetBytes(\"bsd pax portable`n\")); tar -c --format paxr --uid 0 --gid 0 --uname root --gname root --mtime '@0' -f (Join-Path $OUTPUT bsdtar.tar) -C $OUTPUT $name",
+      "member_path": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.txt",
+      "member_content_hex": "6273642070617820706f727461626c650a",
+      "base_name_hex": "6262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262",
+      "carrier_name_hex": "5061784865616465722f626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262",
+      "records": [
+        {
+          "keyword": "path",
+          "value": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.txt",
+          "parsed_size": null
+        }
+      ],
+      "size_source": "ustar",
+      "len": 3072,
+      "source_sha256": "703f2069c08b8f7c82d462fe050494f77d73ff45225159df21dfd2d749c7bb1d",
+      "layout_sha256": "748031c5a5a21bc146b2943a326db133b3fb629f72256abcb0e1009231680c4d",
+      "content_sha256": "015f5fbf5ff28a0c98976ea7f3827ddf8fb26618040966412c3529a81e14f569",
+      "spans": [
+        { "offset": 0, "hex": "5061784865616465722f626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262" },
+        { "offset": 100, "hex": "30303036363620" },
+        { "offset": 108, "hex": "30303030303020" },
+        { "offset": 116, "hex": "30303030303020" },
+        { "offset": 124, "hex": "303030303030303031373420303030303030303030303020303333343734" },
+        { "offset": 155, "hex": "2078" },
+        { "offset": 257, "hex": "7573746172" },
+        { "offset": 263, "hex": "3030726f6f74" },
+        { "offset": 297, "hex": "726f6f74" },
+        { "offset": 329, "hex": "30303030303020" },
+        { "offset": 337, "hex": "30303030303020" },
+        { "offset": 512, "hex": "31323420706174683d62626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262622e7478740a" },
+        { "offset": 1024, "hex": "6262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262626262" },
+        { "offset": 1124, "hex": "30303036363620" },
+        { "offset": 1132, "hex": "30303030303020" },
+        { "offset": 1140, "hex": "30303030303020" },
+        { "offset": 1148, "hex": "303030303030303030323120303030303030303030303020303333363030" },
+        { "offset": 1179, "hex": "2030" },
+        { "offset": 1281, "hex": "7573746172" },
+        { "offset": 1287, "hex": "3030726f6f74" },
+        { "offset": 1321, "hex": "726f6f74" },
+        { "offset": 1353, "hex": "30303030303020" },
+        { "offset": 1361, "hex": "30303030303020" },
+        { "offset": 1536, "hex": "6273642070617820706f727461626c650a" }
+      ]
+    },
+    {
+      "id": "python-tarfile-3.12.10",
+      "producer": "Python 3.12.10 tarfile.PAX_FORMAT",
+      "command": "py -3.12 -c \"import io,tarfile; data=b'python pax portable\\n'; ti=tarfile.TarInfo('base.txt'); ti.size=len(data); ti.mode=0o644; ti.uid=ti.gid=0; ti.uname=ti.gname='root'; ti.mtime=0; ti.pax_headers={'path':'mission/python-pax.txt','size':str(len(data))}; tf=tarfile.open('python.tar','w',format=tarfile.PAX_FORMAT); tf.addfile(ti,io.BytesIO(data)); tf.close()\"",
+      "member_path": "mission/python-pax.txt",
+      "member_content_hex": "707974686f6e2070617820706f727461626c650a",
+      "base_name_hex": "626173652e747874",
+      "carrier_name_hex": "2e2f2e2f40506178486561646572",
+      "records": [
+        { "keyword": "path", "value": "mission/python-pax.txt", "parsed_size": null },
+        { "keyword": "size", "value": "20", "parsed_size": 20 }
+      ],
+      "size_source": "local:0:1",
+      "len": 10240,
+      "source_sha256": "6223b757c0928d6b2312f3c85ef5d783acbaef58e89ceb17dae3cd120953af92",
+      "layout_sha256": "2123fbfabcc5a3c01e9d92471fd1960b0b873d5577b7cb1cc27962314d7940d4",
+      "content_sha256": "4fe72516dfddc6c429cb546698b065d4cbed0594c0fb12e8a2e8ef3020abec1e",
+      "spans": [
+        { "offset": 0, "hex": "2e2f2e2f40506178486561646572" },
+        { "offset": 100, "hex": "30303030303030" },
+        { "offset": 108, "hex": "30303030303030" },
+        { "offset": 116, "hex": "30303030303030" },
+        { "offset": 124, "hex": "3030303030303030303532" },
+        { "offset": 136, "hex": "3030303030303030303030" },
+        { "offset": 148, "hex": "303130323132" },
+        { "offset": 155, "hex": "2078" },
+        { "offset": 257, "hex": "7573746172" },
+        { "offset": 263, "hex": "3030" },
+        { "offset": 512, "hex": "333120706174683d6d697373696f6e2f707974686f6e2d7061782e7478740a31312073697a653d32300a" },
+        { "offset": 1024, "hex": "626173652e747874" },
+        { "offset": 1124, "hex": "30303030363434" },
+        { "offset": 1132, "hex": "30303030303030" },
+        { "offset": 1140, "hex": "30303030303030" },
+        { "offset": 1148, "hex": "3030303030303030303234" },
+        { "offset": 1160, "hex": "3030303030303030303030" },
+        { "offset": 1172, "hex": "303131323234" },
+        { "offset": 1179, "hex": "2030" },
+        { "offset": 1281, "hex": "7573746172" },
+        { "offset": 1287, "hex": "3030726f6f74" },
+        { "offset": 1321, "hex": "726f6f74" },
+        { "offset": 1536, "hex": "707974686f6e2070617820706f727461626c650a" }
+      ]
+    }
+  ]
+}

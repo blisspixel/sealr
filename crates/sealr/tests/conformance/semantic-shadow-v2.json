@@ -1,0 +1,483 @@
+{
+  "schema": "sealr.semantic-shadow.v2",
+  "predecessor": {
+    "schema": "sealr.semantic-shadow.v1",
+    "path": "crates/sealr/tests/conformance/semantic-shadow-v1.json",
+    "bytes": 17119,
+    "sha256": "b064c6945ca31603914d45a3d18775750bf30ddb667c356eb6d331673a9feb59"
+  },
+  "operation_ids": [
+    "41414141414141414141414141414141"
+  ],
+  "cases": [
+    {
+      "oracles": [
+        "apply-outcome-parity",
+        "backend-semantic-parity"
+      ],
+      "backend": "memory-borrowed",
+      "parity_group": "strict-v2-mixed-backends",
+      "evidence": {
+        "name": "strict-v2-mixed-memory-complete",
+        "profile_id": "sealr.profile.zip.strict-ascii.v2",
+        "policy_id": "sealr:policy/default/v1",
+        "policy_sha256": "8298b205c981ed140a52ba555c0499712436969faf4ebc28d88d8d9e7024c340",
+        "requested_effect": "inspect",
+        "retention": "none",
+        "finding_code": null,
+        "interpretation": "interpreted",
+        "admission": "admitted",
+        "verification": "complete",
+        "effect": "not-requested",
+        "phase": null,
+        "cause": null,
+        "verified_members": null,
+        "pending_members": null,
+        "source_sha256": "6a7ade295829bfdc7befd3d1cc6c51a26b1f7b3609c8e3122f795bffc9d2b372",
+        "request_id": "0a9b13c3bf842bf9bd8e3d32da127b72f22637b44a944c4e25391c67b1b6129e",
+        "plan_id": "270e1a1075fb2e4e81b63fdeb712a9a4063aff3758a3ab882e351fdc5cc46ca6",
+        "pending_ir_sha256": "a8188aa688bd811d98f12552b4bce75a88634c76e19646772a153421ec10fd78",
+        "final_ir_sha256": "59d76049f18925204eb4fb7db7e1a47a25c766266ffe87e355f08b825e0b3254",
+        "frontier": [
+          "verified",
+          "verified",
+          "verified"
+        ],
+        "findings": [],
+        "findings_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "planning_frame_sha256": "d3390db2d09bd7560fbd4f64c5d9e806497ac7760cb8475cb7761e51e261170c",
+        "completion_frame_sha256": "351c57d1250817042e43b8ad00768a3e280fd756669ac7abee1e9d7b302f8d34"
+      }
+    },
+    {
+      "oracles": [
+        "apply-outcome-parity",
+        "backend-semantic-parity"
+      ],
+      "backend": "private-file",
+      "parity_group": "strict-v2-mixed-backends",
+      "evidence": {
+        "name": "strict-v2-mixed-private-file-complete",
+        "profile_id": "sealr.profile.zip.strict-ascii.v2",
+        "policy_id": "sealr:policy/default/v1",
+        "policy_sha256": "8298b205c981ed140a52ba555c0499712436969faf4ebc28d88d8d9e7024c340",
+        "requested_effect": "inspect",
+        "retention": "none",
+        "finding_code": null,
+        "interpretation": "interpreted",
+        "admission": "admitted",
+        "verification": "complete",
+        "effect": "not-requested",
+        "phase": null,
+        "cause": null,
+        "verified_members": null,
+        "pending_members": null,
+        "source_sha256": "6a7ade295829bfdc7befd3d1cc6c51a26b1f7b3609c8e3122f795bffc9d2b372",
+        "request_id": "0a9b13c3bf842bf9bd8e3d32da127b72f22637b44a944c4e25391c67b1b6129e",
+        "plan_id": "270e1a1075fb2e4e81b63fdeb712a9a4063aff3758a3ab882e351fdc5cc46ca6",
+        "pending_ir_sha256": "a8188aa688bd811d98f12552b4bce75a88634c76e19646772a153421ec10fd78",
+        "final_ir_sha256": "59d76049f18925204eb4fb7db7e1a47a25c766266ffe87e355f08b825e0b3254",
+        "frontier": [
+          "verified",
+          "verified",
+          "verified"
+        ],
+        "findings": [],
+        "findings_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "planning_frame_sha256": "d3390db2d09bd7560fbd4f64c5d9e806497ac7760cb8475cb7761e51e261170c",
+        "completion_frame_sha256": "351c57d1250817042e43b8ad00768a3e280fd756669ac7abee1e9d7b302f8d34"
+      }
+    },
+    {
+      "oracles": [
+        "apply-outcome-parity"
+      ],
+      "backend": "memory-borrowed",
+      "parity_group": "same-extra-profile-differential",
+      "evidence": {
+        "name": "same-extra-strict-v1-complete",
+        "profile_id": "sealr.profile.zip.strict-ascii.v1",
+        "policy_id": "sealr:policy/default/v1",
+        "policy_sha256": "8298b205c981ed140a52ba555c0499712436969faf4ebc28d88d8d9e7024c340",
+        "requested_effect": "inspect",
+        "retention": "none",
+        "finding_code": null,
+        "interpretation": "interpreted",
+        "admission": "admitted",
+        "verification": "complete",
+        "effect": "not-requested",
+        "phase": null,
+        "cause": null,
+        "verified_members": null,
+        "pending_members": null,
+        "source_sha256": "5b3cbe3b03f2624e02c3f17af7df6d60c04e63a2ef6f7d3c3105c7178d2792ae",
+        "request_id": "3f1e6bf907762f9d446f8ee92e3293f642d079e688d52bf223e6cedd388222e4",
+        "plan_id": "b2c751c84d577517ad601a2451e07aa5176f7fd71355e50c53a0f6783f63ac7a",
+        "pending_ir_sha256": "e20cc76ffdec266e2e87b1734f100c82aabbc427d83229b2b7f3ccb3597f4ec8",
+        "final_ir_sha256": "c1c89e8bbc773c704caf9539daabf93901e12449a44552ea7b4b207fe255351c",
+        "frontier": [
+          "verified"
+        ],
+        "findings": [],
+        "findings_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "planning_frame_sha256": "aab75e57fdc6fdffd962cac0acd2b073eb892e2d9126de1fd76c1e6cc9eb519b",
+        "completion_frame_sha256": "38f1c7a5f72ef4d2a14a17ac12f06d151914068aafae02c6c5a9259b40ea7f94"
+      }
+    },
+    {
+      "oracles": [
+        "apply-outcome-parity"
+      ],
+      "backend": "memory-borrowed",
+      "parity_group": "same-extra-profile-differential",
+      "evidence": {
+        "name": "same-extra-strict-v2-terminal",
+        "profile_id": "sealr.profile.zip.strict-ascii.v2",
+        "policy_id": "sealr:policy/default/v1",
+        "policy_sha256": "8298b205c981ed140a52ba555c0499712436969faf4ebc28d88d8d9e7024c340",
+        "requested_effect": "inspect",
+        "retention": "none",
+        "finding_code": "zip.extra",
+        "interpretation": "malformed",
+        "admission": "not-evaluated",
+        "verification": "structure-only",
+        "effect": "not-requested",
+        "phase": "structure",
+        "cause": "zip.extra",
+        "verified_members": null,
+        "pending_members": null,
+        "source_sha256": "5b3cbe3b03f2624e02c3f17af7df6d60c04e63a2ef6f7d3c3105c7178d2792ae",
+        "request_id": "db7f50baddffa323bf5971d15537225b8504faae523701d8f7869d1973905e5d",
+        "plan_id": "555f81d54f9680440ce3ab3eed1843c04bab88f4debf699c8eac41e3558876a5",
+        "pending_ir_sha256": null,
+        "final_ir_sha256": null,
+        "frontier": [],
+        "findings": [
+          {
+            "severity": "error",
+            "code": "zip.extra",
+            "member": "extra.txt"
+          }
+        ],
+        "findings_sha256": "3a2592d8a53abbe8c687cdee1c02c55fa7600019bfa36d48ba950889cb332558",
+        "planning_frame_sha256": "75e0e888a11e893e4145fd6565156f20ea67c2599d04a21a7c6c30624a4e94a8",
+        "completion_frame_sha256": null
+      }
+    },
+    {
+      "oracles": [
+        "apply-outcome-parity"
+      ],
+      "backend": "memory-borrowed",
+      "parity_group": null,
+      "evidence": {
+        "name": "dotdot-terminal",
+        "profile_id": "sealr.profile.zip.strict-ascii.v2",
+        "policy_id": "sealr:policy/default/v1",
+        "policy_sha256": "8298b205c981ed140a52ba555c0499712436969faf4ebc28d88d8d9e7024c340",
+        "requested_effect": "inspect",
+        "retention": "none",
+        "finding_code": "path.dotdot",
+        "interpretation": "interpreted",
+        "admission": "denied",
+        "verification": "structure-only",
+        "effect": "not-requested",
+        "phase": "admission",
+        "cause": "path.dotdot",
+        "verified_members": null,
+        "pending_members": null,
+        "source_sha256": "32a6a8c57e4bc9a7c0d7f155f2164c1413d15069bb5f0162b9f3d45e99883831",
+        "request_id": "3bf33e512de85f7d1947773254b845a7af3fffbf6ea7114e6a0e490097e88b1a",
+        "plan_id": "01192cbf2680a57bd770f6a421d59464cb8855ea65dba52bad6a017857534387",
+        "pending_ir_sha256": null,
+        "final_ir_sha256": null,
+        "frontier": [],
+        "findings": [
+          {
+            "severity": "error",
+            "code": "path.dotdot",
+            "member": "../outside.txt"
+          }
+        ],
+        "findings_sha256": "28a993fe5a0bb1bab0b1846b7b765ccb0f75d45f0e29e916f8836bcea26a1b42",
+        "planning_frame_sha256": "0e3605606449e74d141b5b4426e3861b2ea7ebfde377b972eb31b1edc16f4775",
+        "completion_frame_sha256": null
+      }
+    },
+    {
+      "oracles": [
+        "apply-outcome-parity"
+      ],
+      "backend": "memory-borrowed",
+      "parity_group": null,
+      "evidence": {
+        "name": "interleaved-exact-topology-terminal",
+        "profile_id": "sealr.profile.zip.strict-ascii.v2",
+        "policy_id": "sealr:policy/default/v1",
+        "policy_sha256": "8298b205c981ed140a52ba555c0499712436969faf4ebc28d88d8d9e7024c340",
+        "requested_effect": "inspect",
+        "retention": "none",
+        "finding_code": "path.conflict",
+        "interpretation": "interpreted",
+        "admission": "denied",
+        "verification": "structure-only",
+        "effect": "not-requested",
+        "phase": "admission",
+        "cause": "path.conflict",
+        "verified_members": null,
+        "pending_members": null,
+        "source_sha256": "817b46e55c11aea4357cdece7c8d6878175e1b38ec61681e65d44ecbfc350e35",
+        "request_id": "b9517d402a2babacda3c6f0bedf41dea3d7b4de4be448555c2340bbb0a52843f",
+        "plan_id": "cd01783ebbe9ac59c515586a86a2e2b4f4839d2ed06efb4b97619183454206f9",
+        "pending_ir_sha256": null,
+        "final_ir_sha256": null,
+        "frontier": [],
+        "findings": [
+          {
+            "severity": "error",
+            "code": "path.conflict",
+            "member": "a/child"
+          }
+        ],
+        "findings_sha256": "d05d0b3b3efcedfb33902db9d0a923e528f51398c7977f429b3c0ac43b6acccf",
+        "planning_frame_sha256": "c9a91a73475c97e563dc9aa7ecb4fe171654207fee012bd6453fa59c966dcd91",
+        "completion_frame_sha256": null
+      }
+    },
+    {
+      "oracles": [
+        "apply-outcome-parity"
+      ],
+      "backend": "memory-borrowed",
+      "parity_group": null,
+      "evidence": {
+        "name": "interleaved-folded-topology-terminal",
+        "profile_id": "sealr.profile.zip.strict-ascii.v2",
+        "policy_id": "sealr:policy/default/v1",
+        "policy_sha256": "8298b205c981ed140a52ba555c0499712436969faf4ebc28d88d8d9e7024c340",
+        "requested_effect": "inspect",
+        "retention": "none",
+        "finding_code": "path.case_fold",
+        "interpretation": "interpreted",
+        "admission": "denied",
+        "verification": "structure-only",
+        "effect": "not-requested",
+        "phase": "admission",
+        "cause": "path.case_fold",
+        "verified_members": null,
+        "pending_members": null,
+        "source_sha256": "8683967894d4bbed9bf9bff94e80d41170d28476efb081fd9e7193c501011421",
+        "request_id": "f0a7dde6cc2053209fc00fe722c8bab0a39b7ba48b9bbc65b8395b09ba19cf06",
+        "plan_id": "3cb870b8f6047b647b06ee67f79afddb1a4c63430397fdc923b1feec8e7a2fb5",
+        "pending_ir_sha256": null,
+        "final_ir_sha256": null,
+        "frontier": [],
+        "findings": [
+          {
+            "severity": "error",
+            "code": "path.case_fold",
+            "member": "a/child"
+          }
+        ],
+        "findings_sha256": "db611b957be2339e41f80698621f8872e4716121621702b52619d75107d08500",
+        "planning_frame_sha256": "838903a697ca0035c4a72f5e8b2e726e7b83e90c60c6a954a4fcd7e452bed915",
+        "completion_frame_sha256": null
+      }
+    },
+    {
+      "oracles": [
+        "apply-outcome-parity"
+      ],
+      "backend": "memory-borrowed",
+      "parity_group": "total-quota-boundary",
+      "evidence": {
+        "name": "total-quota-exact-complete",
+        "profile_id": "sealr.profile.zip.strict-ascii.v2",
+        "policy_id": "sealr:policy/default/v1",
+        "policy_sha256": "457d6b29bdc3084a2b9813273560975137dc89a50078ac8894f25b708ec48abb",
+        "requested_effect": "inspect",
+        "retention": "none",
+        "finding_code": null,
+        "interpretation": "interpreted",
+        "admission": "admitted",
+        "verification": "complete",
+        "effect": "not-requested",
+        "phase": null,
+        "cause": null,
+        "verified_members": null,
+        "pending_members": null,
+        "source_sha256": "17a9a5ed60b068750fb0c13271593d61ee9114ff24cd9a4bb7cd5ad00e1fa897",
+        "request_id": "9943bc0d54cdc6ffe7fcb864c5d14f81a335c30abe0321e10ae971c9a445540d",
+        "plan_id": "3f4b8c8d32fff9bc5177b0b5bbf700f0b189b7148b94b4aae006687a8f12781c",
+        "pending_ir_sha256": "3af93f4c41bd46c3ea6ed3ae04e6d09cf85f977e2bce3430c0fc1ddfad0c35eb",
+        "final_ir_sha256": "be1856790129865a060960e52597ed0ff1b3ae2f5dd55601a9b75401ec5ad881",
+        "frontier": [
+          "verified",
+          "verified"
+        ],
+        "findings": [],
+        "findings_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "planning_frame_sha256": "ecefd4d88fdda12255ff5b5b4a656e0b79a04a228f1422e552e273d7c77aa90a",
+        "completion_frame_sha256": "b357b547f94a811c700261f1dafb693fc34a778870b1012594ea5881c9cf4fd3"
+      }
+    },
+    {
+      "oracles": [
+        "apply-outcome-parity"
+      ],
+      "backend": "memory-borrowed",
+      "parity_group": "total-quota-boundary",
+      "evidence": {
+        "name": "total-quota-one-under-terminal",
+        "profile_id": "sealr.profile.zip.strict-ascii.v2",
+        "policy_id": "sealr:policy/default/v1",
+        "policy_sha256": "1f33ec57809ee09b8d3ecb38f5e8af04d50bda9d6c6c4c9b5565ecdb261584f0",
+        "requested_effect": "inspect",
+        "retention": "none",
+        "finding_code": "quota.total",
+        "interpretation": "interpreted",
+        "admission": "denied",
+        "verification": "structure-only",
+        "effect": "not-requested",
+        "phase": "admission",
+        "cause": "quota.total",
+        "verified_members": null,
+        "pending_members": null,
+        "source_sha256": "17a9a5ed60b068750fb0c13271593d61ee9114ff24cd9a4bb7cd5ad00e1fa897",
+        "request_id": "55795cb875a906ba3f1985b6d01995a9a8cd7d3d9381cb3f6e9faed5d85a4b39",
+        "plan_id": "9085f4485e8914f4a92290df0a9f49bc7a6d1b41000b14d45b03ce83173bcfb3",
+        "pending_ir_sha256": null,
+        "final_ir_sha256": null,
+        "frontier": [],
+        "findings": [
+          {
+            "severity": "error",
+            "code": "quota.total",
+            "member": null
+          }
+        ],
+        "findings_sha256": "4f34ae13cd6ced07653f6a563d0f301bdc19d5690f78f6eab0b3f907f545abbb",
+        "planning_frame_sha256": "c70aa3502bfd3f3cfc817de8b566a045eec56672f4554be93683d7fe77f67461",
+        "completion_frame_sha256": null
+      }
+    },
+    {
+      "oracles": [
+        "apply-outcome-parity"
+      ],
+      "backend": "memory-borrowed",
+      "parity_group": "ratio-quota-boundary",
+      "evidence": {
+        "name": "ratio-quota-exact-complete",
+        "profile_id": "sealr.profile.zip.strict-ascii.v2",
+        "policy_id": "sealr:policy/default/v1",
+        "policy_sha256": "23cd189db800bb25ad3b46c8f82dff31a1e8e9b6b7239ac937544285247bd282",
+        "requested_effect": "inspect",
+        "retention": "none",
+        "finding_code": null,
+        "interpretation": "interpreted",
+        "admission": "admitted",
+        "verification": "complete",
+        "effect": "not-requested",
+        "phase": null,
+        "cause": null,
+        "verified_members": null,
+        "pending_members": null,
+        "source_sha256": "3864b8f2dcecfd72e4b0a19a59c453a7de0014406b66a26eb5ec6703926c1088",
+        "request_id": "9e68b0d3b92629913e334c8361ad9cbb2db8d474aa484cffdbc3649923605b90",
+        "plan_id": "dfd547ec3bad729f8ebe9df46ed3d6570e1c2e7b147c40ef9c75ff4027441042",
+        "pending_ir_sha256": "7994d95d196c1b84b46727088627ec0cb805b0815de3be1d11b368405cfc6049",
+        "final_ir_sha256": "d85681976b0ad5f439a5de26e99bead4a80b57ddafd5833d0a86dc7bdd431b30",
+        "frontier": [
+          "verified"
+        ],
+        "findings": [],
+        "findings_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+        "planning_frame_sha256": "0755790571842de7afbe8638e9c30e8445f118da08ccbbda55e6d9a0b5051a9b",
+        "completion_frame_sha256": "3cf552ca623ff81036dd5dc7f00f2ab8590ab940d769f5325759a22e29b5e78b"
+      }
+    },
+    {
+      "oracles": [
+        "apply-outcome-parity"
+      ],
+      "backend": "memory-borrowed",
+      "parity_group": "ratio-quota-boundary",
+      "evidence": {
+        "name": "ratio-quota-one-under-terminal",
+        "profile_id": "sealr.profile.zip.strict-ascii.v2",
+        "policy_id": "sealr:policy/default/v1",
+        "policy_sha256": "171684d11aa72e701eb077e345f042aa9c634d0e6e1b19111b9df358898b90c1",
+        "requested_effect": "inspect",
+        "retention": "none",
+        "finding_code": "quota.ratio",
+        "interpretation": "interpreted",
+        "admission": "denied",
+        "verification": "structure-only",
+        "effect": "not-requested",
+        "phase": "admission",
+        "cause": "quota.ratio",
+        "verified_members": null,
+        "pending_members": null,
+        "source_sha256": "3864b8f2dcecfd72e4b0a19a59c453a7de0014406b66a26eb5ec6703926c1088",
+        "request_id": "e6bac27312ba024ee82bda2273b557d621d99b1c0b1fe2876e94a4dd2243c964",
+        "plan_id": "bf60751f226fb0c6c3f8929f70f8f1dc7702b3fc797967fcaac6180cd01869a5",
+        "pending_ir_sha256": null,
+        "final_ir_sha256": null,
+        "frontier": [],
+        "findings": [
+          {
+            "severity": "error",
+            "code": "quota.ratio",
+            "member": "ratio.bin"
+          }
+        ],
+        "findings_sha256": "656dcb46e292f8a7c4ebc169ff8e44683011eafad4493bdefaa3a42a1e03b277",
+        "planning_frame_sha256": "8713ec0d04f658e23e8622820ae6b815925f1dd5ebdf9e38ee678072ca86aa8c",
+        "completion_frame_sha256": null
+      }
+    },
+    {
+      "oracles": [
+        "supervisor-reproduced-terminal"
+      ],
+      "backend": "memory-borrowed",
+      "parity_group": null,
+      "evidence": {
+        "name": "covering-inconsistent-terminal",
+        "profile_id": "sealr.profile.zip.strict-ascii.v2",
+        "policy_id": "sealr:policy/default/v1",
+        "policy_sha256": "8298b205c981ed140a52ba555c0499712436969faf4ebc28d88d8d9e7024c340",
+        "requested_effect": "inspect",
+        "retention": "none",
+        "finding_code": "covering.inconsistent",
+        "interpretation": "malformed",
+        "admission": "denied",
+        "verification": "structure-only",
+        "effect": "not-requested",
+        "phase": "structure",
+        "cause": "covering.inconsistent",
+        "verified_members": null,
+        "pending_members": null,
+        "source_sha256": "6903e0054583827b780b84e9e0da6ee2e3777b9bbef7bc500632231fc49e9f34",
+        "request_id": "2182b3ff7cf14cda9e2eab940e78bc977adc9520ec43271a91b664431d4eae19",
+        "plan_id": "0a23b31657a20493ee1bcf904da14d795b7c8f341c9419141c83abb65f95e223",
+        "pending_ir_sha256": "e395feb43cac333e26cd71b6a5ec1aef0340e9997df7447892156bdc611c2db6",
+        "final_ir_sha256": null,
+        "frontier": [
+          "pending"
+        ],
+        "findings": [
+          {
+            "severity": "error",
+            "code": "covering.inconsistent",
+            "member": null
+          }
+        ],
+        "findings_sha256": "769e1c1137a275492ea960155cf9747ba093148fb7c6fc092d65ae110842f7d6",
+        "planning_frame_sha256": "5da9aff706c9f37ef24e4a743662a4c0e7c4a1fc1893d5191a04503a970aa007",
+        "completion_frame_sha256": null
+      }
+    }
+  ]
+}

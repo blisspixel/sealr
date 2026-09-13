@@ -1,0 +1,204 @@
+{
+  "schema": "sealr.assurance-promotion-ledger.v1",
+  "required_workflow": ".github/workflows/ci.yml",
+  "minimum_consecutive_successful_main_runs": 10,
+  "failure_policy": "Any unsuccessful scheduled main run resets that check's committed consecutive-success sequence before automated promotion validation.",
+  "checks": [
+    {
+      "id": "kani.scalar-kernels.v1",
+      "category": "bounded-model-checking",
+      "scheduled_workflow": ".github/workflows/assurance.yml",
+      "scheduled_job": "Bounded scalar model checking",
+      "domain": "Three named scalar harnesses over the exact domains and assumptions in tests/assurance/manifest.json.",
+      "nonclaim": "No harness proves ZIP parsing, codecs, filesystem effects, worker containment, cryptography, or behavior outside its stated scalar domain.",
+      "local_reproduction": [
+        "cargo kani --manifest-path verification/kani/Cargo.toml --package sealr --default-unwind 1"
+      ],
+      "timeout_minutes": 20,
+      "required_ci_marker": "cargo kani --manifest-path verification/kani/Cargo.toml",
+      "promotable": true,
+      "stable_main_runs": [
+        {
+          "sequence": 1,
+          "run_id": 34335686928,
+          "commit": "8090a6bb6b0a6cc51461d2bce18966eb1a323434",
+          "branch": "main",
+          "event": "schedule",
+          "conclusion": "success",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/34335686928",
+          "observed_at": "2026-09-13T14:53:05.361566+00:00"
+        }
+      ],
+      "eligible": false,
+      "promoted": false
+    },
+    {
+      "id": "mutation.scalar-kernels.v1",
+      "category": "mutation-discovery",
+      "scheduled_workflow": ".github/workflows/assurance.yml",
+      "scheduled_job": "Targeted mutation discovery",
+      "domain": "Fixed mutations of three pure production scalar kernels under the ordinary sealr library tests.",
+      "nonclaim": "Mutation outcomes are review leads and never a correctness, completeness, security, or release score.",
+      "local_reproduction": [
+        "mkdir -p target/assurance-discovery",
+        "cargo-mutants mutants --no-config --package sealr --file crates/sealr/src/interval.rs --file crates/sealr/src/quota.rs --file crates/sealr/src/ratio.rs --re 'CheckedInterval::from_offset_len|QuotaState::consume|ratio_exceeds' --exclude-re 'kani_proofs' --jobs 2 --timeout 120 --output target/assurance-discovery/mutation --no-times --colors never --annotations none --cargo-arg=--locked -- --lib"
+      ],
+      "timeout_minutes": 20,
+      "required_ci_marker": "cargo-mutants mutants --no-config",
+      "promotable": false,
+      "stable_main_runs": [
+        {
+          "sequence": 1,
+          "run_id": 33615049485,
+          "commit": "2fab2cfcd54dc065d02e25e74c3bfb227555ca90",
+          "branch": "main",
+          "event": "schedule",
+          "conclusion": "success",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/33615049485",
+          "observed_at": "2026-09-13T14:53:05.361566+00:00"
+        },
+        {
+          "sequence": 2,
+          "run_id": 34335686928,
+          "commit": "8090a6bb6b0a6cc51461d2bce18966eb1a323434",
+          "branch": "main",
+          "event": "schedule",
+          "conclusion": "success",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/34335686928",
+          "observed_at": "2026-09-13T14:53:06.007788+00:00"
+        }
+      ],
+      "eligible": false,
+      "promoted": false
+    },
+    {
+      "id": "coverage.sealr-source.v1",
+      "category": "coverage-discovery",
+      "scheduled_workflow": ".github/workflows/assurance.yml",
+      "scheduled_job": "Source coverage discovery",
+      "domain": "Source regions observed under the ordinary non-ignored sealr package tests with all features.",
+      "nonclaim": "Coverage is a discovery map, not evidence of assertion strength, semantic completeness, correctness, or security.",
+      "local_reproduction": [
+        "mkdir -p target/assurance-discovery",
+        "cargo llvm-cov --locked --package sealr --all-features --json --summary-only --output-path target/assurance-discovery/coverage.json"
+      ],
+      "timeout_minutes": 20,
+      "required_ci_marker": "cargo llvm-cov",
+      "promotable": false,
+      "stable_main_runs": [
+        {
+          "sequence": 1,
+          "run_id": 33615049485,
+          "commit": "2fab2cfcd54dc065d02e25e74c3bfb227555ca90",
+          "branch": "main",
+          "event": "schedule",
+          "conclusion": "success",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/33615049485",
+          "observed_at": "2026-09-13T14:53:06.007788+00:00"
+        },
+        {
+          "sequence": 2,
+          "run_id": 34335686928,
+          "commit": "8090a6bb6b0a6cc51461d2bce18966eb1a323434",
+          "branch": "main",
+          "event": "schedule",
+          "conclusion": "success",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/34335686928",
+          "observed_at": "2026-09-13T14:53:07.004647+00:00"
+        }
+      ],
+      "eligible": false,
+      "promoted": false
+    },
+    {
+      "id": "semver.public-api-alpha12.v1",
+      "category": "public-api-compatibility",
+      "scheduled_workflow": ".github/workflows/assurance.yml",
+      "scheduled_job": "Public API compatibility discovery",
+      "domain": "The Rust-visible public API lints implemented by cargo-semver-checks 0.49.0, comparing current sealr with the self-contained Cargo package produced from exact Alpha.12 commit 9d762a596624415b8499b774707d018cf128dbd6.",
+      "nonclaim": "A clean job accepts no compatibility warnings. It does not prove behavioral, wire-format, evidence-schema, filesystem, platform, or security compatibility, and it cannot detect compatibility classes outside the pinned tool's implemented lints.",
+      "local_reproduction": [
+        "mkdir -p \"${TMPDIR}/sealr-semver-baseline-source\" \"${TMPDIR}/sealr-semver-baseline-target\"",
+        "test \"$(git rev-parse 'v0.1.0-alpha.12^{commit}')\" = '9d762a596624415b8499b774707d018cf128dbd6'",
+        "git archive --format=tar 9d762a596624415b8499b774707d018cf128dbd6 | tar --extract --directory \"${TMPDIR}/sealr-semver-baseline-source\"",
+        "CARGO_TARGET_DIR=\"${TMPDIR}/sealr-semver-baseline-target\" cargo package --locked --allow-dirty --manifest-path \"${TMPDIR}/sealr-semver-baseline-source/crates/sealr/Cargo.toml\"",
+        "cargo-semver-checks check-release --manifest-path crates/sealr/Cargo.toml --baseline-root \"${TMPDIR}/sealr-semver-baseline-target/package/sealr-0.1.0-alpha.12\" --release-type minor"
+      ],
+      "timeout_minutes": 20,
+      "required_ci_marker": "cargo-semver-checks check-release",
+      "promotable": true,
+      "stable_main_runs": [
+        {
+          "sequence": 1,
+          "run_id": 33615049485,
+          "commit": "2fab2cfcd54dc065d02e25e74c3bfb227555ca90",
+          "branch": "main",
+          "event": "schedule",
+          "conclusion": "success",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/33615049485",
+          "observed_at": "2026-09-13T14:53:07.778683+00:00"
+        },
+        {
+          "sequence": 2,
+          "run_id": 34335686928,
+          "commit": "8090a6bb6b0a6cc51461d2bce18966eb1a323434",
+          "branch": "main",
+          "event": "schedule",
+          "conclusion": "success",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/34335686928",
+          "observed_at": "2026-09-13T14:53:08.007140+00:00"
+        }
+      ],
+      "eligible": false,
+      "promoted": false
+    },
+    {
+      "id": "fuzz.protocol-semantic-and-tar.v2",
+      "category": "coverage-guided-fuzzing",
+      "scheduled_workflow": ".github/workflows/fuzz.yml",
+      "scheduled_job": "Bounded worker protocol, semantic-record, and raw portable ustar fuzzing",
+      "domain": "Digest-pinned protocol, semantic-record, and raw portable ustar seeds plus arbitrary bytes and input-directed checksum-repaired TAR mutations under the workflow's exact bounds.",
+      "nonclaim": "Coverage-guided fuzzing is heuristic exploration, not exhaustive reachability or proof that the protocol, semantic-record, or TAR interpreters are defect-free.",
+      "local_reproduction": [
+        "pwsh -NoLogo -NoProfile -File scripts/verify_fuzz_seeds.ps1",
+        "cargo fuzz run protocol_decoders -- -max_total_time=600 -rss_limit_mb=1024 -max_len=65536",
+        "cargo fuzz run semantic_records -- -max_total_time=600 -rss_limit_mb=1024 -max_len=65536",
+        "cargo fuzz run tar_ustar_portable_v1 -- -max_total_time=600 -rss_limit_mb=1024 -max_len=65536"
+      ],
+      "timeout_minutes": 25,
+      "required_ci_marker": "cargo fuzz run",
+      "promotable": true,
+      "stable_main_runs": [
+        {
+          "sequence": 1,
+          "run_id": 34102390215,
+          "commit": "8090a6bb6b0a6cc51461d2bce18966eb1a323434",
+          "branch": "main",
+          "event": "schedule",
+          "conclusion": "success",
+          "url": "https://github.com/blisspixel/sealr/actions/runs/34102390215",
+          "observed_at": "2026-09-13T14:53:16.086503+00:00"
+        }
+      ],
+      "eligible": false,
+      "promoted": false
+    },
+    {
+      "id": "resource.multigigabyte-sparse.v1",
+      "category": "native-resource-evidence",
+      "scheduled_workflow": ".github/workflows/resource-evidence.yml",
+      "scheduled_job": "3 GiB sparse gate on each release platform",
+      "domain": "One exact physically sparse valid 3 GiB ZIP32 fixture on the scheduled Linux, macOS, and Windows runners.",
+      "nonclaim": "This bounds observed heap use for one fixture and runner generation, not every archive, allocation, filesystem, or platform.",
+      "local_reproduction": [
+        "cargo test --locked --release -p sealr --test bounded_path_memory multigigabyte_sparse_path_input_stays_within_the_heap_budget -- --ignored --exact --nocapture"
+      ],
+      "timeout_minutes": 30,
+      "required_ci_marker": "multigigabyte_sparse_path_input_stays_within_the_heap_budget",
+      "promotable": true,
+      "stable_main_runs": [],
+      "eligible": false,
+      "promoted": false
+    }
+  ]
+}

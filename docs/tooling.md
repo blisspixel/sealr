@@ -1,0 +1,84 @@
+# Repository tooling and dependency discipline
+
+> Current status: the shipped `sealr` library and CLI are Rust. PowerShell and Bash are repository and release orchestration tools only. They are not runtime dependencies of the native archives.
+
+## Why PowerShell exists today
+
+The first release pipeline was developed from Windows, and PowerShell 7 is available on the standard Ubuntu, macOS, and Windows GitHub-hosted runners. It therefore provided one implementation for walkthrough generation, documentation checks, license bundles, and the local release operator while the product boundary was still changing.
+
+That choice helped the first three alpha releases ship consistently, but it is not the desired long-term ownership boundary. Deterministic repository logic is easier to test, reuse, and run everywhere when it is implemented in Rust.
+
+## Target tooling shape
+
+Shared tasks move into a small workspace `xtask` binary:
+
+```text
+cargo run -p xtask -- docs verify
+cargo run -p xtask -- walkthrough verify
+cargo run -p xtask -- licenses verify
+cargo run -p xtask -- release verify
+```
+
+The commands above are target notation, not current commands. This document owns the migration order; the project-wide dependency and TCB requirements are in the [roadmap decision rules](../ROADMAP.md#decision-rules).
+
+Host wrappers remain thin:
+
+- Bash may prepare a Linux-hosted GitHub Actions environment.
+- PowerShell may integrate with a Windows operator session.
+- Neither may own archive interpretation, evidence schemas, asset classification, or other shared security logic after its Rust replacement lands.
+
+Release promotion moves last because the current PowerShell implementation contains deliberate numeric release-ID binding, tag and protected-main verification, checksum checks, provenance verification, immutable-release readback, and fail-closed recovery rules. A replacement must preserve every gate before the old path is removed.
+
+## Cross-platform rule
+
+Every shared tool must run from a clean checkout on Ubuntu, macOS, and Windows using repository-pinned Rust. Platform-specific tests may add native coverage, but no release platform may depend on another platform to generate or validate its artifact.
+
+The release matrix remains:
+
+- native Linux tests and archive;
+- native macOS tests and archive;
+- native 64-bit Windows tests and archive;
+- 32-bit Windows ABI compile check today; native 32-bit execution is a future gate when an explicitly supported runner is available.
+
+## Rust version policy
+
+The current minimum supported Rust version is 1.98. Package metadata declares `rust-version = "1.98"`, `rust-toolchain.toml` pins 1.98.0 for contributors, and required CI installs exactly 1.98.0 rather than relying on a moving stable channel.
+
+During the preview series, raising the MSRV requires an explicit changelog entry, package-metadata update, and green packaged-consumer build on the new minimum. After a stable 1.x release, patch releases do not raise the MSRV. A minor release may raise it only as a documented compatibility decision.
+
+## Runtime dependency rule
+
+A new dependency in the shipped library or CLI needs:
+
+1. a concrete capability that the standard library or existing graph cannot reasonably provide;
+2. maintained-source and advisory review;
+3. license compatibility with Apache-2.0 distribution;
+4. transitive dependency and binary-size review;
+5. deterministic and offline behavior for the security path;
+6. cross-platform tests on every supported release target.
+
+Rust dependencies are locked and covered by repository license and advisory checks, and GitHub Actions are pinned by commit SHA. Runner-provided host tools are part of the documented CI environment but are not shipped runtime dependencies. Convenience alone does not justify adding an async runtime, terminal UI framework, network client, telemetry library, or second serialization stack to the release binary. Codec coverage does not justify libarchive, a vendor unarchiver, or a subprocess. Each new decompression crate is a trusted-computing-base change and is reviewed as such.
+
+The single required `CI` workflow verifies the exact allowlisted library package with `cargo package --locked -p sealr`, compares its complete file list and README and license bytes with the package contract, and builds two separately locked consumers plus the packaged [copyable PyPA handoff](../crates/sealr/examples/pypa_installer_handoff/README.md) against Cargo's extracted package directory. The handoff builds once as an extracted-package example and again after its complete directory is copied into an isolated standalone project; Cargo metadata must resolve `sealr` to that same extraction and must show no internal Sealr feature. The general consumer later runs inside native Linux package verification against the exact extracted helper manifest. The PyPA conformance consumer uses the exact `wheel_source.py` shipped in the `.crate`, verifies canonical evidence, deletes each source, and drives exact installer 1.0.1 from capability-only member reads. The exact Poetry 2.4.2 fixture separately verifies its 46 Poetry-runtime wheels plus the separate pip bootstrap wheel, actual update ordering, PREPARED-boundary no-reopen rule, abort behavior, stock-output parity, and final Rust audit. These checks catch missing packaged files, package-only compilation failures, accidental workspace-only APIs, Python bridge drift, manifest drift, isolation fallback, and capability regressions before any crates.io publication.
+
+`sealr-identity-verifier` is a separate non-published workspace tool, not the future general `xtask`. It intentionally has no dependency on `sealr`, uses only the existing Serde, serde_json, and SHA-256 dependency families, and independently checks the committed [identity-conformance bundle](identity-conformance.md). Its live mode verifies exact RFC 8785 view v2 and receipt v3 bytes, pair and source bindings, registered interpretation and known default-policy identities, outcome consistency, and the format-neutral content root. Required CI names both manifest modes explicitly in addition to running tamper tests through the workspace suite. Current-main native packages ship the verifier beside the CLI on every release target and prove the extracted pair end to end. It is not published as a crate, a separate release asset, or a source of archive provenance.
+
+`sealr-wheel-lab` is also a non-published workspace tool. Its v1 structural pilot requires the exact production-helper manifest and uses the public fail-closed supervised API with [strict ASCII v2](profiles/zip-strict-ascii-v2.md) to analyze a bounded, digest-pinned corpus without another ZIP parser. Its predecessor-bound [v2 inventory](wheel-compatibility-v2.md) uses the historical wheel UTF-8 profile and consumes only `VerifiedArchive`. Minimized committed fixtures cover container, `RECORD`, relocation, generated-target, and filename disagreements. The supported evaluator and current v5 inventory now live in the public crate and dedicated analyzer. The required packaged PyPA conformance and copyable handoff are isolated projects outside this laboratory. Raw benign wheels remain outside Git, and re-executing corpus measurement is a deliberate research operation because it requires the ignored local artifact cache.
+
+`sealr-materialization-lifecycle` is a non-published, cross-platform executable oracle over the public `sealr` outcome. Required Linux, macOS, and Windows CI runs 500 release-mode iterations divided equally among successful publication, preexisting-destination setup collision, CRC verification abort, and a destination race. A repository-only feature plants the racing destination after staged-tree audit and immediately before the native no-replace publication call. This exact interleaving is deterministic and does not depend on thread scheduling. The tool independently states the expected public axes, receipt materialization and cleanup states, findings, capability presence, bounded member reads, destination preservation, and absence of leaked stage or fixture objects. It does not claim exhaustive schedules, test the isolated Linux worker, or prove a general filesystem race property.
+
+`sealr-worker-bootstrap-lab` is a Linux-only executable conformance tool with a trivial non-Linux build path and cross-platform fixed-frame unit tests. It is not a release asset and does not depend on `sealr-cli` or `sealr-worker-protocol`. On Linux it selects `sealr`'s hidden `__internal-worker-lab` feature to exercise private semantic records and deterministic faults beyond the supported API. `rustix` and `landlock` exercise sequenced-packet descriptor transfer, two-layer authority closure, a direct Landlock floor query plus fixed ABI 3 enforcement, raw ancillary validation, parent observation, abrupt exit, absolute authority-round deadlines, pidfd termination and reap, checked cleanup, and a backpressured member-output pipe. Bounded kernel-sealed plan, completion, retained-content, and full-read or prefix-read request memfds validate required seals, length, role, digest, kind, and correlation. Restricted inspect and materialize workers bind the full plan to an exact file-backed Store-and-Deflate snapshot and execute only planned payload ranges. Each later non-retained read receives no stage or destination and preserves whether its accepted plan originated from inspect or materialize. The worker streams the complete member for both request kinds. The supervisor retains only the requested prefix when applicable and returns bytes only after exact EOF, correlated result, complete size, CRC32, SHA-256, clean exit, and reap. Materialization waits for clean reap before source replay, stage audit, and supervisor-only no-replace publication. Conformance covers discarded-tail corruption, prefix cap boundaries, cancellation, timeout, clones, repeated reads, output mutation, destination races, cleanup failure, crash and stall barriers, and separate 500-iteration bootstrap and writer campaigns. A dependency-free x86_64 seccomp-BPF module uses `TSYNC`, audit-architecture and x32 checks, a measured deny set, direct `EPERM` probes, and procfs observation to close process creation, stage permission mutation, rename, link, unlink, symlink, device creation, mount, truncate, and new socket authority before source transfer.
+
+The semantic helper path now uses one self-bound generic adapter for inspect, materialize, and member-read execution. It validates the actual sealed-plan profile, policy identity, budget, target, consumer, effect, member-sync, target identity, and retention instead of reconstructing the fixed conformance request. Supervisor replay reconstructs owned private outcome and retention state only after exact source-derived completion and retained-content agreement, including canonically stopped verification outcomes. Evidence-only retained-content validation remains borrow-only in the helper.
+
+Normal conformance uses the separate `sealr-worker` artifact built without the `lab` feature. It accepts no commands or fault selector. Both the lab and supported `LinuxWorker` require its explicit absolute path, exact byte length, and SHA-256, then authenticate a no-symlink opened object, sealed executable copy, helper hello, running executable identity, feature generation, and exact reap without fallback before sending archive authority. Only deliberate fault modes execute the lab binary. The frame codec, raw descriptor transport, sealed-blob envelope, helper-artifact authenticator, and fixed-manifest loader are implemented once in `sealr`. The [fixed Linux package contract](helper-packaging.md) places that static artifact under `libexec`, binds its exact manifest and dependency notices, and reuses one package verifier in Required CI and the tag workflow. Package smoke exercises public supervised inspect and materialize, retained borrow, capability clone and drop, full and prefix reads, pre-worker setup-failure preservation, stage cleanup, and exact reap. It also runs the packaged CLI, wheel laboratory, and extracted-package consumer against that exact manifest and helper; the general consumer proves supervised `.data/scripts` classification through the prefix path. After the native archive is built, Required CI extracts it and runs the copied `WheelSource` handoff from both supervised inspect and materialize origins with that exact helper manifest and the adjacent packaged verifier. The handoff passes its manifest SHA-256 and canonical receipt SHA-256 to Python out of band, keeps the install plan in Rust, removes the wheel before the post-admission installer bridge begins, and audits the exact output set and executable modes before realization identity. The exact Poetry fixture then uses that same packaged boundary after Poetry's own lock validation, records PREPARED before real uninstall or target writes, and denies later `.whl` opens in the host adapter and installer bridge. A separate required QEMU TCG gate proves the same public operations fail closed on a hash-pinned Landlock ABI 2 kernel.
+
+The first [private semantic-record experiment](semantic-record.md) remains a crate-private module rather than another workspace executable or dependency. It reuses the shipped crate's existing SHA-256 implementation and adds no runtime dependency. The supported Linux `apply_supervised` path invokes it internally for inspect, materialize, and later reads, while ordinary `apply`, `apply_with_options`, and the CLI remain in-process. The nondefault `__internal-fuzzing` feature exposes only an unsupported hidden byte-slice driver so the separate fuzz workspace can exercise the private codec; ordinary and default-feature builds expose no semantic-record type through the supported API. Its custom bounded codec exists to exercise pre-growth encoded-size and pre-reservation count checks, supervisor-bound depth allocation, exact correlation, hostile range validation, source binding, and semantic state coherence without adding a second general serialization stack. Protocol and semantic targets use separate seed manifests, dictionaries, corpora, and bounded jobs. Required verification binds the complete Cargo manifest, parsed target and dependency graph, lock checksum, registry-rooted crates.io fuzz engine in a Cargo-config-free environment, and complete scheduled workflow. Executable negative fixtures reject inert TOML remapping, local, patched, or vendored fuzz-engine substitution, manual-only drift, weakening, inactive or appended commands, inert evidence, and raw or quoted duplicate last-wins resource arguments, so evidence for one decoder cannot be mistaken for evidence for the other.
+
+## CLI rule
+
+The CLI is a thin presentation layer over typed library outcomes. Human formatting can improve, but machine JSON, rule identities, and exit classes remain versioned contracts. No UI dependency may become a second policy engine or parser.
+
+Repository tools may use `std::thread` and `std::thread::available_parallelism` for independent jobs such as ZipDiff classification. `SEALR_JOBS` caps that parallelism. It is not a `Policy` field and must not change trees, findings, or roots. A thread pool crate is not justified for that.
+
+The Rust task-runner shape follows the small-workspace pattern described by [`cargo-xtask`](https://github.com/matklad/cargo-xtask); Sealr does not need to depend on that repository or a task-runner framework.
