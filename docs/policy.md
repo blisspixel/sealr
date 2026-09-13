@@ -18,7 +18,7 @@ There is no insecure mode.
 
 ## Named durability controls
 
-Alpha.16 gives Rust callers named selections for the existing member-file durability behavior with
+Alpha.17 gives Rust callers named selections for the existing member-file durability behavior with
 `Durability` and the `durability`, `set_durability`, or `with_durability` methods
 on `Policy` and `PolicyDocument`:
 

@@ -279,7 +279,7 @@ class Collector:
             if category in ("bounded-model-checking", "mutation-discovery"):
                 required += [f"crates/sealr/src/{name}.rs" for name in ("interval", "quota", "ratio")]
             if category == "public-api-compatibility":
-                required += ["tests/assurance/semver-alpha12-known-warnings.txt"]
+                required += ["tests/assurance/semver-source-baseline-20260913-known-warnings.txt"]
         for path in required:
             files[path] = self.source(sha, path)[1]
         files.update({path: blob for path, blob in tree.items() if path.startswith(prefixes)})

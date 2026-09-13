@@ -1,21 +1,26 @@
 # Verify a published release
 
+Alpha.17 is the current distribution lineage. Alpha.1 through Alpha.16 remote
+tags and releases are retired and are not acquisition fallbacks. Historical
+notes and measurements keep their original meaning; see
+[distribution history](distribution-history.md).
+
 This page gives runnable commands for the current immutable prerelease. Historical release notes remain versioned snapshots, while current verification commands and clearer examples live here.
 
 This source tree targets the following release. Its publication state is verified
 from GitHub rather than inferred from these commands:
 
-- tag: `v0.1.0-alpha.16`;
-- release: <https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.16>;
+- tag: `v0.1.0-alpha.17`;
+- release: <https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.17>;
 - required state after promotion: prerelease, published, immutable.
 
 ## Linux
 
-Download `SHA256SUMS` and `sealr-0.1.0-alpha.16-x86_64-unknown-linux-gnu.tar.gz` into one directory, then run:
+Download `SHA256SUMS` and `sealr-0.1.0-alpha.17-x86_64-unknown-linux-gnu.tar.gz` into one directory, then run:
 
 ```sh
-archive='sealr-0.1.0-alpha.16-x86_64-unknown-linux-gnu.tar.gz'
-tag='v0.1.0-alpha.16'
+archive='sealr-0.1.0-alpha.17-x86_64-unknown-linux-gnu.tar.gz'
+tag='v0.1.0-alpha.17'
 commit="$(gh api "repos/blisspixel/sealr/commits/${tag}" --jq .sha)"
 if [ "${#commit}" -ne 40 ]; then echo 'could not resolve release tag commit' >&2; exit 1; fi
 case "${commit}" in *[!0-9a-f]*) echo 'could not resolve release tag commit' >&2; exit 1;; esac
@@ -31,11 +36,11 @@ gh attestation verify "${archive}" \
 
 ## macOS
 
-Download `SHA256SUMS` and `sealr-0.1.0-alpha.16-aarch64-apple-darwin.tar.gz` into one directory, then run:
+Download `SHA256SUMS` and `sealr-0.1.0-alpha.17-aarch64-apple-darwin.tar.gz` into one directory, then run:
 
 ```sh
-archive='sealr-0.1.0-alpha.16-aarch64-apple-darwin.tar.gz'
-tag='v0.1.0-alpha.16'
+archive='sealr-0.1.0-alpha.17-aarch64-apple-darwin.tar.gz'
+tag='v0.1.0-alpha.17'
 commit="$(gh api "repos/blisspixel/sealr/commits/${tag}" --jq .sha)"
 if [ "${#commit}" -ne 40 ]; then echo 'could not resolve release tag commit' >&2; exit 1; fi
 case "${commit}" in *[!0-9a-f]*) echo 'could not resolve release tag commit' >&2; exit 1;; esac
@@ -56,11 +61,11 @@ gh attestation verify "${archive}" \
 
 ## Windows PowerShell
 
-Download `SHA256SUMS` and `sealr-0.1.0-alpha.16-x86_64-pc-windows-msvc.zip` into one directory, then run:
+Download `SHA256SUMS` and `sealr-0.1.0-alpha.17-x86_64-pc-windows-msvc.zip` into one directory, then run:
 
 ```powershell
-$archive = 'sealr-0.1.0-alpha.16-x86_64-pc-windows-msvc.zip'
-$tag = 'v0.1.0-alpha.16'
+$archive = 'sealr-0.1.0-alpha.17-x86_64-pc-windows-msvc.zip'
+$tag = 'v0.1.0-alpha.17'
 $commit = gh api "repos/blisspixel/sealr/commits/$tag" --jq .sha
 if ($LASTEXITCODE -ne 0 -or $commit -notmatch '^[0-9a-f]{40}$') { throw 'could not resolve release tag commit' }
 $line = (Get-Content -LiteralPath SHA256SUMS) | Where-Object { $_ -match "  $([regex]::Escape($archive))$" }
@@ -83,14 +88,14 @@ if ($LASTEXITCODE -ne 0) { throw 'build provenance verification failed' }
 With a current GitHub CLI, verify the immutable release record:
 
 ```sh
-gh release verify v0.1.0-alpha.16 --repo blisspixel/sealr
+gh release verify v0.1.0-alpha.17 --repo blisspixel/sealr
 ```
 
 Build provenance binds each native archive to the tagged GitHub Actions workflow and source commit. It is not a vulnerability-free claim, an archive-decision attestation, or a substitute for reviewing the security limitations.
 
 ## Canonical evidence after archive authentication
 
-The published Alpha.16 archives include `sealr-identity-verifier` or `sealr-identity-verifier.exe` beside the `sealr` CLI, with no additional release asset. After the checksum and provenance steps above succeed, the extracted pair can produce and check byte-exact evidence without a source checkout or Rust toolchain:
+The published Alpha.17 archives include `sealr-identity-verifier` or `sealr-identity-verifier.exe` beside the `sealr` CLI, with no additional release asset. After the checksum and provenance steps above succeed, the extracted pair can produce and check byte-exact evidence without a source checkout or Rust toolchain:
 
 ```sh
 ./sealr path/to/archive.zip \

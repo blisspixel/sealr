@@ -6,6 +6,15 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+## [0.1.0-alpha.17] - 2026-09-13
+
+### Changed
+
+- Started the current owner-controlled repository and native-release history for Nick Seal (`blisspixel`). Alpha.1 through Alpha.16 remote tags and releases are retired; historical release notes, measurements, and artifact digests remain records rather than active acquisition instructions. Old immutable tag names are not reused.
+- Require the owner-created exact draft before automated building, attestation, and asset staging. Publication preserves the owner identity and all exact-commit CI, fuzz, provenance, checksum, and immutable-release checks.
+- Reset all six active assurance qualification histories to zero without changing historical snapshots or the ten-distinct-commit rule. Every category remains ineligible and unpromoted; mutation and coverage remain discovery-only.
+- Updated source, native, copied-consumer, release, and documentation version contracts to Alpha.17. Runtime behavior, public semantic identities, worker protocol, policy encoding, and dependencies remain unchanged.
+
 ## [0.1.0-alpha.16] - 2026-09-13
 
 ### Added
@@ -492,7 +501,8 @@ First public development preview of the ZIP boundary.
 
 This preview is not a production-ready security boundary and has not received an external security audit. See the security limitations in the README and the reporting policy in `SECURITY.md` before evaluating it.
 
-[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.16...HEAD
+[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.17...HEAD
+[0.1.0-alpha.17]: https://github.com/blisspixel/sealr/commits/v0.1.0-alpha.17
 [0.1.0-alpha.16]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.15...v0.1.0-alpha.16
 [0.1.0-alpha.15]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.14...v0.1.0-alpha.15
 [0.1.0-alpha.14]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.13...v0.1.0-alpha.14

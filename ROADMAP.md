@@ -10,20 +10,25 @@ Archive bytes -> versioned interpretation -> verified admitted tree
 All stages                                 -> evidence
 ```
 
-This source tree targets `v0.1.0-alpha.16`, built with Rust 1.98. The [release page](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.16) records publication state. Alpha.16 contains typed publisher outcomes, tested evidence and Rust consumer migrations, named durability controls, and reproducible assurance bookkeeping. The owner-maintained [validation project](https://github.com/blisspixel/sealr-validation) consumes real release artifacts. Independent adoption and an independent security audit remain unproven.
+This source tree targets `v0.1.0-alpha.17`, built with Rust 1.98. The [release page](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.17) records publication state. Alpha.17 contains typed publisher outcomes, tested evidence and Rust consumer migrations, named durability controls, and reproducible assurance bookkeeping. The owner-maintained [validation project](https://github.com/blisspixel/sealr-validation) consumes real release artifacts. Independent adoption and an independent security audit remain unproven.
 
 Progress and release readiness use executable evidence. Human approval, adopter recruitment, and paid review are not prerequisites. Automation cannot manufacture independent adoption or audit claims. Existing fail-closed CI, artifact authentication, semantic identities, and security limits still apply.
 
 The [optional external pilot](docs/adopter-pilot.md) retains its independent
-ownership and attribution requirements without gating technical progress.
+ownership and evidence requirements without gating technical progress.
+
+Alpha.17 starts a new owner-controlled distribution history. Earlier remote
+releases and runs are retired; all six active assurance histories restart at
+zero. The observations below remain historical evidence. See
+[distribution history](docs/distribution-history.md).
 
 ## Why this order
 
-The publisher and migration gaps now have executable consumer evidence. A controlled downstream run also shows substantial repeated-read cost for a small known working set, but does not identify which internal phase dominates. Measure that attribution before changing authority or adding runtime complexity. Lifecycle gaps and coordinated dependency maintenance remain explicit work. More formats would increase trusted code before answering those questions.
+The publisher and migration gaps now have executable consumer evidence. A controlled downstream run also shows substantial repeated-read cost for a small known working set, but does not identify which internal phase dominates. Measure time spent in source hashing, plan validation, worker setup, and payload work before changing authority or adding runtime complexity. Lifecycle gaps and coordinated dependency maintenance remain explicit work. More formats would increase trusted code before answering those questions.
 
 ```text
 typed outcomes and tested consumer migrations
-    -> bounded attribution of repeated-read costs
+    -> measured time spent in each repeated-read phase
     -> justified implementation changes and lifecycle closure
     -> accumulated assurance and complete compatibility scope
     -> scoped stable-release decision
@@ -45,7 +50,7 @@ These close the named increments, not a stable API freeze or lifecycle qualifica
 
 ## Active execution queue
 
-### 1. Attribute repeated-read costs before changing the boundary
+### 1. Measure repeated-read phases before changing the boundary
 
 The [controlled downstream observation](docs/capability-reuse-experiment.md#controlled-repeated-read-observation) used released Alpha.15 and eight members totaling 363,559 bytes. Across six measured pairs, median totals for 16 read calls were 3.685663 seconds without retention and 0.000056 seconds with those members retained. Separate returned-byte digest checks and initial admission are excluded. This is a local warm-cache comparison, not a full-installation benchmark or latency promise.
 
@@ -71,7 +76,7 @@ Keep compatibility vectors and tested migration rules current, then write a scop
 
 ### 4. Replay each new release without rewriting historical evidence
 
-Preserve exact-commit CI, provenance, immutable tags, checksums, matching companions, and release readback. The downstream Alpha.15 observations retain their original source and artifact pins. Adopting Alpha.16 requires a new explicit acquisition and replay record; old reports do not become Alpha.16 results by relabeling them.
+Preserve exact-commit CI, provenance, immutable tags, checksums, matching companions, and release readback. The downstream Alpha.15 observations retain their original source and artifact pins. Adopting Alpha.17 requires a new explicit acquisition and replay record; old reports do not become Alpha.17 results by relabeling them.
 
 GitHub-only distribution remains supported. A future crates.io version requires truthful tagged documentation and registry readback; existing GitHub-only releases must not be uploaded retroactively.
 
@@ -116,7 +121,7 @@ Agent workspaces and hermetic build inputs are the next consumer candidates. Bin
 | Question | Source |
 |---|---|
 | What works now? | [README](README.md), [API](docs/api.md), [security policy](SECURITY.md) |
-| What changed? | [Milestones](docs/milestones.md), [changelog](CHANGELOG.md), [Alpha.16 notes](docs/releases/v0.1.0-alpha.16.md) |
+| What changed? | [Milestones](docs/milestones.md), [changelog](CHANGELOG.md), [Alpha.17 notes](docs/releases/v0.1.0-alpha.17.md) |
 | What is the next bounded plan? | [Near-term execution](docs/near-term.md) and [iteration record](docs/autonomous-improvement.md) |
 | What may a consumer pin? | [Candidate inventory](docs/candidate-surface.md) |
 | What proves usefulness? | [Usefulness test](docs/usefulness.md) |

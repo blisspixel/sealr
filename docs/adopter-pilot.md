@@ -2,6 +2,10 @@
 
 Updated 2026-09-13.
 
+The Alpha.13 baseline below is retained historical evidence. Its old remote
+release and tag are retired; evaluation now requires a new Alpha.17 acquisition
+and replay. See [distribution history](distribution-history.md).
+
 > Status: verified technical baseline for the first external pilot. No external adopter has passed this contract. No separately maintained consumer has been selected, and no publishable pilot release has been assigned. Alpha.13 must not be retroactively published to crates.io because its immutable packaged README explicitly describes it as GitHub-only. Repository fixtures remain mechanism evidence only.
 
 This is an optional independent-adoption contract. Its maintainer and reporting conditions determine whether an external adoption claim is justified; they do not gate engineering, candidate stability, or release readiness. The active [technical conformance plan](near-term.md) can proceed autonomously using owner-maintained downstream evidence.
@@ -12,9 +16,9 @@ The machine-readable source is [`tests/package-contract/adopter-pilot.json`](../
 
 The `sealr.external-adopter-pilot.v2` contract separates historical artifact
 identities from the source currently under evaluation. Current evaluation pins
-`sealr = "=0.1.0-alpha.16"` and matching Alpha.16 native companions. The copied
+`sealr = "=0.1.0-alpha.17"` and matching Alpha.17 native companions. The copied
 handoff manifest and workspace package version must agree with that requirement.
-Alpha.16 remains GitHub-only and does not assign a registry pilot release.
+Alpha.17 remains GitHub-only and does not assign a registry pilot release.
 
 Alpha.13 is historical reproduction evidence, not the recommended evaluation
 release: Alpha.14 fixes incomplete Deflate stream admission. The historical

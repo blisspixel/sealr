@@ -2,7 +2,7 @@
 
 Updated 2026-09-13.
 
-This page records preview contents through the Alpha.16 source tree. The release pages record publication state. It replaces completed milestone logs that previously lived in the roadmap and near-term plan. The per-release notes are the detailed, versioned source for contents, limitations, compatibility changes, and verification instructions. The [changelog](../CHANGELOG.md) is the compact file-level history.
+This page records preview contents through the Alpha.17 source tree. Alpha.1 through Alpha.16 remote releases and tags are retired; their notes remain historical snapshots. The current release page records publication state. See [distribution history](distribution-history.md). The [changelog](../CHANGELOG.md) is the compact file-level history.
 
 All previews remain non-production releases. A completed milestone means its bounded repository gate shipped, not that the whole security boundary became stable.
 
@@ -26,6 +26,7 @@ All previews remain non-production releases. A completed milestone means its bou
 | Alpha.14 | 2026-09-04 | Explicit Deflate completion, 24 Unicode and streaming wheel producer vectors, twelve complete supervised installer runs, and machine-checked adopter and candidate inventories | [Release notes](releases/v0.1.0-alpha.14.md) |
 | Alpha.15 | 2026-09-05 | Capability-only publisher content decision, measured bounded-retention guidance, and a consistent visual identity with current Linux examples | [Release notes](releases/v0.1.0-alpha.15.md) |
 | Alpha.16 | 2026-09-13 | Typed publisher outcomes, tested evidence and Rust consumer migrations, named existing durability controls, and reproducible assurance bookkeeping | [Release notes](releases/v0.1.0-alpha.16.md) |
+| Alpha.17 | 2026-09-13 | Current owner-controlled source and native distribution, owner-created release drafts, and fresh assurance qualification history with unchanged archive semantics | [Release notes](releases/v0.1.0-alpha.17.md) |
 
 ## Durable detail by topic
 

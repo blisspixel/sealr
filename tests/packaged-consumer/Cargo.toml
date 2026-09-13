@@ -8,6 +8,6 @@ publish = false
 [workspace]
 
 [dependencies]
-sealr = { version = "=0.1.0-alpha.16", path = "../../target/package/sealr-0.1.0-alpha.16" }
+sealr = { version = "=0.1.0-alpha.17", path = "../../target/package/sealr-0.1.0-alpha.17" }
 sha2 = "0.11"
 zip = { version = "8", default-features = false, features = ["deflate"] }

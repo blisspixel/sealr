@@ -2,6 +2,10 @@
 
 Updated 2026-09-13.
 
+The historical artifact replays below precede the Alpha.17 distribution reset.
+Their old remote releases and tags are retired; a current acquisition claim
+requires a new Alpha.17 replay. See [distribution history](distribution-history.md).
+
 Sealr is an admission boundary other software calls. Its technical usefulness test is:
 
 ```text
@@ -36,7 +40,7 @@ The [exact Poetry 2.4.2 fixture](../tests/poetry-consumer/README.md) tests one p
 
 The [Unicode and streaming matrix](wheel-producer-compatibility.md) adds controlled producer evidence and exposed an incomplete Deflate stream admission defect, fixed in Alpha.14. The [Alpha.15 content gate](wheel-content-gate.md) checks real publisher requirements without installing files. The separate owner-maintained [validation project](https://github.com/blisspixel/sealr-validation) consumes released Deepr, Primr, and Recon wheels and records retention experiments.
 
-The separate publisher replay combines ordinary immutable Alpha.15 acquisition with two accepted variants, ten typed refusals, and bounded post-deletion source-open observations. It closes that narrow technical conformance increment. Alpha.16 carries the typed outcome and consumer migration changes; the older report remains Alpha.15 artifact evidence. Independent adoption and an independent security audit remain unproven. The next work attributes measured repeated-read costs and closes explicit lifecycle gaps.
+The separate publisher replay combines ordinary immutable Alpha.15 acquisition with two accepted variants, ten typed refusals, and bounded post-deletion source-open observations. It closes that narrow technical conformance increment. Alpha.17 carries the typed outcome and consumer migration changes; the older report remains Alpha.15 artifact evidence. Independent adoption and an independent security audit remain unproven. The next work attributes measured repeated-read costs and closes explicit lifecycle gaps.
 
 ## Boundary rules
 

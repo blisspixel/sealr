@@ -17,18 +17,7 @@
       "timeout_minutes": 20,
       "required_ci_marker": "cargo kani --manifest-path verification/kani/Cargo.toml",
       "promotable": true,
-      "stable_main_runs": [
-        {
-          "sequence": 1,
-          "run_id": 34335686928,
-          "commit": "8090a6bb6b0a6cc51461d2bce18966eb1a323434",
-          "branch": "main",
-          "event": "schedule",
-          "conclusion": "success",
-          "url": "https://github.com/blisspixel/sealr/actions/runs/34335686928",
-          "observed_at": "2026-09-13T14:53:05.361566+00:00"
-        }
-      ],
+      "stable_main_runs": [],
       "eligible": false,
       "promoted": false
     },
@@ -46,28 +35,7 @@
       "timeout_minutes": 20,
       "required_ci_marker": "cargo-mutants mutants --no-config",
       "promotable": false,
-      "stable_main_runs": [
-        {
-          "sequence": 1,
-          "run_id": 33615049485,
-          "commit": "2fab2cfcd54dc065d02e25e74c3bfb227555ca90",
-          "branch": "main",
-          "event": "schedule",
-          "conclusion": "success",
-          "url": "https://github.com/blisspixel/sealr/actions/runs/33615049485",
-          "observed_at": "2026-09-13T14:53:05.361566+00:00"
-        },
-        {
-          "sequence": 2,
-          "run_id": 34335686928,
-          "commit": "8090a6bb6b0a6cc51461d2bce18966eb1a323434",
-          "branch": "main",
-          "event": "schedule",
-          "conclusion": "success",
-          "url": "https://github.com/blisspixel/sealr/actions/runs/34335686928",
-          "observed_at": "2026-09-13T14:53:06.007788+00:00"
-        }
-      ],
+      "stable_main_runs": [],
       "eligible": false,
       "promoted": false
     },
@@ -85,70 +53,28 @@
       "timeout_minutes": 20,
       "required_ci_marker": "cargo llvm-cov",
       "promotable": false,
-      "stable_main_runs": [
-        {
-          "sequence": 1,
-          "run_id": 33615049485,
-          "commit": "2fab2cfcd54dc065d02e25e74c3bfb227555ca90",
-          "branch": "main",
-          "event": "schedule",
-          "conclusion": "success",
-          "url": "https://github.com/blisspixel/sealr/actions/runs/33615049485",
-          "observed_at": "2026-09-13T14:53:06.007788+00:00"
-        },
-        {
-          "sequence": 2,
-          "run_id": 34335686928,
-          "commit": "8090a6bb6b0a6cc51461d2bce18966eb1a323434",
-          "branch": "main",
-          "event": "schedule",
-          "conclusion": "success",
-          "url": "https://github.com/blisspixel/sealr/actions/runs/34335686928",
-          "observed_at": "2026-09-13T14:53:07.004647+00:00"
-        }
-      ],
+      "stable_main_runs": [],
       "eligible": false,
       "promoted": false
     },
     {
-      "id": "semver.public-api-alpha12.v1",
+      "id": "semver.public-api-source-baseline-20260913.v1",
       "category": "public-api-compatibility",
       "scheduled_workflow": ".github/workflows/assurance.yml",
       "scheduled_job": "Public API compatibility discovery",
-      "domain": "The Rust-visible public API lints implemented by cargo-semver-checks 0.49.0, comparing current sealr with the self-contained Cargo package produced from exact Alpha.12 commit 9d762a596624415b8499b774707d018cf128dbd6.",
+      "domain": "The Rust-visible public API lints implemented by cargo-semver-checks 0.49.0, comparing current sealr with the self-contained Cargo package produced from exact source-only baseline commit 157d47168ea7bdab1a5d0a1a7c2c8ec896d195d1.",
       "nonclaim": "A clean job accepts no compatibility warnings. It does not prove behavioral, wire-format, evidence-schema, filesystem, platform, or security compatibility, and it cannot detect compatibility classes outside the pinned tool's implemented lints.",
       "local_reproduction": [
         "mkdir -p \"${TMPDIR}/sealr-semver-baseline-source\" \"${TMPDIR}/sealr-semver-baseline-target\"",
-        "test \"$(git rev-parse 'v0.1.0-alpha.12^{commit}')\" = '9d762a596624415b8499b774707d018cf128dbd6'",
-        "git archive --format=tar 9d762a596624415b8499b774707d018cf128dbd6 | tar --extract --directory \"${TMPDIR}/sealr-semver-baseline-source\"",
+        "test \"$(git rev-parse 'source-baseline-20260913^{commit}')\" = '157d47168ea7bdab1a5d0a1a7c2c8ec896d195d1'",
+        "git archive --format=tar 157d47168ea7bdab1a5d0a1a7c2c8ec896d195d1 | tar --extract --directory \"${TMPDIR}/sealr-semver-baseline-source\"",
         "CARGO_TARGET_DIR=\"${TMPDIR}/sealr-semver-baseline-target\" cargo package --locked --allow-dirty --manifest-path \"${TMPDIR}/sealr-semver-baseline-source/crates/sealr/Cargo.toml\"",
-        "cargo-semver-checks check-release --manifest-path crates/sealr/Cargo.toml --baseline-root \"${TMPDIR}/sealr-semver-baseline-target/package/sealr-0.1.0-alpha.12\" --release-type minor"
+        "cargo-semver-checks check-release --manifest-path crates/sealr/Cargo.toml --baseline-root \"${TMPDIR}/sealr-semver-baseline-target/package/sealr-0.1.0-alpha.16\" --release-type minor"
       ],
       "timeout_minutes": 20,
       "required_ci_marker": "cargo-semver-checks check-release",
       "promotable": true,
-      "stable_main_runs": [
-        {
-          "sequence": 1,
-          "run_id": 33615049485,
-          "commit": "2fab2cfcd54dc065d02e25e74c3bfb227555ca90",
-          "branch": "main",
-          "event": "schedule",
-          "conclusion": "success",
-          "url": "https://github.com/blisspixel/sealr/actions/runs/33615049485",
-          "observed_at": "2026-09-13T14:53:07.778683+00:00"
-        },
-        {
-          "sequence": 2,
-          "run_id": 34335686928,
-          "commit": "8090a6bb6b0a6cc51461d2bce18966eb1a323434",
-          "branch": "main",
-          "event": "schedule",
-          "conclusion": "success",
-          "url": "https://github.com/blisspixel/sealr/actions/runs/34335686928",
-          "observed_at": "2026-09-13T14:53:08.007140+00:00"
-        }
-      ],
+      "stable_main_runs": [],
       "eligible": false,
       "promoted": false
     },
@@ -168,18 +94,7 @@
       "timeout_minutes": 25,
       "required_ci_marker": "cargo fuzz run",
       "promotable": true,
-      "stable_main_runs": [
-        {
-          "sequence": 1,
-          "run_id": 34102390215,
-          "commit": "8090a6bb6b0a6cc51461d2bce18966eb1a323434",
-          "branch": "main",
-          "event": "schedule",
-          "conclusion": "success",
-          "url": "https://github.com/blisspixel/sealr/actions/runs/34102390215",
-          "observed_at": "2026-09-13T14:53:16.086503+00:00"
-        }
-      ],
+      "stable_main_runs": [],
       "eligible": false,
       "promoted": false
     },

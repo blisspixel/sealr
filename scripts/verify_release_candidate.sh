@@ -2,14 +2,14 @@
 set -euo pipefail
 
 selector="scripts/release_candidate.jq"
-tag="v0.1.0-alpha.16"
-title="sealr 0.1.0-alpha.16: typed outcomes and tested consumer migrations"
-notes=$'# sealr 0.1.0-alpha.16\n'
+tag="v0.1.0-alpha.17"
+title="sealr 0.1.0-alpha.17: verified archive boundary"
+notes=$'# sealr 0.1.0-alpha.17\n'
 allowed='[
   "SHA256SUMS",
-  "sealr-0.1.0-alpha.16-aarch64-apple-darwin.tar.gz",
-  "sealr-0.1.0-alpha.16-x86_64-pc-windows-msvc.zip",
-  "sealr-0.1.0-alpha.16-x86_64-unknown-linux-gnu.tar.gz"
+  "sealr-0.1.0-alpha.17-aarch64-apple-darwin.tar.gz",
+  "sealr-0.1.0-alpha.17-x86_64-pc-windows-msvc.zip",
+  "sealr-0.1.0-alpha.17-x86_64-unknown-linux-gnu.tar.gz"
 ]'
 
 mapfile -t workspace_versions < <(
@@ -38,7 +38,7 @@ make_release() {
         prerelease: true,
         immutable: false,
         published_at: null,
-        author: {login: "github-actions[bot]"},
+        author: {login: "blisspixel"},
         assets: [
           range(0; 4) as $index |
           {
@@ -93,6 +93,9 @@ assert_counts "[[]]" \
   '{"exact":0,"valid_exact":0,"recovery":0,"suspicious":0}'
 assert_counts "[[${exact}]]" \
   '{"exact":1,"valid_exact":1,"recovery":0,"suspicious":0}'
+empty_exact="$(jq '.assets = []' <<<"${exact}")"
+assert_counts "[[${empty_exact}]]" \
+  '{"exact":1,"valid_exact":1,"recovery":0,"suspicious":0}'
 assert_counts "[[${orphan}]]" \
   '{"exact":0,"valid_exact":0,"recovery":1,"suspicious":1}'
 assert_counts "[[${exact},${orphan}]]" \
@@ -102,6 +105,13 @@ assert_counts "[[${orphan},$(jq '.id = 374132104' <<<"${orphan}")]]" \
 
 wrong_author="$(jq '.author.login = "octocat"' <<<"${orphan}")"
 assert_counts "[[${wrong_author}]]" \
+  '{"exact":0,"valid_exact":0,"recovery":0,"suspicious":1}'
+
+bot_exact="$(jq '.author.login = "github-actions[bot]"' <<<"${exact}")"
+assert_counts "[[${bot_exact}]]" \
+  '{"exact":1,"valid_exact":0,"recovery":0,"suspicious":0}'
+bot_orphan="$(jq '.author.login = "github-actions[bot]"' <<<"${orphan}")"
+assert_counts "[[${bot_orphan}]]" \
   '{"exact":0,"valid_exact":0,"recovery":0,"suspicious":1}'
 
 wrong_state="$(jq '.draft = false | .published_at = "2026-08-21T00:00:00Z"' <<<"${orphan}")"

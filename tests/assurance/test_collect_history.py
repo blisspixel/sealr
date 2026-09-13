@@ -42,7 +42,7 @@ class HistoryFixture:
             MODULE.MANIFEST: b'{"schema":"fixture.assurance.v1"}',
             "verification/kani/Cargo.toml": b"bounded proof manifest\n",
             "verification/kani/src/lib.rs": b"proof-only modules\n",
-            "tests/assurance/semver-alpha12-known-warnings.txt": b"",
+            "tests/assurance/semver-source-baseline-20260913-known-warnings.txt": b"",
             "fuzz/Cargo.toml": b"fuzz manifest\n",
             "fuzz/Cargo.lock": b"fuzz lock\n",
             "fuzz/fuzz_targets/example.rs": b"bounded fuzz domain\n",

@@ -20,7 +20,7 @@ silently give the same bytes a different meaning.
 ## Try it
 
 Download the native Linux, macOS, or Windows archive from
-[`v0.1.0-alpha.16`](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.16)
+[`v0.1.0-alpha.17`](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.17)
 and [verify the release](docs/release-verification.md) before running it.
 
 ```sh
@@ -54,7 +54,7 @@ Inspecting a two-member ZIP verifies both members without writing a destination:
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-light.png">
-  <img alt="Linux terminal summary of Alpha.16 verifying two ZIP members with no destination written." src="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-light.png" width="1000">
+  <img alt="Linux terminal summary of Alpha.17 verifying two ZIP members with no destination written." src="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-light.png" width="1000">
 </picture>
 
 This is a rendered summary of verified CLI output. The
@@ -63,16 +63,20 @@ materialization, both themes, and reproduction instructions.
 
 ## Current status
 
-Alpha.16 contains machine-readable publisher failures, tested evidence and Rust
+Alpha.17 contains machine-readable publisher failures, tested evidence and Rust
 consumer migrations, named durability controls, and reproducible assurance
 bookkeeping. Native CI covers Linux, macOS, and Windows. The
-[release notes](docs/releases/v0.1.0-alpha.16.md) describe the contents; the
+[release notes](docs/releases/v0.1.0-alpha.17.md) describe the contents; the
 release page records publication state.
 
 Sealr is a development preview for integration and adversarial testing. It has
 no independent security audit or stable production release. Receipts are unsigned,
 and admission does not establish that a program is safe to execute.
 This GitHub-only prerelease does not publish a crate to crates.io.
+
+Alpha.17 starts the current owner-controlled distribution history. Earlier
+remote releases and tags are retired; their notes and measurements remain
+historical records. See [distribution history](docs/distribution-history.md).
 
 The [implementation and security boundary](docs/implementation.md) describes
 supported formats, the explicit Linux worker, resource limits, and open gaps.

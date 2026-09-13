@@ -130,10 +130,16 @@ if ($releaseWorkflowVersion -ne $version -or
 $changelog = Get-Content -Raw -LiteralPath (Join-Path $workspace 'CHANGELOG.md')
 $unreleasedLink = "[Unreleased]: https://github.com/blisspixel/sealr/compare/v$version...HEAD"
 $releaseLinkPrefix = "[$version]: https://github.com/blisspixel/sealr/compare/"
+$releaseHistoryLink = "[$version]: https://github.com/blisspixel/sealr/commits/v$version"
+$hasReleaseLink = if ($version -eq '0.1.0-alpha.17') {
+    $changelog.Contains($releaseHistoryLink, [StringComparison]::Ordinal)
+} else {
+    $changelog.Contains($releaseLinkPrefix, [StringComparison]::Ordinal) -and
+        $changelog.Contains("...v$version", [StringComparison]::Ordinal)
+}
 if (-not $changelog.Contains($unreleasedLink, [StringComparison]::Ordinal) -or
-    -not $changelog.Contains($releaseLinkPrefix, [StringComparison]::Ordinal) -or
-    -not $changelog.Contains("...v$version", [StringComparison]::Ordinal)) {
-    throw 'CHANGELOG comparison links do not match the workspace release version'
+    -not $hasReleaseLink) {
+    throw 'CHANGELOG release history links do not match the workspace release version'
 }
 
 $helperPackaging = Get-Content -Raw -LiteralPath (Join-Path $workspace 'docs/helper-packaging.md')

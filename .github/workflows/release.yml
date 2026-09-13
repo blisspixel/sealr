@@ -14,7 +14,7 @@ concurrency:
 
 env:
   MACOSX_DEPLOYMENT_TARGET: "15.0"
-  RELEASE_VERSION: 0.1.0-alpha.16
+  RELEASE_VERSION: 0.1.0-alpha.17
   RUST_VERSION: 1.98.0
 
 jobs:
@@ -31,6 +31,9 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Verify authorship and publication metadata
+        run: python3 scripts/verify_attribution.py --ci
 
       - name: Install pinned Rust
         run: rustup toolchain install "${RUST_VERSION}" --profile minimal
@@ -431,12 +434,12 @@ jobs:
         with:
           subject-checksums: dist/SHA256SUMS
 
-      - name: Create or resume the exact prerelease draft
+      - name: Resume the exact owner-created prerelease draft
         shell: bash
         run: |
           set -euo pipefail
 
-          release_title="sealr ${RELEASE_VERSION}: typed outcomes and tested consumer migrations"
+          release_title="sealr ${RELEASE_VERSION}: verified archive boundary"
           notes_file="docs/releases/v${RELEASE_VERSION}.md"
           if [[ ! -f "${notes_file}" ]]; then
             echo "::error::missing release notes: ${notes_file}"
@@ -555,40 +558,8 @@ jobs:
           existing_release_id=""
           case "${candidate_count}" in
             0)
-              confirmation_pages="$(get_release_pages)"
-              confirmation="$(classify_release_pages <<<"${confirmation_pages}")"
-              require_safe_classification "${confirmation}"
-              if [[ "$(jq -er '(.exact | length) + (.recovery | length)' <<<"${confirmation}")" -ne 0 ]]; then
-                echo "::error::release candidate appeared before creation"
-                exit 1
-              fi
-              create_payload="$(
-                jq -cn \
-                  --arg tag "${GITHUB_REF_NAME}" \
-                  --arg target "${GITHUB_SHA}" \
-                  --arg name "${release_title}" \
-                  --rawfile body "${notes_file}" '
-                    {
-                      tag_name: $tag,
-                      target_commitish: $target,
-                      name: $name,
-                      body: $body,
-                      draft: true,
-                      prerelease: true,
-                      make_latest: "false"
-                    }
-                  '
-              )"
-              existing_release="$(
-                gh api --method POST \
-                  -H "X-GitHub-Api-Version: 2026-03-10" \
-                  "repos/${GITHUB_REPOSITORY}/releases" \
-                  --input - <<<"${create_payload}"
-              )"
-              existing_release_id="$(
-                jq -er '.id | select(type == "number" and . > 0)' \
-                  <<<"${existing_release}"
-              )"
+              echo "::error::the exact prerelease draft must be created by blisspixel before staging"
+              exit 1
               ;;
             1)
               existing_release_id="$(
@@ -812,7 +783,7 @@ jobs:
               .draft == true and
               .prerelease == true and
               .immutable == false and
-              .author.login == "github-actions[bot]" and
+              .author.login == "blisspixel" and
               (.assets | length) <= 4
             ' <<<"${existing_release}" >/dev/null; then
             echo "::error::release changed before numeric asset uploads"
@@ -913,7 +884,7 @@ jobs:
           if [[ "$(jq -r '.draft' <<<"${release_json}")" != "true" || \
                 "$(jq -r '.prerelease' <<<"${release_json}")" != "true" || \
                 "$(jq -r '.immutable' <<<"${release_json}")" != "false" || \
-                "$(jq -r '.author.login' <<<"${release_json}")" != "github-actions[bot]" || \
+                "$(jq -r '.author.login' <<<"${release_json}")" != "blisspixel" || \
                 "$(jq -r '.id' <<<"${release_json}")" != "${readback_release_id}" || \
                 "$(jq -r '.tag_name' <<<"${release_json}")" != "${GITHUB_REF_NAME}" || \
                 "$(jq -r '.name' <<<"${release_json}")" != "${release_title}" ]]; then

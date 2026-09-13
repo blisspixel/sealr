@@ -2,6 +2,12 @@
 
 Updated 2026-09-13.
 
+This file preserves the original iteration observations. Alpha.17 starts a new
+owner-controlled repository history; earlier remote releases, tags, and run
+identities are retired. Their recorded hashes and measurements are historical,
+not active acquisition or qualification claims. All six active assurance
+histories restart at zero. See [distribution history](distribution-history.md).
+
 ## Objective and loop
 
 Make Sealr an exceptional archive boundary by completing bounded, evidence-driven

@@ -32,7 +32,7 @@ def full_contract($allowed; $name; $notes):
   .prerelease == true and
   .immutable == false and
   .published_at == null and
-  .author.login == "github-actions[bot]" and
+  .author.login == "blisspixel" and
   .name == $name and
   .body == $notes and
   valid_assets($allowed);

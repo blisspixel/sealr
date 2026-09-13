@@ -1,6 +1,11 @@
 # Distribution contract
 
-Current evaluation uses Alpha.16, including its Deflate completion correction,
+Alpha.17 starts the current owner-controlled distribution. Earlier remote tags,
+releases, and workflow identities are retired. Historical measurements below
+retain their original digests but are not live acquisition promises. See
+[distribution history](distribution-history.md).
+
+Current evaluation uses Alpha.17, including its Deflate completion correction,
 with matching source and authenticated native companions. It remains a GitHub-only
 prerelease. The Alpha.13 package measurements below are historical reproducibility
 evidence, and the adopter contract now records the current source separately.

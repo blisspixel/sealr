@@ -1,6 +1,7 @@
 * text=auto
 .gitattributes text eol=lf
 .gitignore text eol=lf
+.githooks/* text eol=lf
 Cargo.lock text eol=lf
 LICENSE text eol=lf
 *.md text eol=lf
@@ -18,5 +19,6 @@ LICENSE text eol=lf
 *.svg text eol=lf
 *.example text eol=lf
 *.json text eol=lf
+*.jq text eol=lf
 fuzz/corpus/** binary
 fuzz/dictionaries/** text eol=lf

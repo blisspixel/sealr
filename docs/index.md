@@ -17,8 +17,9 @@ Start with the [getting started guide](getting-started.md) and [illustrated CLI 
 | [Unicode and streaming wheel evidence](wheel-producer-compatibility.md) | Reproducible producer matrix, exact refusals, and complete capability handoffs |
 | [Candidate surface inventory](candidate-surface.md) | Classified public identities for the first pilot; inventory only, not a freeze |
 | [Exact Poetry 2.4.2 repository fixture](../tests/poetry-consumer/README.md) | Hash-pinned private update seam, PREPARED ordering, abort safety, stock parity, and realization audit |
-| [Current release notes](releases/v0.1.0-alpha.16.md) | Alpha.16 contents and limitations |
+| [Current release notes](releases/v0.1.0-alpha.17.md) | Alpha.17 contents and limitations |
 | [Release verification](release-verification.md) | Verify checksums, provenance, tag, and immutable release state |
+| [Distribution history](distribution-history.md) | Alpha.17 distribution lineage, retired remote releases, and preserved historical evidence |
 | [Distribution contract](distribution-contract.md) | Exact source-package scope, compatibility policy, and native archive floors |
 
 ## Trust boundary
@@ -86,7 +87,7 @@ Repository vulnerability reporting and supported-version policy are in [SECURITY
 | [Autonomous improvement record](autonomous-improvement.md) | Research findings, bounded execution loop, cost policy, and validation results |
 | [Unicode and streaming wheel evidence](wheel-producer-compatibility.md) | Reproducible producer matrix, exact refusals, and complete capability handoffs |
 | [Candidate surface inventory](candidate-surface.md) | Inventory of public identities the first pilot may pin; not a freeze |
-| [Milestone history](milestones.md) | Alpha.1 through Alpha.16 contents with links to release notes and maintained topic contracts |
+| [Milestone history](milestones.md) | Alpha.1 through Alpha.17 contents with links to release notes and maintained topic contracts |
 | [Vision](vision.md) | Durable category and priorities |
 | [Usefulness test](usefulness.md) | Proof that a downstream consumer stops reparsing |
 | [Capability reuse experiment](capability-reuse-experiment.md) | Measured working-set results, the resulting content gate, and remaining proposals |

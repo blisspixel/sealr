@@ -63,11 +63,11 @@ Assert-True -Condition ($manifest.tools.cargo_llvm_cov -eq '0.9.0') -Message 'ca
 Assert-True -Condition ($manifest.tools.cargo_semver_checks -eq '0.49.0') -Message 'cargo-semver-checks version drifted'
 Assert-True -Condition ($manifest.tools.rust -eq '1.98.0') -Message 'assurance Rust version drifted'
 Assert-True -Condition ($manifest.semver_tool_archive_sha256 -eq '72f6834d75d28a66e02c9fd6a230ce901bb30eee6067b85867a97445df040e4a') -Message 'cargo-semver-checks archive digest drifted'
-Assert-True -Condition ($manifest.semver_baseline_tag -eq 'v0.1.0-alpha.12') -Message 'semver baseline tag drifted'
-Assert-True -Condition ($manifest.semver_baseline_rev -eq '9d762a596624415b8499b774707d018cf128dbd6') -Message 'semver baseline revision drifted'
-Assert-True -Condition ($manifest.semver_baseline_version -eq '0.1.0-alpha.12') -Message 'semver baseline version drifted'
-Assert-True -Condition ($manifest.semver_command -eq 'cargo-semver-checks check-release --manifest-path crates/sealr/Cargo.toml --baseline-root <packaged-alpha.12-root> --release-type minor') -Message 'semver command drifted'
-Assert-True -Condition ($manifest.semver_known_warnings -eq 'tests/assurance/semver-alpha12-known-warnings.txt') -Message 'semver known-warning path drifted'
+Assert-True -Condition ($manifest.semver_baseline_tag -eq 'source-baseline-20260913') -Message 'semver baseline tag drifted'
+Assert-True -Condition ($manifest.semver_baseline_rev -eq '157d47168ea7bdab1a5d0a1a7c2c8ec896d195d1') -Message 'semver baseline revision drifted'
+Assert-True -Condition ($manifest.semver_baseline_version -eq '0.1.0-alpha.16') -Message 'semver baseline version drifted'
+Assert-True -Condition ($manifest.semver_command -eq 'cargo-semver-checks check-release --manifest-path crates/sealr/Cargo.toml --baseline-root <packaged-source-baseline-20260913-root> --release-type minor') -Message 'semver command drifted'
+Assert-True -Condition ($manifest.semver_known_warnings -eq 'tests/assurance/semver-source-baseline-20260913-known-warnings.txt') -Message 'semver known-warning path drifted'
 Assert-True -Condition ($manifest.semver_expected_summary -eq '196 checks: 196 pass, 57 skip') -Message 'semver expected summary drifted'
 Assert-True -Condition ($manifest.kani_command -eq 'cargo kani --manifest-path verification/kani/Cargo.toml --package sealr --default-unwind 1') -Message 'Kani command drifted'
 Assert-True -Condition ($manifest.kani_manifest -eq 'verification/kani/Cargo.toml') -Message 'Kani proof manifest path drifted'
@@ -79,7 +79,7 @@ Assert-True -Condition ($manifest.promotion_ledger -eq 'tests/assurance/promotio
 $knownWarningsPath = Join-Path $RepositoryRoot ([string]$manifest.semver_known_warnings)
 Assert-True -Condition (Test-Path -LiteralPath $knownWarningsPath -PathType Leaf) -Message 'semver known-warning file is missing'
 $knownWarnings = @(Get-Content -LiteralPath $knownWarningsPath)
-Assert-True -Condition ($knownWarnings.Count -eq 0) -Message 'Alpha.12 semver baseline must have zero known-warning debt'
+Assert-True -Condition ($knownWarnings.Count -eq 0) -Message 'source-only baseline semver baseline must have zero known-warning debt'
 $uniqueKnownWarnings = @($knownWarnings | Select-Object -Unique)
 Assert-True -Condition ($uniqueKnownWarnings.Count -eq $knownWarnings.Count) -Message 'semver known-warning debt contains duplicates'
 foreach ($knownWarning in $knownWarnings) {
@@ -121,7 +121,7 @@ Assert-TextContains -Text $workflow -Expected '              --manifest-path "${
 Assert-TextContains -Text $workflow -Expected '            "${tool}" check-release \' -Context 'semver discovery'
 Assert-TextContains -Text $workflow -Expected '              --baseline-root "${baseline_package}"' -Context 'semver discovery'
 Assert-TextContains -Text $workflow -Expected '              --release-type minor' -Context 'semver discovery'
-Assert-TextContains -Text $workflow -Expected '            tests/assurance/semver-alpha12-known-warnings.txt \' -Context 'semver discovery'
+Assert-TextContains -Text $workflow -Expected '            tests/assurance/semver-source-baseline-20260913-known-warnings.txt \' -Context 'semver discovery'
 Assert-TextContains -Text $workflow -Expected "            '$($manifest.semver_expected_summary)' \" -Context 'semver discovery'
 Assert-TextContains -Text $workflow -Expected '          path: target/assurance-discovery/semver/semver.log' -Context 'semver discovery'
 Assert-True -Condition (-not $workflow.Contains('--fail-under')) -Message 'coverage discovery must not contain a percentage gate'

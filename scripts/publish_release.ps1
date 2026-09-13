@@ -6,11 +6,21 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+$AttributionPython = Get-Command python3, python -ErrorAction SilentlyContinue | Select-Object -First 1
+if ($null -eq $AttributionPython) {
+    throw 'Python is required to verify publication attribution.'
+}
+& $AttributionPython.Source (Join-Path $PSScriptRoot 'verify_attribution.py') --ci
+if ($LASTEXITCODE -ne 0) {
+    throw 'Publication attribution verification failed.'
+}
+
 $Repository = 'blisspixel/sealr'
+$ReleaseAuthor = 'blisspixel'
 $DefaultBranch = 'main'
-$Version = '0.1.0-alpha.16'
+$Version = '0.1.0-alpha.17'
 $ReleaseTag = "v$Version"
-$ReleaseTitle = "sealr ${Version}: typed outcomes and tested consumer migrations"
+$ReleaseTitle = "sealr ${Version}: verified archive boundary"
 $CiWorkflow = '.github/workflows/ci.yml'
 $ReleaseWorkflow = '.github/workflows/release.yml'
 $GithubActionsAppId = 15368
@@ -133,6 +143,12 @@ function Assert-Equal {
     if ($Expected -ne $Actual) {
         throw "$Label expected '$Expected' but got '$Actual'"
     }
+}
+
+function Assert-AuthenticatedReleaseAuthor {
+    $identity = Invoke-GhApiJson -ApiArguments @('user')
+    Assert-Equal -Expected $ReleaseAuthor -Actual ([string]$identity.login) -Label 'authenticated release publisher'
+    Assert-Equal -Expected 'User' -Actual ([string]$identity.type) -Label 'authenticated publisher account type'
 }
 
 function Assert-ExactSet {
@@ -504,7 +520,7 @@ function Assert-ReleaseContract {
     Assert-Equal -Expected $ReleaseTitle -Actual ([string]$Release.name) -Label 'release title'
     Assert-True -Condition ([bool]$Release.prerelease) -Message 'release must remain a prerelease'
     Assert-Equal -Expected (Normalize-ReleaseText -Text $ExpectedNotes) -Actual (Normalize-ReleaseText -Text ([string]$Release.body)) -Label 'release notes'
-    Assert-Equal -Expected 'github-actions[bot]' -Actual ([string]$Release.author.login) -Label 'release author'
+    Assert-Equal -Expected $ReleaseAuthor -Actual ([string]$Release.author.login) -Label 'release author'
     Assert-True -Condition ([int64]$Release.id -gt 0) -Message 'release ID must be positive'
 
     if ($State -eq 'draft') {
@@ -739,6 +755,7 @@ Get-Command -Name gh -CommandType Application -ErrorAction Stop | Out-Null
 Push-Location $Workspace
 try {
     Invoke-NativeCommand -FilePath 'gh' -Arguments @('auth', 'status', '--hostname', 'github.com') | Out-Null
+    Assert-AuthenticatedReleaseAuthor
 
     $source = Assert-LocalReleaseSource
     $initialMain = Get-RemoteMainCommit
@@ -791,6 +808,7 @@ try {
         return
     }
 
+    Assert-AuthenticatedReleaseAuthor
     $finalProtection = Get-BranchProtection
     $finalRequiredChecks = @(Assert-BranchProtection -Protection $finalProtection)
     $finalCiState = Get-ExactCiState -Commit $source.Commit -RequiredChecks $finalRequiredChecks

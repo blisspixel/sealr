@@ -20,9 +20,9 @@ env:
   CARGO_LLVM_COV_VERSION: 0.9.0
   CARGO_SEMVER_CHECKS_VERSION: 0.49.0
   CARGO_SEMVER_CHECKS_ARCHIVE_SHA256: 72f6834d75d28a66e02c9fd6a230ce901bb30eee6067b85867a97445df040e4a
-  SEMVER_BASELINE_TAG: v0.1.0-alpha.12
-  SEMVER_BASELINE_REV: 9d762a596624415b8499b774707d018cf128dbd6
-  SEMVER_BASELINE_VERSION: 0.1.0-alpha.12
+  SEMVER_BASELINE_TAG: source-baseline-20260913
+  SEMVER_BASELINE_REV: 157d47168ea7bdab1a5d0a1a7c2c8ec896d195d1
+  SEMVER_BASELINE_VERSION: 0.1.0-alpha.16
 
 jobs:
   kani:
@@ -208,7 +208,7 @@ jobs:
           test "$("${tool_dir}/cargo-semver-checks" --version)" = \
             "cargo-semver-checks ${CARGO_SEMVER_CHECKS_VERSION}"
 
-      - name: Compare the packaged Alpha.12 public API
+      - name: Compare the packaged source-only baseline public API
         shell: bash
         run: |
           set -euo pipefail
@@ -247,7 +247,7 @@ jobs:
             -e 's/ in \/.*$//' \
             "${report}/known-warnings.txt"
           diff --unified \
-            tests/assurance/semver-alpha12-known-warnings.txt \
+            tests/assurance/semver-source-baseline-20260913-known-warnings.txt \
             "${report}/known-warnings.txt"
           grep --fixed-strings --quiet \
             '196 checks: 196 pass, 57 skip' \

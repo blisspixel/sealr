@@ -1,5 +1,9 @@
 # Reuse the established authority
 
+The remote distributions used by these measurements are retired. The reports
+retain their original artifact identities and observations, not a current
+acquisition promise. See [distribution history](distribution-history.md).
+
 Status: the first nine-install experiment completed against immutable Alpha.14.
 Alpha.15 adds the resulting narrow [publisher content gate](wheel-content-gate.md).
 No retention limit, worker protocol, or source-binding check changed.

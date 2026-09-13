@@ -1,5 +1,10 @@
 # Assurance discovery and promotion
 
+Alpha.17 starts a new owner-controlled repository history. All six active
+qualification histories restart at zero; retired repository runs cannot count
+toward promotion. Historical observation files remain unchanged. See
+[distribution history](distribution-history.md).
+
 This document binds Sealr's scheduled model-checking, mutation, source-coverage, and public-API-compatibility evidence to exact tools, finite claims, retained reports, and a conservative promotion rule. The machine-readable source of truth is [the assurance manifest](../tests/assurance/manifest.json). Promotion history is recorded separately in [the promotion ledger](../tests/assurance/promotion-ledger.json).
 
 ## Scheduled discovery workflow
@@ -11,7 +16,7 @@ The weekly [assurance workflow](../.github/workflows/assurance.yml) runs at `29 
 | Scalar model checking | Kani 0.67.0 | Three named harnesses, unwind bound 1 | Exhaustive only within each stated domain and assumptions. It is not an extractor proof. |
 | Targeted mutation discovery | cargo-mutants 27.1.0 | Three source files, three production function filters, explicit proof-harness exclusion, two workers, 120-second Cargo invocation timeout | Missed and timed-out mutants are review leads. The caught fraction is not a correctness or security score. |
 | Source coverage discovery | cargo-llvm-cov 0.9.0 on Rust 1.98.0 | `sealr` package tests with all features, 20-minute job | The JSON report identifies exercised regions. It has no percentage gate and makes no completeness claim. |
-| Public API compatibility discovery | cargo-semver-checks 0.49.0 on Rust 1.98.0 | Exact Alpha.12 tag-to-commit binding, a self-contained baseline Cargo package, SHA-256-authenticated x86_64 Linux tool archive, explicit minor release class, an empty expected-warning file, and a 20-minute job | Any warning, deny-level finding, expected-warning drift, summary drift, or infrastructure failure fails the scheduled job. A green job is not a claim of behavior, evidence-format, platform, or security compatibility. |
+| Public API compatibility discovery | cargo-semver-checks 0.49.0 on Rust 1.98.0 | Exact source-only baseline tag-to-commit binding, a self-contained baseline Cargo package, SHA-256-authenticated x86_64 Linux tool archive, explicit minor release class, an empty expected-warning file, and a 20-minute job | Any warning, deny-level finding, expected-warning drift, summary drift, or infrastructure failure fails the scheduled job. A green job is not a claim of behavior, evidence-format, platform, or security compatibility. |
 | ClusterFuzzLite code-change fuzzing | google/clusterfuzzlite actions pinned by commit, `base-builder-rust` pinned by image digest, the campaign's exact nightly-2026-08-01 toolchain installed in the build | 300 seconds per changed fuzz target on pull requests, seeded from the committed corpus and dictionaries | Bounded discovery. The manifest-verified scheduled campaign remains the reproducibility contract, the run is informational rather than required, and it may be promoted only under the ten-clean-runs rule. It is never a coverage or correctness score. |
 
 Mutation exit codes for missed mutants and mutant timeouts preserve the report. Baseline, usage, filter, and internal tool failures fail the job. Coverage is not sent to a scoring service and cannot gate required CI by percentage.
@@ -52,16 +57,22 @@ A promotable check may enter the one protected `Required CI` workflow only when 
 4. Any unsuccessful scheduled run resets that check's committed consecutive sequence.
 5. A CI-validated change records the computed `eligible` and `promoted` values and adds the declared marker to required CI. No human approval is required. The read-only history collector must verify the remote evidence before proposing this change; the offline verifier alone cannot authenticate GitHub history.
 
-Manual runs do not count toward the ten-run sequence. Mutation and coverage reports are permanently discovery-only in the current ledger, so they cannot become required percentage or score gates. Public API compatibility is promotable from the clean Alpha.12 baseline, with a fresh history starting at zero. Kani, fuzzing, and native resource evidence are promotable only after their own independent histories qualify.
+Manual runs do not count toward the ten-run sequence. Mutation and coverage reports are permanently discovery-only in the current ledger, so they cannot become required percentage or score gates. Public API compatibility is promotable from the clean source-only baseline, with a fresh history starting at zero. Kani, fuzzing, and native resource evidence are promotable only after their own independent histories qualify.
 
-The complete [2026-09-13 observation](../tests/assurance/observations/2026-09-13.json)
+The historical [2026-09-13 observation](../tests/assurance/observations/2026-09-13.json)
 records one qualifying Kani run, two public-API-compatibility runs, one fuzz run,
-and zero native-resource runs for the current evidence inputs. Mutation and
-coverage each have two recorded runs and remain non-promotable. No category is
-eligible or promoted. Older Kani and resource successes have different evidence
-inputs; the report retains those resets instead of counting them toward today's
-contract. Required CI remains one strict protected authority without importing
-an ineligible scheduled job.
+and zero native-resource runs for the retired repository's evidence inputs.
+Mutation and coverage each retain two historical runs. None of these runs counts
+toward the new repository: all six active histories are empty and no category is
+eligible or promoted. Required CI remains one strict protected authority without
+importing an ineligible scheduled job.
+
+The current API baseline is the source-only tag `source-baseline-20260913`, bound
+to commit `157d47168ea7bdab1a5d0a1a7c2c8ec896d195d1`. Its source package retains
+version `0.1.0-alpha.16`; it has no native release and does not restore a retired
+release tag. The workflow verifies the tag's exact commit before packaging it.
+The manifest and ledger contain the matching reproduction commands and zero
+expected warnings.
 
 The offline verifier, `scripts/verify_assurance.ps1`, rejects tool, workflow, bound, domain, source-symbol, artifact, baseline, history, eligibility, or required-CI drift. This governs what evidence may be claimed. It does not validate the truth of Kani, cargo-mutants, cargo-llvm-cov, cargo-semver-checks, GitHub Actions, or the declared independent oracles.
 

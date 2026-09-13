@@ -1,6 +1,11 @@
 # Release process
 
-GitHub releases come only from the protected `main` commit selected by their immutable tag. The tag workflow stages an attested draft. It never publishes. A trusted local promotion script revalidates live repository controls and publishes only the exact verified draft through the operator's existing administrative GitHub session. A source-crate publication for that same release must be planned in the tagged documentation and reproduce the tagged source package through the separate procedure below; it does not publish the moving default branch.
+GitHub releases come only from the protected `main` commit selected by their immutable tag. Nick Seal's authenticated `blisspixel` session creates the exact empty draft. The tag workflow builds, attests, and stages that owner-created draft; it never creates or publishes a release. A trusted local promotion script revalidates live repository controls and publishes only the exact verified draft through that same owner's administrative GitHub session. A source-crate publication for that release must be planned in the tagged documentation and reproduce the tagged source package through the separate procedure below.
+
+Alpha.17 starts the current owner-controlled distribution. Earlier remote tags,
+releases, and workflow identities are retired and their names are not reused.
+Historical records remain available in the source tree; see
+[distribution history](distribution-history.md).
 
 Verification commands for the current published prerelease are maintained in [release-verification.md](release-verification.md). Each new immutable GitHub release body is taken exactly from its tagged release-note file.
 
@@ -57,7 +62,37 @@ This tool is used only to build release notices. It is not a sealr runtime depen
 
 ## Stage the draft
 
-Create an annotated tag at the verified commit and push only that tag. For `0.1.0-alpha.16`, the tag is `v0.1.0-alpha.16`.
+From the clean verified `main` checkout, confirm the authenticated account is
+`blisspixel`, then create the exact empty draft with its tagged note bytes:
+
+```powershell
+$releaseOwner = gh api user --jq .login
+if ($LASTEXITCODE -ne 0 -or $releaseOwner -cne 'blisspixel') { throw 'release owner must be blisspixel' }
+$releaseCommit = git rev-parse HEAD
+if ($LASTEXITCODE -ne 0 -or $releaseCommit -notmatch '^[0-9a-f]{40}$') { throw 'release commit unavailable' }
+$draftRequest = New-TemporaryFile
+try {
+  $draftPayload = [ordered]@{
+    tag_name = 'v0.1.0-alpha.17'
+    target_commitish = $releaseCommit
+    name = 'sealr 0.1.0-alpha.17: verified archive boundary'
+    body = [IO.File]::ReadAllText((Join-Path $PWD 'docs/releases/v0.1.0-alpha.17.md'))
+    draft = $true
+    prerelease = $true
+  } | ConvertTo-Json
+  [IO.File]::WriteAllText($draftRequest.FullName, $draftPayload, [Text.UTF8Encoding]::new($false))
+  gh api --method POST -H 'X-GitHub-Api-Version: 2026-03-10' `
+    repos/blisspixel/sealr/releases --input $draftRequest.FullName
+  if ($LASTEXITCODE -ne 0) { throw 'owner draft creation failed; read existing state before retrying' }
+} finally {
+  Remove-Item -LiteralPath $draftRequest.FullName -Force
+}
+```
+
+Read back the numeric release ID, owner, exact title and body, empty asset set,
+and draft/prerelease state. If the request is ambiguous or a draft already
+exists, verify it rather than creating another release. Then create an annotated
+tag at the verified commit and push only `refs/tags/v0.1.0-alpha.17`.
 
 The tag workflow:
 
@@ -69,13 +104,13 @@ The tag workflow:
 6. extracts every package, checks both executables' version and help output, and proves canonical producer-verifier success plus tamper refusal;
 7. creates and verifies `SHA256SUMS` for exactly three native archives;
 8. records build provenance for those archives;
-9. creates or safely resumes the exact expected prerelease draft by numeric release ID;
+9. safely resumes the exact owner-created prerelease draft by numeric release ID and refuses a missing draft;
 10. reads back its body, state, four-asset set, sizes, and API digests;
 11. stops without publishing.
 
 An existing published release, mismatched draft, unexpected asset, tag drift, or exact-CI failure stops the workflow.
 
-If an annotated tag must be moved while its draft is still private, GitHub can rename the draft to an `untagged-*` placeholder. The workflow recovers only one bot-owned orphan that matches the exact title, notes, state, and safe expected asset subset. It pins that numeric release ID, verifies the live annotated tag and protected `main`, then rebinds the draft to the expected tag. Any near-match, duplicate, unexpected asset, or identity change stops before asset mutation. The promotion script never performs orphan recovery.
+If an annotated tag must be moved while its draft is still private, GitHub can rename the draft to an `untagged-*` placeholder. The workflow recovers only one `blisspixel`-owned orphan that matches the exact title, notes, state, and safe expected asset subset. It pins that numeric release ID, verifies the live annotated tag and protected `main`, then rebinds the draft to the expected tag. Any near-match, duplicate, unexpected asset, or identity change stops before asset mutation. The promotion script never performs orphan recovery. Build automation remains the authenticated asset uploader; it is not the release author.
 
 ## Promote the verified draft
 
@@ -117,7 +152,7 @@ The final operator record includes the release URL and ID, tag commit, CI run ID
 
 ## Publish the source crate for the pilot
 
-> Status as of 2026-09-13: Alpha.16 is planned as GitHub-only; no registry pilot release is assigned or published. Alpha.13 is a verified technical baseline, not the upload candidate. Its immutable packaged README says it is GitHub-only, so it must not be retroactively published to crates.io. The GitHub release workflow and `publish_release.ps1` do not publish source crates.
+> Status as of 2026-09-13: Alpha.17 is planned as GitHub-only; no registry pilot release is assigned or published. Alpha.13 is a verified technical baseline, not the upload candidate. Its immutable packaged README says it is GitHub-only, so it must not be retroactively published to crates.io. The GitHub release workflow and `publish_release.ps1` do not publish source crates.
 
 Define the exact technical consumer scope before assigning a new prerelease; adopter recruitment is optional. The candidate must update its workspace version, lockfile, copied handoff pin, changelog, release notes, release workflow constants, and current source pins in the [adopter contract](adopter-pilot.md) together without rewriting historical baseline digests. Its tagged README must accurately describe both the crates.io source distribution and matching authenticated native release. Required CI and the ordinary GitHub release process must pass before source upload. Existing authorization can drive these steps without another human approval checkpoint.
 

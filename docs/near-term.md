@@ -2,11 +2,16 @@
 
 Updated 2026-09-13.
 
-This source tree targets Alpha.16. The completed publisher, artifact replay,
+This source tree targets Alpha.17. The completed publisher, artifact replay,
 migration, and assurance increments are recorded below. The next implementation
-question is bounded attribution of repeated-read costs, followed by lifecycle
+question is measuring time spent in each repeated-read phase, followed by lifecycle
 closure. Technical acceptance criteria govern progress; external maintainer
 participation and independent human review are not dependencies.
+
+Earlier remote tags, releases, and run identities are retired. Historical
+reports do not establish current artifact availability or qualification; all
+six active assurance histories restart at zero. New downstream acquisition
+must use Alpha.17. See [distribution history](distribution-history.md).
 
 ## Completed consumer and automation increments
 
@@ -14,8 +19,8 @@ participation and independent human review are not dependencies.
   reports while preserving its success schema and exit codes. Two accepted
   variants and ten Linux process refusals cover the consumer boundary.
 - The owner-maintained [validation project](https://github.com/blisspixel/sealr-validation)
-  acquires immutable Alpha.15 source and authenticated matching native artifacts.
-  It checks source contracts before transfer and observes wheel pathname opens
+  previously acquired immutable Alpha.15 source and authenticated matching native artifacts.
+  That replay checked source contracts before transfer and observed wheel pathname opens
   in a bounded process tree after private-source deletion. Its reports establish
   technical conformance, not independent adoption or a deployed publisher gate.
 - Five packaged evidence cases refuse legacy and mixed lineages without
@@ -26,14 +31,15 @@ participation and independent human review are not dependencies.
   All four [candidate replacements](candidate-surface.md) have tested migration
   rules; the candidate is still an inventory rather than a freeze.
 - Bounded read-only assurance collection and deterministic ledger replay have
-  47 behavioral tests and a saved September 13 observation. Its eight qualifying
-  category/run entries leave all categories ineligible and unpromoted.
+  47 behavioral tests and a saved September 13 observation. Its eight historical
+  category/run entries cannot qualify the new repository; every active history
+  restarts empty, ineligible, and unpromoted.
 
 The [iteration record](autonomous-improvement.md) preserves exact validation
 scope, source-built versus released artifacts, and historical Alpha.15 pins.
-Neither local tests nor an older release's CI establish Alpha.16 remote results.
+Neither local tests nor an older release's CI establish Alpha.17 remote results.
 
-## 1. Attribute the repeated-read cost
+## 1. Measure the repeated-read phases
 
 The [controlled repeated-read observation](capability-reuse-experiment.md#controlled-repeated-read-observation)
 completed 14 cases and 224 reads with released Alpha.15. Its eight-member,
@@ -109,7 +115,7 @@ optional independent-adoption contract.
 This release is the stopping point for the current implementation loop. Future
 work starts with the first bounded measurement above, with acceptance criteria
 before code changes. No additional parser, hosted UI, binding, or backend is
-needed to finish Alpha.16.
+needed to finish Alpha.17.
 
 Use local computation, cached artifacts, free public documentation, and ordinary
 public CI. External purchases stay at $0 by default and never exceed the $5
