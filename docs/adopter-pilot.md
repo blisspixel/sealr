@@ -1,10 +1,11 @@
 # External adopter pilot contract
 
-Updated 2026-09-13.
+Updated 2026-10-13.
 
 The Alpha.13 baseline below is retained historical evidence. Its old remote
-release and tag are retired; evaluation now requires a new Alpha.17 acquisition
-and replay. See [distribution history](distribution-history.md).
+release and tag are retired; evaluation now requires Alpha.18 source.
+Published native companions remain Alpha.17 until that release exists. See
+[distribution history](distribution-history.md).
 
 > Status: verified technical baseline for the first external pilot. No external adopter has passed this contract. No separately maintained consumer has been selected, and no publishable pilot release has been assigned. Alpha.13 must not be retroactively published to crates.io because its immutable packaged README explicitly describes it as GitHub-only. Repository fixtures remain mechanism evidence only.
 
@@ -16,9 +17,11 @@ The machine-readable source is [`tests/package-contract/adopter-pilot.json`](../
 
 The `sealr.external-adopter-pilot.v2` contract separates historical artifact
 identities from the source currently under evaluation. Current evaluation pins
-`sealr = "=0.1.0-alpha.17"` and matching Alpha.17 native companions. The copied
-handoff manifest and workspace package version must agree with that requirement.
-Alpha.17 remains GitHub-only and does not assign a registry pilot release.
+`sealr = "=0.1.0-alpha.18"` and the matching workspace package. Published
+Alpha.17 native companions remain the downloadable archives until Alpha.18
+artifacts exist. The copied handoff manifest and workspace package version must
+agree with that requirement. Alpha.18 remains GitHub-only and does not assign
+a registry pilot release.
 
 Alpha.13 is historical reproduction evidence, not the recommended evaluation
 release: Alpha.14 fixes incomplete Deflate stream admission. The historical

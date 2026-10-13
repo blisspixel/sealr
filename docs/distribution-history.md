@@ -3,8 +3,9 @@
 Alpha.17 starts the current owner-controlled repository and release history for
 Nick Seal (`blisspixel`). Alpha.1 through Alpha.16 tags, releases, workflow runs,
 and their old repository identities are retired from the active distribution.
-Old immutable tag names are not reused. Use the current
-[release verification](release-verification.md) instructions for Alpha.17.
+Old immutable tag names are not reused. Use the
+[release verification](release-verification.md) instructions for the published
+Alpha.17 archives. Alpha.18 source does not yet have release artifacts.
 
 Versioned release-note files, measured reports, source and artifact digests, and
 saved assurance observations remain historical records of the bytes and runs
@@ -16,8 +17,9 @@ changing a label, and an old signature does not authenticate a new repository.
 The new source-only tag `source-baseline-20260913` identifies parentless commit
 `157d47168ea7bdab1a5d0a1a7c2c8ec896d195d1` for public API comparison. This retained
 source tree declares package version `0.1.0-alpha.16`; it is a baseline snapshot,
-not a restored Alpha.16 release or a native artifact. Current source and native
-distribution use Alpha.17.
+not a restored Alpha.16 release or a native artifact. Current source is
+Alpha.18. Published native distribution remains Alpha.17 until Alpha.18
+artifacts exist.
 
 All six active assurance qualification histories restart at zero for the new
 repository. No retired run counts toward the unchanged ten-distinct-commit

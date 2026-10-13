@@ -73,10 +73,10 @@ if ($LASTEXITCODE -ne 0 -or $releaseCommit -notmatch '^[0-9a-f]{40}$') { throw '
 $draftRequest = New-TemporaryFile
 try {
   $draftPayload = [ordered]@{
-    tag_name = 'v0.1.0-alpha.17'
+    tag_name = 'v0.1.0-alpha.18'
     target_commitish = $releaseCommit
-    name = 'sealr 0.1.0-alpha.17: verified archive boundary'
-    body = [IO.File]::ReadAllText((Join-Path $PWD 'docs/releases/v0.1.0-alpha.17.md'))
+    name = 'sealr 0.1.0-alpha.18: minimal GNU tar records'
+    body = [IO.File]::ReadAllText((Join-Path $PWD 'docs/releases/v0.1.0-alpha.18.md'))
     draft = $true
     prerelease = $true
   } | ConvertTo-Json
@@ -92,7 +92,7 @@ try {
 Read back the numeric release ID, owner, exact title and body, empty asset set,
 and draft/prerelease state. If the request is ambiguous or a draft already
 exists, verify it rather than creating another release. Then create an annotated
-tag at the verified commit and push only `refs/tags/v0.1.0-alpha.17`.
+tag at the verified commit and push only `refs/tags/v0.1.0-alpha.18`.
 
 The tag workflow:
 
@@ -152,7 +152,7 @@ The final operator record includes the release URL and ID, tag commit, CI run ID
 
 ## Publish the source crate for the pilot
 
-> Status as of 2026-09-13: Alpha.17 is planned as GitHub-only; no registry pilot release is assigned or published. Alpha.13 is a verified technical baseline, not the upload candidate. Its immutable packaged README says it is GitHub-only, so it must not be retroactively published to crates.io. The GitHub release workflow and `publish_release.ps1` do not publish source crates.
+> Status as of 2026-10-13: Alpha.18 is planned as GitHub-only; no registry pilot release is assigned or published. Alpha.17 remains the published native prerelease until Alpha.18 artifacts exist. Alpha.13 is a verified technical baseline, not the upload candidate. Its immutable packaged README says it is GitHub-only, so it must not be retroactively published to crates.io. The GitHub release workflow and `publish_release.ps1` do not publish source crates.
 
 Define the exact technical consumer scope before assigning a new prerelease; adopter recruitment is optional. The candidate must update its workspace version, lockfile, copied handoff pin, changelog, release notes, release workflow constants, and current source pins in the [adopter contract](adopter-pilot.md) together without rewriting historical baseline digests. Its tagged README must accurately describe both the crates.io source distribution and matching authenticated native release. Required CI and the ordinary GitHub release process must pass before source upload. Existing authorization can drive these steps without another human approval checkpoint.
 

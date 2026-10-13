@@ -1,6 +1,6 @@
 # Implementation and security boundary
 
-This reference describes the Alpha.17 implementation and its limits. Start with the [getting started guide](getting-started.md), or use the [documentation index](index.md) to find a specific contract.
+This reference describes the Alpha.18 implementation and its limits. Start with the [getting started guide](getting-started.md), or use the [documentation index](index.md) to find a specific contract.
 
 ## Why this exists
 

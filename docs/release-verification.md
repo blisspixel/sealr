@@ -1,14 +1,19 @@
 # Verify a published release
 
-Alpha.17 is the current distribution lineage. Alpha.1 through Alpha.16 remote
-tags and releases are retired and are not acquisition fallbacks. Historical
-notes and measurements keep their original meaning; see
+Published native archives are Alpha.17. This source tree targets
+`v0.1.0-alpha.18`, which has no release artifacts yet. Alpha.1 through Alpha.16
+remote tags and releases are retired and are not acquisition fallbacks.
+Historical notes and measurements keep their original meaning; see
 [distribution history](distribution-history.md).
 
-This page gives runnable commands for the current immutable prerelease. Historical release notes remain versioned snapshots, while current verification commands and clearer examples live here.
+This page gives runnable commands for the published Alpha.17 prerelease.
+Historical release notes remain versioned snapshots. Do not point these
+commands at an Alpha.18 tag that has not been published, and do not invent
+checksums for artifacts that do not exist.
 
-This source tree targets the following release. Its publication state is verified
-from GitHub rather than inferred from these commands:
+This source tree targets `v0.1.0-alpha.18`. Until that annotated tag and its
+archives exist, verify the published release below. Its publication state is
+verified from GitHub rather than inferred from these commands:
 
 - tag: `v0.1.0-alpha.17`;
 - release: <https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.17>;

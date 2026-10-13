@@ -18,9 +18,9 @@ if ($LASTEXITCODE -ne 0) {
 $Repository = 'blisspixel/sealr'
 $ReleaseAuthor = 'blisspixel'
 $DefaultBranch = 'main'
-$Version = '0.1.0-alpha.17'
+$Version = '0.1.0-alpha.18'
 $ReleaseTag = "v$Version"
-$ReleaseTitle = "sealr ${Version}: verified archive boundary"
+$ReleaseTitle = "sealr ${Version}: minimal GNU tar records"
 $CiWorkflow = '.github/workflows/ci.yml'
 $ReleaseWorkflow = '.github/workflows/release.yml'
 $GithubActionsAppId = 15368
