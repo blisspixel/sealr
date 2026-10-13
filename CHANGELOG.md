@@ -6,6 +6,17 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+### Fixed
+
+- Derived TAR compression ratios no longer charge the mandatory 1024-byte terminator or the all-zero bytes that finish the single 10240-byte record containing that terminator. Member payloads, headers, per-member block padding, and trailing zeros past that record stay in the numerator. The default `max_ratio` of 100 is unchanged.
+
+### Added
+
+- TAR member names may start with `./`. That prefix is normalized away, including an archive-root directory from `tar -C dir .`. Absolute paths, `..`, embedded dot components, and links stay rejected.
+- `format.unsupported` and `tar.dialect` findings carry a hint naming the observed signature and the `--format` values whose profiles start with it. The hint is not used to select an interpretation.
+- Unix symlink ZIP entries are reported as `zip.symlink`.
+- On a terminal, with neither `--view`, `--receipt`, nor `--json`, the CLI prints a one-line summary on stderr. Redirected output stays JSON. `--json` forces the view and receipt JSON on a terminal.
+
 ## [0.1.0-alpha.17] - 2026-09-13
 
 ### Changed

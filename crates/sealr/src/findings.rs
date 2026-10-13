@@ -42,6 +42,7 @@ pub enum FindingCode {
     ZipDiffA2Size,
     ZipDiffA3Name,
     ZipDiffA4Dir,
+    ZipSymlink,
     ZipDiffA5Crypt,
     ZipDiffB1Dup,
     ZipDiffB2Chars,
@@ -126,6 +127,7 @@ impl FindingCode {
             Self::ZipDiffA2Size => "zip.diff.a2_size",
             Self::ZipDiffA3Name => "zip.diff.a3_name",
             Self::ZipDiffA4Dir => "zip.diff.a4_dir",
+            Self::ZipSymlink => "zip.symlink",
             Self::ZipDiffA5Crypt => "zip.diff.a5_crypt",
             Self::ZipDiffB1Dup => "zip.diff.b1_dup",
             Self::ZipDiffB2Chars => "zip.diff.b2_chars",
@@ -187,6 +189,29 @@ pub enum Severity {
     Info,
 }
 
+/// Next step attached to `format.unsupported` and `tar.dialect`.
+///
+/// `observed` and `formats` come from fixed signature bytes. The hint is not
+/// an interpretation and is never used to select a profile.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[non_exhaustive]
+pub struct FindingHint {
+    pub observed: String,
+    pub formats: Vec<String>,
+}
+
+impl FindingHint {
+    pub fn new(
+        observed: impl Into<String>,
+        formats: impl IntoIterator<Item = impl Into<String>>,
+    ) -> Self {
+        Self {
+            observed: observed.into(),
+            formats: formats.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[non_exhaustive]
 pub struct Finding {
@@ -195,6 +220,8 @@ pub struct Finding {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub member: Option<String>,
     pub detail: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<FindingHint>,
 }
 
 impl Finding {
@@ -204,11 +231,17 @@ impl Finding {
             severity: Severity::Error,
             member: None,
             detail: detail.into(),
+            hint: None,
         }
     }
 
     pub fn on(mut self, member: impl Into<String>) -> Self {
         self.member = Some(member.into());
+        self
+    }
+
+    pub fn with_hint(mut self, hint: FindingHint) -> Self {
+        self.hint = Some(hint);
         self
     }
 }
@@ -223,5 +256,24 @@ mod tests {
         assert_eq!(FindingCode::TarPaxState.as_str(), "tar.pax.state");
         assert_eq!(FindingCode::TarGnuLongName.as_str(), "tar.gnu.long_name");
         assert_eq!(FindingCode::TarGnuState.as_str(), "tar.gnu.state");
+        assert_eq!(FindingCode::ZipSymlink.as_str(), "zip.symlink");
+    }
+
+    #[test]
+    fn absent_hint_does_not_change_finding_json() {
+        let finding = super::Finding::error(FindingCode::FormatUnsupported, "magic unknown");
+        let json = serde_json::to_string(&finding).unwrap();
+        assert_eq!(
+            json,
+            r#"{"code":"format.unsupported","severity":"error","detail":"magic unknown"}"#
+        );
+        let hinted = finding.with_hint(super::FindingHint {
+            observed: "gzip member".to_owned(),
+            formats: vec!["tar-gzip-ustar".to_owned()],
+        });
+        let hinted_json = serde_json::to_value(&hinted).unwrap();
+        assert_eq!(hinted_json["detail"], "magic unknown");
+        assert_eq!(hinted_json["hint"]["observed"], "gzip member");
+        assert_eq!(hinted_json["hint"]["formats"][0], "tar-gzip-ustar");
     }
 }

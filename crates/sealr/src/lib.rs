@@ -11,6 +11,7 @@ mod deflate;
 mod findings;
 #[allow(dead_code)]
 mod gzip;
+mod hints;
 mod identity;
 mod interval;
 mod ir;
@@ -141,7 +142,7 @@ pub use apply::{
     apply, apply_with_options, ApplyOptions, ArchiveSelection, CanonicalEvidence, EnvMeta,
     MemberView, Outcome, PolicyMeta, Receipt, Request, Source, SourceMeta, ToolMeta, Verdict, View,
 };
-pub use findings::{Finding, FindingCode, Severity};
+pub use findings::{Finding, FindingCode, FindingHint, Severity};
 pub use identity::{
     content_root, encode_sevenz_layout, encode_tar_bzip2_layout, encode_tar_gnu_longname_layout,
     encode_tar_gzip_gnu_longname_layout, encode_tar_gzip_layout, encode_tar_gzip_pax_layout,

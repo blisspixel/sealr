@@ -1177,6 +1177,7 @@ fn decode_finding(cursor: &mut Cursor<'_>) -> Result<Finding, RecordError> {
         severity,
         member,
         detail,
+        hint: None,
     };
     validate_finding(&finding)?;
     Ok(finding)
@@ -1243,6 +1244,7 @@ fn finding_code_tag(code: FindingCode) -> u16 {
         FindingCode::ZipDiffA2Size => 34,
         FindingCode::ZipDiffA3Name => 35,
         FindingCode::ZipDiffA4Dir => 36,
+        FindingCode::ZipSymlink => 79,
         FindingCode::ZipDiffA5Crypt => 37,
         FindingCode::ZipDiffB1Dup => 38,
         FindingCode::ZipDiffB2Chars => 39,
@@ -1369,6 +1371,7 @@ fn finding_code_from_tag(tag: u16, offset: usize) -> Result<FindingCode, RecordE
         76 => FindingCode::CodecBzip2TrailingInput,
         77 => FindingCode::SevenZInvalidStructure,
         78 => FindingCode::EvidenceCanonicalization,
+        79 => FindingCode::ZipSymlink,
         _ => {
             return Err(RecordError::new(
                 RecordErrorKind::InvalidEnum,
@@ -3384,6 +3387,7 @@ fn planning_structure_finding(code: FindingCode) -> bool {
             | FindingCode::ZipDiffA2Size
             | FindingCode::ZipDiffA3Name
             | FindingCode::ZipDiffA4Dir
+            | FindingCode::ZipSymlink
             | FindingCode::ZipDiffA5Crypt
             | FindingCode::ZipDiffC1Stream
             | FindingCode::ZipDiffC2Eocd
@@ -7673,6 +7677,7 @@ mod tests {
                     severity: Severity::Warn,
                     member: Some("../outside.txt".into()),
                     detail: "diagnostic only".into(),
+                    hint: None,
                 },
                 Finding::error(FindingCode::CrcMismatch, "mismatch").on("safe.txt:hidden"),
             ],
@@ -8484,6 +8489,7 @@ mod tests {
                     severity: Severity::Warn,
                     member: None,
                     detail: "wrong-phase diagnostic".into(),
+                    hint: None,
                 },
             ],
         };
@@ -8603,6 +8609,7 @@ mod tests {
                     severity: Severity::Warn,
                     member: None,
                     detail: "wrong-phase diagnostic".into(),
+                    hint: None,
                 },
                 Finding::error(FindingCode::CrcMismatch, "execution"),
             ],

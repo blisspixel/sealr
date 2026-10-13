@@ -1,12 +1,12 @@
 use std::fs::File;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use sealr::{
-    apply_supervised, apply_with_options, ApplyOptions, LinuxWorker, Policy, PolicyDocument,
-    Request, SevenZInterpretationProfile, Source, TarBzip2InterpretationProfile,
+    apply_supervised, apply_with_options, ApplyOptions, Finding, LinuxWorker, Policy,
+    PolicyDocument, Request, SevenZInterpretationProfile, Source, TarBzip2InterpretationProfile,
     TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
     TarPaxInterpretationProfile, TarXzInterpretationProfile, TarZstdInterpretationProfile,
     ZipInterpretationProfile,
@@ -52,6 +52,9 @@ struct Cli {
     /// --receipt files, whose bytes are exactly the digested bytes
     #[arg(long, requires = "view", requires = "receipt")]
     canonical: bool,
+    /// Print the view and receipt JSON even when both streams are terminals
+    #[arg(long)]
+    json: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -95,6 +98,9 @@ struct CommonArgs {
     /// --receipt files, whose bytes are exactly the digested bytes
     #[arg(long, requires = "view", requires = "receipt")]
     canonical: bool,
+    /// Print the view and receipt JSON even when both streams are terminals
+    #[arg(long)]
+    json: bool,
 }
 
 /// One resolved invocation shape shared by the compatibility form and both
@@ -108,6 +114,7 @@ struct ResolvedInvocation {
     receipt: Option<PathBuf>,
     policy: Option<PathBuf>,
     canonical: bool,
+    json: bool,
 }
 
 fn resolve(cli: Cli) -> Result<ResolvedInvocation, String> {
@@ -121,6 +128,7 @@ fn resolve(cli: Cli) -> Result<ResolvedInvocation, String> {
             receipt: common.receipt,
             policy: common.policy,
             canonical: common.canonical,
+            json: common.json,
         }),
         Some(CliCommand::Materialize { common, dest }) => Ok(ResolvedInvocation {
             archive: common.archive,
@@ -131,6 +139,7 @@ fn resolve(cli: Cli) -> Result<ResolvedInvocation, String> {
             receipt: common.receipt,
             policy: common.policy,
             canonical: common.canonical,
+            json: common.json,
         }),
         None => {
             let Some(archive) = cli.archive else {
@@ -145,6 +154,7 @@ fn resolve(cli: Cli) -> Result<ResolvedInvocation, String> {
                 receipt: cli.receipt,
                 policy: cli.policy,
                 canonical: cli.canonical,
+                json: cli.json,
             })
         }
     }
@@ -329,6 +339,25 @@ fn main() -> ExitCode {
         }
         return ExitCode::from(exit);
     }
+    if use_tty_summary(
+        io::stdout().is_terminal(),
+        io::stderr().is_terminal(),
+        invocation.view.is_some(),
+        invocation.receipt.is_some(),
+        invocation.json,
+    ) {
+        let summary = format_summary(
+            out.view.verdict,
+            out.view.wrote,
+            out.view.members.len(),
+            &out.view.findings,
+            invocation.dest.as_deref(),
+        );
+        if io::stderr().write_all(summary.as_bytes()).is_err() {
+            return ExitCode::FAILURE;
+        }
+        return ExitCode::from(out.cli_exit_code());
+    }
     let mut view_writer: Box<dyn Write> = match view_output {
         Some(claimed) => Box::new(claimed.into_file()),
         None => Box::new(io::stdout().lock()),
@@ -415,6 +444,61 @@ impl ClaimedOutput {
     }
 }
 
+/// Summary mode is the human default only when both streams are terminals and
+/// the caller did not ask for a file, a receipt file, or JSON.
+fn use_tty_summary(
+    stdout_is_tty: bool,
+    stderr_is_tty: bool,
+    view_file: bool,
+    receipt_file: bool,
+    json: bool,
+) -> bool {
+    stdout_is_tty && stderr_is_tty && !view_file && !receipt_file && !json
+}
+
+fn format_summary(
+    verdict: &str,
+    wrote: bool,
+    member_count: usize,
+    findings: &[Finding],
+    dest: Option<&Path>,
+) -> String {
+    if verdict == "allowed" {
+        let effect = if wrote {
+            match dest {
+                Some(dest) => format!("wrote {}", dest.display()),
+                None => "wrote".to_owned(),
+            }
+        } else {
+            "nothing written (use --dest DIR to materialize)".to_owned()
+        };
+        return format!(
+            "allowed: {member_count} members, {} findings, {effect}\n",
+            findings.len()
+        );
+    }
+    let Some(finding) = findings.first() else {
+        return format!("rejected: {verdict}\n");
+    };
+    let code = finding.code.as_str();
+    if let Some(hint) = &finding.hint {
+        if hint.formats.is_empty() {
+            return format!("rejected: {code} (observed {}).\n", hint.observed);
+        }
+        return format!(
+            "rejected: {code} (observed {}). Try: --format {}\n",
+            hint.observed,
+            hint.formats.join(" | ")
+        );
+    }
+    match finding.member.as_deref() {
+        Some(member) => {
+            format!("rejected: {code} member {member} ({})\n", finding.detail)
+        }
+        None => format!("rejected: {code} ({})\n", finding.detail),
+    }
+}
+
 fn write_json(writer: &mut impl Write, value: &impl Serialize) -> io::Result<()> {
     serde_json::to_writer_pretty(&mut *writer, value).map_err(io::Error::other)?;
     writer.write_all(b"\n")
@@ -439,6 +523,7 @@ fn write_outputs(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sealr::{FindingCode, FindingHint};
 
     struct ClosedWriter;
 
@@ -469,6 +554,42 @@ mod tests {
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&receipt).unwrap(),
             serde_json::json!({ "schema": "sealr.receipt.v2" })
+        );
+    }
+
+    #[test]
+    fn tty_summary_requires_both_terminals_and_no_machine_request() {
+        assert!(use_tty_summary(true, true, false, false, false));
+        assert!(!use_tty_summary(false, true, false, false, false));
+        assert!(!use_tty_summary(true, false, false, false, false));
+        assert!(!use_tty_summary(true, true, true, false, false));
+        assert!(!use_tty_summary(true, true, false, true, false));
+        assert!(!use_tty_summary(true, true, false, false, true));
+    }
+
+    #[test]
+    fn summary_lines_name_the_next_action() {
+        let hinted =
+            Finding::error(FindingCode::FormatUnsupported, "magic gz").with_hint(FindingHint::new(
+                "gzip member",
+                ["tar-gzip-ustar", "tar-gzip-pax", "tar-gzip-gnu-longname"],
+            ));
+        assert_eq!(
+            format_summary("rejected", false, 0, &[hinted], None),
+            "rejected: format.unsupported (observed gzip member). Try: --format tar-gzip-ustar | tar-gzip-pax | tar-gzip-gnu-longname\n"
+        );
+        let path = Finding::error(FindingCode::PathDotDot, "parent component").on("./../x");
+        assert_eq!(
+            format_summary("rejected", false, 0, &[path], None),
+            "rejected: path.dotdot member ./../x (parent component)\n"
+        );
+        assert_eq!(
+            format_summary("allowed", false, 2, &[], None),
+            "allowed: 2 members, 0 findings, nothing written (use --dest DIR to materialize)\n"
+        );
+        assert_eq!(
+            format_summary("allowed", true, 2, &[], Some(Path::new("/tmp/out"))),
+            "allowed: 2 members, 0 findings, wrote /tmp/out\n"
         );
     }
 }

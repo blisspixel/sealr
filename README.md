@@ -24,7 +24,7 @@ Download the native Linux, macOS, or Windows archive from
 and [verify the release](docs/release-verification.md) before running it.
 
 ```sh
-# Inspect. View JSON goes to stdout; receipt JSON goes to stderr.
+# On a terminal this prints a one-line summary. A pipe or --json keeps JSON.
 ./sealr path/to/archive.zip
 
 # Publish the verified tree into a new destination.
@@ -57,8 +57,9 @@ Inspecting a two-member ZIP verifies both members without writing a destination:
   <img alt="Linux terminal summary of Alpha.17 verifying two ZIP members with no destination written." src="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-light.png" width="1000">
 </picture>
 
-This is a rendered summary of verified CLI output. The
-[full walkthrough](docs/walkthrough.md) includes parent-path rejection,
+This image renders the JSON view and receipt. On a terminal, the current CLI
+prints a one-line summary instead. Redirected output and `--json` keep the JSON.
+The [full walkthrough](docs/walkthrough.md) includes parent-path rejection,
 materialization, both themes, and reproduction instructions.
 
 ## Current status

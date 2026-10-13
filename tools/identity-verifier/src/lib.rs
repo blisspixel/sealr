@@ -1171,7 +1171,7 @@ enum StoppingPhase {
     Effect,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(deny_unknown_fields)]
 struct Finding {
     code: String,
@@ -1179,9 +1179,18 @@ struct Finding {
     #[serde(default)]
     member: Option<String>,
     detail: String,
+    #[serde(default)]
+    hint: Option<FindingHint>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct FindingHint {
+    observed: String,
+    formats: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 enum Severity {
     Error,

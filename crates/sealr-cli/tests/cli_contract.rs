@@ -442,6 +442,7 @@ fn help_and_version_use_stdout_and_exit_zero() {
     assert!(help_text.contains("--receipt <NEW_FILE>"));
     assert!(help_text.contains("--policy <FILE>"));
     assert!(help_text.contains("--canonical"));
+    assert!(help_text.contains("--json"));
     assert!(help_text.contains("do not reopen the archive"));
     assert!(help_text.contains("not an authority"));
     assert!(help_text.contains("inspect"));
@@ -1991,4 +1992,43 @@ fn a_missing_archive_and_subcommand_is_a_usage_error() {
         message.contains("an archive path or a subcommand is required"),
         "unexpected diagnostic: {message}"
     );
+}
+
+#[test]
+fn format_hint_comes_from_signature_bytes_not_the_filename() {
+    let run = RunDirectory::create("signature-hint");
+    let gzip = [0x1f_u8, 0x8b, 0x08, 0x00];
+    let named_gzip = run.path.join("good.tar.gz");
+    let renamed = run.path.join("notes.zip");
+    fs::write(&named_gzip, gzip).unwrap();
+    fs::write(&renamed, gzip).unwrap();
+
+    let first = sealr(&[&named_gzip]);
+    let second = sealr(&[&renamed]);
+    assert_eq!(first.status.code(), Some(2));
+    assert_eq!(second.status.code(), Some(2));
+    let first_view = json(&first.stdout, "gzip view");
+    let second_view = json(&second.stdout, "renamed view");
+    assert_eq!(
+        first_view["findings"][0]["hint"],
+        second_view["findings"][0]["hint"]
+    );
+    assert_eq!(first_view["findings"][0]["hint"]["observed"], "gzip member");
+    assert_eq!(
+        first_view["findings"][0]["hint"]["formats"],
+        serde_json::json!(["tar-gzip-ustar", "tar-gzip-pax", "tar-gzip-gnu-longname"])
+    );
+    let hint_text = first_view["findings"][0]["hint"].to_string();
+    assert!(!hint_text.contains("good.tar.gz"));
+    assert!(!hint_text.contains("notes.zip"));
+    assert_eq!(first_view["verdict"], "rejected");
+    assert_eq!(first_view["findings"][0]["code"], "format.unsupported");
+
+    let zip_named_tar = run.path.join("not-gzip.tar.gz");
+    fs::write(&zip_named_tar, b"PK\x03\x04not a zip").unwrap();
+    let zip_output = sealr(&[&zip_named_tar]);
+    let zip_view = json(&zip_output.stdout, "zip-named-tar view");
+    let formats = zip_view["findings"][0]["hint"]["formats"].to_string();
+    assert!(!formats.contains("tar-gzip"));
+    assert_ne!(zip_view["findings"][0]["hint"]["observed"], "gzip member");
 }

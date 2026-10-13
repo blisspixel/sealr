@@ -1851,6 +1851,13 @@ fn validate_directory_metadata(
     let attribute_is_special = unix_kind != 0 && unix_kind != 0x4000 && unix_kind != 0x8000;
     let host = version_made_by >> 8;
 
+    if unix_kind == 0xa000 {
+        return Err(Finding::error(
+            FindingCode::ZipSymlink,
+            format!("host {host} external attributes describe a Unix symlink (type 0120000)"),
+        )
+        .on(name));
+    }
     if attribute_is_special {
         return Err(Finding::error(
             FindingCode::ZipDiffA4Dir,

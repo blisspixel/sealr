@@ -41,7 +41,7 @@ Policy v4 preserves the existing original-source, file-count, member, total extr
 - `max_archive_bytes` bounds domain 0.
 - `max_derived_archive_bytes` bounds domain 1 while it is decoded.
 - `max_metadata_bytes` cumulatively bounds the gzip header and trailer plus TAR headers and terminator.
-- `max_ratio` separately bounds decoded TAR bytes against the recorded Deflate payload length and continues to apply to extracted members.
+- `max_ratio` separately bounds decoded TAR bytes against the recorded Deflate payload length and continues to apply to extracted members. The derived numerator omits the verified 1024-byte terminator and the verified all-zero bytes that finish the single 10240-byte record containing that terminator. Member payloads, headers, per-member block padding, and trailing zeros past that record stay charged.
 - All sums and range ends use checked integer arithmetic. Ratio comparisons use widened integer arithmetic; equality passes and `null` alone disables the ratio limit.
 
 The default v4 policy sets both original and derived archive caps to 512 MiB. The profile adds no runtime package and reuses the existing `flate2` and `crc32fast` dependency boundary.

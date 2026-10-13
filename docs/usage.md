@@ -9,7 +9,7 @@ explicit fail-closed Linux supervisor.
 cargo run --locked -p sealr-cli -- path/to/archive.zip
 ```
 
-The inspectable view is printed as pretty JSON on stdout. The unsigned receipt is printed as pretty JSON on stderr. No member files are created.
+When stdout and stderr are both terminals, and the command sets neither `--view`, `--receipt`, nor `--json`, sealr prints one summary line on stderr and leaves stdout empty. A pipe, a redirect, or `--json` prints the view as pretty JSON on stdout and the unsigned receipt as pretty JSON on stderr. `--json` forces those two documents on a terminal. It is not the future one-envelope machine output described under Target CLI. No member files are created.
 
 Both documents can be captured as files instead:
 
@@ -250,6 +250,7 @@ Options:
       --receipt <NEW_FILE>               Write the receipt JSON to this exact new file instead of stderr
       --policy <FILE>                    Validate and use this exact JSON policy document instead of the format's default policy
       --canonical                        Write the canonical RFC 8785 evidence lineage to the --view and --receipt files, whose bytes are exactly the digested bytes
+      --json                             Print the view and receipt JSON even when both streams are terminals
   -h, --help                             Print help
   -V, --version                          Print version
 ```
@@ -277,7 +278,8 @@ This is design notation, not current output. The exact fields depend on the vers
 The target CLI follows these rules:
 
 - human output is short, scannable, and explains the next action;
-- `--json` emits one versioned machine envelope on stdout;
+- the `--json` flag in today's CLI forces the existing view and receipt documents on a terminal;
+- the target `--json` emits one versioned machine envelope on stdout;
 - progress and diagnostics never corrupt machine stdout;
 - color defaults to terminal-aware `auto`, honors `NO_COLOR`, and is never required to understand a result;
 - redirected output has no animation or control sequences;
