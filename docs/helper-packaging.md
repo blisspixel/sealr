@@ -28,7 +28,7 @@ The CLI, identity verifier, and helper have mode `0755`. Documentation, licenses
 ```json
 {
   "schema": "sealr.worker-artifact.v1",
-  "release_version": "0.1.0-alpha.17",
+  "release_version": "0.1.0-alpha.18",
   "target": "x86_64-unknown-linux-musl",
   "bootstrap_abi": 1,
   "byte_len": 0,
@@ -36,7 +36,7 @@ The CLI, identity verifier, and helper have mode `0755`. Documentation, licenses
 }
 ```
 
-The example `byte_len` is schematic. Every real manifest binds the exact positive helper length and SHA-256. `bootstrap_abi` remains 1 because the bootstrap frame layout is unchanged. The authenticated runtime hello separately requires helper feature generation 2, which binds support for the additive supervised prefix-read request and frame flag. A helper with any other feature generation is rejected before source transfer. The feature generation is intentionally not a manifest field. The enclosing release archive checksum and build-provenance attestation authenticate the helper and manifest transitively. At execution, the supervisor independently opens, hashes, seals, launches, and proves the running object before transferring archive authority, as specified in the [reduced-authority design](sandbox.md).
+The example `byte_len` is schematic. The example `release_version` is this source tree. Published Alpha.17 manifests still record `0.1.0-alpha.17` until Alpha.18 artifacts exist. Every real manifest binds the exact positive helper length and SHA-256. `bootstrap_abi` remains 1 because the bootstrap frame layout is unchanged. The authenticated runtime hello separately requires helper feature generation 2, which binds support for the additive supervised prefix-read request and frame flag. A helper with any other feature generation is rejected before source transfer. The feature generation is intentionally not a manifest field. The enclosing release archive checksum and build-provenance attestation authenticate the helper and manifest transitively. At execution, the supervisor independently opens, hashes, seals, launches, and proves the running object before transferring archive authority, as specified in the [reduced-authority design](sandbox.md).
 
 The helper is built as a static `x86_64-unknown-linux-musl` ELF and must have no program interpreter. The repository lab is a separate verification executable and is never included in a native release archive.
 

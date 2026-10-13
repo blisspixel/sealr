@@ -19,9 +19,10 @@ silently give the same bytes a different meaning.
 
 ## Try it
 
-Download the native Linux, macOS, or Windows archive from
+Download the published native Linux, macOS, or Windows archive from
 [`v0.1.0-alpha.17`](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.17)
 and [verify the release](docs/release-verification.md) before running it.
+This source tree is `v0.1.0-alpha.18` and does not yet have native release artifacts.
 
 ```sh
 # On a terminal this prints a one-line summary. A pipe or --json keeps JSON.
@@ -54,7 +55,7 @@ Inspecting a two-member ZIP verifies both members without writing a destination:
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-light.png">
-  <img alt="Linux terminal summary of Alpha.17 verifying two ZIP members with no destination written." src="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-light.png" width="1000">
+  <img alt="Linux terminal summary, captured with Alpha.17, verifying two ZIP members with no destination written." src="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-light.png" width="1000">
 </picture>
 
 This image renders the JSON view and receipt. On a terminal, the current CLI
@@ -64,11 +65,21 @@ materialization, both themes, and reproduction instructions.
 
 ## Current status
 
+This source tree targets `v0.1.0-alpha.18`. It admits minimal GNU tar records.
+Real bombs still fail `quota.ratio`: only the one 10240-byte record that
+contains the terminator is excluded from the derived ratio numerator, and the
+default `max_ratio` stays 100. The
+[Alpha.18 release notes](docs/releases/v0.1.0-alpha.18.md) describe this source
+tree. Published native archives remain
+[`v0.1.0-alpha.17`](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.17)
+until Alpha.18 artifacts exist.
+[Release verification](docs/release-verification.md) checksums those published
+archives.
+
 Alpha.17 contains machine-readable publisher failures, tested evidence and Rust
 consumer migrations, named durability controls, and reproducible assurance
 bookkeeping. Native CI covers Linux, macOS, and Windows. The
-[release notes](docs/releases/v0.1.0-alpha.17.md) describe the contents; the
-release page records publication state.
+[Alpha.17 notes](docs/releases/v0.1.0-alpha.17.md) remain that release's record.
 
 Sealr is a development preview for integration and adversarial testing. It has
 no independent security audit or stable production release. Receipts are unsigned,

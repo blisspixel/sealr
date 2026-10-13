@@ -6,13 +6,15 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+## [0.1.0-alpha.18] - 2026-10-13
+
 ### Fixed
 
-- Derived TAR compression ratios no longer charge the mandatory 1024-byte terminator or the all-zero bytes that finish the single 10240-byte record containing that terminator. Member payloads, headers, per-member block padding, and trailing zeros past that record stay in the numerator. The default `max_ratio` of 100 is unchanged.
+- Derived TAR compression ratios no longer charge the mandatory 1024-byte terminator or the all-zero bytes that finish the single 10240-byte record containing that terminator. Member payloads, headers, per-member block padding, and trailing zeros past that record stay in the numerator. The default `max_ratio` of 100 is unchanged. `ratio_exceeds` stays a strict greater-than comparison, so 1001/10 and 101/1 still exceed.
 
 ### Added
 
-- TAR member names may start with `./`. That prefix is normalized away, including an archive-root directory from `tar -C dir .`. Absolute paths, `..`, embedded dot components, and links stay rejected.
+- Minimal GNU tar records are admitted. TAR member names may start with `./`. That prefix is normalized away, including an archive-root directory from `tar -C dir .`. Absolute paths, `..`, embedded dot components, and links stay rejected.
 - `format.unsupported` and `tar.dialect` findings carry a hint naming the observed signature and the `--format` values whose profiles start with it. The hint is not used to select an interpretation.
 - Unix symlink ZIP entries are reported as `zip.symlink`.
 - On a terminal, with neither `--view`, `--receipt`, nor `--json`, the CLI prints a one-line summary on stderr. Redirected output stays JSON. `--json` forces the view and receipt JSON on a terminal.
@@ -512,7 +514,8 @@ First public development preview of the ZIP boundary.
 
 This preview is not a production-ready security boundary and has not received an external security audit. See the security limitations in the README and the reporting policy in `SECURITY.md` before evaluating it.
 
-[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.17...HEAD
+[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.18...HEAD
+[0.1.0-alpha.18]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.17...v0.1.0-alpha.18
 [0.1.0-alpha.17]: https://github.com/blisspixel/sealr/commits/v0.1.0-alpha.17
 [0.1.0-alpha.16]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.15...v0.1.0-alpha.16
 [0.1.0-alpha.15]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.14...v0.1.0-alpha.15

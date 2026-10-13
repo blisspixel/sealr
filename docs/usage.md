@@ -293,8 +293,9 @@ Job-oriented verbs such as `gate`, `verify`, `materialize`, and `explain` follow
 ## Documentation capture policy
 
 The [walkthrough](walkthrough.md) owns the screenshots and reproduction commands.
-The images are rendered terminal summaries of the current Alpha.17 JSON view
-and receipt streams, captured from a Linux run with shell notation. They remain
+The images are rendered terminal summaries of an Alpha.17 JSON view
+and receipt stream, captured from a Linux run with shell notation. They still
+show `0.1.0-alpha.17`. This source tree is Alpha.18. They remain
 paired with copyable commands and expected text. The README shows one overview
 image; detailed scenarios belong in the walkthrough.
 
