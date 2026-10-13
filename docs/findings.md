@@ -13,6 +13,20 @@ Agents switch on `code`. Humans read `detail`. There is no numeric risk score.
 
 The enclosing view and receipt bind the policy. Individual finding objects do not repeat it.
 
+`format.unsupported` and `tar.dialect` may include a `hint` object. `observed` names the fixed signature that was present, and `formats` lists the `--format` values whose profiles start with that signature. Both fields come from those bytes, never from the file name. The hint does not select an interpretation, and it does not change the verdict or the source, interpretation, layout, or content identities. Findings without a hint omit the field. The semantic record does not encode it.
+
+```json
+{
+  "code": "format.unsupported",
+  "severity": "error",
+  "detail": "magic gz",
+  "hint": {
+    "observed": "gzip member",
+    "formats": ["tar-gzip-ustar", "tar-gzip-pax", "tar-gzip-gnu-longname"]
+  }
+}
+```
+
 ## Severity
 
 | Value | Meaning |
@@ -31,7 +45,7 @@ Unknown error codes must be treated as rejection by consumers.
 | Code | Meaning |
 |---|---|
 | `source.io` | The archive source could not be inspected, opened, or read. |
-| `format.unsupported` | Magic or format is unsupported or disallowed by policy. |
+| `format.unsupported` | Magic or format is unsupported or disallowed by policy. A recognized signature adds the hint described above. |
 | `format.magic` | Reserved for explicit magic-versus-extension policy. |
 | `method.unsupported` | ZIP compression method is not Store or Deflate. |
 
@@ -41,14 +55,14 @@ Unknown error codes must be treated as rejection by consumers.
 |---|---|
 | `path.absolute` | Absolute, UNC-like, or drive-qualified member path. |
 | `path.dotdot` | Parent component. |
-| `path.empty` | Empty component or empty normalized name. |
+| `path.empty` | Empty component or empty normalized name. A regular file that normalizes to empty stays here. An archive-root TAR directory whose name is only `.` or `./` is kept, with an empty canonical path. |
 | `path.ads` | Colon that could address an NTFS alternate data stream. |
 | `path.reserved` | Windows reserved device name. |
 | `path.trailing` | Component ending in dot or space. |
 | `path.escape` | Internal containment join failed. |
 | `path.depth` | Normalized depth exceeds policy. |
 | `path.nul` | NUL byte in a decoded name. |
-| `path.invalid_char` | Character denied by the selected profile, including controls, backslash, portable Windows-illegal characters, and Portable v1's pinned non-ASCII whitespace, bidi-control, assigned-repertoire, and private-use rules. |
+| `path.invalid_char` | Character denied by the selected profile, including controls, backslash, portable Windows-illegal characters, and Portable v1's pinned non-ASCII whitespace, bidi-control, assigned-repertoire, and private-use rules. A leading `./` on a TAR member is removed before this check. An embedded dot component such as `a/./b` is still rejected. |
 | `path.unicode` | Path is not in the selected profile's canonical Unicode form, including a non-NFC path under portable UTF-8 v1. |
 | `path.case_fold` | Collision or topology conflict under the selected profile's case-fold relation. |
 | `path.conflict` | A path is both a file and a directory ancestor or descendant. |
@@ -77,7 +91,7 @@ Unknown error codes must be treated as rejection by consumers.
 | `quota.files` | Entry count exceeds `max_files`. |
 | `quota.member` | Declared or actual member size exceeds its cap. |
 | `quota.total` | Declared or actual running total exceeds its cap. |
-| `quota.ratio` | Declared or actual compression ratio exceeds policy. |
+| `quota.ratio` | Declared or actual compression ratio exceeds policy. For a derived TAR, the numerator omits the verified 1024-byte terminator and the verified all-zero bytes that finish the single 10240-byte record containing that terminator. Member payloads, headers, per-member block padding, and trailing zeros past that record stay charged. |
 | `quota.overflow` | A checked security counter could not be represented in `u64`. |
 | `quota.metadata` | Structural archive metadata exceeds its cap. |
 | `quota.declared_lie` | Actual expanded size disagrees with the declared size. |
@@ -90,7 +104,8 @@ Unknown error codes must be treated as rejection by consumers.
 | `zip.diff.a1_method` | CDH and LFH methods disagree. |
 | `zip.diff.a2_size` | CDH, LFH, CRC, size, or data descriptor fields disagree. |
 | `zip.diff.a3_name` | Raw CDH and LFH names disagree, or an alternate Unicode Path extra field is present. |
-| `zip.diff.a4_dir` | Filename, size, host, or external attributes disagree on entry type. |
+| `zip.diff.a4_dir` | Filename, size, host, or external attributes disagree on entry type. Unix symlinks are `zip.symlink` instead. |
+| `zip.symlink` | Host external attributes describe a Unix symlink (type 0120000). The entry is rejected. |
 | `zip.diff.a5_crypt` | Encryption-related flags disagree. |
 | `zip.diff.b1_dup` | Duplicate canonical destination path. |
 | `zip.diff.b2_chars` | Reserved for the upstream character ambiguity class. Current paths use the more specific `path.*` codes. |
@@ -128,7 +143,7 @@ Unknown error codes must be treated as rejection by consumers.
 | Code | Meaning |
 |---|---|
 | `tar.checksum` | A ustar header checksum field is malformed, overflows, or disagrees with the unsigned header-byte sum. |
-| `tar.dialect` | The selected portable ustar language does not recognize the required magic, version, fixed text fields, or reserved-byte form. |
+| `tar.dialect` | The selected portable ustar language does not recognize the required magic, version, fixed text fields, or reserved-byte form. A recognized inner magic adds the hint described above, naming only the `--format` values for that outer wrapper. |
 | `tar.numeric` | An octal numeric field is malformed or overflows. GNU base-256 numeric fields are reported as unsupported instead. |
 | `tar.padding` | Member padding or trailing record padding contains a nonzero byte. |
 | `tar.terminator` | The archive lacks exactly observable two-block zero termination or contains an incomplete trailing block. |

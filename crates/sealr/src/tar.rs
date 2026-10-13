@@ -453,6 +453,87 @@ fn is_zero_block(block: &[u8; BLOCK_LEN_USIZE]) -> bool {
     block.iter().all(|byte| *byte == 0)
 }
 
+/// Terminator location for ratio accounting when the selected dialect rejected
+/// the archive. Checksums and the ustar or old-GNU magic must verify, and the
+/// tail must be all zeros. This never admits an archive.
+pub(crate) struct RatioCovering {
+    pub terminator: ByteRange,
+    pub trailing_zeros: ByteRange,
+}
+
+pub(crate) fn verified_ratio_covering(snapshot: &SourceSnapshot<'_>) -> Option<RatioCovering> {
+    let source_len = snapshot.len();
+    if source_len < BLOCK_LEN * 2 || !source_len.is_multiple_of(BLOCK_LEN) {
+        return None;
+    }
+    let mut offset = 0_u64;
+    loop {
+        let header_end = offset.checked_add(BLOCK_LEN)?;
+        if header_end > source_len {
+            return None;
+        }
+        let mut header = [0_u8; BLOCK_LEN_USIZE];
+        snapshot.read_exact_at(offset, &mut header).ok()?;
+        if is_zero_block(&header) {
+            let trailing_offset = header_end.checked_add(BLOCK_LEN)?;
+            if trailing_offset > source_len {
+                return None;
+            }
+            let mut second = [0_u8; BLOCK_LEN_USIZE];
+            snapshot.read_exact_at(header_end, &mut second).ok()?;
+            if !is_zero_block(&second) {
+                return None;
+            }
+            let trailing_len = source_len - trailing_offset;
+            ensure_zero_range(snapshot, trailing_offset, trailing_len, "record padding").ok()?;
+            return Some(RatioCovering {
+                terminator: ByteRange {
+                    offset,
+                    len: BLOCK_LEN * 2,
+                },
+                trailing_zeros: ByteRange {
+                    offset: trailing_offset,
+                    len: trailing_len,
+                },
+            });
+        }
+        if !header_checksum_matches(&header) {
+            return None;
+        }
+        let magic = &header[257..265];
+        if magic != b"ustar\x0000" && magic != b"ustar  \0" {
+            return None;
+        }
+        let size = parse_octal(&header[124..136], "size").ok()?;
+        let padded = round_up_block(size).ok()?;
+        let payload_end = header_end.checked_add(size)?;
+        let record_end = header_end.checked_add(padded)?;
+        if record_end > source_len || record_end <= offset {
+            return None;
+        }
+        ensure_zero_range(snapshot, payload_end, padded - size, "member padding").ok()?;
+        offset = record_end;
+    }
+}
+
+fn header_checksum_matches(header: &[u8; BLOCK_LEN_USIZE]) -> bool {
+    let Ok(stored) = parse_checksum(&header[148..156]) else {
+        return false;
+    };
+    let actual = header
+        .iter()
+        .enumerate()
+        .map(|(index, byte)| {
+            if (148..156).contains(&index) {
+                u32::from(b' ')
+            } else {
+                u32::from(*byte)
+            }
+        })
+        .sum::<u32>();
+    stored == actual
+}
+
 #[cfg(feature = "__internal-fuzzing")]
 pub(crate) fn exercise_fuzz_input(input: &[u8]) {
     const MAX_FUZZ_INPUT: usize = 4 * 1024 * 1024;

@@ -191,6 +191,15 @@ struct Finding {
     #[serde(default)]
     member: Option<String>,
     detail: String,
+    #[serde(default)]
+    hint: Option<FindingHint>,
+}
+
+#[derive(Debug, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+struct FindingHint {
+    observed: String,
+    formats: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, PartialEq, Eq)]

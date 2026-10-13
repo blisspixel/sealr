@@ -13,7 +13,8 @@ Download the native preview archives, `SHA256SUMS`, and provenance from the [`v0
 ```text
 # After checksumming and extracting the native archive:
 ./sealr path/to/archive.zip
-# View JSON goes to stdout; receipt JSON to stderr. Exit 0 means admitted.
+# On a terminal, one summary line goes to stderr. A pipe or --json keeps JSON.
+# Exit 0 means admitted.
 
 # Materialize into a new destination below an existing parent.
 ./sealr path/to/archive.zip --dest ./out
@@ -35,7 +36,7 @@ git clone https://github.com/blisspixel/sealr.git
 cd sealr
 cargo test --locked --workspace
 
-# Inspect only. View goes to stdout; receipt goes to stderr.
+# Inspect only. A terminal prints a one-line summary; a pipe keeps JSON.
 cargo run --locked -p sealr-cli -- path/to/archive.zip
 
 # Materialize into a new destination below an existing parent.
@@ -45,6 +46,8 @@ cargo run --locked -p sealr-cli -- path/to/archive.zip --dest ./out
 The library and shipped CLI are Rust. CI runs native tests and release builds on Ubuntu, macOS, and Windows; the platform-specific materializers are release gates, not secondary ports. Some repository maintenance and release scripts are currently PowerShell because the same scripts run on all three GitHub-hosted runner families and the local release operator uses Windows. PowerShell is not a runtime dependency of `sealr`, but this is more scripting surface than the project should keep. Shared deterministic repository tasks are scheduled to move into a small Rust `xtask`, leaving only thin host-specific wrappers where an operating-system or operator boundary requires one.
 
 The CLI exits `0` only when the archive is admitted and completely verified without an effect failure, `2` when admission or verification does not complete successfully, and `3` when admission succeeds but a requested destination effect fails. The inspectable view now includes the same interpretation, admission, verification, effect, and completeness axes as the receipt. The compatibility `verdict` maps incomplete verification and an admitted archive with a failed destination to `rejected`. Operational command-line errors use the normal Clap exit behavior.
+
+A leading `./` on a TAR member, including the archive-root directory from `tar -C dir .`, is normalized away. Absolute paths, `..`, embedded dot components, and links are still rejected. On a terminal, with neither `--view` nor `--receipt`, sealr prints a one-line summary on stderr instead of the receipt JSON. Redirected output stays JSON. `--json` forces JSON on a terminal. A `format.unsupported` or `tar.dialect` finding includes a hint naming the observed signature and the `--format` values that start with it. The hint is not a selection.
 
 ## Use the Rust capability
 

@@ -13,6 +13,7 @@ use crate::covering::{
     audit_zstd_wrapper_covering,
 };
 use crate::findings::{Finding, FindingCode, Severity};
+use crate::hints::{self, TarWrapperClass};
 use crate::identity::OutcomeIdentities;
 use crate::ir::{
     ArchiveFormat, ArchiveIR, Bzip2WrapperEvidence, GnuLongNameCarrierEvidence,
@@ -34,6 +35,7 @@ use crate::policy::{
     POLICY_FORMAT_TAR_GNU_LONGNAME, POLICY_FORMAT_TAR_PAX, POLICY_FORMAT_TAR_USTAR,
 };
 use crate::quota::{QuotaError, QuotaState};
+use crate::ratio::derived_tar_ratio_numerator;
 use crate::sevenz;
 use crate::snapshot::{
     DomainRange, SnapshotDomainId, SnapshotKind, SnapshotSet, SourceSnapshot, TransformGraph,
@@ -910,8 +912,8 @@ fn apply_tar_gzip_with_options(
         Ok(transformed) => transformed,
         Err(error) => {
             let axes = gzip_failure_axes(&error);
-            let finding = error.into_finding();
             let original = snapshots.original();
+            let finding = hint_format_finding(error.into_finding(), original);
             let observed_magic = observed_gzip_magic(original);
             return finish(
                 (original.path_owned(), source_digest, original.kind()),
@@ -945,36 +947,6 @@ fn apply_tar_gzip_with_options(
             ),
             identities_base,
         );
-    }
-    if let Some(max_ratio) = controls.budget.max_ratio {
-        if ratio_exceeds(
-            transformed.output_len,
-            transformed.compressed_payload.len,
-            max_ratio,
-        ) {
-            let finding = Finding::error(
-                FindingCode::QuotaRatio,
-                format!(
-                    "derived gzip output {}:{} exceeds {max_ratio}:1",
-                    transformed.output_len, transformed.compressed_payload.len
-                ),
-            );
-            let original = snapshots.original();
-            return finish(
-                (original.path_owned(), source_digest, original.kind()),
-                "gz",
-                policy,
-                vec![finding.clone()],
-                Vec::new(),
-                initial_materialization,
-                SemanticAxes::structure_stop(
-                    InterpretationStatus::Interpreted,
-                    AdmissionStatus::Denied,
-                    &finding,
-                ),
-                identities_base,
-            );
-        }
     }
     let wrapper = GzipWrapperEvidence {
         flags: transformed.header.flags,
@@ -1141,8 +1113,8 @@ fn apply_tar_zstd_with_options(
         Ok(transformed) => transformed,
         Err(error) => {
             let axes = zstd_failure_axes(&error);
-            let finding = error.into_finding();
             let original = snapshots.original();
+            let finding = hint_format_finding(error.into_finding(), original);
             let observed_magic = observed_zstd_magic(original);
             return finish(
                 (original.path_owned(), source_digest, original.kind()),
@@ -1176,36 +1148,6 @@ fn apply_tar_zstd_with_options(
             ),
             identities_base,
         );
-    }
-    if let Some(max_ratio) = controls.budget.max_ratio {
-        if ratio_exceeds(
-            transformed.output_len,
-            transformed.compressed_payload.len,
-            max_ratio,
-        ) {
-            let finding = Finding::error(
-                FindingCode::QuotaRatio,
-                format!(
-                    "derived zstd output {}:{} exceeds {max_ratio}:1",
-                    transformed.output_len, transformed.compressed_payload.len
-                ),
-            );
-            let original = snapshots.original();
-            return finish(
-                (original.path_owned(), source_digest, original.kind()),
-                "zst",
-                policy,
-                vec![finding.clone()],
-                Vec::new(),
-                initial_materialization,
-                SemanticAxes::structure_stop(
-                    InterpretationStatus::Interpreted,
-                    AdmissionStatus::Denied,
-                    &finding,
-                ),
-                identities_base,
-            );
-        }
     }
     let wrapper = ZstdWrapperEvidence {
         descriptor: transformed.header.descriptor,
@@ -1366,8 +1308,8 @@ fn apply_tar_xz_with_options(
         Ok(transformed) => transformed,
         Err(error) => {
             let axes = xz_failure_axes(&error);
-            let finding = error.into_finding();
             let original = snapshots.original();
+            let finding = hint_format_finding(error.into_finding(), original);
             let observed_magic = observed_xz_magic(original);
             return finish(
                 (original.path_owned(), source_digest, original.kind()),
@@ -1402,10 +1344,14 @@ fn apply_tar_xz_with_options(
             identities_base,
         );
     }
-    let compressed_total = transformed.blocks.iter().try_fold(0_u64, |total, block| {
-        total.checked_add(block.compressed.len)
-    });
-    let Some(compressed_total) = compressed_total else {
+    if transformed
+        .blocks
+        .iter()
+        .try_fold(0_u64, |total, block| {
+            total.checked_add(block.compressed.len)
+        })
+        .is_none()
+    {
         let finding = Finding::error(
             FindingCode::QuotaOverflow,
             "xz compressed total overflowed u64",
@@ -1425,32 +1371,6 @@ fn apply_tar_xz_with_options(
             ),
             identities_base,
         );
-    };
-    if let Some(max_ratio) = controls.budget.max_ratio {
-        if ratio_exceeds(transformed.output_len, compressed_total, max_ratio) {
-            let finding = Finding::error(
-                FindingCode::QuotaRatio,
-                format!(
-                    "derived xz output {}:{compressed_total} exceeds {max_ratio}:1",
-                    transformed.output_len
-                ),
-            );
-            let original = snapshots.original();
-            return finish(
-                (original.path_owned(), source_digest, original.kind()),
-                "xz",
-                policy,
-                vec![finding.clone()],
-                Vec::new(),
-                initial_materialization,
-                SemanticAxes::structure_stop(
-                    InterpretationStatus::Interpreted,
-                    AdmissionStatus::Denied,
-                    &finding,
-                ),
-                identities_base,
-            );
-        }
     }
     let wrapper = XzWrapperEvidence {
         check_id: transformed.check_id,
@@ -1630,8 +1550,8 @@ fn apply_tar_bzip2_with_options(
         Ok(transformed) => transformed,
         Err(error) => {
             let axes = bzip2_failure_axes(&error);
-            let finding = error.into_finding();
             let original = snapshots.original();
+            let finding = hint_format_finding(error.into_finding(), original);
             let observed_magic = observed_bzip2_magic(original);
             return finish(
                 (original.path_owned(), source_digest, original.kind()),
@@ -1674,36 +1594,6 @@ fn apply_tar_bzip2_with_options(
         + 80
         + u64::from(transformed.padding_bits);
     let wrapper_metadata = metadata_bits.div_ceil(8);
-    let source_len = snapshots.original().len();
-    let compressed_total = source_len
-        .checked_sub(wrapper_metadata)
-        .expect("bzip2 metadata bits never exceed the audited stream");
-    if let Some(max_ratio) = controls.budget.max_ratio {
-        if ratio_exceeds(transformed.output_len, compressed_total, max_ratio) {
-            let finding = Finding::error(
-                FindingCode::QuotaRatio,
-                format!(
-                    "derived bzip2 output {}:{compressed_total} exceeds {max_ratio}:1",
-                    transformed.output_len
-                ),
-            );
-            let original = snapshots.original();
-            return finish(
-                (original.path_owned(), source_digest, original.kind()),
-                "bz2",
-                policy,
-                vec![finding.clone()],
-                Vec::new(),
-                initial_materialization,
-                SemanticAxes::structure_stop(
-                    InterpretationStatus::Interpreted,
-                    AdmissionStatus::Denied,
-                    &finding,
-                ),
-                identities_base,
-            );
-        }
-    }
     let wrapper = Bzip2WrapperEvidence {
         level: transformed.level,
         header: transformed.header,
@@ -2095,6 +1985,355 @@ fn apply_sevenz_with_options(
     }
 }
 
+struct DerivedTarCharge {
+    codec: &'static str,
+    decoded_len: u64,
+    compressed_len: u64,
+}
+
+fn bzip2_compressed_payload_len(
+    block_count: u64,
+    padding_bits: u8,
+    source_len: u64,
+) -> Option<u64> {
+    let metadata_bits = 32_u64
+        .checked_add(81_u64.checked_mul(block_count)?)?
+        .checked_add(80)?
+        .checked_add(u64::from(padding_bits))?;
+    source_len.checked_sub(metadata_bits.div_ceil(8))
+}
+
+fn charge_gzip(wrapper: &GzipWrapperEvidence) -> DerivedTarCharge {
+    DerivedTarCharge {
+        codec: "gzip",
+        decoded_len: wrapper.derived_output_len,
+        compressed_len: wrapper.compressed_payload.len,
+    }
+}
+
+fn charge_zstd(wrapper: &ZstdWrapperEvidence) -> DerivedTarCharge {
+    DerivedTarCharge {
+        codec: "zstd",
+        decoded_len: wrapper.derived_output_len,
+        compressed_len: wrapper.compressed_payload.len,
+    }
+}
+
+fn charge_xz(wrapper: &XzWrapperEvidence) -> Result<DerivedTarCharge, Finding> {
+    let compressed_len = wrapper
+        .blocks
+        .iter()
+        .try_fold(0_u64, |total, block| {
+            total.checked_add(block.compressed.len)
+        })
+        .ok_or_else(|| {
+            Finding::error(
+                FindingCode::QuotaOverflow,
+                "xz compressed total overflowed u64",
+            )
+        })?;
+    Ok(DerivedTarCharge {
+        codec: "xz",
+        decoded_len: wrapper.derived_output_len,
+        compressed_len,
+    })
+}
+
+fn charge_bzip2(
+    wrapper: &Bzip2WrapperEvidence,
+    source_len: u64,
+) -> Result<DerivedTarCharge, Finding> {
+    let compressed_len = bzip2_compressed_payload_len(
+        u64::try_from(wrapper.block_bit_offsets.len()).unwrap_or(u64::MAX),
+        wrapper.padding_bits,
+        source_len,
+    )
+    .ok_or_else(|| {
+        Finding::error(
+            FindingCode::QuotaOverflow,
+            "bzip2 compressed payload length overflowed u64",
+        )
+    })?;
+    Ok(DerivedTarCharge {
+        codec: "bzip2",
+        decoded_len: wrapper.derived_output_len,
+        compressed_len,
+    })
+}
+
+fn ustar_derived_charge(
+    profile: &TarPlanProfile,
+    source_len: u64,
+) -> Result<Option<DerivedTarCharge>, Finding> {
+    match profile {
+        TarPlanProfile::Raw(_) => Ok(None),
+        TarPlanProfile::Gzip(_, wrapper) => Ok(Some(charge_gzip(wrapper))),
+        TarPlanProfile::Zstd(_, wrapper) => Ok(Some(charge_zstd(wrapper))),
+        TarPlanProfile::Xz(_, wrapper) => charge_xz(wrapper).map(Some),
+        TarPlanProfile::Bzip2(_, wrapper) => charge_bzip2(wrapper, source_len).map(Some),
+    }
+}
+
+fn pax_derived_charge(profile: &PaxPlanProfile) -> Option<DerivedTarCharge> {
+    match profile {
+        PaxPlanProfile::Raw(_) => None,
+        PaxPlanProfile::Gzip(_, wrapper) => Some(charge_gzip(wrapper)),
+    }
+}
+
+fn gnu_derived_charge(profile: &GnuLongNamePlanProfile) -> Option<DerivedTarCharge> {
+    match profile {
+        GnuLongNamePlanProfile::Raw(_) => None,
+        GnuLongNamePlanProfile::Gzip(_, wrapper) => Some(charge_gzip(wrapper)),
+    }
+}
+
+fn ustar_wrapper_class(profile: &TarPlanProfile) -> TarWrapperClass {
+    match profile {
+        TarPlanProfile::Raw(_) => TarWrapperClass::Raw,
+        TarPlanProfile::Gzip(_, _) => TarWrapperClass::Gzip,
+        TarPlanProfile::Zstd(_, _) => TarWrapperClass::Zstd,
+        TarPlanProfile::Xz(_, _) => TarWrapperClass::Xz,
+        TarPlanProfile::Bzip2(_, _) => TarWrapperClass::Bzip2,
+    }
+}
+
+fn derived_numerator(
+    decoded_len: u64,
+    covering: Option<&TarArchiveCovering>,
+    tar_snapshot: &SourceSnapshot<'_>,
+) -> u64 {
+    if let Some(covering) = covering {
+        return derived_tar_ratio_numerator(
+            decoded_len,
+            covering.terminator.offset,
+            covering.terminator.len,
+            covering.trailing_zeros.offset,
+            covering.trailing_zeros.len,
+        );
+    }
+    if let Some(ratio) = tar::verified_ratio_covering(tar_snapshot) {
+        return derived_tar_ratio_numerator(
+            decoded_len,
+            ratio.terminator.offset,
+            ratio.terminator.len,
+            ratio.trailing_zeros.offset,
+            ratio.trailing_zeros.len,
+        );
+    }
+    decoded_len
+}
+
+#[allow(clippy::too_many_arguments)]
+fn derived_ratio_stop(
+    charge: Result<Option<DerivedTarCharge>, Finding>,
+    covering: Option<&TarArchiveCovering>,
+    tar_snapshot: &SourceSnapshot<'_>,
+    max_ratio: Option<u64>,
+    snapshots: &SnapshotSet<'_>,
+    magic: &'static str,
+    policy: &Policy,
+    source_digest: &SourceDigest,
+    identities_base: &OutcomeIdentities,
+    initial_materialization: &MaterializationMeta,
+) -> Option<Outcome> {
+    let charge = match charge {
+        Ok(None) => return None,
+        Ok(Some(charge)) => charge,
+        Err(finding) => {
+            return Some(denied_quota(
+                finding,
+                snapshots,
+                magic,
+                policy,
+                source_digest,
+                identities_base,
+                initial_materialization,
+            ));
+        }
+    };
+    let max_ratio = max_ratio?;
+    let numerator = derived_numerator(charge.decoded_len, covering, tar_snapshot);
+    if !ratio_exceeds(numerator, charge.compressed_len, max_ratio) {
+        return None;
+    }
+    let finding = Finding::error(
+        FindingCode::QuotaRatio,
+        format!(
+            "derived {} output {numerator}:{} exceeds {max_ratio}:1",
+            charge.codec, charge.compressed_len
+        ),
+    );
+    Some(denied_quota(
+        finding,
+        snapshots,
+        magic,
+        policy,
+        source_digest,
+        identities_base,
+        initial_materialization,
+    ))
+}
+
+fn denied_quota(
+    finding: Finding,
+    snapshots: &SnapshotSet<'_>,
+    magic: &'static str,
+    policy: &Policy,
+    source_digest: &SourceDigest,
+    identities_base: &OutcomeIdentities,
+    initial_materialization: &MaterializationMeta,
+) -> Outcome {
+    finish(
+        (
+            snapshots.original().path_owned(),
+            source_digest.clone(),
+            snapshots.original().kind(),
+        ),
+        magic,
+        policy,
+        vec![finding.clone()],
+        Vec::new(),
+        initial_materialization.clone(),
+        SemanticAxes::structure_stop(
+            InterpretationStatus::Interpreted,
+            AdmissionStatus::Denied,
+            &finding,
+        ),
+        identities_base.clone(),
+    )
+}
+
+fn hint_format_finding(mut finding: Finding, snapshot: &SourceSnapshot<'_>) -> Finding {
+    if finding.code != FindingCode::FormatUnsupported || finding.hint.is_some() {
+        return finding;
+    }
+    let len = usize::try_from(snapshot.len().min(512)).unwrap_or(0);
+    let mut prefix = vec![0_u8; len];
+    if len == 0 || snapshot.read_exact_at(0, &mut prefix).is_err() {
+        return finding;
+    }
+    finding.hint = hints::hint_from_prefix(&prefix);
+    finding
+}
+
+fn tar_dialect_hint(
+    snapshot: &SourceSnapshot<'_>,
+    class: TarWrapperClass,
+) -> Option<crate::findings::FindingHint> {
+    if snapshot.len() < 265 {
+        return None;
+    }
+    let mut magic = [0_u8; 8];
+    snapshot.read_exact_at(257, &mut magic).ok()?;
+    hints::hint_for_tar_dialect(class, &magic)
+}
+
+struct PreparedTarName {
+    name: String,
+    actions: Vec<NormalizationAction>,
+    archive_root: bool,
+}
+
+fn prepare_tar_member_name(name: &str, is_dir: bool) -> PreparedTarName {
+    let mut actions = Vec::new();
+    let stripped = if is_dir {
+        match name.strip_suffix('/') {
+            Some(without) => {
+                actions.push(NormalizationAction::StripDirectoryTrailingSlash);
+                without.to_owned()
+            }
+            None => name.to_owned(),
+        }
+    } else {
+        name.to_owned()
+    };
+    let mut rest = stripped.as_str();
+    while let Some(next) = rest.strip_prefix("./") {
+        rest = next;
+    }
+    if is_dir && (rest.is_empty() || rest == ".") {
+        return PreparedTarName {
+            name: String::new(),
+            actions,
+            archive_root: true,
+        };
+    }
+    PreparedTarName {
+        name: rest.to_owned(),
+        actions,
+        archive_root: false,
+    }
+}
+
+fn admit_tar_path(
+    name: &str,
+    is_dir: bool,
+    max_depth: u32,
+    dest_seen: &mut BTreeMap<String, bool>,
+    fold_seen: &mut BTreeMap<String, bool>,
+) -> Result<(Vec<String>, Vec<NormalizationAction>), Finding> {
+    let prepared = prepare_tar_member_name(name, is_dir);
+    if prepared.archive_root {
+        let joined = String::new();
+        if dest_seen.contains_key(&joined) {
+            return Err(
+                Finding::error(FindingCode::PathConflict, "duplicate destination path").on(name),
+            );
+        }
+        if fold_seen.contains_key(&joined) {
+            return Err(Finding::error(FindingCode::PathCaseFold, "case-fold collision").on(name));
+        }
+        dest_seen.insert(joined.clone(), true);
+        fold_seen.insert(joined, true);
+        return Ok((Vec::new(), prepared.actions));
+    }
+    let mut actions = prepared.actions;
+    let jailed = match jail_name_for_profile(
+        &prepared.name,
+        max_depth,
+        ZipInterpretationProfile::PortableUtf8V1,
+    ) {
+        Ok(jailed) => jailed,
+        Err(mut finding) => {
+            finding.member = Some(name.to_owned());
+            return Err(finding);
+        }
+    };
+    if let Some(detail) = portable_name_violation(&jailed) {
+        return Err(Finding::error(FindingCode::PathInvalidChar, detail).on(name));
+    }
+    actions.extend(jailed.actions);
+    let parts = jailed.components;
+    let joined = parts.join("/");
+    let fold = profile_case_fold(&joined, ZipInterpretationProfile::PortableUtf8V1);
+    if dest_seen.contains_key(&joined) {
+        return Err(
+            Finding::error(FindingCode::PathConflict, "duplicate destination path").on(name),
+        );
+    }
+    if fold_seen.contains_key(&fold) {
+        return Err(Finding::error(FindingCode::PathCaseFold, "case-fold collision").on(name));
+    }
+    if let Some(conflict) = path_conflict(dest_seen, &joined, is_dir) {
+        return Err(Finding::error(
+            FindingCode::PathConflict,
+            format!("file/directory conflict with {conflict}"),
+        )
+        .on(name));
+    }
+    if let Some(conflict) = path_conflict(fold_seen, &fold, is_dir) {
+        return Err(Finding::error(
+            FindingCode::PathCaseFold,
+            format!("case-fold topology conflict with {conflict}"),
+        )
+        .on(name));
+    }
+    dest_seen.insert(joined, is_dir);
+    fold_seen.insert(fold, is_dir);
+    Ok((parts, actions))
+}
+
 enum TarPlanProfile {
     Raw(TarInterpretationProfile),
     Gzip(TarGzipInterpretationProfile, Box<GzipWrapperEvidence>),
@@ -2153,7 +2392,24 @@ fn plan_tar_domains(
         tar_metadata_budget,
     ) {
         Ok(parsed) => parsed,
-        Err(finding) => {
+        Err(mut finding) => {
+            if let Some(outcome) = derived_ratio_stop(
+                ustar_derived_charge(&profile, snapshots.original().len()),
+                None,
+                tar_snapshot,
+                controls.budget.max_ratio,
+                &snapshots,
+                magic,
+                policy,
+                &source_digest,
+                &identities_base,
+                &initial_materialization,
+            ) {
+                return outcome;
+            }
+            if finding.code == FindingCode::TarDialect {
+                finding.hint = tar_dialect_hint(tar_snapshot, ustar_wrapper_class(&profile));
+            }
             let axes = parse_failure_axes(&finding);
             let original = snapshots.original();
             return finish(
@@ -2175,6 +2431,20 @@ fn plan_tar_domains(
         terminator: parsed.terminator,
         trailing_zeros: parsed.trailing_zeros,
     };
+    if let Some(outcome) = derived_ratio_stop(
+        ustar_derived_charge(&profile, snapshots.original().len()),
+        Some(&covering),
+        tar_snapshot,
+        budget.max_ratio,
+        &snapshots,
+        magic,
+        policy,
+        &source_digest,
+        &identities_base,
+        &initial_materialization,
+    ) {
+        return outcome;
+    }
     let mut findings = Vec::new();
     let mut planned = Vec::new();
     let mut dest_seen: BTreeMap<String, bool> = BTreeMap::new();
@@ -2222,72 +2492,14 @@ fn plan_tar_domains(
             }
         }
 
-        let mut actions = Vec::new();
-        let jailed_name = if member.is_dir {
-            match member.name.strip_suffix('/') {
-                Some(name) => {
-                    actions.push(NormalizationAction::StripDirectoryTrailingSlash);
-                    name
-                }
-                None => member.name.as_str(),
-            }
-        } else {
-            &member.name
-        };
-        match jail_name_for_profile(
-            jailed_name,
+        match admit_tar_path(
+            &member.name,
+            member.is_dir,
             budget.max_path_depth,
-            ZipInterpretationProfile::PortableUtf8V1,
+            &mut dest_seen,
+            &mut fold_seen,
         ) {
-            Ok(jailed) => {
-                if let Some(detail) = portable_name_violation(&jailed) {
-                    findings.push(
-                        Finding::error(FindingCode::PathInvalidChar, detail).on(&member.name),
-                    );
-                    continue;
-                }
-                actions.extend(jailed.actions);
-                let parts = jailed.components;
-                let joined = parts.join("/");
-                let fold = profile_case_fold(&joined, ZipInterpretationProfile::PortableUtf8V1);
-                if dest_seen.contains_key(&joined) {
-                    findings.push(
-                        Finding::error(FindingCode::PathConflict, "duplicate destination path")
-                            .on(&member.name),
-                    );
-                    continue;
-                }
-                if fold_seen.contains_key(&fold) {
-                    findings.push(
-                        Finding::error(FindingCode::PathCaseFold, "case-fold collision")
-                            .on(&member.name),
-                    );
-                    continue;
-                }
-                if let Some(conflict) = path_conflict(&dest_seen, &joined, member.is_dir) {
-                    findings.push(
-                        Finding::error(
-                            FindingCode::PathConflict,
-                            format!("file/directory conflict with {conflict}"),
-                        )
-                        .on(&member.name),
-                    );
-                    continue;
-                }
-                if let Some(conflict) = path_conflict(&fold_seen, &fold, member.is_dir) {
-                    findings.push(
-                        Finding::error(
-                            FindingCode::PathCaseFold,
-                            format!("case-fold topology conflict with {conflict}"),
-                        )
-                        .on(&member.name),
-                    );
-                    continue;
-                }
-                dest_seen.insert(joined, member.is_dir);
-                fold_seen.insert(fold, member.is_dir);
-                planned.push((member, parts, actions));
-            }
+            Ok((parts, actions)) => planned.push((member, parts, actions)),
             Err(finding) => findings.push(finding),
         }
     }
@@ -2429,7 +2641,28 @@ fn plan_tar_pax(
         tar_metadata_budget,
     ) {
         Ok(parsed) => parsed,
-        Err(finding) => {
+        Err(mut finding) => {
+            if let Some(outcome) = derived_ratio_stop(
+                Ok(pax_derived_charge(&profile)),
+                None,
+                tar_snapshot,
+                controls.budget.max_ratio,
+                &snapshots,
+                magic,
+                policy,
+                &source_digest,
+                &identities_base,
+                &initial_materialization,
+            ) {
+                return outcome;
+            }
+            if finding.code == FindingCode::TarDialect {
+                let class = match &profile {
+                    PaxPlanProfile::Raw(_) => TarWrapperClass::Raw,
+                    PaxPlanProfile::Gzip(_, _) => TarWrapperClass::Gzip,
+                };
+                finding.hint = tar_dialect_hint(tar_snapshot, class);
+            }
             let axes = parse_failure_axes(&finding);
             let original = snapshots.original();
             return finish(
@@ -2458,6 +2691,20 @@ fn plan_tar_pax(
         terminator,
         trailing_zeros,
     };
+    if let Some(outcome) = derived_ratio_stop(
+        Ok(pax_derived_charge(&profile)),
+        Some(&covering),
+        tar_snapshot,
+        controls.budget.max_ratio,
+        &snapshots,
+        magic,
+        policy,
+        &source_digest,
+        &identities_base,
+        &initial_materialization,
+    ) {
+        return outcome;
+    }
     let extensions = parsed_extensions
         .into_iter()
         .map(|extension| PaxExtensionEvidence {
@@ -2536,72 +2783,14 @@ fn plan_tar_pax(
             }
         }
 
-        let mut actions = Vec::new();
-        let jailed_name = if member.is_dir {
-            match member.name.strip_suffix('/') {
-                Some(name) => {
-                    actions.push(NormalizationAction::StripDirectoryTrailingSlash);
-                    name
-                }
-                None => member.name.as_str(),
-            }
-        } else {
-            &member.name
-        };
-        match jail_name_for_profile(
-            jailed_name,
+        match admit_tar_path(
+            &member.name,
+            member.is_dir,
             budget.max_path_depth,
-            ZipInterpretationProfile::PortableUtf8V1,
+            &mut dest_seen,
+            &mut fold_seen,
         ) {
-            Ok(jailed) => {
-                if let Some(detail) = portable_name_violation(&jailed) {
-                    findings.push(
-                        Finding::error(FindingCode::PathInvalidChar, detail).on(&member.name),
-                    );
-                    continue;
-                }
-                actions.extend(jailed.actions);
-                let parts = jailed.components;
-                let joined = parts.join("/");
-                let fold = profile_case_fold(&joined, ZipInterpretationProfile::PortableUtf8V1);
-                if dest_seen.contains_key(&joined) {
-                    findings.push(
-                        Finding::error(FindingCode::PathConflict, "duplicate destination path")
-                            .on(&member.name),
-                    );
-                    continue;
-                }
-                if fold_seen.contains_key(&fold) {
-                    findings.push(
-                        Finding::error(FindingCode::PathCaseFold, "case-fold collision")
-                            .on(&member.name),
-                    );
-                    continue;
-                }
-                if let Some(conflict) = path_conflict(&dest_seen, &joined, member.is_dir) {
-                    findings.push(
-                        Finding::error(
-                            FindingCode::PathConflict,
-                            format!("file/directory conflict with {conflict}"),
-                        )
-                        .on(&member.name),
-                    );
-                    continue;
-                }
-                if let Some(conflict) = path_conflict(&fold_seen, &fold, member.is_dir) {
-                    findings.push(
-                        Finding::error(
-                            FindingCode::PathCaseFold,
-                            format!("case-fold topology conflict with {conflict}"),
-                        )
-                        .on(&member.name),
-                    );
-                    continue;
-                }
-                dest_seen.insert(joined, member.is_dir);
-                fold_seen.insert(fold, member.is_dir);
-                planned.push((member, parts, actions));
-            }
+            Ok((parts, actions)) => planned.push((member, parts, actions)),
             Err(finding) => findings.push(finding),
         }
     }
@@ -2772,7 +2961,28 @@ fn plan_tar_gnu_longname(
         tar_metadata_budget,
     ) {
         Ok(parsed) => parsed,
-        Err(finding) => {
+        Err(mut finding) => {
+            if let Some(outcome) = derived_ratio_stop(
+                Ok(gnu_derived_charge(&profile)),
+                None,
+                tar_snapshot,
+                controls.budget.max_ratio,
+                &snapshots,
+                magic,
+                policy,
+                &source_digest,
+                &identities_base,
+                &initial_materialization,
+            ) {
+                return outcome;
+            }
+            if finding.code == FindingCode::TarDialect {
+                let class = match &profile {
+                    GnuLongNamePlanProfile::Raw(_) => TarWrapperClass::Raw,
+                    GnuLongNamePlanProfile::Gzip(_, _) => TarWrapperClass::Gzip,
+                };
+                finding.hint = tar_dialect_hint(tar_snapshot, class);
+            }
             let axes = parse_failure_axes(&finding);
             let original = snapshots.original();
             return finish(
@@ -2801,6 +3011,20 @@ fn plan_tar_gnu_longname(
         terminator,
         trailing_zeros,
     };
+    if let Some(outcome) = derived_ratio_stop(
+        Ok(gnu_derived_charge(&profile)),
+        Some(&covering),
+        tar_snapshot,
+        controls.budget.max_ratio,
+        &snapshots,
+        magic,
+        policy,
+        &source_digest,
+        &identities_base,
+        &initial_materialization,
+    ) {
+        return outcome;
+    }
     let carriers = parsed_carriers
         .into_iter()
         .map(|carrier| GnuLongNameCarrierEvidence {
@@ -2866,72 +3090,14 @@ fn plan_tar_gnu_longname(
             }
         }
 
-        let mut actions = Vec::new();
-        let jailed_name = if member.is_dir {
-            match member.name.strip_suffix('/') {
-                Some(name) => {
-                    actions.push(NormalizationAction::StripDirectoryTrailingSlash);
-                    name
-                }
-                None => member.name.as_str(),
-            }
-        } else {
-            &member.name
-        };
-        match jail_name_for_profile(
-            jailed_name,
+        match admit_tar_path(
+            &member.name,
+            member.is_dir,
             budget.max_path_depth,
-            ZipInterpretationProfile::PortableUtf8V1,
+            &mut dest_seen,
+            &mut fold_seen,
         ) {
-            Ok(jailed) => {
-                if let Some(detail) = portable_name_violation(&jailed) {
-                    findings.push(
-                        Finding::error(FindingCode::PathInvalidChar, detail).on(&member.name),
-                    );
-                    continue;
-                }
-                actions.extend(jailed.actions);
-                let parts = jailed.components;
-                let joined = parts.join("/");
-                let fold = profile_case_fold(&joined, ZipInterpretationProfile::PortableUtf8V1);
-                if dest_seen.contains_key(&joined) {
-                    findings.push(
-                        Finding::error(FindingCode::PathConflict, "duplicate destination path")
-                            .on(&member.name),
-                    );
-                    continue;
-                }
-                if fold_seen.contains_key(&fold) {
-                    findings.push(
-                        Finding::error(FindingCode::PathCaseFold, "case-fold collision")
-                            .on(&member.name),
-                    );
-                    continue;
-                }
-                if let Some(conflict) = path_conflict(&dest_seen, &joined, member.is_dir) {
-                    findings.push(
-                        Finding::error(
-                            FindingCode::PathConflict,
-                            format!("file/directory conflict with {conflict}"),
-                        )
-                        .on(&member.name),
-                    );
-                    continue;
-                }
-                if let Some(conflict) = path_conflict(&fold_seen, &fold, member.is_dir) {
-                    findings.push(
-                        Finding::error(
-                            FindingCode::PathCaseFold,
-                            format!("case-fold topology conflict with {conflict}"),
-                        )
-                        .on(&member.name),
-                    );
-                    continue;
-                }
-                dest_seen.insert(joined, member.is_dir);
-                fold_seen.insert(fold, member.is_dir);
-                planned.push((member, parts, actions));
-            }
+            Ok((parts, actions)) => planned.push((member, parts, actions)),
             Err(finding) => findings.push(finding),
         }
     }
@@ -3106,6 +3272,8 @@ pub(crate) struct SourceFailure {
     pub(crate) snapshot_kind: SnapshotKind,
 }
 
+// The optional finding hint widens SourceFailure past clippy's Result size budget.
+#[allow(clippy::result_large_err)]
 fn read_source<'a>(
     src: &Source<'a>,
     budget: ResourceBudget,
@@ -3275,6 +3443,8 @@ fn terminal_plan<'a>(
 /// Acquire, interpret, and admit one immutable source without verifying
 /// payloads or requesting effects. This is the single crate-private planning
 /// seam used by the public operation and repository semantic-record evidence.
+// The optional finding hint widens SourceFailure past clippy's Result size budget.
+#[allow(clippy::result_large_err)]
 pub(crate) fn plan_source<'a>(
     source: &Source<'a>,
     context: PlanningContext,
@@ -3286,6 +3456,8 @@ pub(crate) fn plan_source<'a>(
 /// Acquire every supervised input as an owned private file before planning so
 /// the exact same read-only object can be delegated to authenticated workers.
 #[cfg(target_os = "linux")]
+// The optional finding hint widens SourceFailure past clippy's Result size budget.
+#[allow(clippy::result_large_err)]
 pub(crate) fn plan_supervised_source(
     source: &Source<'_>,
     context: PlanningContext,
@@ -3329,7 +3501,10 @@ fn plan_snapshot<'a>(snapshot: SourceSnapshot<'a>, context: PlanningContext) -> 
         }
     };
     if magic != "zip" {
-        let finding = Finding::error(FindingCode::FormatUnsupported, format!("magic {magic}"));
+        let finding = hint_format_finding(
+            Finding::error(FindingCode::FormatUnsupported, format!("magic {magic}")),
+            &snapshot,
+        );
         let axes = SemanticAxes::structure_stop(
             InterpretationStatus::Unsupported,
             AdmissionStatus::NotEvaluated,
@@ -3590,6 +3765,8 @@ fn plan_snapshot<'a>(snapshot: SourceSnapshot<'a>, context: PlanningContext) -> 
     })
 }
 
+// The optional finding hint widens SourceFailure past clippy's Result size budget.
+#[allow(clippy::result_large_err)]
 fn apply_inner(
     req: &Request<'_>,
     planning_context: PlanningContext,
@@ -4108,6 +4285,8 @@ fn validate_verified_archive_authority(
     Ok(VerifiedArchiveAuthority { _private: () })
 }
 
+// The optional finding hint widens SourceFailure past clippy's Result size budget.
+#[allow(clippy::result_large_err)]
 fn execute_ready_archive(
     req: &Request<'_>,
     options: &ApplyOptions,
@@ -7237,6 +7416,63 @@ mod tests {
             .findings
             .iter()
             .any(|finding| finding.code == FindingCode::ZipDiffA4Dir));
+    }
+
+    #[test]
+    fn rejects_unix_symlink_external_attributes_as_zip_symlink() {
+        let mut bytes = make_zip(&[("link", b"../../../../etc/passwd")]);
+        let central = signature_offsets(&bytes, [0x50, 0x4b, 0x01, 0x02])[0];
+        put_u16(&mut bytes, central + 4, 0x0314);
+        put_u32(&mut bytes, central + 38, 0xa1ed_0000);
+        let policy = Policy::default_v1();
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("symlink.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: None,
+        });
+
+        assert!(out.rejected());
+        let finding = out
+            .view
+            .findings
+            .iter()
+            .find(|finding| finding.code == FindingCode::ZipSymlink)
+            .expect("unix symlink");
+        assert!(finding.detail.contains("Unix symlink"));
+        assert!(finding.detail.contains("0120000"));
+        assert_eq!(finding.member.as_deref(), Some("link"));
+    }
+
+    #[test]
+    fn rejects_other_unix_specials_as_entry_type_disagreement() {
+        let mut bytes = make_zip(&[("fifo", b"")]);
+        let central = signature_offsets(&bytes, [0x50, 0x4b, 0x01, 0x02])[0];
+        put_u16(&mut bytes, central + 4, 0x0314);
+        put_u32(&mut bytes, central + 38, 0x1000_0000);
+        let policy = Policy::default_v1();
+        let out = apply(Request {
+            source: Source::Bytes {
+                path: Some("fifo.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: None,
+        });
+
+        assert!(out.rejected());
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::ZipDiffA4Dir));
+        assert!(out
+            .view
+            .findings
+            .iter()
+            .all(|finding| finding.code != FindingCode::ZipSymlink));
     }
 
     #[test]

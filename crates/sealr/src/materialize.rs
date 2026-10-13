@@ -1096,6 +1096,16 @@ impl CapabilityMaterializer {
         let mut expected_dirs = BTreeSet::new();
         let mut expected_files = BTreeSet::new();
         for member in &ir.members {
+            if member.components.is_empty() {
+                if !matches!(member.kind, crate::ir::MemberKind::Directory) {
+                    return Err(Finding::error(
+                        FindingCode::MaterializeAudit,
+                        "file member has no path components",
+                    )
+                    .on(&member.decoded_name));
+                }
+                continue;
+            }
             match member.kind {
                 crate::ir::MemberKind::Directory => {
                     expected_dirs.insert(member.components.clone());

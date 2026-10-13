@@ -45,7 +45,7 @@ Policy v9 preserves the existing original-source, file-count, member, total extr
 - `max_archive_bytes` bounds domain 0.
 - `max_derived_archive_bytes` bounds domain 1 while it is decoded.
 - `max_metadata_bytes` cumulatively bounds the stream header, block headers, block padding, checks, index, and footer plus TAR headers and terminator. Compressed block payloads are part of the payload accounting.
-- `max_ratio` separately bounds decoded TAR bytes against the summed compressed block-payload length and continues to apply to extracted members.
+- `max_ratio` separately bounds decoded TAR bytes against the summed compressed block-payload length and continues to apply to extracted members. The derived numerator omits the verified 1024-byte terminator and the verified all-zero bytes that finish the single 10240-byte record containing that terminator. Member payloads, headers, per-member block padding, and trailing zeros past that record stay charged.
 - The 8 MiB dictionary ceiling is a profile constant, not a policy field. The reserved `max_dict_bytes` constructor field remains reserved and compiles only at its default.
 
 The default v9 policy sets both original and derived archive caps to 512 MiB.
