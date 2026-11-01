@@ -41,6 +41,7 @@
     "src/materialize/apple.rs",
     "src/materialize/windows.rs",
     "src/outcome.rs",
+    "src/phase_trace.rs",
     "src/policy.rs",
     "src/quota.rs",
     "src/ratio.rs",
