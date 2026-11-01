@@ -257,7 +257,8 @@
   "internal_features": [
     "__internal-fuzzing",
     "__internal-worker-lab",
-    "__internal-lifecycle-lab"
+    "__internal-lifecycle-lab",
+    "__internal-phase-trace"
   ],
   "planned_for_replacement": [
     {

@@ -150,14 +150,19 @@ scheduling or unrelated system activity and is not a latency guarantee.
 The result supports existing bounded retention for this known working set.
 It does not attribute the difference to a specific phase: retention avoids
 source binding, plan validation, worker setup, and streaming work together.
-Measure those phases separately in a labeled diagnostic experiment before
-changing the unretained runtime path. Preserve this report as Alpha.15 evidence;
-it is not an Alpha.16 performance result.
+The separate [phase observation](repeated-read-phases.md) measures those phases
+on a local diagnostic helper. It does not replace this report and it is not a
+speed comparison with the totals above. Preserve this report as Alpha.15
+evidence; it is not an Alpha.16 performance result.
 
 ## Next hypothesis: a private validated read authority
 
-If measurements justify it, investigate retaining a source-owning, already
-validated supervisor capability across member requests. Such a type would have
+The phase observation separates repeated full-file hashing from process setup.
+Hashing dominates once the archive is large, and two of those hashes happen in
+the child before it accepts the read. Process setup remains visible when the
+archive is small. Investigate a source-owning, already validated supervisor
+capability only as a proposal that still has to remove the child snapshots, not
+only the supervisor re-hash. Such a type would have
 to carry the established source, plan, completion, and profile bindings, while
 preventing raw file substitution or an unchecked construction path.
 

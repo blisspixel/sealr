@@ -732,6 +732,8 @@ fn execute_member_read(
     deadline: Instant,
     output: &mut Vec<u8>,
 ) -> Result<(), SupervisionError> {
+    #[cfg(feature = "__internal-phase-trace")]
+    let _phase_guard = crate::phase_trace::open(crate::phase_trace::Phase::WorkerSetup);
     let (control, child_socket) = rustix::net::socketpair(
         AddressFamily::UNIX,
         SocketType::SEQPACKET,
@@ -753,7 +755,10 @@ fn execute_member_read(
         &control,
         &mut child,
     );
-    finish_active_result(result, &mut child)
+    let result = finish_active_result(result, &mut child);
+    #[cfg(feature = "__internal-phase-trace")]
+    crate::phase_trace::close_open();
+    result
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -893,6 +898,8 @@ fn execute_member_read_active(
         return Err(protocol("member-read authority acceptance is inconsistent"));
     }
 
+    #[cfg(feature = "__internal-phase-trace")]
+    crate::phase_trace::switch(crate::phase_trace::Phase::PayloadVerification);
     let (output_reader, output_writer) = rustix::pipe::pipe_with(PipeFlags::CLOEXEC)
         .map_err(|error| fail(SupervisionErrorKind::Protocol, error))?;
     let flags = rustix::fs::fcntl_getfl(&output_reader)
@@ -1076,6 +1083,8 @@ fn drain_member_read(
             format!("member-read worker exited unsuccessfully as {status}"),
         ));
     }
+    #[cfg(feature = "__internal-phase-trace")]
+    crate::phase_trace::close_open();
     let read_authority = MemberReadAuthority::new(
         authority.operation_id,
         &authority.planning,

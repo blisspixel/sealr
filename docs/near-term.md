@@ -3,10 +3,11 @@
 Updated 2026-11-01.
 
 This source tree targets Alpha.19. The completed publisher, artifact replay,
-migration, and assurance increments are recorded below. The next implementation
-question is measuring time spent in each repeated-read phase, followed by lifecycle
-closure. Technical acceptance criteria govern progress; external maintainer
-participation and independent human review are not dependencies.
+migration, and assurance increments are recorded below. Repeated-read phases
+are measured in the [phase observation](repeated-read-phases.md). The next
+implementation question is lifecycle closure. Technical acceptance criteria
+govern progress; external maintainer participation and independent human review
+are not dependencies.
 
 Earlier remote tags, releases, and run identities are retired. Historical
 reports do not establish current artifact availability or qualification; all
@@ -53,10 +54,13 @@ work together. The result supports the existing bounded retention API for this
 small known working set. It does not identify which unretained phase dominates,
 measure cold-cache behavior, or establish full-installation performance.
 
-Deliver a separate diagnostic experiment that measures source hashing, plan
-validation, worker setup, and payload verification under a fixed protocol.
-
-Acceptance:
+The separate diagnostic is recorded in the [phase observation](repeated-read-phases.md).
+It measures source hashing, plan validation, worker setup, and payload
+verification under a fixed protocol. On the small fixture, worker setup
+dominates. On the wide fixture, repeated full-file hashing dominates, including
+two child snapshot constructions that are counted inside worker setup. No
+runtime change is selected from that evidence. The observation meets this
+acceptance:
 
 - Pin exact source, native artifacts, consumer code, inputs, and output hashes.
 - Record diagnostic changes separately from the released-helper baseline.

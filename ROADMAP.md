@@ -24,7 +24,7 @@ zero. The observations below remain historical evidence. See
 
 ## Why this order
 
-The publisher and migration gaps now have executable consumer evidence. A controlled downstream run also shows substantial repeated-read cost for a small known working set, but does not identify which internal phase dominates. Measure time spent in source hashing, plan validation, worker setup, and payload work before changing authority or adding runtime complexity. Lifecycle gaps and coordinated dependency maintenance remain explicit work. More formats would increase trusted code before answering those questions.
+The publisher and migration gaps now have executable consumer evidence. A controlled downstream run showed substantial repeated-read cost but did not identify which phase dominated. The [phase observation](docs/repeated-read-phases.md) separates source hashing, plan validation, worker setup, and payload verification for two archive sizes. Lifecycle gaps and coordinated dependency maintenance remain the next explicit work. More formats would increase trusted code before that work is done.
 
 ```text
 typed outcomes and tested consumer migrations
@@ -50,13 +50,11 @@ These close the named increments, not a stable API freeze or lifecycle qualifica
 
 ## Active execution queue
 
-### 1. Measure repeated-read phases before changing the boundary
+### 1. Repeated-read phases are measured
 
-The [controlled downstream observation](docs/capability-reuse-experiment.md#controlled-repeated-read-observation) used released Alpha.15 and eight members totaling 363,559 bytes. Across six measured pairs, median totals for 16 read calls were 3.685663 seconds without retention and 0.000056 seconds with those members retained. Separate returned-byte digest checks and initial admission are excluded. This is a local warm-cache comparison, not a full-installation benchmark or latency promise.
+The [controlled downstream observation](docs/capability-reuse-experiment.md#controlled-repeated-read-observation) used released Alpha.15 and eight members totaling 363,559 bytes. Across six measured pairs, median totals for 16 read calls were 3.685663 seconds without retention and 0.000056 seconds with those members retained. Separate returned-byte digest checks and initial admission are excluded. This is a local warm-cache comparison, not a full-installation benchmark or latency promise. Retention bypasses several costs together, so that result cannot attribute the difference to hashing, decompression, or process creation alone.
 
-Measure source hashing, plan validation, worker setup, and payload verification separately under fixed input, ordering, repetition, and resource bounds. Record diagnostic-build differences explicitly. Retention bypasses several costs together, so this result cannot attribute the difference to hashing, decompression, or process creation alone.
-
-Done means a bounded reproducible report identifies the work worth changing while preserving semantic identities, complete verification, mutation detection, byte limits, cancellation, and reap. A private validated read authority or process pool remains a proposal until that evidence justifies it.
+The [phase observation](docs/repeated-read-phases.md) is a separate diagnostic. On a 6,152-byte archive, worker setup was most of the unretained time. On an 8,394,850-byte archive with the same eight 45,000-byte members and one unread pad, supervisor hashing and the child snapshot work inside worker setup were most of the time. Payload verification of the requested member stayed near one millisecond. Retained reads recorded no phase samples. Semantic identities, complete verification, mutation detection, byte limits, and reap were preserved. A private validated read authority or process pool remains a proposal. A later change has to account for both repeated full-file hashing and process setup.
 
 ### 2. Close lifecycle gaps beyond named member syncing
 

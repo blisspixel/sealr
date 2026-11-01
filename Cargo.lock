@@ -594,6 +594,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "sealr-phase-trace"
+version = "0.1.0-alpha.19"
+dependencies = [
+ "sealr",
+ "sha2",
+ "zip",
+]
+
+[[package]]
 name = "sealr-release-license-closure"
 version = "0.1.0-alpha.19"
 dependencies = [

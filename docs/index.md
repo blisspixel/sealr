@@ -91,6 +91,7 @@ Repository vulnerability reporting and supported-version policy are in [SECURITY
 | [Vision](vision.md) | Durable category and priorities |
 | [Usefulness test](usefulness.md) | Proof that a downstream consumer stops reparsing |
 | [Capability reuse experiment](capability-reuse-experiment.md) | Measured working-set results, the resulting content gate, and remaining proposals |
+| [Repeated-read phase observation](repeated-read-phases.md) | Diagnostic phase timings for a small archive and a wide archive |
 | [Same digest is not same tree](same-digest-different-tree.md) | The archive-confusion lesson as a runnable capability-path demonstration |
 | [Competitive context](competitive.md) | Category boundaries and alternatives |
 | [Related work](who-else.md) | Projects and research that inform the design |

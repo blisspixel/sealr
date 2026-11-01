@@ -31,6 +31,9 @@ __internal-worker-lab = []
 # Enables only the repository native materialization lifecycle seam. This is
 # not a shipped API or a supported runtime activation surface.
 __internal-lifecycle-lab = []
+# Records supervisor phase timings for the repeated-read diagnostic. This is
+# not a shipped API or a supported runtime activation surface.
+__internal-phase-trace = []
 
 [dependencies]
 bzip2.workspace = true
