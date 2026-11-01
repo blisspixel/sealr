@@ -160,6 +160,7 @@ These Cargo features are not a shipped API or a supported runtime activation sur
 - `__internal-fuzzing`
 - `__internal-worker-lab`
 - `__internal-lifecycle-lab`
+- `__internal-phase-trace`
 
 The private semantic-record codec, worker protocol types, and wheel laboratory remain outside the public crate root.
 

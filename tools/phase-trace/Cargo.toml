@@ -1,0 +1,14 @@
+[package]
+name = "sealr-phase-trace"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Bounded diagnostic for Sealr repeated-read phase timings"
+publish = false
+
+[dependencies]
+sealr = { version = "=0.1.0-alpha.19", path = "../../crates/sealr", features = ["__internal-phase-trace"] }
+sha2.workspace = true
+zip.workspace = true

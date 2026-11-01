@@ -23,7 +23,7 @@ Evidence for one promise does not imply the other. A successful `cargo package` 
 
 ## Source crate
 
-Only the `sealr` library crate is allowlisted for publication to `crates-io`. The CLI, worker protocol, helper, wheel laboratory, conformance tools, lifecycle tools, and license-closure tool remain repository or native-release components and have `publish = false`.
+Only the `sealr` library crate is allowlisted for publication to `crates-io`. The CLI, worker protocol, helper, wheel laboratory, conformance tools, lifecycle tools, phase-trace diagnostic, and license-closure tool remain repository or native-release components and have `publish = false`.
 
 The package contract at `tests/package-contract/sealr.json` pins:
 
@@ -48,7 +48,7 @@ The supported source surface is the documented public `sealr` API exercised by:
 
 That surface includes the one-operation compatibility API, explicit interpretation-profile selection, outcome and evidence types, the opaque `VerifiedArchive`, bounded retention and member reads, immutable member container facts, and explicit fail-closed Linux supervision types.
 
-The three features whose names begin with `__internal-` exist only to compile repository fuzzing, worker-lab, and lifecycle seams. They are not supported activation surfaces, and no stable compatibility promise applies to them. Other workspace crates and private semantic-record types are not part of the published library API.
+The four features whose names begin with `__internal-` exist only to compile repository fuzzing, worker-lab, lifecycle, and phase-trace seams. They are not supported activation surfaces, and no stable compatibility promise applies to them. Other workspace crates and private semantic-record types are not part of the published library API.
 
 The current `0.1.0-alpha.*` line is prerelease software. Every breaking prerelease change must be called out in the changelog and reflected in compatibility fixtures. At stable 1.0:
 

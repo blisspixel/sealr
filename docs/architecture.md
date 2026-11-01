@@ -4,7 +4,7 @@
 
 ## Implemented on current main
 
-Sealr is an eleven-package Rust workspace. The library and CLI are the release-facing components; nine packages remain repository-only protocol, conformance, bootstrap, release-support, lifecycle, evidence, or compatibility tools:
+Sealr is a twelve-package Rust workspace. The library and CLI are the release-facing components; ten packages remain repository-only protocol, conformance, bootstrap, release-support, lifecycle, diagnostic, evidence, or compatibility tools:
 
 ```text
 crates/sealr             unpublished preview library boundary, parser, policy, verification, evidence, materializer
@@ -12,6 +12,7 @@ crates/sealr-cli         native command-line facade
 crates/sealr-protocol    non-published bounded worker protocol experiment
 tools/identity-verifier  independent conformance verifier with no sealr dependency
 tools/materialization-lifecycle  cross-platform public materialization lifecycle oracle
+tools/phase-trace        non-published Linux repeated-read phase diagnostic
 tools/release-license-closure    Linux CLI-plus-helper dependency anchor
 tools/worker-bootstrap   repository-only Linux authority and lifecycle conformance lab
 tools/wheel-lab          non-shipping compatibility measurement and report verifier

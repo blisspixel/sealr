@@ -18,6 +18,9 @@ mod ir;
 mod jail;
 mod materialize;
 mod outcome;
+#[doc(hidden)]
+#[cfg(feature = "__internal-phase-trace")]
+pub mod phase_trace;
 mod policy;
 mod quota;
 mod ratio;

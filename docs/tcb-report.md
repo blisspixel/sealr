@@ -14,8 +14,8 @@ pwsh -NoProfile -File scripts/generate_tcb_report.ps1
 
 | Measurement | Value |
 |---|---|
-| Runtime Rust lines (crates/sealr/src) | 45532 |
-| In-crate test lines | 19168 |
+| Runtime Rust lines (crates/sealr/src) | 45704 |
+| In-crate test lines | 19244 |
 | `unsafe` uses in runtime code | 51 |
 | `unsafe` uses in test code | 13 |
 | `extern "C"` blocks in runtime code | 1 |
@@ -64,6 +64,7 @@ Pinned graph digests:
 
 Every `mod` declaration carrying a `cfg` gate, verbatim:
 
+- `crates/sealr/src/lib.rs`: `#[cfg(feature = "__internal-phase-trace")]` `pub mod phase_trace;`
 - `crates/sealr/src/materialize.rs`: `#[cfg(target_os = "macos")]` `mod apple;`
 - `crates/sealr/src/materialize.rs`: `#[cfg(windows)]` `mod windows;`
 - `crates/sealr/src/semantic_record.rs`: `#[cfg(test)]` `mod peak_live;`
@@ -90,11 +91,12 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/interval.rs` | 128 | 90 | 0 | 1 |
 | `crates/sealr/src/ir.rs` | 3492 | 281 | 0 | 16 |
 | `crates/sealr/src/jail.rs` | 375 | 185 | 0 | 4 |
-| `crates/sealr/src/lib.rs` | 222 | 0 | 0 | 0 |
+| `crates/sealr/src/lib.rs` | 225 | 0 | 0 | 0 |
 | `crates/sealr/src/materialize.rs` | 1740 | 1147 | 0 | 0 |
 | `crates/sealr/src/materialize/apple.rs` | 33 | 39 | 3 | 0 |
 | `crates/sealr/src/materialize/windows.rs` | 730 | 69 | 35 | 5 |
 | `crates/sealr/src/outcome.rs` | 265 | 78 | 0 | 0 |
+| `crates/sealr/src/phase_trace.rs` | 144 | 76 | 0 | 0 |
 | `crates/sealr/src/policy.rs` | 955 | 808 | 0 | 1 |
 | `crates/sealr/src/quota.rs` | 82 | 51 | 0 | 0 |
 | `crates/sealr/src/ratio.rs` | 75 | 99 | 0 | 0 |
@@ -104,11 +106,11 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/semantic_record/peak_live.rs` | 0 | 491 | 0 | 0 |
 | `crates/sealr/src/semantic_record/retained_content.rs` | 382 | 0 | 0 | 0 |
 | `crates/sealr/src/semantic_record/worker_lab.rs` | 1026 | 625 | 0 | 0 |
-| `crates/sealr/src/semantic_record/worker_runtime.rs` | 781 | 554 | 0 | 0 |
+| `crates/sealr/src/semantic_record/worker_runtime.rs` | 797 | 554 | 0 | 0 |
 | `crates/sealr/src/sevenz.rs` | 1109 | 273 | 0 | 10 |
 | `crates/sealr/src/snapshot.rs` | 1414 | 664 | 0 | 6 |
 | `crates/sealr/src/supervised.rs` | 642 | 0 | 0 | 5 |
-| `crates/sealr/src/supervised/linux.rs` | 1684 | 0 | 4 | 4 |
+| `crates/sealr/src/supervised/linux.rs` | 1693 | 0 | 4 | 4 |
 | `crates/sealr/src/supervised/linux/materialize.rs` | 288 | 0 | 0 | 0 |
 | `crates/sealr/src/tar.rs` | 667 | 383 | 0 | 7 |
 | `crates/sealr/src/tar_gnu.rs` | 866 | 294 | 0 | 9 |

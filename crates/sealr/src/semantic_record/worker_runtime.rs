@@ -421,6 +421,8 @@ pub fn create_member_read_request(
     max_bytes: u64,
 ) -> Result<Vec<u8>, String> {
     let (planning, _snapshot) = bind_member_read_source(source, source_len, authority)?;
+    #[cfg(feature = "__internal-phase-trace")]
+    let _span = crate::phase_trace::Span::start(crate::phase_trace::Phase::PlanValidation);
     super::member_read::encode(
         &planning,
         authority.completion,
@@ -443,6 +445,8 @@ pub fn create_member_prefix_read_request(
     prefix_cap: u64,
 ) -> Result<Vec<u8>, String> {
     let (planning, _snapshot) = bind_member_read_source(source, source_len, authority)?;
+    #[cfg(feature = "__internal-phase-trace")]
+    let _span = crate::phase_trace::Span::start(crate::phase_trace::Phase::PlanValidation);
     super::member_read::encode_prefix(
         &planning,
         authority.completion,
@@ -500,6 +504,8 @@ fn validate_member_read_kind(
     kind: super::member_read::MemberReadKind,
 ) -> Result<ValidatedMemberRead, String> {
     let (planning, snapshot) = bind_member_read_source(source, source_len, authority)?;
+    #[cfg(feature = "__internal-phase-trace")]
+    let _span = crate::phase_trace::Span::start(crate::phase_trace::Phase::PlanValidation);
     let request = match kind {
         super::member_read::MemberReadKind::Full => {
             super::member_read::decode(&planning, authority.completion, request, read_operation_id)
@@ -565,6 +571,8 @@ fn validate_member_read_request_kind(
     kind: super::member_read::MemberReadKind,
 ) -> Result<MemberReadEvidence, String> {
     let (planning, _snapshot) = bind_member_read_source(source, source_len, authority)?;
+    #[cfg(feature = "__internal-phase-trace")]
+    let _span = crate::phase_trace::Span::start(crate::phase_trace::Phase::PlanValidation);
     let request = match kind {
         super::member_read::MemberReadKind::Full => {
             super::member_read::decode(&planning, authority.completion, request, read_operation_id)
@@ -740,15 +748,23 @@ fn bind_member_read_source(
     if binding.operation_id != authority.operation_id || binding.source_len != source_len {
         return Err("member-read authority differs from its planning binding".to_owned());
     }
-    let snapshot = SourceSnapshot::from_worker_file(
-        source,
-        Some("authenticated-member-read-source".to_owned()),
-        source_len,
-        binding.budget.max_archive_bytes,
-    )
+    let snapshot = {
+        #[cfg(feature = "__internal-phase-trace")]
+        let _span = crate::phase_trace::Span::start(crate::phase_trace::Phase::SourceHash);
+        SourceSnapshot::from_worker_file(
+            source,
+            Some("authenticated-member-read-source".to_owned()),
+            source_len,
+            binding.budget.max_archive_bytes,
+        )
+    }
     .map_err(debug_error)?;
-    let planning =
-        super::decode_planning(authority.planning, &binding, &snapshot).map_err(debug_error)?;
+    let planning = {
+        #[cfg(feature = "__internal-phase-trace")]
+        let _span = crate::phase_trace::Span::start(crate::phase_trace::Phase::PlanValidation);
+        super::decode_planning(authority.planning, &binding, &snapshot)
+    }
+    .map_err(debug_error)?;
     Ok((planning, snapshot))
 }
 
