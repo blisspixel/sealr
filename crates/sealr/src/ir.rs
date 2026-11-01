@@ -1366,8 +1366,7 @@ fn tar_gzip_ustar_portable_v1_profile() -> TarGzipUstarPortableV1Profile {
         format: "tar-gzip-ustar",
         wrapper_profile: "sealr.transform.gzip.rfc1952-single-member.v1",
         wrapper_profile_sha256: "795a124c278eacf1fb9b4fc3825a74240d6d0e89c29ffdfe6118ff6db53c0a45",
-        decoder_parameters_sha256:
-            "c835627b01c4b54041c627319fab4d5af294a203ac26fbe91cadb6d1f17cd5e1",
+        decoder_parameters_sha256: "c835627b01c4b54041c627319fab4d5af294a203ac26fbe91cadb6d1f17cd5e1",
         gzip_members: "exactly-one",
         gzip_optional_fields: "bounded-exact-rfc1952-framing-si2-nonzero-unique-ids",
         gzip_integrity: "fhcrc-when-present-and-crc32-and-isize",
@@ -1385,8 +1384,7 @@ fn tar_gzip_pax_portable_v1_profile() -> TarGzipPaxPortableV1Profile {
         format: "tar-gzip-pax",
         wrapper_profile: "sealr.transform.gzip.rfc1952-single-member.v1",
         wrapper_profile_sha256: "795a124c278eacf1fb9b4fc3825a74240d6d0e89c29ffdfe6118ff6db53c0a45",
-        decoder_parameters_sha256:
-            "c835627b01c4b54041c627319fab4d5af294a203ac26fbe91cadb6d1f17cd5e1",
+        decoder_parameters_sha256: "c835627b01c4b54041c627319fab4d5af294a203ac26fbe91cadb6d1f17cd5e1",
         gzip_members: "exactly-one",
         gzip_optional_fields: "bounded-exact-rfc1952-framing-si2-nonzero-unique-ids",
         gzip_integrity: "fhcrc-when-present-and-crc32-and-isize",
@@ -1404,8 +1402,7 @@ fn tar_gzip_gnu_longname_portable_v1_profile() -> TarGzipGnuLongNamePortableV1Pr
         format: "tar-gzip-gnu-longname",
         wrapper_profile: "sealr.transform.gzip.rfc1952-single-member.v1",
         wrapper_profile_sha256: "795a124c278eacf1fb9b4fc3825a74240d6d0e89c29ffdfe6118ff6db53c0a45",
-        decoder_parameters_sha256:
-            "c835627b01c4b54041c627319fab4d5af294a203ac26fbe91cadb6d1f17cd5e1",
+        decoder_parameters_sha256: "c835627b01c4b54041c627319fab4d5af294a203ac26fbe91cadb6d1f17cd5e1",
         gzip_members: "exactly-one",
         gzip_optional_fields: "bounded-exact-rfc1952-framing-si2-nonzero-unique-ids",
         gzip_integrity: "fhcrc-when-present-and-crc32-and-isize",
@@ -1441,8 +1438,7 @@ fn tar_zstd_ustar_portable_v1_profile() -> TarZstdUstarPortableV1Profile {
         format: "tar-zstd-ustar",
         wrapper_profile: "sealr.transform.zstd.rfc8878-single-frame.v1",
         wrapper_profile_sha256: "86745123584dc79e454f8f1bbf5a1bd1b75d1334902fd629e8eee8f251aa9d19",
-        decoder_parameters_sha256:
-            "a4a46d31cf8acbbfe043745ba1df4f43b7a955efc28ee8913804a99bae79d503",
+        decoder_parameters_sha256: "a4a46d31cf8acbbfe043745ba1df4f43b7a955efc28ee8913804a99bae79d503",
         zstd_frames: "exactly-one-standard-frame-no-skippable",
         zstd_descriptor: "reserved-and-unused-bits-zero-dictionary-forbidden",
         zstd_window: "effective-window-at-most-8388608-bytes",
@@ -1485,8 +1481,7 @@ fn sevenz_copy_portable_v1_profile() -> SevenZCopyPortableV1Profile {
         integrity: "start-next-pack-folder-substream-crc32-all-sealr-verified",
         numbers: "minimal-variable-length-encodings-required-checked-arithmetic",
         names: "utf16le-non-external-null-terminated-portable-utf8-path-v1",
-        empty_matrix:
-            "empty-stream-and-empty-file-vectors-authoritative-directory-attribute-must-agree",
+        empty_matrix: "empty-stream-and-empty-file-vectors-authoritative-directory-attribute-must-agree",
         container_facts: "attributes-and-mtime-evidence-only-never-applied",
         denied_features: [
             "encoded-header",
@@ -1529,14 +1524,12 @@ fn tar_bzip2_ustar_portable_v1_profile() -> TarBzip2UstarPortableV1Profile {
         format: "tar-bzip2-ustar",
         wrapper_profile: "sealr.transform.bzip2.bzip2fmt-single-stream.v1",
         wrapper_profile_sha256: "3520def23a770b24a29ae037ae31d3bfefeb3faf7132b07913ae71dbf028ece4",
-        decoder_parameters_sha256:
-            "c5c288439edcf5710a640215400fa2481f06fb0a2381ec96db29f7e1ace36195",
+        decoder_parameters_sha256: "c5c288439edcf5710a640215400fa2481f06fb0a2381ec96db29f7e1ace36195",
         bzip2_streams: "exactly-one-no-concatenation",
         bzip2_blocks: "one-to-65536-magic-scan-and-chain-fold-verified",
         bzip2_level: "header-digit-1-to-9-caps-decoder-memory-preallocation",
         bzip2_randomized_blocks: "denied",
-        bzip2_integrity:
-            "combined-crc-extracted-and-verified-single-block-re-hashed-footer-padding-zero",
+        bzip2_integrity: "combined-crc-extracted-and-verified-single-block-re-hashed-footer-padding-zero",
         bzip2_trailing_input: "denied-including-concatenated-streams",
         derived_output: "private-immutable-bounded-and-sha256-bound",
         inner_profile: TAR_USTAR_PORTABLE_V1,
@@ -1570,8 +1563,7 @@ fn tar_xz_ustar_portable_v1_profile() -> TarXzUstarPortableV1Profile {
         format: "tar-xz-ustar",
         wrapper_profile: "sealr.transform.xz.xzfmt-single-stream.v1",
         wrapper_profile_sha256: "b3c323849a366141edc28e0c5ab0028253430d0f6a5bda2ebec728c3a6543667",
-        decoder_parameters_sha256:
-            "ebdf4f3d9624cad6b245054d78f84ca50f8cea18a368e0025d2812dae8799032",
+        decoder_parameters_sha256: "ebdf4f3d9624cad6b245054d78f84ca50f8cea18a368e0025d2812dae8799032",
         xz_streams: "exactly-one-no-padding-no-concatenation",
         xz_blocks: "one-to-4096-index-and-backward-size-verified",
         xz_filters: "exactly-one-lzma2-reserved-bits-zero",
@@ -1593,8 +1585,7 @@ fn tar_pax_portable_v1_profile() -> TarPaxPortableV1Profile {
         base_profile_sha256: tar_ustar_portable_v1_digest(),
         extension_types: ["global-g", "local-x"],
         extension_carrier_names: "structurally-valid-ustar-text-not-destination-validated",
-        underlying_member_names:
-            "structurally-valid-ustar-text-destination-validated-only-when-effective",
+        underlying_member_names: "structurally-valid-ustar-text-destination-validated-only-when-effective",
         extension_materialization: "metadata-only-never-a-member",
         record_encoding: "decimal-length-space-keyword-equals-value-newline",
         length_encoding: "canonical-ascii-decimal-no-leading-zero-max-20-digits",
@@ -3533,11 +3524,13 @@ mod tests {
             assert_eq!(rule.mask, 1_u16 << bit);
         }
         assert_eq!(profile.general_purpose_bits[3].disposition, "semantic");
-        assert!(profile
-            .general_purpose_bits
-            .iter()
-            .enumerate()
-            .all(|(bit, rule)| bit == 3 || rule.disposition == "denied"));
+        assert!(
+            profile
+                .general_purpose_bits
+                .iter()
+                .enumerate()
+                .all(|(bit, rule)| bit == 3 || rule.disposition == "denied")
+        );
         assert!(profile.extra_fields_semantic.is_empty());
         assert!(profile.extra_fields_permitted_nonsemantic.is_empty());
         assert_eq!(profile.extra_fields_other, "denied");
@@ -3552,11 +3545,13 @@ mod tests {
             assert_eq!(usize::from(rule.bit), bit);
             assert_eq!(rule.mask, 1_u16 << bit);
         }
-        assert!(profile
-            .general_purpose_bits
-            .iter()
-            .enumerate()
-            .all(|(bit, rule)| matches!(bit, 3 | 11) || rule.disposition == "denied"));
+        assert!(
+            profile
+                .general_purpose_bits
+                .iter()
+                .enumerate()
+                .all(|(bit, rule)| matches!(bit, 3 | 11) || rule.disposition == "denied")
+        );
         assert_eq!(profile.general_purpose_bits[3].disposition, "semantic");
         assert_eq!(profile.general_purpose_bits[11].disposition, "semantic");
         assert!(profile.extra_fields_semantic.is_empty());

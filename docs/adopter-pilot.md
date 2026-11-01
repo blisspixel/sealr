@@ -1,9 +1,9 @@
 # External adopter pilot contract
 
-Updated 2026-10-13.
+Updated 2026-10-31.
 
 The Alpha.13 baseline below is retained historical evidence. Its old remote
-release and tag are retired; evaluation now requires Alpha.18 source.
+release and tag are retired; evaluation now requires Alpha.19 source.
 Published native companions remain Alpha.17 until that release exists. See
 [distribution history](distribution-history.md).
 
@@ -17,10 +17,12 @@ The machine-readable source is [`tests/package-contract/adopter-pilot.json`](../
 
 The `sealr.external-adopter-pilot.v2` contract separates historical artifact
 identities from the source currently under evaluation. Current evaluation pins
-`sealr = "=0.1.0-alpha.18"` and the matching workspace package. Published
-Alpha.17 native companions remain the downloadable archives until Alpha.18
+`sealr = "=0.1.0-alpha.19"` and the matching workspace package. The current
+source MSRV is Rust 1.99. The Alpha.13 package remains the Cargo 1.98.0
+measurement below and is not restated as the current compiler. Published
+Alpha.17 native companions remain the downloadable archives until Alpha.19
 artifacts exist. The copied handoff manifest and workspace package version must
-agree with that requirement. Alpha.18 remains GitHub-only and does not assign
+agree with that requirement. Alpha.19 remains GitHub-only and does not assign
 a registry pilot release.
 
 Alpha.13 is historical reproduction evidence, not the recommended evaluation

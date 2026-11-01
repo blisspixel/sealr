@@ -406,12 +406,12 @@ pub(crate) fn parse_copy_portable_v1(
                 substream.declared_crc,
             )
         };
-        if let Some(attributes) = attributes {
-            if (attributes & FILE_ATTRIBUTE_DIRECTORY != 0) != is_dir {
-                return Err(structure(
-                    "a 7z directory attribute disagrees with the empty-stream matrix",
-                ));
-            }
+        if let Some(attributes) = attributes
+            && (attributes & FILE_ATTRIBUTE_DIRECTORY != 0) != is_dir
+        {
+            return Err(structure(
+                "a 7z directory attribute disagrees with the empty-stream matrix",
+            ));
         }
         members.push(SevenZMember {
             raw_name_bytes,
@@ -606,11 +606,7 @@ const fn minimal_number_extra(value: u64) -> usize {
         }
         extra += 1;
     }
-    if value < 1_u64 << 56 {
-        7
-    } else {
-        8
-    }
+    if value < 1_u64 << 56 { 7 } else { 8 }
 }
 
 fn parse_streams_info(reader: &mut HeaderReader<'_>) -> Result<StreamsInfo, Finding> {
@@ -824,12 +820,12 @@ fn parse_streams_info(reader: &mut HeaderReader<'_>) -> Result<StreamsInfo, Find
             substream_crcs: crcs,
         });
     }
-    if let Some(values) = &substream_digest_values {
-        if digest_cursor != values.len() {
-            return Err(structure(
-                "7z substream digests do not match the substream layout",
-            ));
-        }
+    if let Some(values) = &substream_digest_values
+        && digest_cursor != values.len()
+    {
+        return Err(structure(
+            "7z substream digests do not match the substream layout",
+        ));
     }
 
     Ok(StreamsInfo {
@@ -1114,8 +1110,8 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::test_support::{
-        decode_hex, SEVENZ_CLI_DIR_HEX, SEVENZ_CLI_ENCODED_HEADER_HEX, SEVENZ_CLI_FILEONLY_HEX,
-        SEVENZ_CLI_MULTI_HEX,
+        SEVENZ_CLI_DIR_HEX, SEVENZ_CLI_ENCODED_HEADER_HEX, SEVENZ_CLI_FILEONLY_HEX,
+        SEVENZ_CLI_MULTI_HEX, decode_hex,
     };
     use super::*;
 

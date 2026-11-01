@@ -1,12 +1,12 @@
 use std::path::Path;
 
 use super::{
-    clone_source, execute_initial, prepare_operation, random_operation_id, PreparedOperation,
-    ReadyOperation, WorkerReadAuthority, NOT_ENTERED_JAIL, SUPERVISED_JAIL,
+    NOT_ENTERED_JAIL, PreparedOperation, ReadyOperation, SUPERVISED_JAIL, WorkerReadAuthority,
+    clone_source, execute_initial, prepare_operation, random_operation_id,
 };
 use crate::apply::{
-    finish_with_jail, first_error, member_view, with_ir, with_verified_archive, ApplyOptions,
-    Source,
+    ApplyOptions, Source, finish_with_jail, first_error, member_view, with_ir,
+    with_verified_archive,
 };
 use crate::identity::OutcomeIdentities;
 use crate::materialize::{CapabilityMaterializer, MaterializationMeta};

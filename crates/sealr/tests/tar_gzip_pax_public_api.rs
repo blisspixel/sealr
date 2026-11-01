@@ -3,14 +3,14 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use crc32fast::Hasher as Crc;
-use flate2::write::DeflateEncoder;
 use flate2::Compression;
+use flate2::write::DeflateEncoder;
 use sealr::{
-    apply_with_options, tar_gzip_pax_portable_v1_canonical_bytes, tar_gzip_pax_portable_v1_digest,
-    tar_pax_portable_v1_digest, AdmissionStatus, ApplyOptions, ArchiveFormat, FindingCode,
-    InterpretationStatus, PaxValueSource, Policy, Request, RetentionPlan, Source,
-    TarGzipInterpretationProfile, TarPaxInterpretationProfile, TreeRoot, VerificationStatus,
-    TAR_GZIP_PAX_ARCHIVE_IR_SCHEMA, TAR_GZIP_PAX_PORTABLE_V1,
+    AdmissionStatus, ApplyOptions, ArchiveFormat, FindingCode, InterpretationStatus,
+    PaxValueSource, Policy, Request, RetentionPlan, Source, TAR_GZIP_PAX_ARCHIVE_IR_SCHEMA,
+    TAR_GZIP_PAX_PORTABLE_V1, TarGzipInterpretationProfile, TarPaxInterpretationProfile, TreeRoot,
+    VerificationStatus, apply_with_options, tar_gzip_pax_portable_v1_canonical_bytes,
+    tar_gzip_pax_portable_v1_digest, tar_pax_portable_v1_digest,
 };
 
 fn write_octal(field: &mut [u8], value: u64) {
@@ -334,11 +334,13 @@ fn wrapper_and_inner_language_fail_closed() {
         concatenated.interpretation,
         InterpretationStatus::Unsupported
     ));
-    assert!(concatenated
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::CodecDeflateTrailingInput));
+    assert!(
+        concatenated
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CodecDeflateTrailingInput)
+    );
 
     let unknown_keyword = {
         let payload = record("uid", "0");
@@ -357,11 +359,13 @@ fn wrapper_and_inner_language_fail_closed() {
         InterpretationStatus::Unsupported
     ));
     assert_eq!(unknown.view.source.magic, "gz");
-    assert!(unknown
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::TarFeatureUnsupported));
+    assert!(
+        unknown
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::TarFeatureUnsupported)
+    );
 
     let mut derived_cap = Policy::default_v7();
     derived_cap.max_derived_archive_bytes = Some((tar.len() - 1) as u64);
@@ -371,31 +375,37 @@ fn wrapper_and_inner_language_fail_closed() {
         InterpretationStatus::Interpreted
     ));
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaDerived));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaDerived)
+    );
 
     let mut ratio = Policy::default_v7();
     ratio.max_ratio = Some(1);
     let denied = inspect(&member, &ratio, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaRatio));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaRatio)
+    );
 
     let mut metadata = Policy::default_v7();
     metadata.max_metadata_bytes = 17;
     let denied = inspect(&member, &metadata, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaMetadata));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaMetadata)
+    );
 }
 
 #[test]
@@ -405,11 +415,13 @@ fn policy_and_format_selection_do_not_alias_other_profiles() {
 
     let older = inspect(&wrapped, &Policy::default_v6(), &options());
     assert!(!matches!(older.admission, AdmissionStatus::Admitted));
-    assert!(older
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::PolicyUnsupported));
+    assert!(
+        older
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PolicyUnsupported)
+    );
 
     let ustar_selection = apply_with_options(
         Request {

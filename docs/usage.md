@@ -226,42 +226,39 @@ Receipts are currently unsigned and the kernel jail is unavailable.
 | `1` | The selected supervised boundary failed, a `--view` or `--receipt` output file could not be claimed, or a view or receipt stream could not be written. |
 | Clap default | Command-line syntax or argument error. |
 
-Source open and read failures currently become a structured rejection and therefore exit `2`. Receipts mark those failures as `interpretation: indeterminate` with an unavailable source digest. An admitted archive whose destination cannot be published exits `3`. The compatibility `verdict` remains `rejected` on that path so older adapters keep working.
+Source open and read failures currently become a structured rejection and therefore exit `2`. Receipts mark those failures as `interpretation: indeterminate` with an unavailable source digest. An admitted archive whose destination cannot be published exits `3`. The compatibility `verdict` remains `rejected` on that path so older adapters keep working. The terminal summary follows the exit class, so that same case says `not written`.
+
+When stderr is a terminal and neither `--json` nor `--receipt` is set, the summary is printed on stderr even if stdout is piped. The view JSON still goes to stdout, and no receipt is written to stderr. Both terminals print only the summary. Non-terminal stderr keeps the view on stdout and the receipt on stderr. `--color always` also selects the summary when stderr is redirected. `--json` forces the view and receipt JSON. `--machine` is a separate stdout document and is not colored.
 
 ## Current CLI surface
 
-```text
-Usage: sealr [OPTIONS] [ARCHIVE]
-       sealr <COMMAND>
-
-Commands:
-  inspect      Interpret and verify without writing any member file
-  materialize  Interpret, verify, and publish the tree into a new destination
-  help         Print this message or the help of the given subcommand(s)
-
-Arguments:
-  [ARCHIVE]  Archive file
-
-Options:
-      --format <FORMAT>                  Exact container interpretation [default: zip] [possible values: zip, zip64, tar-ustar, tar-gzip-ustar, tar-pax, tar-gnu-longname, tar-gzip-pax, tar-gzip-gnu-longname, tar-zstd-ustar, tar-xz-ustar, tar-bzip2-ustar, 7z-copy]
-      --dest <DEST>                      Materialize into a new directory below an existing parent
-      --worker-manifest <ABSOLUTE_PATH>  Use the exact packaged Linux worker bound by this manifest
-      --view <NEW_FILE>                  Write the view JSON to this exact new file instead of stdout
-      --receipt <NEW_FILE>               Write the receipt JSON to this exact new file instead of stderr
-      --policy <FILE>                    Validate and use this exact JSON policy document instead of the format's default policy
-      --canonical                        Write the canonical RFC 8785 evidence lineage to the --view and --receipt files, whose bytes are exactly the digested bytes
-      --json                             Print the view and receipt JSON even when both streams are terminals
-  -h, --help                             Print help
-  -V, --version                          Print version
-```
+`sealr --help` is the source of the flag list. Help wraps on word boundaries, and hyphenated format names stay intact. The purpose line is `Admit an untrusted archive into a new directory, or refuse it, with a receipt.` Formats are listed once, in groups, after the flags. Invalid `--format tar-gz` exits 2 and lists `tar-gzip-ustar`, `tar-gzip-pax`, and `tar-gzip-gnu-longname`.
 
 JSONL output, mounts, folder scans, force replacement, other isolation backends, and signing are roadmap items. They are not accepted flags today.
 
-## Target CLI experience
+## Summary, color, and machine output
 
-Alpha.17 intentionally exposes the underlying JSON contract. It is useful for validation but is not the finished human interface.
+The summary is one line. `allowed` covers exit 0. `rejected` covers exit 2. `not written` covers exit 3. A destination that already exists uses this fixed sentence rather than the library detail:
 
-After the semantic outcome model stabilizes, the default terminal experience should be concise and task-oriented:
+```text
+not written: materialize.exists (destination already exists; sealr never replaces). Choose a new --dest path.
+```
+
+A hinted refusal without a member looks like `rejected: format.magic (observed xz stream). Try: --format tar-xz-ustar`. A hinted refusal with a member looks like `rejected: tar.feature_unsupported member PaxHeader (PAX extended header). Try: --format tar-gzip-pax`. Extra findings use `(+3 more; --json for all)` when three findings remain beyond the first. Plurals are `1 member` and `1 finding`. Displayed member names and details replace control characters with `?` and cap the member at 120 characters. JSON stays exact.
+
+Color paints the verdict word, the finding code, the detail, and `Try`. Green is allowed, red is rejected, and yellow is not written. The code is bold and the detail is dim. There is no truecolor and no brand teal. Only stderr summary text is colored.
+
+After a written admitted tree, and only when stderr is a terminal, one dim line follows:
+
+```text
+content tree 850eb7fb25938114 (preview identity, unsigned)
+```
+
+Those 16 characters are the start of `identities.content.sealrTreeV1`. The line is absent for inspect-only runs, refusals, exit 3, redirected stderr, and `--json`.
+
+`--machine` writes `sealr.command-result.v1` to stdout. `category` is `semantic` when an outcome exists, and otherwise `policy`, `worker`, `output`, or `usage`. `evaluated` is false and `semantic` is null when evaluation never happened. Process exit codes stay as they are today. `semantic_exit` preserves 0, 2, or 3 when a later output write fails. Consumers branch on `schema`, `category`, and the typed axes. An unknown schema or category is not an admission. The known extra category `usage` is not an admission either. Clap's own parse errors do not emit the envelope. Missing source is a semantic outcome with finding code `source.io`.
+
+The multi-line `gate` layout below is design notation, not current output:
 
 ```text
 $ sealr gate package.zip
@@ -273,29 +270,14 @@ Expanded: 812 KiB
 Evidence: package.zip.sealr.json
 ```
 
-This is design notation, not current output. The exact fields depend on the versioned interpretation, admission, verification, effect, and completeness types.
-
-The target CLI follows these rules:
-
-- human output is short, scannable, and explains the next action;
-- the `--json` flag in today's CLI forces the existing view and receipt documents on a terminal;
-- the target `--json` emits one versioned machine envelope on stdout;
-- progress and diagnostics never corrupt machine stdout;
-- color defaults to terminal-aware `auto`, honors `NO_COLOR`, and is never required to understand a result;
-- redirected output has no animation or control sequences;
-- exit classes distinguish denial, indeterminate input, failed effects, and command misuse;
-- no telemetry, implicit network request, update check, or hidden write occurs;
-- Linux, macOS, and Windows help and output receive equal golden coverage;
-- UI formatting remains a thin layer over the Rust library and adds no second parser or policy path.
-
-Job-oriented verbs such as `gate`, `verify`, `materialize`, and `explain` follow the semantic types. They must not freeze the current combined verdict under a more polished surface.
+Job-oriented verbs such as `gate`, `verify`, `materialize`, and `explain` remain future names. They must not freeze the current combined verdict under a more polished surface. Progress and diagnostics never corrupt machine stdout. There is no telemetry, implicit network request, update check, or hidden write. UI formatting remains a thin layer over the Rust library and adds no second parser or policy path.
 
 ## Documentation capture policy
 
 The [walkthrough](walkthrough.md) owns the screenshots and reproduction commands.
-The images are rendered terminal summaries of an Alpha.17 JSON view
-and receipt stream, captured from a Linux run with shell notation. They still
-show `0.1.0-alpha.17`. This source tree is Alpha.18. They remain
+The images are rendered terminal summaries of a measured view and receipt,
+captured from a Linux run with shell notation. Their displayed version matches
+the receipt of this source tree. They remain
 paired with copyable commands and expected text. The README shows one overview
 image; detailed scenarios belong in the walkthrough.
 

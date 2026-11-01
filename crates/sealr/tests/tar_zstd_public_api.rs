@@ -3,11 +3,11 @@ use std::fs;
 use std::path::PathBuf;
 
 use sealr::{
-    apply_with_options, tar_ustar_portable_v1_digest, tar_zstd_ustar_portable_v1_canonical_bytes,
-    tar_zstd_ustar_portable_v1_digest, AdmissionStatus, ApplyOptions, ArchiveFormat, FindingCode,
-    InterpretationStatus, Policy, Request, RetentionPlan, Source, TarGzipInterpretationProfile,
-    TarInterpretationProfile, TarZstdInterpretationProfile, TreeRoot, VerificationStatus,
-    TAR_ZSTD_ARCHIVE_IR_SCHEMA, TAR_ZSTD_USTAR_PORTABLE_V1,
+    AdmissionStatus, ApplyOptions, ArchiveFormat, FindingCode, InterpretationStatus, Policy,
+    Request, RetentionPlan, Source, TAR_ZSTD_ARCHIVE_IR_SCHEMA, TAR_ZSTD_USTAR_PORTABLE_V1,
+    TarGzipInterpretationProfile, TarInterpretationProfile, TarZstdInterpretationProfile, TreeRoot,
+    VerificationStatus, apply_with_options, tar_ustar_portable_v1_digest,
+    tar_zstd_ustar_portable_v1_canonical_bytes, tar_zstd_ustar_portable_v1_digest,
 };
 
 /// Zstandard CLI v1.5.7 default-level output for the exact conformance
@@ -339,11 +339,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Unsupported
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::FormatUnsupported));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::FormatUnsupported)
+    );
 
     let mut dictionary = member.clone();
     dictionary[4] |= 0b0000_0001;
@@ -380,11 +382,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Unsupported
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::CodecZstdTrailingInput));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CodecZstdTrailingInput)
+    );
 
     let mut trailing = member.clone();
     trailing.push(0x7f);
@@ -393,11 +397,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Malformed
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::CodecZstdTrailingInput));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CodecZstdTrailingInput)
+    );
 
     let mut checksum_lie = member.clone();
     let last = checksum_lie.len() - 1;
@@ -407,11 +413,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Malformed
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::CrcMismatch));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CrcMismatch)
+    );
 
     let invalid_inner = raw_block_frame(b"not a tar archive", false);
     let outcome = inspect(&invalid_inner, &policy, &options());
@@ -429,42 +437,50 @@ fn wrapper_and_inner_language_fail_closed() {
         InterpretationStatus::Interpreted
     ));
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaDerived));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaDerived)
+    );
 
     let compressible = decode_hex(ZSTD_CLI_DEFAULT_HEX);
     let mut ratio = Policy::default_v8();
     ratio.max_ratio = Some(1);
     let denied = inspect(&compressible, &ratio, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaRatio));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaRatio)
+    );
 
     let mut source_cap = Policy::default_v8();
     source_cap.max_archive_bytes = (member.len() - 1) as u64;
     let denied = inspect(&member, &source_cap, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaArchive));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaArchive)
+    );
 
     let mut metadata = Policy::default_v8();
     metadata.max_metadata_bytes = 12;
     let denied = inspect(&member, &metadata, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaMetadata));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaMetadata)
+    );
 }
 
 #[test]
@@ -473,11 +489,13 @@ fn policy_and_format_selection_do_not_alias_other_profiles() {
 
     let older = inspect(&member, &Policy::default_v7(), &options());
     assert!(!matches!(older.admission, AdmissionStatus::Admitted));
-    assert!(older
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::PolicyUnsupported));
+    assert!(
+        older
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PolicyUnsupported)
+    );
 
     let raw_selection = apply_with_options(
         Request {

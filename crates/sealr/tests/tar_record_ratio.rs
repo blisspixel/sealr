@@ -9,14 +9,14 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crc32fast::Hasher as Crc;
-use flate2::write::DeflateEncoder;
 use flate2::Compression;
+use flate2::write::DeflateEncoder;
 use sealr::{
-    apply_with_options, hex_sha256, tar_gzip_gnu_longname_portable_v1_digest,
-    tar_gzip_ustar_portable_v1_digest, tar_ustar_portable_v1_digest,
-    tar_zstd_ustar_portable_v1_digest, AdmissionStatus, ApplyOptions, Finding, FindingCode,
-    NormalizationAction, Policy, Request, Source, TarGzipInterpretationProfile,
-    TarInterpretationProfile, TarZstdInterpretationProfile, ZipInterpretationProfile,
+    AdmissionStatus, ApplyOptions, Finding, FindingCode, NormalizationAction, Policy, Request,
+    Source, TarGzipInterpretationProfile, TarInterpretationProfile, TarZstdInterpretationProfile,
+    ZipInterpretationProfile, apply_with_options, hex_sha256,
+    tar_gzip_gnu_longname_portable_v1_digest, tar_gzip_ustar_portable_v1_digest,
+    tar_ustar_portable_v1_digest, tar_zstd_ustar_portable_v1_digest,
 };
 
 const ONE_TAR_ZST: &str = "28b52ffd0458d50200920410178019a80360648613aa091e4b07778dec12f230a212dd650518145b8bb1944a87aed4105f5650245a1fcd83df2526bf1443f28a779efb8b68fe8b06820022040800f005f04f03540c850320fc01900660d60a5775025b07de9903";
@@ -333,11 +333,13 @@ fn gnu_magic_under_ustar_names_the_gnu_gzip_profile_without_selecting_it() {
             .collect::<Vec<_>>()
     );
     assert!(matches!(outcome.admission, AdmissionStatus::NotEvaluated));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .all(|finding| finding.code != FindingCode::QuotaRatio));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .all(|finding| finding.code != FindingCode::QuotaRatio)
+    );
     let finding = outcome
         .view
         .findings
@@ -420,14 +422,16 @@ fn leading_dot_slash_is_normalized_and_escapes_stay_rejected() {
         .collect::<Result<Vec<_>, _>>()
         .unwrap();
     assert_eq!(children.len(), 1);
-    assert!(published
-        .archive_ir()
-        .unwrap()
-        .members()
-        .iter()
-        .any(|member| member.canonical_path.is_empty()
-            && member.normalization_actions
-                == vec![NormalizationAction::StripDirectoryTrailingSlash]));
+    assert!(
+        published
+            .archive_ir()
+            .unwrap()
+            .members()
+            .iter()
+            .any(|member| member.canonical_path.is_empty()
+                && member.normalization_actions
+                    == vec![NormalizationAction::StripDirectoryTrailingSlash])
+    );
     fs::remove_dir_all(&parent).unwrap();
 
     let cases = [
@@ -468,11 +472,13 @@ fn leading_dot_slash_is_normalized_and_escapes_stay_rejected() {
     duplicate.extend(ustar_entry("README", b"two", b'0', ""));
     let duplicate = finish_tar(duplicate);
     let conflict = inspect(&duplicate, "dup.tar", &policy, &options, None);
-    assert!(conflict
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::PathConflict));
+    assert!(
+        conflict
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PathConflict)
+    );
 }
 
 #[test]
@@ -496,12 +502,14 @@ fn zip_dot_slash_and_filename_do_not_become_a_tar_hint() {
         &zip_options,
         None,
     );
-    assert!(rejected
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::PathInvalidChar
-            || finding.code == FindingCode::PathEmpty));
+    assert!(
+        rejected
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PathInvalidChar
+                || finding.code == FindingCode::PathEmpty)
+    );
 
     let gzip_member = decode_hex(EMPTY_FILE_TAR_GZ);
     let as_archive = inspect(

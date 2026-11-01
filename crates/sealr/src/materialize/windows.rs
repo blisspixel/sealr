@@ -1,7 +1,7 @@
 use std::ffi::c_void;
 use std::fs::File;
 use std::io;
-use std::mem::{size_of, MaybeUninit};
+use std::mem::{MaybeUninit, size_of};
 use std::os::windows::ffi::OsStrExt;
 use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::Path;
@@ -10,31 +10,31 @@ use std::ptr;
 use cap_std::fs::Dir as CapDir;
 use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::{
-    FileFsDeviceInformation, FileRenameInformation, NtCreateFile, NtQueryVolumeInformationFile,
-    NtSetInformationFile, FILE_CREATE, FILE_DIRECTORY_FILE, FILE_OPEN_REPARSE_POINT,
-    FILE_RENAME_INFORMATION, FILE_SYNCHRONOUS_IO_NONALERT,
+    FILE_CREATE, FILE_DIRECTORY_FILE, FILE_OPEN_REPARSE_POINT, FILE_RENAME_INFORMATION,
+    FILE_SYNCHRONOUS_IO_NONALERT, FileFsDeviceInformation, FileRenameInformation, NtCreateFile,
+    NtQueryVolumeInformationFile, NtSetInformationFile,
 };
 use windows_sys::Wdk::System::SystemServices::{FILE_FS_DEVICE_INFORMATION, FILE_REMOTE_DEVICE};
 use windows_sys::Win32::Foundation::{
-    GetLastError, LocalFree, RtlNtStatusToDosError, ERROR_INSUFFICIENT_BUFFER, ERROR_NO_TOKEN,
-    HANDLE, INVALID_HANDLE_VALUE, OBJ_CASE_INSENSITIVE, UNICODE_STRING,
+    ERROR_INSUFFICIENT_BUFFER, ERROR_NO_TOKEN, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
+    LocalFree, OBJ_CASE_INSENSITIVE, RtlNtStatusToDosError, UNICODE_STRING,
 };
 use windows_sys::Win32::Security::Authorization::{GetSecurityInfo, SE_FILE_OBJECT};
 use windows_sys::Win32::Security::{
-    AclSizeInformation, AddAccessAllowedAceEx, CopySid, EqualSid, GetAce, GetAclInformation,
-    GetLengthSid, GetSecurityDescriptorControl, GetTokenInformation, InitializeAcl,
-    InitializeSecurityDescriptor, IsValidSid, SetSecurityDescriptorControl,
-    SetSecurityDescriptorDacl, SetSecurityDescriptorOwner, TokenUser, ACCESS_ALLOWED_ACE, ACL,
-    ACL_REVISION, ACL_SIZE_INFORMATION, CONTAINER_INHERIT_ACE, DACL_SECURITY_INFORMATION,
-    INHERIT_ONLY_ACE, OBJECT_INHERIT_ACE, OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
-    SECURITY_DESCRIPTOR, SE_DACL_PROTECTED, TOKEN_INFORMATION_CLASS, TOKEN_QUERY, TOKEN_USER,
+    ACCESS_ALLOWED_ACE, ACL, ACL_REVISION, ACL_SIZE_INFORMATION, AclSizeInformation,
+    AddAccessAllowedAceEx, CONTAINER_INHERIT_ACE, CopySid, DACL_SECURITY_INFORMATION, EqualSid,
+    GetAce, GetAclInformation, GetLengthSid, GetSecurityDescriptorControl, GetTokenInformation,
+    INHERIT_ONLY_ACE, InitializeAcl, InitializeSecurityDescriptor, IsValidSid, OBJECT_INHERIT_ACE,
+    OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED, SECURITY_DESCRIPTOR,
+    SetSecurityDescriptorControl, SetSecurityDescriptorDacl, SetSecurityDescriptorOwner,
+    TOKEN_INFORMATION_CLASS, TOKEN_QUERY, TOKEN_USER, TokenUser,
 };
 #[cfg(test)]
-use windows_sys::Win32::Security::{TokenOwner, INHERITED_ACE, TOKEN_OWNER};
+use windows_sys::Win32::Security::{INHERITED_ACE, TOKEN_OWNER, TokenOwner};
 use windows_sys::Win32::Storage::FileSystem::{
-    GetVolumeInformationByHandleW, DELETE, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY,
-    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE,
-    READ_CONTROL, SYNCHRONIZE,
+    DELETE, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
+    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, GetVolumeInformationByHandleW, READ_CONTROL,
+    SYNCHRONIZE,
 };
 use windows_sys::Win32::System::SystemServices::{
     ACCESS_ALLOWED_ACE_TYPE, FILE_PERSISTENT_ACLS, FILE_READ_ONLY_VOLUME,

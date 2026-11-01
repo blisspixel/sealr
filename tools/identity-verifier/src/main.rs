@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use sealr_identity_verifier::{
-    verify_canonical_evidence, verify_manifest_json, MAX_EVIDENCE_BYTES, MAX_MANIFEST_BYTES,
+    MAX_EVIDENCE_BYTES, MAX_MANIFEST_BYTES, verify_canonical_evidence, verify_manifest_json,
 };
 use sha2::{Digest, Sha256};
 
@@ -73,10 +73,7 @@ fn run_manifest(program: &OsStr, arguments: &[OsString]) -> ExitCode {
         Ok(summary) => {
             println!(
                 "verified {} profile vector(s), {} case(s), {} layout root(s), and {} content root(s)",
-                summary.profiles,
-                summary.cases,
-                summary.layout_roots,
-                summary.content_roots
+                summary.profiles, summary.cases, summary.layout_roots, summary.content_roots
             );
             ExitCode::SUCCESS
         }

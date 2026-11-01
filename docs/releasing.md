@@ -73,10 +73,10 @@ if ($LASTEXITCODE -ne 0 -or $releaseCommit -notmatch '^[0-9a-f]{40}$') { throw '
 $draftRequest = New-TemporaryFile
 try {
   $draftPayload = [ordered]@{
-    tag_name = 'v0.1.0-alpha.18'
+    tag_name = 'v0.1.0-alpha.19'
     target_commitish = $releaseCommit
-    name = 'sealr 0.1.0-alpha.18: minimal GNU tar records'
-    body = [IO.File]::ReadAllText((Join-Path $PWD 'docs/releases/v0.1.0-alpha.18.md'))
+    name = 'sealr 0.1.0-alpha.19: a gate that explains itself'
+    body = [IO.File]::ReadAllText((Join-Path $PWD 'docs/releases/v0.1.0-alpha.19.md'))
     draft = $true
     prerelease = $true
   } | ConvertTo-Json
@@ -92,7 +92,7 @@ try {
 Read back the numeric release ID, owner, exact title and body, empty asset set,
 and draft/prerelease state. If the request is ambiguous or a draft already
 exists, verify it rather than creating another release. Then create an annotated
-tag at the verified commit and push only `refs/tags/v0.1.0-alpha.18`.
+tag at the verified commit and push only `refs/tags/v0.1.0-alpha.19`.
 
 The tag workflow:
 

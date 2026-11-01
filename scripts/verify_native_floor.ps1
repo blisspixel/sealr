@@ -28,11 +28,11 @@ $expected = [ordered]@{
         kernel = 'Darwin 24'
     }
     'x86_64-pc-windows-msvc' = [ordered]@{
-        runner = 'windows-2022'
-        operating_system = 'Windows Server 2022 build 20348'
+        runner = 'windows-2025'
+        operating_system = 'Windows Server 2025 build 26100'
         architecture = 'x64'
         abi = 'MSVC'
-        kernel = 'Windows NT 10.0 build 20348'
+        kernel = 'Windows NT 10.0 build 26100'
     }
 }
 
@@ -126,13 +126,13 @@ switch ($ExpectedTarget) {
     }
     'x86_64-pc-windows-msvc' {
         $version = [Environment]::OSVersion.Version
-        if ($version.Major -ne 10 -or $version.Build -ne 20348) {
-            throw "Windows floor requires Server 2022 build 20348, observed $version"
+        if ($version.Major -ne 10 -or $version.Build -ne 26100) {
+            throw "Windows floor requires Server 2025 build 26100, observed $version"
         }
         if ([Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne
             [Runtime.InteropServices.Architecture]::X64) {
             throw 'Windows floor requires x64 hardware'
         }
-        Write-Host "Verified Windows Server 2022 build $($version.Build) on x64."
+        Write-Host "Verified Windows Server 2025 build $($version.Build) on x64."
     }
 }

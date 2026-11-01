@@ -1,7 +1,7 @@
-use super::frame::{Frame, FrameError, FRAME_LEN};
+use super::frame::{FRAME_LEN, Frame, FrameError};
 use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use rustix::io::FdFlags;
-use rustix::net::{sendmsg, SendAncillaryBuffer, SendAncillaryMessage, SendFlags};
+use rustix::net::{SendAncillaryBuffer, SendAncillaryMessage, SendFlags, sendmsg};
 use std::io::IoSlice;
 use std::mem::MaybeUninit;
 use std::os::fd::FromRawFd;
@@ -183,13 +183,13 @@ pub fn receive_packet<Fd: AsFd>(
         return Err(TransportError::Frame(FrameError::Length(received)));
     }
     let descriptors = parsed_descriptors?;
-    if let Some(expected) = expected_descriptors {
-        if descriptors.len() != expected {
-            return Err(TransportError::DescriptorCount {
-                expected,
-                actual: descriptors.len(),
-            });
-        }
+    if let Some(expected) = expected_descriptors
+        && descriptors.len() != expected
+    {
+        return Err(TransportError::DescriptorCount {
+            expected,
+            actual: descriptors.len(),
+        });
     }
     for descriptor in &descriptors {
         let flags = rustix::io::fcntl_getfd(descriptor)?;

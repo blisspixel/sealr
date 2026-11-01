@@ -1,7 +1,10 @@
 # Exact Poetry 2.4.2 repository fixture
 
 This repository-owned fixture exercises one exact Poetry update seam on Ubuntu
-24.04 x86_64 with CPython 3.12. It pins the Poetry 2.4.2 wheel at SHA-256
+24.04 x86_64 with CPython 3.12. It stays on CPython 3.12 because the wheelhouse
+and the CI platform pin are `ubuntu-24.04-x86_64-cpython-3.12`. That pin does
+not represent the maintained CPython range. New Sealr work treats CPython 3.11
+through 3.15 as maintained and does not add a shim for 3.10. It pins the Poetry 2.4.2 wheel at SHA-256
 `a506d6ff7fcc54a3472b2618145b8e4a1ef8d76d52836d41b813fa1b36083a08`,
 Poetry Core 2.4.0, PyPA installer 1.0.1, pip 26.2.1, and the complete
 47-wheel acquisition set in `wheelhouse.json`. The controller contains the 46

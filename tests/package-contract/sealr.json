@@ -2,7 +2,7 @@
   "schema": "sealr.crate-package-contract.v1",
   "package": "sealr",
   "registry": "crates-io",
-  "rust_version": "1.98",
+  "rust_version": "1.99",
   "license": "Apache-2.0",
   "readme": "README.md",
   "license_file": null,

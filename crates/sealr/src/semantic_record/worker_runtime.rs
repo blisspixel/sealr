@@ -4,9 +4,9 @@ use std::fs::File;
 use std::io::{BufReader, Write};
 
 use super::{
-    decode_completion, decode_planning_binding, decode_planning_for_worker, encode_planning,
-    parse_hex_32, retained_content, InvocationBinding, PlanningDisposition, PlanningRecord,
-    RequestedEffect, RetentionBinding, ValidatedPlanningRecord,
+    InvocationBinding, PlanningDisposition, PlanningRecord, RequestedEffect, RetentionBinding,
+    ValidatedPlanningRecord, decode_completion, decode_planning_binding,
+    decode_planning_for_worker, encode_planning, parse_hex_32, retained_content,
 };
 use crate::apply::PlanningContext;
 use crate::findings::Finding;
@@ -14,7 +14,7 @@ use crate::ir::{ArchiveIR, MemberVerification};
 use crate::materialize::StageWriteRoot;
 use crate::outcome::{AdmissionStatus, InterpretationStatus, VerificationStatus, ViewCompleteness};
 use crate::snapshot::SourceSnapshot;
-use crate::verification::{verify_payload, PayloadPlan};
+use crate::verification::{PayloadPlan, verify_payload};
 use crate::verified::{RetentionBuild, RetentionPlan};
 use crate::zip as zip_ranges;
 
@@ -789,7 +789,7 @@ mod tests {
     use zip::{CompressionMethod, ZipWriter};
 
     use super::*;
-    use crate::apply::{plan_source, PlanDecision, Source};
+    use crate::apply::{PlanDecision, Source, plan_source};
     use crate::ir::ZipInterpretationProfile;
     use crate::policy::Policy;
 
@@ -905,14 +905,16 @@ mod tests {
         )
         .unwrap();
         assert!(materialize_operation.execute(None).is_err());
-        assert!(validate_operation(
-            temp.open(),
-            source.len() as u64,
-            operation_id,
-            &materialize_planning,
-            OperationKind::Inspect,
-        )
-        .is_err());
+        assert!(
+            validate_operation(
+                temp.open(),
+                source.len() as u64,
+                operation_id,
+                &materialize_planning,
+                OperationKind::Inspect,
+            )
+            .is_err()
+        );
 
         let operation = validate_operation(
             temp.open(),
@@ -963,16 +965,18 @@ mod tests {
         let mut altered_completion = executed.completion().to_vec();
         let last = altered_completion.len() - 1;
         altered_completion[last] ^= 1;
-        assert!(authorize_execution(
-            temp.open(),
-            source.len() as u64,
-            operation_id,
-            &planning,
-            &altered_completion,
-            executed.retained_content(),
-            OperationKind::Inspect,
-        )
-        .is_err());
+        assert!(
+            authorize_execution(
+                temp.open(),
+                source.len() as u64,
+                operation_id,
+                &planning,
+                &altered_completion,
+                executed.retained_content(),
+                OperationKind::Inspect,
+            )
+            .is_err()
+        );
         let completion = executed.completion().to_vec();
         let read_operation_id = [0x7c; 16];
         let authority = MemberReadAuthority::new(operation_id, &planning, &completion);
@@ -1052,22 +1056,26 @@ mod tests {
                 actual_crc: crc32fast::hash(b"custom policy payload"),
             }
         );
-        assert!(validate_member_read_request(
-            temp.open(),
-            source.len() as u64,
-            authority,
-            &prefix_request,
-            prefix_operation_id,
-        )
-        .is_err());
-        assert!(validate_member_prefix_read_request(
-            temp.open(),
-            source.len() as u64,
-            authority,
-            &request,
-            read_operation_id,
-        )
-        .is_err());
+        assert!(
+            validate_member_read_request(
+                temp.open(),
+                source.len() as u64,
+                authority,
+                &prefix_request,
+                prefix_operation_id,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_member_prefix_read_request(
+                temp.open(),
+                source.len() as u64,
+                authority,
+                &request,
+                read_operation_id,
+            )
+            .is_err()
+        );
         let zero_prefix_request = create_member_prefix_read_request(
             temp.open(),
             source.len() as u64,
@@ -1112,14 +1120,16 @@ mod tests {
         );
         let mut unknown_prefix_kind = prefix_request.clone();
         unknown_prefix_kind[10] = 0xff;
-        assert!(validate_member_prefix_read_request(
-            temp.open(),
-            source.len() as u64,
-            authority,
-            &unknown_prefix_kind,
-            prefix_operation_id,
-        )
-        .is_err());
+        assert!(
+            validate_member_prefix_read_request(
+                temp.open(),
+                source.len() as u64,
+                authority,
+                &unknown_prefix_kind,
+                prefix_operation_id,
+            )
+            .is_err()
+        );
         let prefix_read = validate_member_prefix_read(
             temp.open(),
             source.len() as u64,
@@ -1147,95 +1157,111 @@ mod tests {
             .unwrap(),
             prefix_evidence
         );
-        assert!(validate_member_prefix_read_stream_result(
-            temp.open(),
-            source.len() as u64,
-            authority,
-            &prefix_request,
-            prefix_operation_id,
-            prefix_stream.len() as u64,
-            crc32fast::hash(&prefix_stream),
-            Sha256::digest(&prefix_stream).into(),
-            5,
-        )
-        .is_err());
+        assert!(
+            validate_member_prefix_read_stream_result(
+                temp.open(),
+                source.len() as u64,
+                authority,
+                &prefix_request,
+                prefix_operation_id,
+                prefix_stream.len() as u64,
+                crc32fast::hash(&prefix_stream),
+                Sha256::digest(&prefix_stream).into(),
+                5,
+            )
+            .is_err()
+        );
         let mut corrupted_tail = prefix_stream.clone();
         corrupted_tail[12] ^= 1;
-        assert!(validate_member_prefix_read_stream_result(
-            temp.open(),
-            source.len() as u64,
-            authority,
-            &prefix_request,
-            prefix_operation_id,
-            corrupted_tail.len() as u64,
-            crc32fast::hash(&corrupted_tail),
-            Sha256::digest(&corrupted_tail).into(),
-            6,
-        )
-        .is_err());
-        assert!(validate_member_prefix_read_stream_result(
-            temp.open(),
-            source.len() as u64,
-            authority,
-            &prefix_request,
-            prefix_operation_id,
-            prefix_stream.len() as u64 - 1,
-            crc32fast::hash(&prefix_stream),
-            Sha256::digest(&prefix_stream).into(),
-            6,
-        )
-        .is_err());
-        assert!(validate_member_prefix_read_stream_result(
-            temp.open(),
-            source.len() as u64,
-            authority,
-            &prefix_request,
-            prefix_operation_id,
-            prefix_stream.len() as u64,
-            crc32fast::hash(&prefix_stream) ^ 1,
-            Sha256::digest(&prefix_stream).into(),
-            6,
-        )
-        .is_err());
+        assert!(
+            validate_member_prefix_read_stream_result(
+                temp.open(),
+                source.len() as u64,
+                authority,
+                &prefix_request,
+                prefix_operation_id,
+                corrupted_tail.len() as u64,
+                crc32fast::hash(&corrupted_tail),
+                Sha256::digest(&corrupted_tail).into(),
+                6,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_member_prefix_read_stream_result(
+                temp.open(),
+                source.len() as u64,
+                authority,
+                &prefix_request,
+                prefix_operation_id,
+                prefix_stream.len() as u64 - 1,
+                crc32fast::hash(&prefix_stream),
+                Sha256::digest(&prefix_stream).into(),
+                6,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_member_prefix_read_stream_result(
+                temp.open(),
+                source.len() as u64,
+                authority,
+                &prefix_request,
+                prefix_operation_id,
+                prefix_stream.len() as u64,
+                crc32fast::hash(&prefix_stream) ^ 1,
+                Sha256::digest(&prefix_stream).into(),
+                6,
+            )
+            .is_err()
+        );
         let mut wrong_sha256: [u8; 32] = Sha256::digest(&prefix_stream).into();
         wrong_sha256[0] ^= 1;
-        assert!(validate_member_prefix_read_stream_result(
-            temp.open(),
-            source.len() as u64,
-            authority,
-            &prefix_request,
-            prefix_operation_id,
-            prefix_stream.len() as u64,
-            crc32fast::hash(&prefix_stream),
-            wrong_sha256,
-            6,
-        )
-        .is_err());
-        assert!(validate_member_read_result(
-            temp.open(),
-            source.len() as u64,
-            authority,
-            &prefix_request,
-            prefix_operation_id,
-            &prefix_stream[..6],
-        )
-        .is_err());
-        assert!(validate_operation(
-            temp.open(),
-            source.len() as u64,
-            operation_id,
-            &planning,
-            OperationKind::Materialize,
-        )
-        .is_err());
-        assert!(validate_operation(
-            temp.open(),
-            source.len() as u64,
-            [0x6b; 16],
-            &planning,
-            OperationKind::Inspect,
-        )
-        .is_err());
+        assert!(
+            validate_member_prefix_read_stream_result(
+                temp.open(),
+                source.len() as u64,
+                authority,
+                &prefix_request,
+                prefix_operation_id,
+                prefix_stream.len() as u64,
+                crc32fast::hash(&prefix_stream),
+                wrong_sha256,
+                6,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_member_read_result(
+                temp.open(),
+                source.len() as u64,
+                authority,
+                &prefix_request,
+                prefix_operation_id,
+                &prefix_stream[..6],
+            )
+            .is_err()
+        );
+        assert!(
+            validate_operation(
+                temp.open(),
+                source.len() as u64,
+                operation_id,
+                &planning,
+                OperationKind::Materialize,
+            )
+            .is_err()
+        );
+        assert!(
+            validate_operation(
+                temp.open(),
+                source.len() as u64,
+                [0x6b; 16],
+                &planning,
+                OperationKind::Inspect,
+            )
+            .is_err()
+        );
     }
 
     #[test]

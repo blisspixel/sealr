@@ -6,6 +6,24 @@ The project is in initial development. Compatibility may change between preview 
 
 ## [Unreleased]
 
+## [0.1.0-alpha.19] - 2026-10-31
+
+### Added
+
+- On a terminal, a refusal names the member when the header has one and the next `--format` only when the bytes already match another supported signature. Exit 3 says `not written` when the destination already exists, with the next step. Four or more findings end with `(+N more; --json for all)`. Counts use `1 member` and `1 finding`.
+- `--color auto|always|never` colors only the summary on stderr. `allowed` is green, `rejected` is red, and `not written` is yellow. The finding code is bold and the detail is dim. JSON is never colored. With automatic color, `NO_COLOR` wins over `CLICOLOR_FORCE`. `--color always` ignores the environment and prints the summary even when stderr is redirected.
+- When stderr is a terminal and neither `--json` nor `--receipt` is set, the summary is printed on stderr even if stdout is piped. The view JSON still goes to stdout. Both terminals still print only the summary.
+- A written admitted tree on a terminal adds one dim line: `content tree`, the first 16 hex characters of `identities.content.sealrTreeV1`, and `(preview identity, unsigned)`.
+- Help states the purpose, lists each format once, and gives three examples. A gzip-like unknown format lists the three gzip TAR formats and exits 2.
+- `--machine` writes one `sealr.command-result.v1` document on stdout. It is rejected together with `--json` or `--canonical`. Clap syntax errors do not emit it. A write that fails after a committed destination stays category `semantic`, exits 1, preserves `semantic_exit`, and does not roll the destination back.
+
+### Changed
+
+- Existing `FindingCode` discriminants are explicit and unchanged from source-baseline-20260913. `ZipSymlink` is 79. Strings from `as_str()` remain the wire format. Semantic-record tags were not renumbered.
+- The repository toolchain is Rust 1.99.1, `rust-version` is 1.99, and the workspace uses edition 2024. Fuzzing pins `nightly-2026-10-31`. Required Windows jobs run on `windows-2025`, Windows Server 2025, NT build 26100. The Poetry fixture stays on CPython 3.12 because its wheelhouse is cp312. Maintained CPython for new work is 3.11 through 3.15. Kani stays on its Rust 1.93 compiler.
+- Native release license bundles include `terminal_size` 0.4.4 because wrapped help needs it. The pinned counts are 73 on Linux, 68 on macOS, and 76 on Windows. The `sealr` crate runtime graph is unchanged.
+- Admission, policy bytes, and the view and receipt schemas are unchanged. Measuring repeated-read phases, then lifecycle closure, remains the roadmap priority. This preview is not an audit and not a stable 1.0.
+
 ## [0.1.0-alpha.18] - 2026-10-13
 
 ### Fixed
@@ -514,7 +532,8 @@ First public development preview of the ZIP boundary.
 
 This preview is not a production-ready security boundary and has not received an external security audit. See the security limitations in the README and the reporting policy in `SECURITY.md` before evaluating it.
 
-[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.18...HEAD
+[Unreleased]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.19...HEAD
+[0.1.0-alpha.19]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.18...v0.1.0-alpha.19
 [0.1.0-alpha.18]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.17...v0.1.0-alpha.18
 [0.1.0-alpha.17]: https://github.com/blisspixel/sealr/commits/v0.1.0-alpha.17
 [0.1.0-alpha.16]: https://github.com/blisspixel/sealr/compare/v0.1.0-alpha.15...v0.1.0-alpha.16

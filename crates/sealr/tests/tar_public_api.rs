@@ -2,10 +2,10 @@ use std::fs;
 use std::path::PathBuf;
 
 use sealr::{
-    apply, apply_with_options, tar_ustar_portable_v1_canonical_bytes, tar_ustar_portable_v1_digest,
     AdmissionStatus, ApplyOptions, ArchiveFormat, FindingCode, InterpretationStatus, MemberKind,
-    Policy, Request, RetentionPlan, Source, TarInterpretationProfile, TreeRoot, VerificationStatus,
-    TAR_ARCHIVE_IR_SCHEMA, TAR_USTAR_PORTABLE_V1,
+    Policy, Request, RetentionPlan, Source, TAR_ARCHIVE_IR_SCHEMA, TAR_USTAR_PORTABLE_V1,
+    TarInterpretationProfile, TreeRoot, VerificationStatus, apply, apply_with_options,
+    tar_ustar_portable_v1_canonical_bytes, tar_ustar_portable_v1_digest,
 };
 use serde::Deserialize;
 
@@ -319,10 +319,11 @@ fn explicit_tar_profile_inspects_retains_and_rereads_without_a_second_parser() {
             );
         }
     }
-    assert!(ir
-        .members()
-        .iter()
-        .all(|member| member.format() == ArchiveFormat::TarUstar));
+    assert!(
+        ir.members()
+            .iter()
+            .all(|member| member.format() == ArchiveFormat::TarUstar)
+    );
 
     let verified = outcome.verified_archive().unwrap();
     assert_eq!(
@@ -516,11 +517,13 @@ fn portable_tar_profile_denies_traversal_before_verification() {
         },
         &options(),
     );
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == sealr::FindingCode::PathDotDot));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == sealr::FindingCode::PathDotDot)
+    );
     assert!(outcome.verified_archive().is_none());
 }
 

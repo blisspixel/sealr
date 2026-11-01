@@ -5,9 +5,10 @@ releases, and workflow identities are retired. Historical measurements below
 retain their original digests but are not live acquisition promises. See
 [distribution history](distribution-history.md).
 
-Current source evaluation uses Alpha.18, including minimal GNU tar records and
-the Deflate completion correction. Published authenticated native companions
-remain Alpha.17 until Alpha.18 artifacts exist. It remains a GitHub-only
+Current source evaluation uses Alpha.19, including the terminal explanation
+and the pinned finding-code discriminants, on top of the Deflate completion
+correction. Published authenticated native companions remain Alpha.17 until
+Alpha.19 artifacts exist. It remains a GitHub-only
 prerelease. The Alpha.13 package measurements below are historical reproducibility
 evidence, and the adopter contract now records the current source separately.
 Neither GitHub-only release is a retroactive crates.io publication candidate.
@@ -29,7 +30,7 @@ The package contract at `tests/package-contract/sealr.json` pins:
 
 - the complete `cargo package --list` result;
 - the crates.io registry allowlist;
-- Rust 1.98 as the current minimum supported Rust version;
+- Rust 1.99 as the current minimum supported Rust version;
 - the Apache-2.0 SPDX expression;
 - a package-root `README.md` and `LICENSE` whose bytes match the repository sources.
 
@@ -59,7 +60,7 @@ The current `0.1.0-alpha.*` line is prerelease software. Every breaking prerelea
 - patch releases never raise the MSRV;
 - a later 1.x minor release may raise the MSRV only with an explicit changelog entry, metadata update, and compatibility-test update.
 
-The current Rust 1.98 declaration is executable now. The stable 1.0 API and profile freeze requires the automated usefulness, compatibility, lifecycle, and assurance evidence in the roadmap. Independent audit status must remain explicit; human participation is not a prerequisite.
+The current Rust 1.99 declaration is executable now. The stable 1.0 API and profile freeze requires the automated usefulness, compatibility, lifecycle, and assurance evidence in the roadmap. Independent audit status must remain explicit; human participation is not a prerequisite.
 
 ## Native archives
 
@@ -69,11 +70,11 @@ The machine-readable floor is `tests/package-contract/native.json`. Workflows us
 |---|---|---|
 | `x86_64-unknown-linux-gnu` | Ubuntu 24.04 x86_64, glibc 2.39, Linux 6.8 or later | The ordinary library and CLI path is in process. Explicit supervised execution additionally runtime-probes Landlock ABI 3 and installs the documented x86_64 seccomp filter. It fails closed without fallback when those capabilities are unavailable. |
 | `aarch64-apple-darwin` | macOS 15 on arm64, Darwin 24, `MACOSX_DEPLOYMENT_TARGET=15.0` | In-process inspection and materialization only. Linux supervision fails closed as unavailable. |
-| `x86_64-pc-windows-msvc` | Windows Server 2022 x64, NT build 20348, MSVC ABI | In-process inspection and materialization only. Linux supervision fails closed as unavailable. |
+| `x86_64-pc-windows-msvc` | Windows Server 2025 x64, NT build 26100, MSVC ABI | In-process inspection and materialization only. Linux supervision fails closed as unavailable. |
 
-These are the supported native archive floors, not claims that the artifacts fail on every older or different system. Generic Linux distributions with compatible glibc may work, but only the named Ubuntu floor is promised. Windows desktop versions may work, but the required release evidence is Windows Server 2022. No x86_64 macOS archive is produced.
+These are the supported native archive floors, not claims that the artifacts fail on every older or different system. Generic Linux distributions with compatible glibc may work, but only the named Ubuntu floor is promised. Windows desktop versions may work, but the required release evidence is Windows Server 2025. No x86_64 macOS archive is produced.
 
-The exact runners are `ubuntu-24.04`, `macos-15`, and `windows-2022`. The release matrix:
+The exact runners are `ubuntu-24.04`, `macos-15`, and `windows-2025`. The release matrix:
 
 1. verifies the runner, architecture, ABI, and deployment contract;
 2. runs the optimized workspace tests on that host;

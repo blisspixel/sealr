@@ -6,8 +6,8 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use sealr::wheel::{
-    realize_identity, ExecutableDisposition, InstallScheme, InstallTransform, RealizedOutput,
-    RecordBinding, WheelArtifactIR, WheelIdentities, WheelInstallPlan,
+    ExecutableDisposition, InstallScheme, InstallTransform, RealizedOutput, RecordBinding,
+    WheelArtifactIR, WheelIdentities, WheelInstallPlan, realize_identity,
 };
 use sealr::{MemberKind, VerifiedArchive};
 use serde::{Deserialize, Serialize};
@@ -960,10 +960,12 @@ mod child_deadline_tests {
         )
         .expect_err("poll failure must fail closed");
         assert!(error.to_string().contains("child status polling failed"));
-        assert!(child
-            .try_wait()
-            .expect("postcondition poll succeeds")
-            .is_some());
+        assert!(
+            child
+                .try_wait()
+                .expect("postcondition poll succeeds")
+                .is_some()
+        );
     }
 
     #[test]
@@ -980,10 +982,12 @@ mod child_deadline_tests {
         let detail = error.to_string();
         assert!(detail.contains("injected group termination failure"));
         assert!(detail.contains("direct-child termination: succeeded"));
-        assert!(child
-            .try_wait()
-            .expect("postcondition poll succeeds")
-            .is_some());
+        assert!(
+            child
+                .try_wait()
+                .expect("postcondition poll succeeds")
+                .is_some()
+        );
     }
 
     #[test]
@@ -1019,9 +1023,11 @@ mod child_deadline_tests {
             terminate_process_group,
         )
         .expect_err("deadline must fail closed");
-        assert!(error
-            .to_string()
-            .contains("process-group termination: succeeded"));
+        assert!(
+            error
+                .to_string()
+                .contains("process-group termination: succeeded")
+        );
         std::thread::sleep(Duration::from_millis(600));
         assert!(
             !escaped.exists(),

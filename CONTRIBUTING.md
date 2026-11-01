@@ -4,7 +4,7 @@ sealr is an admission boundary, so the contribution process is part of the secur
 
 ## Getting started
 
-The repository pins Rust 1.98.0 in `rust-toolchain.toml`; rustup selects it automatically.
+The repository pins Rust 1.99.1 in `rust-toolchain.toml`; rustup selects it automatically.
 
 ```text
 git clone https://github.com/blisspixel/sealr.git

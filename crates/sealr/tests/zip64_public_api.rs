@@ -1,8 +1,8 @@
 use sealr::{
-    apply, apply_with_options, AdmissionStatus, ApplyOptions, ArchiveEvidence, ArchiveFormat,
-    EffectStatus, FindingCode, InterpretationStatus, MemberEvidence, Policy, Request,
-    RetentionPlan, Source, TreeRoot, VerificationStatus, Zip64DataDescriptorWidth,
-    Zip64LocalValueShape, ZipInterpretationProfile, ZIP64_ARCHIVE_IR_SCHEMA, ZIP64_STRICT_ASCII_V1,
+    AdmissionStatus, ApplyOptions, ArchiveEvidence, ArchiveFormat, EffectStatus, FindingCode,
+    InterpretationStatus, MemberEvidence, Policy, Request, RetentionPlan, Source, TreeRoot,
+    VerificationStatus, ZIP64_ARCHIVE_IR_SCHEMA, ZIP64_STRICT_ASCII_V1, Zip64DataDescriptorWidth,
+    Zip64LocalValueShape, ZipInterpretationProfile, apply, apply_with_options,
 };
 
 const CPYTHON_SEEK_HEX: &str = concat!(
@@ -245,13 +245,15 @@ fn empty_global_zip64_magic_is_exact_and_profile_scoped() {
         encode_hex(&sealr::encode_zip64_layout(selected.archive_ir().unwrap()).unwrap()),
         "7365616c722e747265652e6c61796f75742e7a697036342e763120313032000000000000000000000000000000000000000000000000000000000000000000010000000000000000380000000000000001380000000000000014000000000000004c0000000000000016000000000000006200000000000000000000000000000000000000"
     );
-    assert!(selected
-        .archive_ir()
-        .unwrap()
-        .zip64_covering()
-        .unwrap()
-        .zip64_eocd
-        .is_some());
+    assert!(
+        selected
+            .archive_ir()
+            .unwrap()
+            .zip64_covering()
+            .unwrap()
+            .zip64_eocd
+            .is_some()
+    );
     assert_eq!(
         selected.receipt.identities.layout.hex(),
         Some("02d0757e59980e22c32a65aafbc9d0bac0facfd439c36db07e31872c14ccc93e")

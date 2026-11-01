@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::thread;
 
-use sealr::{apply, Policy, Request, Source};
+use sealr::{Policy, Request, Source, apply};
 use sha2::{Digest, Sha256};
 
 fn main() -> ExitCode {

@@ -67,7 +67,7 @@ class HistoryFixture:
         self.files[MODULE.WORKFLOWS["coverage-guided-fuzzing"]] = b"jobs:\n  fuzz:\n    name: Bounded fixture fuzz\n"
         self.files[MODULE.WORKFLOWS["native-resource-evidence"]] = (
             b"jobs:\n  resource:\n    name: 3 GiB sparse gate on ${{ matrix.os }}\n"
-            b"        os: [ubuntu-24.04, macos-15, windows-2022]\n")
+            b"        os: [ubuntu-24.04, macos-15, windows-2025]\n")
         self.add_revision(CURRENT)
         self.api.responses[f"{self.prefix}/branches/main"] = {"name": "main", "commit": {"sha": CURRENT}}
         self.runs = []
@@ -105,7 +105,7 @@ class HistoryFixture:
         if category in MODULE.SINGLE_JOBS:
             names = list(MODULE.SINGLE_JOBS.values())
         elif category == "native-resource-evidence":
-            names = ["3 GiB sparse gate on " + os for os in ("ubuntu-24.04", "macos-15", "windows-2022")]
+            names = ["3 GiB sparse gate on " + os for os in ("ubuntu-24.04", "macos-15", "windows-2025")]
         else:
             names = ["Bounded fixture fuzz"]
         jobs = [{"id": index * 10 + offset, "run_id": index, "run_attempt": 1, "head_sha": sha,

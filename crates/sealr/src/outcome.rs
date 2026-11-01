@@ -1,5 +1,5 @@
-use serde::ser::{SerializeMap, Serializer};
 use serde::Serialize;
+use serde::ser::{SerializeMap, Serializer};
 
 use crate::findings::Finding;
 

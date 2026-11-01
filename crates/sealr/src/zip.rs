@@ -1,10 +1,10 @@
 //! CD-first ZIP reader. One interpretation. Disagreement is a finding.
 
 use crate::findings::{Finding, FindingCode};
-use crate::interval::{exact_partition, CheckedInterval, IntervalError, PartitionError};
+use crate::interval::{CheckedInterval, IntervalError, PartitionError, exact_partition};
 use crate::ir::{
-    is_denied_extra_id, ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite, IrMember,
-    MemberSourceRanges, ZipInterpretationProfile,
+    ByteRange, ExtraDisposition, ExtraFieldRecord, ExtraSite, IrMember, MemberSourceRanges,
+    ZipInterpretationProfile, is_denied_extra_id,
 };
 use crate::snapshot::SourceSnapshot;
 use std::collections::BTreeSet;
@@ -1106,17 +1106,16 @@ pub(crate) fn parse_zip64_strict_ascii_v1(
             "archive contains no ZIP64 construct",
         ));
     }
-    if let Some(zip64_version_needed) = resolved_end.zip64_version_needed {
-        if zip64_version_needed != 45
-            && (max_member_version_needed == 0 || zip64_version_needed != max_member_version_needed)
-        {
-            return Err(Finding::error(
-                FindingCode::ZipDiffC5Zip64,
-                format!(
-                    "ZIP64 EOCD extraction version {zip64_version_needed} is neither 4.5 nor the maximum member version {max_member_version_needed}"
-                ),
-            ));
-        }
+    if let Some(zip64_version_needed) = resolved_end.zip64_version_needed
+        && zip64_version_needed != 45
+        && (max_member_version_needed == 0 || zip64_version_needed != max_member_version_needed)
+    {
+        return Err(Finding::error(
+            FindingCode::ZipDiffC5Zip64,
+            format!(
+                "ZIP64 EOCD extraction version {zip64_version_needed} is neither 4.5 nor the maximum member version {max_member_version_needed}"
+            ),
+        ));
     }
     check_layout(&members, resolved_end.central_directory_offset)?;
 
@@ -2564,10 +2563,12 @@ mod tests {
         assert_eq!(member.comp_size, 1);
         assert_eq!(member.uncomp_size, 1);
         assert_eq!(member.extra_fields.len(), 2);
-        assert!(member
-            .extra_fields
-            .iter()
-            .all(|field| field.disposition == ExtraDisposition::Semantic));
+        assert!(
+            member
+                .extra_fields
+                .iter()
+                .all(|field| field.disposition == ExtraDisposition::Semantic)
+        );
         assert!(parsed.zip64_eocd.is_none());
     }
 
@@ -2877,9 +2878,11 @@ mod tests {
         let finding = parsed_zip64(&bytes).unwrap_err();
 
         assert_eq!(finding.code, FindingCode::ZipDiffC5Zip64);
-        assert!(finding
-            .detail
-            .contains("neither 4.5 nor the maximum member"));
+        assert!(
+            finding
+                .detail
+                .contains("neither 4.5 nor the maximum member")
+        );
     }
 
     #[test]
@@ -3427,12 +3430,14 @@ mod tests {
             .unwrap(),
             "caf\u{e9}"
         );
-        assert!(decode_name_for_profile(
-            "caf\u{e9}".as_bytes(),
-            0,
-            ZipInterpretationProfile::PortableUtf8V1,
-        )
-        .is_err());
+        assert!(
+            decode_name_for_profile(
+                "caf\u{e9}".as_bytes(),
+                0,
+                ZipInterpretationProfile::PortableUtf8V1,
+            )
+            .is_err()
+        );
         assert!(
             decode_name_for_profile(&[0xff], 0x0800, ZipInterpretationProfile::PortableUtf8V1,)
                 .is_err()
@@ -3454,12 +3459,14 @@ mod tests {
             .unwrap(),
             "caf\u{e9}"
         );
-        assert!(decode_name_for_profile(
-            "caf\u{e9}".as_bytes(),
-            0,
-            ZipInterpretationProfile::WheelUtf8V1,
-        )
-        .is_err());
+        assert!(
+            decode_name_for_profile(
+                "caf\u{e9}".as_bytes(),
+                0,
+                ZipInterpretationProfile::WheelUtf8V1,
+            )
+            .is_err()
+        );
         assert!(
             decode_name_for_profile(&[0xff], 0x0800, ZipInterpretationProfile::WheelUtf8V1,)
                 .is_err()

@@ -3,15 +3,15 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use crc32fast::Hasher as Crc;
-use flate2::write::DeflateEncoder;
 use flate2::Compression;
+use flate2::write::DeflateEncoder;
 use sealr::{
-    apply_with_options, tar_gnu_longname_portable_v1_digest,
-    tar_gzip_gnu_longname_portable_v1_canonical_bytes, tar_gzip_gnu_longname_portable_v1_digest,
     AdmissionStatus, ApplyOptions, ArchiveFormat, FindingCode, GnuLongNamePathSource,
     InterpretationStatus, Policy, Request, RetentionPlan, Source,
+    TAR_GZIP_GNU_LONGNAME_ARCHIVE_IR_SCHEMA, TAR_GZIP_GNU_LONGNAME_PORTABLE_V1,
     TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TreeRoot,
-    VerificationStatus, TAR_GZIP_GNU_LONGNAME_ARCHIVE_IR_SCHEMA, TAR_GZIP_GNU_LONGNAME_PORTABLE_V1,
+    VerificationStatus, apply_with_options, tar_gnu_longname_portable_v1_digest,
+    tar_gzip_gnu_longname_portable_v1_canonical_bytes, tar_gzip_gnu_longname_portable_v1_digest,
 };
 
 fn write_octal(field: &mut [u8], value: u64) {
@@ -147,9 +147,11 @@ fn profile_and_public_selection_are_distinct_and_pinned() {
         options().tar_gzip_interpretation_profile(),
         Some(TarGzipInterpretationProfile::GnuLongNamePortableV1)
     );
-    assert!(options()
-        .tar_gnu_longname_interpretation_profile()
-        .is_none());
+    assert!(
+        options()
+            .tar_gnu_longname_interpretation_profile()
+            .is_none()
+    );
     assert!(options().tar_interpretation_profile().is_none());
 }
 
@@ -301,11 +303,13 @@ fn wrapper_and_inner_language_fail_closed() {
         concatenated.interpretation,
         InterpretationStatus::Unsupported
     ));
-    assert!(concatenated
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::CodecDeflateTrailingInput));
+    assert!(
+        concatenated
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CodecDeflateTrailingInput)
+    );
 
     let long_link = {
         let mut payload = b"target-of-link".to_vec();
@@ -325,11 +329,13 @@ fn wrapper_and_inner_language_fail_closed() {
         InterpretationStatus::Unsupported
     ));
     assert_eq!(unsupported.view.source.magic, "gz");
-    assert!(unsupported
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::TarFeatureUnsupported));
+    assert!(
+        unsupported
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::TarFeatureUnsupported)
+    );
 
     let orphan_carrier = {
         let mut payload = b"mission/orphan.txt".to_vec();
@@ -353,31 +359,37 @@ fn wrapper_and_inner_language_fail_closed() {
         InterpretationStatus::Interpreted
     ));
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaDerived));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaDerived)
+    );
 
     let mut ratio = Policy::default_v7();
     ratio.max_ratio = Some(1);
     let denied = inspect(&member, &ratio, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaRatio));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaRatio)
+    );
 
     let mut metadata = Policy::default_v7();
     metadata.max_metadata_bytes = 17;
     let denied = inspect(&member, &metadata, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaMetadata));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaMetadata)
+    );
 }
 
 #[test]
@@ -392,11 +404,13 @@ fn policy_and_format_selection_do_not_alias_other_profiles() {
 
     let older = inspect(&wrapped, &Policy::default_v6(), &options());
     assert!(!matches!(older.admission, AdmissionStatus::Admitted));
-    assert!(older
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::PolicyUnsupported));
+    assert!(
+        older
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PolicyUnsupported)
+    );
 
     let ustar_selection = apply_with_options(
         Request {

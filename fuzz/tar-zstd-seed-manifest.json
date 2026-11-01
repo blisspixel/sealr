@@ -1,7 +1,7 @@
 {
   "schema": "sealr.tar-zstd-fuzz-seeds.v1",
   "target": "tar_zstd_ustar_portable_v1",
-  "toolchain": "nightly-2026-08-01",
+  "toolchain": "nightly-2026-10-31",
   "cargoFuzzVersion": "0.13.2",
   "libfuzzerSysVersion": "0.4.13",
   "sanitizer": "address",

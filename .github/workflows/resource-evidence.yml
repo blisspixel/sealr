@@ -14,7 +14,7 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  RUST_VERSION: 1.98.0
+  RUST_VERSION: 1.99.1
 
 jobs:
   multigigabyte-sparse:
@@ -24,7 +24,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, macos-15, windows-2022]
+        os: [ubuntu-24.04, macos-15, windows-2025]
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -9,7 +9,7 @@ use crate::outcome::SourceDigest;
 use crate::policy::ResourceBudget;
 use crate::quota::QuotaState;
 use crate::snapshot::SnapshotSet;
-use crate::verification::{digest_hex, planned_payload_reader, verify_payload, PayloadPlan};
+use crate::verification::{PayloadPlan, digest_hex, planned_payload_reader, verify_payload};
 
 /// Maximum number of distinct exact paths accepted by one retention plan.
 pub const MAX_RETENTION_PATHS: usize = 64;
@@ -446,10 +446,11 @@ impl VerifiedArchive {
         budget: ResourceBudget,
         retention: RetentionBuild,
     ) -> Self {
-        debug_assert!(ir
-            .members()
-            .iter()
-            .all(|member| matches!(&member.verification, MemberVerification::Verified)));
+        debug_assert!(
+            ir.members()
+                .iter()
+                .all(|member| matches!(&member.verification, MemberVerification::Verified))
+        );
         debug_assert_eq!(authority.source_digest(), ir.source_digest());
 
         let mut members_by_path = BTreeMap::new();
@@ -829,7 +830,7 @@ mod tests {
     use super::*;
     use crate::verification::{reset_verify_payload_calls, verify_payload_calls};
     use crate::{
-        apply, apply_with_options, ApplyOptions, Finding, FindingCode, Policy, Request, Source,
+        ApplyOptions, Finding, FindingCode, Policy, Request, Source, apply, apply_with_options,
     };
 
     #[test]

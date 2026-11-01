@@ -21,7 +21,7 @@ use std::fs::File as StdFile;
 
 use crate::findings::{Finding, FindingCode};
 use crate::policy::ResourceBudget;
-use crate::verification::{verify_payload, PayloadPlan};
+use crate::verification::{PayloadPlan, verify_payload};
 
 #[cfg(target_os = "macos")]
 mod apple;
@@ -105,8 +105,8 @@ impl Drop for DestinationPublicationGuard {
 }
 
 #[cfg(feature = "__internal-lifecycle-lab")]
-pub(crate) fn plant_destination_before_publication_for_current_thread(
-) -> DestinationPublicationGuard {
+pub(crate) fn plant_destination_before_publication_for_current_thread()
+-> DestinationPublicationGuard {
     let previous = PLANT_DESTINATION_BEFORE_PUBLICATION.with(|enabled| enabled.replace(true));
     DestinationPublicationGuard { previous }
 }
@@ -1473,11 +1473,7 @@ fn capability_path_exists(dir: &CapDir, path: &Path) -> Result<bool, Finding> {
 }
 
 fn durability(atomic: bool) -> &'static str {
-    if atomic {
-        "member-sync"
-    } else {
-        "flush-only"
-    }
+    if atomic { "member-sync" } else { "flush-only" }
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1775,18 +1771,22 @@ mod tests {
     #[test]
     fn non_windows_materialization_reports_never_serialize_windows_evidence() {
         let not_requested = MaterializationMeta::not_started(false, false);
-        assert!(serde_json::to_value(not_requested)
-            .unwrap()
-            .get("windows")
-            .is_none());
+        assert!(
+            serde_json::to_value(not_requested)
+                .unwrap()
+                .get("windows")
+                .is_none()
+        );
 
         let dest = temp_dest("non-windows-receipt");
         let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
         materializer.commit().unwrap();
-        assert!(serde_json::to_value(materializer.report())
-            .unwrap()
-            .get("windows")
-            .is_none());
+        assert!(
+            serde_json::to_value(materializer.report())
+                .unwrap()
+                .get("windows")
+                .is_none()
+        );
         fs::remove_dir_all(&dest).unwrap();
 
         let missing_parent = temp_dest("non-windows-missing-parent");
@@ -1796,10 +1796,12 @@ mod tests {
         };
         let (_, cleanup, windows) = error.into_parts();
         let setup_failed = MaterializationMeta::setup_failed(false, cleanup, windows);
-        assert!(serde_json::to_value(setup_failed)
-            .unwrap()
-            .get("windows")
-            .is_none());
+        assert!(
+            serde_json::to_value(setup_failed)
+                .unwrap()
+                .get("windows")
+                .is_none()
+        );
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1847,11 +1849,13 @@ mod tests {
             assert_eq!(findings[0].code, FindingCode::MaterializeUnsafeParent);
             assert_eq!(cleanup, "not-created");
             assert!(!dest.exists());
-            assert!(!fs::read_dir(&parent).unwrap().any(|entry| entry
-                .unwrap()
-                .file_name()
-                .to_string_lossy()
-                .starts_with(".sealr-stage-")));
+            assert!(!fs::read_dir(&parent).unwrap().any(|entry| {
+                entry
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(".sealr-stage-")
+            }));
 
             let owner = fs::metadata(&parent).unwrap().uid();
             assert_eq!(owner, rustix::process::geteuid().as_raw());
@@ -2147,9 +2151,11 @@ mod tests {
         let (findings, cleanup, evidence) = error.into_parts();
 
         assert_eq!(cleanup, "removed");
-        assert!(findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::MaterializeUnsafeStage));
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::MaterializeUnsafeStage)
+        );
         let report = MaterializationMeta::setup_failed(false, cleanup, evidence);
         let serialized = serde_json::to_value(&report).unwrap();
         assert_eq!(serialized["schema"], "sealr.materialization.v2");
@@ -2296,9 +2302,11 @@ mod tests {
     fn rejects_non_component_input_at_the_materializer_boundary() {
         let dest = temp_dest("invalid-component");
         let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
-        assert!(materializer
-            .create_file(&["nested/escape.txt".to_owned()])
-            .is_err_and(|finding| finding.code == FindingCode::MaterializeUnsafeComponent));
+        assert!(
+            materializer
+                .create_file(&["nested/escape.txt".to_owned()])
+                .is_err_and(|finding| finding.code == FindingCode::MaterializeUnsafeComponent)
+        );
         materializer.abort().unwrap();
     }
 

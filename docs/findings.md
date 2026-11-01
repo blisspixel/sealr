@@ -13,7 +13,7 @@ Agents switch on `code`. Humans read `detail`. There is no numeric risk score.
 
 The enclosing view and receipt bind the policy. Individual finding objects do not repeat it.
 
-`format.unsupported` and `tar.dialect` may include a `hint` object. `observed` names the fixed signature that was present, and `formats` lists the `--format` values whose profiles start with that signature. Both fields come from those bytes, never from the file name. The hint does not select an interpretation, and it does not change the verdict or the source, interpretation, layout, or content identities. Findings without a hint omit the field. The semantic record does not encode it.
+`format.unsupported`, `format.magic`, and `tar.dialect` may include a `hint` object. `observed` names the fixed signature that was present, and `formats` lists the `--format` values whose profiles start with that signature. A recognized ustar typeflag can also name that type in `detail`, including symlink, hard link, PAX extended header, and PAX global header, and it carries `member` when the header name is strict UTF-8 without controls. A checksum field of seven octal digits and a trailing NUL adds that shape to the `tar.checksum` detail and stays a refusal. All of those words come from bytes already read, never from the file name. The hint does not select an interpretation, and it does not change the verdict or the source, interpretation, layout, or content identities. Findings without a hint omit the field. The semantic record does not encode it.
 
 ```json
 {
@@ -46,7 +46,7 @@ Unknown error codes must be treated as rejection by consumers.
 |---|---|
 | `source.io` | The archive source could not be inspected, opened, or read. |
 | `format.unsupported` | Magic or format is unsupported or disallowed by policy. A recognized signature adds the hint described above. |
-| `format.magic` | Reserved for explicit magic-versus-extension policy. |
+| `format.magic` | The selected wrapper magic does not match the bytes. A recognized signature adds the hint described above. |
 | `method.unsupported` | ZIP compression method is not Store or Deflate. |
 
 ### Path and topology
@@ -142,14 +142,14 @@ Unknown error codes must be treated as rejection by consumers.
 
 | Code | Meaning |
 |---|---|
-| `tar.checksum` | A ustar header checksum field is malformed, overflows, or disagrees with the unsigned header-byte sum. |
+| `tar.checksum` | A ustar header checksum field is malformed, overflows, or disagrees with the unsigned header-byte sum. Seven octal digits followed by NUL are still a refusal. The detail records that git archive and npm shape. |
 | `tar.dialect` | The selected portable ustar language does not recognize the required magic, version, fixed text fields, or reserved-byte form. A recognized inner magic adds the hint described above, naming only the `--format` values for that outer wrapper. |
 | `tar.numeric` | An octal numeric field is malformed or overflows. GNU base-256 numeric fields are reported as unsupported instead. |
 | `tar.padding` | Member padding or trailing record padding contains a nonzero byte. |
 | `tar.terminator` | The archive lacks exactly observable two-block zero termination or contains an incomplete trailing block. |
 | `tar.truncated` | A complete header, payload, padding region, or checked offset is unavailable. |
 | `tar.type` | A record type is invalid for the portable profile, or a regular-file or directory invariant is violated. |
-| `tar.feature_unsupported` | A recognized PAX, GNU, link, special-file, or base-256 extension is outside the selected portable ustar profile. |
+| `tar.feature_unsupported` | A recognized PAX, GNU, link, special-file, or base-256 extension is outside the selected portable ustar profile. The detail names the typeflag when it is a symlink, hard link, PAX extended header, or PAX global header, and `member` carries the header name when that name is strict UTF-8 without controls. |
 | `tar.pax.record` | A PAX record violates the restricted profile's canonical length, delimiter, keyword, value, or complete-consumption grammar. |
 | `tar.pax.state` | Local or global PAX state violates the restricted profile's ordering, lifetime, or precedence contract. |
 | `tar.gnu.long_name` | A GNU long-name carrier violates the portable profile's canonical length, delimiter, single NUL terminator, or payload grammar. |
@@ -164,3 +164,5 @@ Additional link, permission, wrapper, dictionary, polyglot, signing, and sandbox
 ## Stability
 
 Finding strings become compatibility commitments at the first stable supported release. During the preview line, registry changes must update this document, receipt tests, and fixture expectations in the same change and must be called out in the changelog.
+
+Numeric discriminants of existing variants are pinned. Strings returned by `as_str()` are the wire format. `ZipSymlink` is discriminant 79. New variants append the next unused discriminant. Semantic-record tags are a separate encoding and are not renumbered with these discriminants.

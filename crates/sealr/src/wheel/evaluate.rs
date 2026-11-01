@@ -1,19 +1,19 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::jail::{
-    jail_name_fallible_for_profile, portable_name_violation, portable_unicode_case_fold,
-    JailNameError,
+    JailNameError, jail_name_fallible_for_profile, portable_name_violation,
+    portable_unicode_case_fold,
 };
-use crate::{content_root, MemberKind, VerifiedArchive, ZIP_PORTABLE_UTF8_V1};
+use crate::{MemberKind, VerifiedArchive, ZIP_PORTABLE_UTF8_V1, content_root};
 
 use crate::wheel::identity::{
     artifact_identity, consumer_profile_digest, plan_identity, realization_identity,
 };
 use crate::wheel::model::{
-    EntryPoint, EvaluationStage, ExecutableDisposition, InstallEntry, InstallScheme,
-    InstallTransform, RealizedOutput, RecordBinding, WheelArtifactIR, WheelEvaluation,
-    WheelFinding, WheelIdentities, WheelInstallPlan, WheelLimits, WheelMemberFacts,
-    ARTIFACT_ENCODING_ID, CONSUMER_PROFILE_ID, PLAN_ENCODING_ID, SPEC_SNAPSHOT_ID,
+    ARTIFACT_ENCODING_ID, CONSUMER_PROFILE_ID, EntryPoint, EvaluationStage, ExecutableDisposition,
+    InstallEntry, InstallScheme, InstallTransform, PLAN_ENCODING_ID, RealizedOutput, RecordBinding,
+    SPEC_SNAPSHOT_ID, WheelArtifactIR, WheelEvaluation, WheelFinding, WheelIdentities,
+    WheelInstallPlan, WheelLimits, WheelMemberFacts,
 };
 use crate::wheel::parse::{
     decode_sha256_record, parse_core_metadata, parse_entry_points, parse_record_rows,
@@ -1084,7 +1084,7 @@ mod tests {
     use std::io::{Cursor, Write};
 
     use crate::{
-        apply_with_options, ApplyOptions, Policy, Request, Source, ZipInterpretationProfile,
+        ApplyOptions, Policy, Request, Source, ZipInterpretationProfile, apply_with_options,
     };
     use sha2::{Digest, Sha256};
     use zip::write::SimpleFileOptions;
@@ -1754,10 +1754,12 @@ mod tests {
             b"VALUE = 'unicode'\n".to_vec(),
         )]);
         let archive = verified(&bytes);
-        assert!(archive
-            .members()
-            .iter()
-            .all(|member| member.zip_evidence().unwrap().flags & 0x0008 != 0));
+        assert!(
+            archive
+                .members()
+                .iter()
+                .all(|member| member.zip_evidence().unwrap().flags & 0x0008 != 0)
+        );
         assert_eq!(
             archive
                 .member("demo/caf\u{e9}.py")

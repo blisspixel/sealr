@@ -18,9 +18,9 @@ if ($LASTEXITCODE -ne 0) {
 $Repository = 'blisspixel/sealr'
 $ReleaseAuthor = 'blisspixel'
 $DefaultBranch = 'main'
-$Version = '0.1.0-alpha.18'
+$Version = '0.1.0-alpha.19'
 $ReleaseTag = "v$Version"
-$ReleaseTitle = "sealr ${Version}: minimal GNU tar records"
+$ReleaseTitle = "sealr ${Version}: a gate that explains itself"
 $CiWorkflow = '.github/workflows/ci.yml'
 $ReleaseWorkflow = '.github/workflows/release.yml'
 $GithubActionsAppId = 15368
@@ -45,7 +45,7 @@ $ExpectedFuzzJobs = @(
 )
 $ExpectedCiJobs = @(
     'Format, lint, test, and docs'
-    'Test on windows-2022'
+    'Test on windows-2025'
     'Test on macos-15'
     'ZipDiff 14-class gate'
     'Supply chain'
@@ -55,7 +55,7 @@ $ExpectedChecks = @('Required CI')
 $ExpectedReleaseJobs = @(
     'Validate release tag'
     'Build and test on ubuntu-24.04'
-    'Build and test on windows-2022'
+    'Build and test on windows-2025'
     'Build and test on macos-15'
     'Attest and stage prerelease draft'
 )

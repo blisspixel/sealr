@@ -9,7 +9,7 @@ use crate::deflate::DeflateDecoder;
 
 use crate::findings::{Finding, FindingCode};
 use crate::ir::{IrMember, MemberEvidence};
-use crate::policy::{ratio_exceeds, ResourceBudget};
+use crate::policy::{ResourceBudget, ratio_exceeds};
 use crate::quota::{QuotaError, QuotaState};
 use crate::snapshot::finding_from_io;
 use crate::snapshot::{DomainRange, SnapshotDomainId, SnapshotSet};
@@ -351,16 +351,16 @@ pub(crate) fn verify_payload(
                 "actual bytes exceeded the remaining archive cap",
             ));
         }
-        if let Some(max_ratio) = budget.max_ratio {
-            if ratio_exceeds(actual_bytes, member.compressed_size, max_ratio) {
-                return Err(Finding::error(
-                    FindingCode::QuotaRatio,
-                    format!(
-                        "actual {}:{} exceeded {max_ratio}:1",
-                        actual_bytes, member.compressed_size
-                    ),
-                ));
-            }
+        if let Some(max_ratio) = budget.max_ratio
+            && ratio_exceeds(actual_bytes, member.compressed_size, max_ratio)
+        {
+            return Err(Finding::error(
+                FindingCode::QuotaRatio,
+                format!(
+                    "actual {}:{} exceeded {max_ratio}:1",
+                    actual_bytes, member.compressed_size
+                ),
+            ));
         }
         writer.write_all(chunk).map_err(|error| {
             Finding::error(FindingCode::MaterializeIo, format!("write member: {error}"))
@@ -440,13 +440,13 @@ pub(crate) fn verify_payload(
         ));
     }
     let crc = crc.finalize();
-    if let PayloadIntegrity::Crc32(expected) = member.integrity {
-        if crc != expected {
-            return Err(Finding::error(
-                FindingCode::CrcMismatch,
-                format!("got {crc:08x} want {expected:08x}"),
-            ));
-        }
+    if let PayloadIntegrity::Crc32(expected) = member.integrity
+        && crc != expected
+    {
+        return Err(Finding::error(
+            FindingCode::CrcMismatch,
+            format!("got {crc:08x} want {expected:08x}"),
+        ));
     }
     Ok((actual, crc, sha.finalize().into()))
 }

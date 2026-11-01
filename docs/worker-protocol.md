@@ -135,7 +135,7 @@ The `protocol_decoders` libFuzzer target exercises arbitrary bytes and up to 64 
 
 | Control | Value |
 |---|---:|
-| Rust toolchain | `nightly-2026-08-01` |
+| Rust toolchain | `nightly-2026-10-31` |
 | `cargo-fuzz` | `0.13.2` |
 | `libfuzzer-sys` | `0.4.13` |
 | Maximum input | 4 MiB |

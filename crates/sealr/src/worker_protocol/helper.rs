@@ -390,7 +390,7 @@ pub enum HelperError {
 mod tests {
     use super::*;
     use std::fs;
-    use std::os::unix::fs::{symlink, PermissionsExt};
+    use std::os::unix::fs::{PermissionsExt, symlink};
 
     const HELPER_FIXTURE_PREFIX: &[u8] = b"#!/bin/sh\nexit 0\n";
 

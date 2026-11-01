@@ -260,8 +260,21 @@ class Collector:
             require(jobs[0] in names, "historical required job is missing")
         elif category == "native-resource-evidence":
             require(names == ["3 GiB sparse gate on ${{ matrix.os }}"], "unsupported resource job expansion")
-            require("os: [ubuntu-24.04, macos-15, windows-2022]" in text, "unsupported resource matrix")
-            jobs = ["3 GiB sparse gate on " + os for os in ("ubuntu-24.04", "macos-15", "windows-2022")]
+            matrices = {
+                "os: [ubuntu-24.04, macos-15, windows-2022]": (
+                    "ubuntu-24.04",
+                    "macos-15",
+                    "windows-2022",
+                ),
+                "os: [ubuntu-24.04, macos-15, windows-2025]": (
+                    "ubuntu-24.04",
+                    "macos-15",
+                    "windows-2025",
+                ),
+            }
+            matched = [oses for needle, oses in matrices.items() if needle in text]
+            require(len(matched) == 1, "unsupported resource matrix")
+            jobs = ["3 GiB sparse gate on " + os for os in matched[0]]
         else:
             require(all(re.fullmatch(r"[A-Za-z0-9 ._-]+", name) for name in names), "unsupported dynamic workflow job names")
             jobs = names

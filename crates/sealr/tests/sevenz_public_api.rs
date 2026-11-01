@@ -2,10 +2,10 @@ use std::fs;
 use std::path::PathBuf;
 
 use sealr::{
-    apply_with_options, sevenz_copy_portable_v1_canonical_bytes, sevenz_copy_portable_v1_digest,
     AdmissionStatus, ApplyOptions, ArchiveFormat, FindingCode, InterpretationStatus, MemberKind,
-    Policy, Request, RetentionPlan, SevenZInterpretationProfile, Source, TarInterpretationProfile,
-    TreeRoot, VerificationStatus, SEVENZ_COPY_ARCHIVE_IR_SCHEMA, SEVENZ_COPY_PORTABLE_V1,
+    Policy, Request, RetentionPlan, SEVENZ_COPY_ARCHIVE_IR_SCHEMA, SEVENZ_COPY_PORTABLE_V1,
+    SevenZInterpretationProfile, Source, TarInterpretationProfile, TreeRoot, VerificationStatus,
+    apply_with_options, sevenz_copy_portable_v1_canonical_bytes, sevenz_copy_portable_v1_digest,
 };
 
 /// 7-Zip 26.02 `7z a -m0=Copy -mhc=off` of exactly `mission/plan.txt` =
@@ -321,12 +321,14 @@ fn container_and_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Unsupported
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::FormatUnsupported
-            && finding.detail.contains("mhc=off")));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::FormatUnsupported
+                && finding.detail.contains("mhc=off"))
+    );
 
     let mut start_crc = member.clone();
     start_crc[8] ^= 0x01;
@@ -335,11 +337,13 @@ fn container_and_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Malformed
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::CrcMismatch));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CrcMismatch)
+    );
 
     let mut trailing = member.clone();
     trailing.push(0x00);
@@ -348,11 +352,13 @@ fn container_and_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Malformed
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::SevenZInvalidStructure));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::SevenZInvalidStructure)
+    );
 
     // A payload byte flip breaks the declared substream CRC at member
     // verification, after a structurally valid parse.
@@ -360,11 +366,13 @@ fn container_and_language_fail_closed() {
     payload_lie[32] ^= 0x01;
     let outcome = inspect(&payload_lie, &policy, &options());
     assert!(!matches!(outcome.admission, AdmissionStatus::Admitted));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::CrcMismatch));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CrcMismatch)
+    );
 
     // A backslash smuggled into the UTF-16 name is rejected by the path jail.
     let mut backslash = member.clone();
@@ -376,11 +384,13 @@ fn container_and_language_fail_closed() {
     repair_header_crcs(&mut backslash, 57);
     let outcome = inspect(&backslash, &policy, &options());
     assert!(!matches!(outcome.admission, AdmissionStatus::Admitted));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::PathInvalidChar));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PathInvalidChar)
+    );
 
     let mut files_cap = Policy::default_v11();
     files_cap.max_files = 0;
@@ -390,41 +400,49 @@ fn container_and_language_fail_closed() {
         InterpretationStatus::Interpreted
     ));
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaFiles));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaFiles)
+    );
 
     let mut metadata = Policy::default_v11();
     metadata.max_metadata_bytes = 40;
     let denied = inspect(&member, &metadata, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaMetadata));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaMetadata)
+    );
 
     let mut member_cap = Policy::default_v11();
     member_cap.max_member_bytes = 24;
     let denied = inspect(&member, &member_cap, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaMember));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaMember)
+    );
 
     let mut source_cap = Policy::default_v11();
     source_cap.max_archive_bytes = (member.len() - 1) as u64;
     let denied = inspect(&member, &source_cap, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaArchive));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaArchive)
+    );
 }
 
 #[test]
@@ -433,11 +451,13 @@ fn policy_and_format_selection_do_not_alias_other_profiles() {
 
     let older = inspect(&member, &Policy::default_v10(), &options());
     assert!(!matches!(older.admission, AdmissionStatus::Admitted));
-    assert!(older
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::PolicyUnsupported));
+    assert!(
+        older
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PolicyUnsupported)
+    );
 
     let zip_selection = apply_with_options(
         Request {

@@ -4,11 +4,11 @@ use std::io::{Cursor, Write};
 use std::path::Path;
 
 use sealr::wheel::{
-    evaluate_wheel as evaluate_supported_wheel, WheelEvaluation as SupportedWheelEvaluation,
-    WheelLimits as SupportedWheelLimits,
+    WheelEvaluation as SupportedWheelEvaluation, WheelLimits as SupportedWheelLimits,
+    evaluate_wheel as evaluate_supported_wheel,
 };
-use sealr::{apply_with_options, ApplyOptions, Policy, Request, Source, ZipInterpretationProfile};
-use sealr_wheel_lab::{evaluate_wheel, WheelEvaluation, WheelLimits};
+use sealr::{ApplyOptions, Policy, Request, Source, ZipInterpretationProfile, apply_with_options};
+use sealr_wheel_lab::{WheelEvaluation, WheelLimits, evaluate_wheel};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;

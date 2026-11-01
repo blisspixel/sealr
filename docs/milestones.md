@@ -1,8 +1,8 @@
 # Milestone history
 
-Updated 2026-10-13.
+Updated 2026-10-31.
 
-This page records preview contents through the Alpha.18 source tree. Alpha.1 through Alpha.16 remote releases and tags are retired; their notes remain historical snapshots. Published native artifacts remain Alpha.17 until Alpha.18 is released. See [distribution history](distribution-history.md). The [changelog](../CHANGELOG.md) is the compact file-level history.
+This page records preview contents through the Alpha.19 source tree. Alpha.1 through Alpha.16 remote releases and tags are retired; their notes remain historical snapshots. Published native artifacts remain Alpha.17 until Alpha.19 is released. See [distribution history](distribution-history.md). The [changelog](../CHANGELOG.md) is the compact file-level history.
 
 All previews remain non-production releases. A completed milestone means its bounded repository gate shipped, not that the whole security boundary became stable.
 
@@ -28,6 +28,7 @@ All previews remain non-production releases. A completed milestone means its bou
 | Alpha.16 | 2026-09-13 | Typed publisher outcomes, tested evidence and Rust consumer migrations, named existing durability controls, and reproducible assurance bookkeeping | [Release notes](releases/v0.1.0-alpha.16.md) |
 | Alpha.17 | 2026-09-13 | Current owner-controlled source and native distribution, owner-created release drafts, and fresh assurance qualification history with unchanged archive semantics | [Release notes](releases/v0.1.0-alpha.17.md) |
 | Alpha.18 | 2026-10-13 | Minimal GNU tar records are admitted. Derived ratios exclude only the one 10240-byte record that contains the terminator. Real bombs still fail `quota.ratio`, and `max_ratio` stays 100 | [Release notes](releases/v0.1.0-alpha.18.md) |
+| Alpha.19 | 2026-10-31 | Terminal refusals name the member and the next step. `--machine` emits one command result. Finding-code discriminants are pinned, with `ZipSymlink` at 79. Rust 1.99.1 and edition 2024. Admission and policy are unchanged | [Release notes](releases/v0.1.0-alpha.19.md) |
 
 ## Durable detail by topic
 

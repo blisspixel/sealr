@@ -61,7 +61,7 @@ Assert-True -Condition ($manifest.tools.kani -eq '0.67.0') -Message 'Kani versio
 Assert-True -Condition ($manifest.tools.cargo_mutants -eq '27.1.0') -Message 'cargo-mutants version drifted'
 Assert-True -Condition ($manifest.tools.cargo_llvm_cov -eq '0.9.0') -Message 'cargo-llvm-cov version drifted'
 Assert-True -Condition ($manifest.tools.cargo_semver_checks -eq '0.49.0') -Message 'cargo-semver-checks version drifted'
-Assert-True -Condition ($manifest.tools.rust -eq '1.98.0') -Message 'assurance Rust version drifted'
+Assert-True -Condition ($manifest.tools.rust -eq '1.99.1') -Message 'assurance Rust version drifted'
 Assert-True -Condition ($manifest.semver_tool_archive_sha256 -eq '72f6834d75d28a66e02c9fd6a230ce901bb30eee6067b85867a97445df040e4a') -Message 'cargo-semver-checks archive digest drifted'
 Assert-True -Condition ($manifest.semver_baseline_tag -eq 'source-baseline-20260913') -Message 'semver baseline tag drifted'
 Assert-True -Condition ($manifest.semver_baseline_rev -eq '157d47168ea7bdab1a5d0a1a7c2c8ec896d195d1') -Message 'semver baseline revision drifted'

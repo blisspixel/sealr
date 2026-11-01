@@ -2,12 +2,12 @@ use std::fs;
 use std::path::PathBuf;
 
 use sealr::{
-    apply_with_options, tar_bzip2_ustar_portable_v1_canonical_bytes,
-    tar_bzip2_ustar_portable_v1_digest, tar_ustar_portable_v1_digest, AdmissionStatus,
-    ApplyOptions, ArchiveFormat, FindingCode, InterpretationStatus, Policy, Request, RetentionPlan,
-    Source, TarBzip2InterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
+    AdmissionStatus, ApplyOptions, ArchiveFormat, FindingCode, InterpretationStatus, Policy,
+    Request, RetentionPlan, Source, TAR_BZIP2_ARCHIVE_IR_SCHEMA, TAR_BZIP2_USTAR_PORTABLE_V1,
+    TarBzip2InterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
     TarXzInterpretationProfile, TarZstdInterpretationProfile, TreeRoot, VerificationStatus,
-    TAR_BZIP2_ARCHIVE_IR_SCHEMA, TAR_BZIP2_USTAR_PORTABLE_V1,
+    apply_with_options, tar_bzip2_ustar_portable_v1_canonical_bytes,
+    tar_bzip2_ustar_portable_v1_digest, tar_ustar_portable_v1_digest,
 };
 
 /// CPython 3.12.10 `bz2.compress(tar, 9)` over the exact conformance derived
@@ -375,11 +375,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Unsupported
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::FormatUnsupported));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::FormatUnsupported)
+    );
 
     let mut level = member.clone();
     level[3] = b'0';
@@ -395,11 +397,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Unsupported
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::FormatUnsupported));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::FormatUnsupported)
+    );
 
     let empty = decode_hex(BZ2_EMPTY_HEX);
     let outcome = inspect(&empty, &policy, &options());
@@ -415,11 +419,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Malformed
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::CodecBzip2InvalidStream));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CodecBzip2InvalidStream)
+    );
 
     let mut corrupted = member.clone();
     let middle = corrupted.len() / 2;
@@ -429,11 +435,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Malformed
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::CodecBzip2InvalidStream));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CodecBzip2InvalidStream)
+    );
     assert_eq!(outcome.view.source.magic, "bz2");
 
     let mut trailing = member.clone();
@@ -443,11 +451,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Malformed
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::CodecBzip2TrailingInput));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CodecBzip2TrailingInput)
+    );
 
     let concatenated = [member.clone(), member.clone()].concat();
     let outcome = inspect(&concatenated, &policy, &options());
@@ -455,11 +465,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Unsupported
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::CodecBzip2TrailingInput));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CodecBzip2TrailingInput)
+    );
 
     let mut derived_cap = Policy::default_v10();
     derived_cap.max_derived_archive_bytes = Some(2047);
@@ -469,41 +481,49 @@ fn wrapper_and_inner_language_fail_closed() {
         InterpretationStatus::Interpreted
     ));
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaDerived));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaDerived)
+    );
 
     let mut ratio = Policy::default_v10();
     ratio.max_ratio = Some(1);
     let denied = inspect(&member, &ratio, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaRatio));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaRatio)
+    );
 
     let mut source_cap = Policy::default_v10();
     source_cap.max_archive_bytes = (member.len() - 1) as u64;
     let denied = inspect(&member, &source_cap, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaArchive));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaArchive)
+    );
 
     let mut metadata = Policy::default_v10();
     metadata.max_metadata_bytes = 12;
     let denied = inspect(&member, &metadata, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaMetadata));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaMetadata)
+    );
 }
 
 #[test]
@@ -512,11 +532,13 @@ fn policy_and_format_selection_do_not_alias_other_profiles() {
 
     let older = inspect(&member, &Policy::default_v9(), &options());
     assert!(!matches!(older.admission, AdmissionStatus::Admitted));
-    assert!(older
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::PolicyUnsupported));
+    assert!(
+        older
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PolicyUnsupported)
+    );
 
     let raw_selection = apply_with_options(
         Request {

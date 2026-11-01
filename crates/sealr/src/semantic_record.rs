@@ -11,7 +11,7 @@ use sha2::{Digest, Sha256};
 
 #[cfg(test)]
 use crate::covering::audit_covering;
-use crate::covering::{audit_covering_fallible, CoveringAuditError};
+use crate::covering::{CoveringAuditError, audit_covering_fallible};
 use crate::findings::{Finding, FindingCode, Severity};
 use crate::ir::{
     ArchiveCovering, ArchiveEvidence, ArchiveIR, ByteRange, ExtraDisposition, ExtraFieldRecord,
@@ -19,17 +19,17 @@ use crate::ir::{
     NormalizationAction, ZipInterpretationProfile, ZipMemberEvidence,
 };
 use crate::jail::{
-    jail_name_fallible, jail_name_fallible_for_profile, portable_name_violation, profile_case_fold,
-    JailNameError, JailedName,
+    JailNameError, JailedName, jail_name_fallible, jail_name_fallible_for_profile,
+    portable_name_violation, profile_case_fold,
 };
 use crate::outcome::{
     AdmissionStatus, InterpretationStatus, SemanticAxes, SourceDigest, StoppingPhase,
     VerificationStatus, ViewCompleteness,
 };
-use crate::policy::{ratio_exceeds, ConsumerProfile, ResourceBudget, TargetModel};
+use crate::policy::{ConsumerProfile, ResourceBudget, TargetModel, ratio_exceeds};
 use crate::snapshot::SourceSnapshot;
 use crate::verified::{
-    RetentionPlan, MAX_RETENTION_PATHS, MAX_RETENTION_PATH_BYTES, MAX_RETENTION_TOTAL_PATH_BYTES,
+    MAX_RETENTION_PATH_BYTES, MAX_RETENTION_PATHS, MAX_RETENTION_TOTAL_PATH_BYTES, RetentionPlan,
 };
 
 const MAGIC: [u8; 8] = *b"SEALRSEM";
@@ -4337,8 +4337,8 @@ mod fuzzing {
 
     use super::*;
     use crate::apply::{
-        apply_with_options, plan_source, ApplyOptions, PlanDecision, PlanningContext, Request,
-        Source,
+        ApplyOptions, PlanDecision, PlanningContext, Request, Source, apply_with_options,
+        plan_source,
     };
     use crate::policy::Policy;
 
@@ -4547,7 +4547,7 @@ mod fuzzing {
             }),
             ir: None,
             findings: vec![
-                Finding::error(FindingCode::PathDotDot, "parent path").on("../outside.txt")
+                Finding::error(FindingCode::PathDotDot, "parent path").on("../outside.txt"),
             ],
         };
         let terminal_bytes = encode_planning(&terminal).expect("reference terminal encodes");
@@ -4615,8 +4615,10 @@ mod fuzzing {
                 completed.members.len().saturating_sub(2),
             ))
             .collect(),
-            findings: vec![Finding::error(FindingCode::CrcMismatch, "mismatch")
-                .on(&completed.members[1].decoded_name)],
+            findings: vec![
+                Finding::error(FindingCode::CrcMismatch, "mismatch")
+                    .on(&completed.members[1].decoded_name),
+            ],
         };
         let stopped_bytes =
             encode_completion(&stopped, &planning).expect("reference stopped completion encodes");
@@ -4718,11 +4720,11 @@ mod tests {
 
     use super::*;
     use crate::apply::{
-        apply_with_options, plan_source, ApplyOptions, Outcome, PlanDecision, PlanningContext,
-        Request, Source,
+        ApplyOptions, Outcome, PlanDecision, PlanningContext, Request, Source, apply_with_options,
+        plan_source,
     };
     use crate::outcome::EffectStatus;
-    use crate::policy::{hex_sha256, Policy};
+    use crate::policy::{Policy, hex_sha256};
     use crate::snapshot::{
         inject_read_failure, reset_test_read_ranges, test_read_failure_is_armed, test_read_ranges,
     };
@@ -5980,10 +5982,12 @@ mod tests {
         assert!(planning_findings.is_empty());
         assert_eq!(context.controls(), controls);
         assert_eq!(context.profile(), profile);
-        assert!(pending
-            .members
-            .iter()
-            .all(|member| matches!(member.verification, MemberVerification::Pending)));
+        assert!(
+            pending
+                .members
+                .iter()
+                .all(|member| matches!(member.verification, MemberVerification::Pending))
+        );
 
         let binding = binding_for_planned(&snapshot, &context, RequestedEffect::Inspect);
         let planning_bytes = encode_planning(&ready_plan_with_findings(
@@ -6013,14 +6017,16 @@ mod tests {
         one_under.max_archive_bytes = bytes.len() as u64 - 1;
         crate::zip::reset_parse_calls();
         reset_verify_payload_calls();
-        assert!(plan_source(
-            &Source::Bytes {
-                path: Some("one-over-cap.zip"),
-                data: &bytes,
-            },
-            PlanningContext::compile(&one_under, profile).unwrap(),
-        )
-        .is_err());
+        assert!(
+            plan_source(
+                &Source::Bytes {
+                    path: Some("one-over-cap.zip"),
+                    data: &bytes,
+                },
+                PlanningContext::compile(&one_under, profile).unwrap(),
+            )
+            .is_err()
+        );
         assert_eq!(crate::zip::parse_calls(), 0);
         assert_eq!(verify_payload_calls(), 0);
     }
@@ -6511,18 +6517,24 @@ mod tests {
             test_zip_evidence(&extra_ir.members[0]).extra_fields.len(),
             2
         );
-        assert!(test_zip_evidence(&extra_ir.members[0])
-            .extra_fields
-            .iter()
-            .all(|extra| extra.disposition == ExtraDisposition::Ignored));
-        assert!(test_zip_evidence(&extra_ir.members[0])
-            .extra_fields
-            .iter()
-            .any(|extra| extra.site == ExtraSite::Local));
-        assert!(test_zip_evidence(&extra_ir.members[0])
-            .extra_fields
-            .iter()
-            .any(|extra| extra.site == ExtraSite::Central));
+        assert!(
+            test_zip_evidence(&extra_ir.members[0])
+                .extra_fields
+                .iter()
+                .all(|extra| extra.disposition == ExtraDisposition::Ignored)
+        );
+        assert!(
+            test_zip_evidence(&extra_ir.members[0])
+                .extra_fields
+                .iter()
+                .any(|extra| extra.site == ExtraSite::Local)
+        );
+        assert!(
+            test_zip_evidence(&extra_ir.members[0])
+                .extra_fields
+                .iter()
+                .any(|extra| extra.site == ExtraSite::Central)
+        );
         let (extra_v2, extra_v2_plan) = run_terminal_shadow_for_profile(
             "same-extra-strict-v2-terminal",
             &extra,
@@ -6742,9 +6754,11 @@ mod tests {
             expected_names
         );
         let mut unique_names = std::collections::HashSet::new();
-        assert!(cases
-            .iter()
-            .all(|case| unique_names.insert(case.evidence.name.as_str())));
+        assert!(
+            cases
+                .iter()
+                .all(|case| unique_names.insert(case.evidence.name.as_str()))
+        );
         let backend_twins: Vec<_> = cases
             .iter()
             .filter(|case| case.parity_group.as_deref() == Some("strict-v2-mixed-backends"))
@@ -7387,7 +7401,7 @@ mod tests {
                 cause: FindingCode::CrcMismatch,
             }],
             findings: vec![
-                Finding::error(FindingCode::CrcMismatch, "directory CRC").on("directory/")
+                Finding::error(FindingCode::CrcMismatch, "directory CRC").on("directory/"),
             ],
         };
         assert_eq!(
@@ -7571,14 +7585,18 @@ mod tests {
                 Err(error) => {
                     assert_eq!(error.kind, RecordErrorKind::AllocationFailed);
                     assert_eq!(completion_materializations(), 1);
-                    assert!(plan
-                        .record
-                        .ir
-                        .as_ref()
-                        .unwrap()
-                        .members
-                        .iter()
-                        .all(|member| matches!(member.verification, MemberVerification::Pending)));
+                    assert!(
+                        plan.record
+                            .ir
+                            .as_ref()
+                            .unwrap()
+                            .members
+                            .iter()
+                            .all(|member| matches!(
+                                member.verification,
+                                MemberVerification::Pending
+                            ))
+                    );
                     successful_allocations += 1;
                 }
                 Ok(decoded) => {
@@ -8178,10 +8196,12 @@ mod tests {
         let required = planning_metadata_bytes(&pending).unwrap();
         let parsed = crate::zip::parse_zip(&bytes, u64::MAX, u64::MAX).unwrap();
         assert_eq!(required, parsed.metadata_bytes);
-        assert!(test_zip_evidence(&pending.members[0])
-            .extra_fields
-            .iter()
-            .any(|extra| extra.site == ExtraSite::Local));
+        assert!(
+            test_zip_evidence(&pending.members[0])
+                .extra_fields
+                .iter()
+                .any(|extra| extra.site == ExtraSite::Local)
+        );
 
         let mut omitted = pending.clone();
         test_zip_evidence_mut(&mut omitted.members[0])

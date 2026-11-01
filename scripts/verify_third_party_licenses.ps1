@@ -7,7 +7,7 @@ Set-StrictMode -Version Latest
 $workspace = Split-Path -Parent $PSScriptRoot
 $expected = [ordered]@{
     'x86_64-unknown-linux-gnu' = [pscustomobject]@{
-        Components = 72
+        Components = 73
         Notices = 14
         Present = @(
             'linux-raw-sys 0.12.1',
@@ -31,7 +31,7 @@ $expected = [ordered]@{
         )
     }
     'aarch64-apple-darwin' = [pscustomobject]@{
-        Components = 67
+        Components = 68
         Notices = 11
         Present = @(
             'errno 0.3.14',
@@ -44,7 +44,7 @@ $expected = [ordered]@{
         Absent = @('linux-raw-sys 0.12.1', 'windows-sys 0.61.2')
     }
     'x86_64-pc-windows-msvc' = [pscustomobject]@{
-        Components = 75
+        Components = 76
         Notices = 10
         Present = @(
             'windows-sys 0.61.2',
@@ -122,6 +122,7 @@ try {
                 'unicode-general-category 1.1.0',
                 'unicode-normalization 0.1.25',
                 'unscanny 0.1.0',
+                'terminal_size 0.4.4',
                 'zlib-rs 0.6.7',
                 'zmij 1.0.23'
             ) +

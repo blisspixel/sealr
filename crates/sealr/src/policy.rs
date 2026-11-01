@@ -920,12 +920,12 @@ impl ValidatedPolicy {
             ("max_metadata_bytes", Some(policy.max_metadata_bytes)),
             ("max_dict_bytes", Some(policy.max_dict_bytes)),
         ] {
-            if let Some(value) = value {
-                if value > MAX_DOUBLE_SAFE_INTEGER {
-                    return Err(unsupported(format!(
-                        "policy {field} value {value} exceeds the 2^53-1 double-safe ceiling"
-                    )));
-                }
+            if let Some(value) = value
+                && value > MAX_DOUBLE_SAFE_INTEGER
+            {
+                return Err(unsupported(format!(
+                    "policy {field} value {value} exceeds the 2^53-1 double-safe ceiling"
+                )));
             }
         }
         let digest = policy.digest_hex();
@@ -1387,15 +1387,21 @@ mod tests {
                 .code,
             FindingCode::PolicyUnsupported
         );
-        assert!(Policy::default_v2()
-            .compile_for_format(POLICY_FORMAT_ZIP)
-            .is_ok());
-        assert!(Policy::default_v2()
-            .compile_for_format(POLICY_FORMAT_TAR_USTAR)
-            .is_ok());
-        assert!(Policy::default_v3()
-            .compile_for_format(POLICY_FORMAT_ZIP64)
-            .is_ok());
+        assert!(
+            Policy::default_v2()
+                .compile_for_format(POLICY_FORMAT_ZIP)
+                .is_ok()
+        );
+        assert!(
+            Policy::default_v2()
+                .compile_for_format(POLICY_FORMAT_TAR_USTAR)
+                .is_ok()
+        );
+        assert!(
+            Policy::default_v3()
+                .compile_for_format(POLICY_FORMAT_ZIP64)
+                .is_ok()
+        );
         assert_eq!(
             Policy::default_v2()
                 .compile_for_format(POLICY_FORMAT_ZIP64)
@@ -1403,12 +1409,16 @@ mod tests {
                 .code,
             FindingCode::PolicyUnsupported
         );
-        assert!(Policy::default_v5()
-            .compile_for_format(POLICY_FORMAT_TAR_PAX)
-            .is_ok());
-        assert!(Policy::default_v6()
-            .compile_for_format(POLICY_FORMAT_TAR_GNU_LONGNAME)
-            .is_ok());
+        assert!(
+            Policy::default_v5()
+                .compile_for_format(POLICY_FORMAT_TAR_PAX)
+                .is_ok()
+        );
+        assert!(
+            Policy::default_v6()
+                .compile_for_format(POLICY_FORMAT_TAR_GNU_LONGNAME)
+                .is_ok()
+        );
     }
 
     #[test]

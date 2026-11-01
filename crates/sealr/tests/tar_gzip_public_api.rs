@@ -3,14 +3,14 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use crc32fast::Hasher as Crc;
-use flate2::write::DeflateEncoder;
 use flate2::Compression;
+use flate2::write::DeflateEncoder;
 use sealr::{
+    AdmissionStatus, ApplyOptions, ArchiveFormat, FindingCode, InterpretationStatus, Policy,
+    Request, RetentionPlan, Source, TAR_GZIP_ARCHIVE_IR_SCHEMA, TAR_GZIP_USTAR_PORTABLE_V1,
+    TarGzipInterpretationProfile, TarInterpretationProfile, TreeRoot, VerificationStatus,
     apply_with_options, tar_gzip_ustar_portable_v1_canonical_bytes,
-    tar_gzip_ustar_portable_v1_digest, AdmissionStatus, ApplyOptions, ArchiveFormat, FindingCode,
-    InterpretationStatus, Policy, Request, RetentionPlan, Source, TarGzipInterpretationProfile,
-    TarInterpretationProfile, TreeRoot, VerificationStatus, TAR_GZIP_ARCHIVE_IR_SCHEMA,
-    TAR_GZIP_USTAR_PORTABLE_V1,
+    tar_gzip_ustar_portable_v1_digest,
 };
 
 fn write_octal(field: &mut [u8], value: u64) {
@@ -287,11 +287,13 @@ fn wrapper_grammar_integrity_and_resource_axes_fail_closed() {
             InterpretationStatus::Unsupported
         ));
         assert!(matches!(outcome.admission, AdmissionStatus::NotEvaluated));
-        assert!(outcome
-            .view
-            .findings
-            .iter()
-            .any(|finding| { finding.code == FindingCode::CodecDeflateTrailingInput }));
+        assert!(
+            outcome
+                .view
+                .findings
+                .iter()
+                .any(|finding| { finding.code == FindingCode::CodecDeflateTrailingInput })
+        );
     }
     let mut truncated_second = member.clone();
     truncated_second.extend_from_slice(&[0x1f, 0x8b]);
@@ -340,11 +342,13 @@ fn wrapper_grammar_integrity_and_resource_axes_fail_closed() {
         duplicate_outcome.interpretation,
         InterpretationStatus::Malformed
     ));
-    assert!(duplicate_outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::GzipExtra));
+    assert!(
+        duplicate_outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::GzipExtra)
+    );
 
     let mut derived_cap = Policy::default_v4();
     derived_cap.max_derived_archive_bytes = Some((tar.len() - 1) as u64);
@@ -354,31 +358,37 @@ fn wrapper_grammar_integrity_and_resource_axes_fail_closed() {
         InterpretationStatus::Interpreted
     ));
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaDerived));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaDerived)
+    );
 
     let mut ratio = Policy::default_v4();
     ratio.max_ratio = Some(1);
     let denied = inspect(&member, &ratio, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaRatio));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaRatio)
+    );
 
     let mut source_cap = Policy::default_v4();
     source_cap.max_archive_bytes = (member.len() - 1) as u64;
     let denied = inspect(&member, &source_cap, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaArchive));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaArchive)
+    );
 
     let mut metadata = Policy::default_v4();
     metadata.max_metadata_bytes = 17;
@@ -388,11 +398,13 @@ fn wrapper_grammar_integrity_and_resource_axes_fail_closed() {
         InterpretationStatus::Interpreted
     ));
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaMetadata));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaMetadata)
+    );
 
     let body_len = b"bounded derived content".len() as u64;
     let mut exact = Policy::default_v4();
@@ -420,12 +432,14 @@ fn wrapper_grammar_integrity_and_resource_axes_fail_closed() {
     zero_denominator.max_ratio = Some(1_000);
     let empty_outcome = inspect(&empty_member, &zero_denominator, &options());
     assert!(matches!(empty_outcome.admission, AdmissionStatus::Admitted));
-    assert!(empty_outcome
-        .archive_ir()
-        .unwrap()
-        .members()
-        .iter()
-        .any(|member| member.declared_uncomp_size == 0));
+    assert!(
+        empty_outcome
+            .archive_ir()
+            .unwrap()
+            .members()
+            .iter()
+            .any(|member| member.declared_uncomp_size == 0)
+    );
 }
 
 #[test]
@@ -475,11 +489,13 @@ fn policy_and_format_selection_do_not_alias_raw_tar_or_older_policies() {
     let gzip = gzip(&tar, 0, None);
     let older = inspect(&gzip, &Policy::default_v3(), &options());
     assert!(!matches!(older.admission, AdmissionStatus::Admitted));
-    assert!(older
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::PolicyUnsupported));
+    assert!(
+        older
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PolicyUnsupported)
+    );
 
     let raw_selection = apply_with_options(
         Request {

@@ -116,9 +116,11 @@ fn help_and_version_are_successful_command_surfaces() {
     for flag in ["--help", "-h"] {
         let output = verifier(&[flag]);
         assert_exit(&output, 0);
-        assert!(String::from_utf8(output.stdout)
-            .unwrap()
-            .starts_with("usage: sealr-identity-verifier"));
+        assert!(
+            String::from_utf8(output.stdout)
+                .unwrap()
+                .starts_with("usage: sealr-identity-verifier")
+        );
         assert!(output.stderr.is_empty());
     }
 
@@ -134,9 +136,11 @@ fn help_and_version_are_successful_command_surfaces() {
 
     let output = verifier(&["evidence", "--help"]);
     assert_exit(&output, 0);
-    assert!(String::from_utf8(output.stdout)
-        .unwrap()
-        .contains("evidence --view <view.json>"));
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("evidence --view <view.json>")
+    );
     assert!(output.stderr.is_empty());
 }
 
@@ -162,9 +166,11 @@ fn malformed_invocations_are_usage_errors() {
         let output = verifier(&arguments);
         assert_exit(&output, 2);
         assert!(output.stdout.is_empty());
-        assert!(String::from_utf8(output.stderr)
-            .unwrap()
-            .starts_with("usage: "));
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .starts_with("usage: ")
+        );
     }
 }
 
@@ -189,9 +195,11 @@ fn canonical_evidence_success_is_quiet_on_stderr_and_source_is_optional() {
     with_source.extend(["--source", path_text(&files.source)]);
     let output = verifier(&with_source);
     assert_exit(&output, 0);
-    assert!(String::from_utf8(output.stdout)
-        .unwrap()
-        .contains("content root independently verified, source digest checked"));
+    assert!(
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .contains("content root independently verified, source digest checked")
+    );
     assert!(output.stderr.is_empty());
 }
 
@@ -214,9 +222,11 @@ fn view_receipt_and_source_mutations_fail_closed() {
         ]);
         assert_exit(&output, 1);
         assert!(output.stdout.is_empty());
-        assert!(String::from_utf8(output.stderr)
-            .unwrap()
-            .starts_with("canonical evidence rejected: "));
+        assert!(
+            String::from_utf8(output.stderr)
+                .unwrap()
+                .starts_with("canonical evidence rejected: ")
+        );
         fs::write(path, original).expect("restore fixture");
     }
 }

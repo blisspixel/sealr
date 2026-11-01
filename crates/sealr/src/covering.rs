@@ -814,15 +814,15 @@ pub(crate) fn audit_sevenz_covering(
         let folder_bytes = snapshot
             .read_vec(folder.pack_stream.offset, folder.pack_stream.len)
             .map_err(|_| fail("a 7z pack stream is outside the snapshot"))?;
-        if let Some(declared) = folder.pack_crc {
-            if crc32(&folder_bytes) != declared {
-                return Err(fail("a 7z pack-stream CRC32 disagrees with its bytes"));
-            }
+        if let Some(declared) = folder.pack_crc
+            && crc32(&folder_bytes) != declared
+        {
+            return Err(fail("a 7z pack-stream CRC32 disagrees with its bytes"));
         }
-        if let Some(declared) = folder.folder_crc {
-            if crc32(&folder_bytes) != declared {
-                return Err(fail("a 7z folder CRC32 disagrees with its bytes"));
-            }
+        if let Some(declared) = folder.folder_crc
+            && crc32(&folder_bytes) != declared
+        {
+            return Err(fail("a 7z folder CRC32 disagrees with its bytes"));
         }
     }
     if cursor != sevenz.next_header.offset {
@@ -1153,10 +1153,9 @@ pub(crate) fn audit_xz_wrapper_covering(
         }
         if let (Some(compressed), Some(uncompressed)) =
             (block.declared_compressed, block.declared_uncompressed)
+            && (compressed != block.compressed.len || uncompressed != block.uncompressed_len)
         {
-            if compressed != block.compressed.len || uncompressed != block.uncompressed_len {
-                return Err(fail("xz declared sizes disagree with the evidence"));
-            }
+            return Err(fail("xz declared sizes disagree with the evidence"));
         }
         if block.dict_size > MAX_DICT_BYTES {
             return Err(fail("xz dictionary evidence exceeds the profile ceiling"));
@@ -1300,12 +1299,12 @@ pub(crate) fn audit_zstd_wrapper_covering(
             "zstd frame content size or header length disagrees with the evidence",
         ));
     }
-    if let Some(declared) = frame_content_size {
-        if declared != evidence.derived_output_len {
-            return Err(fail(
-                "zstd frame content size disagrees with the derived output length",
-            ));
-        }
+    if let Some(declared) = frame_content_size
+        && declared != evidence.derived_output_len
+    {
+        return Err(fail(
+            "zstd frame content size disagrees with the derived output length",
+        ));
     }
 
     let window_size = match window_descriptor {
@@ -3038,11 +3037,12 @@ pub(crate) fn audit_covering_fallible<'member>(
                 inconsistent("local header does not abut its payload").on(&member.decoded_name)
             );
         }
-        if let Some(descriptor) = descriptor {
-            if payload.end() != descriptor.start() {
-                return Err(inconsistent("payload does not abut its data descriptor")
-                    .on(&member.decoded_name));
-            }
+        if let Some(descriptor) = descriptor
+            && payload.end() != descriptor.start()
+        {
+            return Err(
+                inconsistent("payload does not abut its data descriptor").on(&member.decoded_name)
+            );
         }
         let local_end = descriptor.map_or_else(|| payload.end(), CheckedInterval::end);
         let local_record = CheckedInterval::from_bounds(local_header.start(), local_end)
@@ -3060,11 +3060,11 @@ pub(crate) fn audit_covering_fallible<'member>(
                 inconsistent("payload range is outside its local record").on(&member.decoded_name)
             );
         }
-        if let Some(descriptor) = descriptor {
-            if !local_record.contains(descriptor) {
-                return Err(inconsistent("data descriptor is outside its local record")
-                    .on(&member.decoded_name));
-            }
+        if let Some(descriptor) = descriptor
+            && !local_record.contains(descriptor)
+        {
+            return Err(inconsistent("data descriptor is outside its local record")
+                .on(&member.decoded_name));
         }
         local_ranges.push(local_record);
         central_ranges.push(central_header);
@@ -3183,7 +3183,7 @@ fn inconsistent(detail: &'static str) -> CoveringAuditError<'static> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::apply::{apply, apply_with_options, ApplyOptions, Request, Source};
+    use crate::apply::{ApplyOptions, Request, Source, apply, apply_with_options};
     use crate::findings::Finding;
     use crate::ir::{
         ArchiveEvidence, ArchiveIR, GnuLongNamePathSource, MemberEvidence, PaxValueSource,
@@ -4024,9 +4024,11 @@ mod tests {
 
         let error = audit_pax_header(&header(1, b'5')).unwrap_err();
         assert_eq!(error.code, FindingCode::CoveringInconsistent);
-        assert!(error
-            .detail
-            .contains("PAX directory has a nonzero underlying size"));
+        assert!(
+            error
+                .detail
+                .contains("PAX directory has a nonzero underlying size")
+        );
         audit_pax_header(&header(0, b'5')).expect("zero-size directory remains canonical");
         audit_pax_header(&header(1, b'0')).expect("nonzero regular file remains canonical");
     }

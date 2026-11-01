@@ -19,8 +19,8 @@ use ruzstd::decoding::{BlockDecodingStrategy, FrameDecoder};
 use crate::findings::{Finding, FindingCode};
 use crate::ir::ByteRange;
 use crate::snapshot::{
-    as_io_error, finding_from_io, DomainRange, SnapshotDomainId, SnapshotRangeReader, SnapshotSet,
-    SourceSnapshot, TransformGraph, TransformProfile,
+    DomainRange, SnapshotDomainId, SnapshotRangeReader, SnapshotSet, SourceSnapshot,
+    TransformGraph, TransformProfile, as_io_error, finding_from_io,
 };
 
 const MAGIC: u32 = 0xFD2F_B528;
@@ -432,14 +432,18 @@ fn parse_frame_header(source: &SourceSnapshot<'_>) -> Result<ZstdFrameHeader, Zs
         return Err(ZstdError::new(
             ZstdErrorKind::WindowBounds,
             FindingCode::FormatUnsupported,
-            format!("zstd window of {window_size} bytes is below the {MIN_WINDOW_BYTES}-byte spec minimum"),
+            format!(
+                "zstd window of {window_size} bytes is below the {MIN_WINDOW_BYTES}-byte spec minimum"
+            ),
         ));
     }
     if window_size > MAX_WINDOW_BYTES {
         return Err(ZstdError::new(
             ZstdErrorKind::WindowBounds,
             FindingCode::FormatUnsupported,
-            format!("zstd window of {window_size} bytes exceeds the {MAX_WINDOW_BYTES}-byte profile ceiling"),
+            format!(
+                "zstd window of {window_size} bytes exceeds the {MAX_WINDOW_BYTES}-byte profile ceiling"
+            ),
         ));
     }
 
@@ -526,17 +530,17 @@ impl ZstdFrameReader<'_, '_> {
                 "the decoder read a checksum for a zstd frame that declares none",
             )));
         }
-        if let Some(declared) = self.frame_content_size {
-            if self.output_len != declared {
-                return Err(self.fail(ZstdError::new(
-                    ZstdErrorKind::DeclaredSize,
-                    FindingCode::QuotaDeclaredLie,
-                    format!(
-                        "zstd frame content size declares {declared} bytes but {} were decoded",
-                        self.output_len
-                    ),
-                )));
-            }
+        if let Some(declared) = self.frame_content_size
+            && self.output_len != declared
+        {
+            return Err(self.fail(ZstdError::new(
+                ZstdErrorKind::DeclaredSize,
+                FindingCode::QuotaDeclaredLie,
+                format!(
+                    "zstd frame content size declares {declared} bytes but {} were decoded",
+                    self.output_len
+                ),
+            )));
         }
         *self.completion.borrow_mut() = Some(Ok(FrameCompletion {
             consumed_total: self.decoder.bytes_read_from_source(),
@@ -658,10 +662,10 @@ fn source_or(io_error: &io::Error, fallback: impl FnOnce() -> ZstdError) -> Zstd
 fn nested_source_finding(error: &FrameDecoderError) -> Option<Finding> {
     let mut source: Option<&(dyn std::error::Error + 'static)> = std::error::Error::source(error);
     while let Some(current) = source {
-        if let Some(io_error) = current.downcast_ref::<io::Error>() {
-            if let Some(finding) = finding_from_io(io_error) {
-                return Some(finding);
-            }
+        if let Some(io_error) = current.downcast_ref::<io::Error>()
+            && let Some(finding) = finding_from_io(io_error)
+        {
+            return Some(finding);
         }
         source = std::error::Error::source(current);
     }
