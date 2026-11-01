@@ -9,6 +9,7 @@ The project is in initial development. Compatibility may change between preview 
 ### Added
 
 - `__internal-phase-trace` records supervisor time for source hashing, plan validation, worker setup, and payload verification on an unretained Linux member read. It is not a shipped API. `tools/phase-trace` runs one bounded diagnostic on a small archive and on the same members beside an unread stored pad. The default library build and the released helper do not include it. Admission, retention, and evidence are unchanged. The 2026-11-01 run is [docs/repeated-read-phases.md](docs/repeated-read-phases.md).
+- `sealr.abandoned-stage.v1` specifies retained-capability stage ownership and the recovery rule. Recovery after the creating process is gone is not implemented, and cleanup does not list `.sealr-stage-*`. `FlushOnly` and `MemberSync` are unchanged. The contract is [docs/abandoned-stage.md](docs/abandoned-stage.md).
 
 ## [0.1.0-alpha.19] - 2026-10-31
 

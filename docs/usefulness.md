@@ -50,7 +50,7 @@ The separate publisher replay combines ordinary immutable Alpha.15 acquisition w
 - A source digest is distinct from a tree, artifact, or installation identity.
 - Publication occurs only after verification and stage audit, with no replacement and no link following.
 - Supervised operations retain authenticated packaging, supported Linux restrictions, exact completion, and worker cleanup requirements.
-- Same-user attackers, abandoned stages, and power-loss durability retain their documented limitations until specific tested contracts replace them.
+- Same-user attackers, abandoned stages, and power-loss durability retain their documented limitations. Abandoned-stage ownership is specified in [abandoned-stage.md](abandoned-stage.md); recovery is not implemented, so that limitation remains in force.
 - Archive admission does not establish that executable content is safe. Automated checks do not establish an independent audit.
 
 The [roadmap](../ROADMAP.md#active-execution-queue) orders remaining work. See the [semantic model](semantic-model.md#the-consumption-rule), [wheel profile](profiles/python-wheel-v1.md), and [implementation boundary](implementation.md) for exact contracts.

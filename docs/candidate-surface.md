@@ -284,8 +284,10 @@ supported native platforms.
 
 Both modes stage privately and publish with no-replace semantics. `MemberSync`
 additionally syncs completed member files. Neither mode syncs directories,
-recovers abandoned stages, or establishes power-loss durability. A future mode
-with different guarantees requires its own policy and migration contract.
+recovers abandoned stages, or establishes power-loss durability. The
+[abandoned-stage contract](abandoned-stage.md) defines current ownership and
+forbids filename-pattern recovery. A future mode with different guarantees
+requires its own policy and migration contract.
 Migration evidence does not retire compatibility fields or freeze the candidate.
 
 ## What would make this a freeze

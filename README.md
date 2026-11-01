@@ -95,12 +95,14 @@ supported formats, the explicit Linux worker, resource limits, and open gaps.
 
 ## What comes next
 
-Measure source hashing, plan validation, worker setup, and payload work
-separately before changing the repeated-read boundary. A controlled downstream
-Alpha.15 experiment found a large difference for one small retained working
-set, but cannot attribute it to one internal phase. Lifecycle recovery and
-coordinated dependency maintenance follow; additional formats remain deferred.
-The [iteration record](docs/autonomous-improvement.md) preserves the historical
+Repeated-read phases are recorded in
+[repeated-read phases](docs/repeated-read-phases.md). The next lifecycle work
+is authenticated abandoned-stage ownership. The
+[contract](docs/abandoned-stage.md) says a live operation acts on the retained
+stage capability, and a later call does not delete a stage by filename.
+Recovery after the process is gone is not implemented. Coordinated dependency
+maintenance follows. Additional formats remain deferred. The
+[iteration record](docs/autonomous-improvement.md) preserves the historical
 artifact pins, exact measurements, and completed migration evidence.
 
 The [roadmap](ROADMAP.md) and [execution plan](docs/near-term.md) use automated

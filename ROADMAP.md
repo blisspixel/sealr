@@ -58,11 +58,13 @@ The [phase observation](docs/repeated-read-phases.md) is a separate diagnostic. 
 
 ### 2. Close lifecycle gaps beyond named member syncing
 
-`Durability::FlushOnly` and `Durability::MemberSync` now name the existing behavior precisely. Both retain private staging and native no-replace publication. Neither provides directory syncing, crash recovery, or power-loss durability.
+`Durability::FlushOnly` and `Durability::MemberSync` name the existing behavior. Both retain private staging and native no-replace publication. Neither provides directory syncing, crash recovery, or power-loss durability.
 
-Specify authenticated abandoned-stage ownership and recovery before implementing cleanup. Exercise interruption at creation, writes, audit, publication, and cleanup, plus hostile renames, links, unrelated neighbors, and existing destinations on each advertised platform. Never recover by recursively deleting a filename pattern.
+[Abandoned-stage ownership](docs/abandoned-stage.md) (`sealr.abandoned-stage.v1`) specifies the gap. A live operation authenticates the stage by the retained directory capability. Linux and macOS require the stage name to identify that same device and inode before publication. Windows keeps the stage handle without delete sharing. Cleanup removes that retained object, with one exact-name retry only where setup cleanup already does, and never by listing `.sealr-stage-*`. A later materialization leaves an abandoned stage, a same-shaped lookalike, a link, an unrelated file, and a pre-existing directory in place. An existing destination is preserved by the publication tests.
 
-Done means each additional lifecycle guarantee has a versioned contract and reproducible fault evidence. Existing named durability selections must not silently acquire a stronger claim.
+Recovery after the process is gone is not implemented. The receipt does not record a stage witness, so a later process cannot prove that a directory is the one this operation created. Same-user replacement remains outside the in-process boundary. Do not add filename-pattern cleanup while that is true.
+
+Done means each additional lifecycle guarantee has a versioned contract and reproducible fault evidence. Existing named durability selections must not silently acquire a stronger claim. This specification and its preservation tests are the current evidence. Directory sync, crash recovery, and power-loss durability are still absent.
 
 ### 3. Keep compatibility, assurance, and dependencies current
 
