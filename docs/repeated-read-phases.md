@@ -17,6 +17,10 @@ That file is the authoritative record of every read. Tables below summarize it.
 The supervisor was a local release build of `sealr-phase-trace` with
 `__internal-phase-trace` enabled. SHA-256
 `03bc2c268e09720b758985e0d23bd156106ce7d921051b33eb38c3790e36d651`.
+That hash is the binary that wrote the JSON. A later change cfg-gates the
+protocol constants to Linux so macOS and Windows can compile the same
+sources. A rebuild after that change has a different tool hash. The protocol
+and this JSON stay the same.
 The helper was a local release build of `sealr-worker` from
 `sealr-worker-bootstrap-lab`, without that feature. SHA-256
 `631ed470950f9f814ed405e51cdb560fc46cdb4aa06388882b7b63cf2c843bb8`,

@@ -32,11 +32,17 @@ use zip::write::SimpleFileOptions;
 #[cfg(target_os = "linux")]
 use zip::{CompressionMethod, ZipWriter};
 
+#[cfg(target_os = "linux")]
 const MEMBERS: usize = 8;
+#[cfg(target_os = "linux")]
 const MEMBER_LEN: usize = 45_000;
+#[cfg(target_os = "linux")]
 const PAD_LEN: usize = 8 * 1024 * 1024;
+#[cfg(target_os = "linux")]
 const PASSES: usize = 6;
+#[cfg(target_os = "linux")]
 const BUDGET: Duration = Duration::from_secs(120);
+#[cfg(target_os = "linux")]
 const CASES: &[(&str, usize)] = &[("small", 0), ("wide", PAD_LEN)];
 
 fn main() -> ExitCode {
