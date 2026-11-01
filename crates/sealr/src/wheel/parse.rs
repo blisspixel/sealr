@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::jail::{jail_name_fallible_for_profile, portable_name_violation, JailNameError};
+use crate::jail::{JailNameError, jail_name_fallible_for_profile, portable_name_violation};
 use crate::wheel::model::{
     CoreMetadata, EntryPoint, EvaluationStage, WheelFilename, WheelFinding, WheelHeaders,
     WheelLimits,
@@ -204,16 +204,15 @@ pub fn parse_wheel_filename(raw: &str, limits: WheelLimits) -> Result<WheelFilen
         ));
     }
     validate_filename_component(version, "version", b"._+!")?;
-    if let Some(build) = build {
-        if !build.as_bytes()[0].is_ascii_digit()
-            || !build.bytes().all(|byte| byte.is_ascii_alphanumeric())
-        {
-            return Err(WheelFinding::new(
-                EvaluationStage::Filename,
-                "wheel.build-tag",
-                "build tag must match [0-9][0-9A-Za-z]*",
-            ));
-        }
+    if let Some(build) = build
+        && (!build.as_bytes()[0].is_ascii_digit()
+            || !build.bytes().all(|byte| byte.is_ascii_alphanumeric()))
+    {
+        return Err(WheelFinding::new(
+            EvaluationStage::Filename,
+            "wheel.build-tag",
+            "build tag must match [0-9][0-9A-Za-z]*",
+        ));
     }
     let expanded_tags = expand_tag_triple(python_tag, abi_tag, platform_tag, limits)?;
     let normalized_distribution = normalize_distribution(distribution);
@@ -895,7 +894,7 @@ fn validate_entry_point_object(object: &str) -> Result<(), WheelFinding> {
     }
 
     let (reference, extras) = if object.ends_with(']') {
-        let open = object.rfind('[').ok_or_else(&invalid)?;
+        let open = object.rfind('[').ok_or_else(invalid)?;
         let reference = object[..open].trim_ascii_end();
         let extras = &object[open + 1..object.len() - 1];
         if reference.contains(['[', ']']) || extras.contains(['[', ']']) {
@@ -909,7 +908,7 @@ fn validate_entry_point_object(object: &str) -> Result<(), WheelFinding> {
         (object, None)
     };
 
-    let (module, attribute) = reference.split_once(':').ok_or_else(&invalid)?;
+    let (module, attribute) = reference.split_once(':').ok_or_else(invalid)?;
     if attribute.contains(':')
         || !valid_dotted_python_reference(module.trim_ascii())
         || !valid_dotted_python_reference(attribute.trim_ascii())
@@ -1018,11 +1017,13 @@ mod tests {
             .unwrap();
         }
         for invalid in [".demo", "demo.", "_demo", "demo_", "caf\u{e9}"] {
-            assert!(parse_wheel_filename(
-                &format!("{invalid}-1.0-py3-none-any.whl"),
-                WheelLimits::default(),
-            )
-            .is_err());
+            assert!(
+                parse_wheel_filename(
+                    &format!("{invalid}-1.0-py3-none-any.whl"),
+                    WheelLimits::default(),
+                )
+                .is_err()
+            );
         }
     }
 

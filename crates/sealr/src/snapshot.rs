@@ -12,7 +12,7 @@ use sha2::{Digest, Sha256};
 
 use crate::findings::{Finding, FindingCode};
 use crate::ir::ByteRange;
-use crate::materialize::{ensure_file_handle_is_not_reparse, PrivateDirectory};
+use crate::materialize::{PrivateDirectory, ensure_file_handle_is_not_reparse};
 use crate::outcome::SourceDigest;
 use crate::policy::hex_sha256;
 
@@ -917,15 +917,15 @@ impl<'a> SourceSnapshot<'a> {
         })?;
 
         let (len, sha256) = copy_bounded(&mut source, &mut writer, max_archive_bytes)?;
-        if let Some(expected_len) = expected_len {
-            if len != expected_len {
-                return Err(Finding::error(
-                    FindingCode::SourceIo,
-                    format!(
-                        "opened source length changed while copying: expected {expected_len}, read {len}"
-                    ),
-                ));
-            }
+        if let Some(expected_len) = expected_len
+            && len != expected_len
+        {
+            return Err(Finding::error(
+                FindingCode::SourceIo,
+                format!(
+                    "opened source length changed while copying: expected {expected_len}, read {len}"
+                ),
+            ));
         }
         writer.flush().map_err(|error| {
             Finding::error(

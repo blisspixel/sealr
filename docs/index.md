@@ -17,7 +17,7 @@ Start with the [getting started guide](getting-started.md) and [illustrated CLI 
 | [Unicode and streaming wheel evidence](wheel-producer-compatibility.md) | Reproducible producer matrix, exact refusals, and complete capability handoffs |
 | [Candidate surface inventory](candidate-surface.md) | Classified public identities for the first pilot; inventory only, not a freeze |
 | [Exact Poetry 2.4.2 repository fixture](../tests/poetry-consumer/README.md) | Hash-pinned private update seam, PREPARED ordering, abort safety, stock parity, and realization audit |
-| [Current release notes](releases/v0.1.0-alpha.18.md) | Alpha.18 minimal GNU tar records; published downloads remain Alpha.17 |
+| [Current release notes](releases/v0.1.0-alpha.19.md) | Alpha.19 terminal explanations and pinned finding codes; published downloads remain Alpha.17 |
 | [Release verification](release-verification.md) | Verify checksums, provenance, tag, and immutable release state |
 | [Distribution history](distribution-history.md) | Alpha.17 distribution lineage, retired remote releases, and preserved historical evidence |
 | [Distribution contract](distribution-contract.md) | Exact source-package scope, compatibility policy, and native archive floors |

@@ -1,16 +1,16 @@
 use crate::fault::{ChildMode, FaultPoint, StallPoint};
 use crate::frame::{Frame, Kind};
 use crate::linux::{
-    close_inherited_authority, configure_timeout, receive_packet, send_packet,
     ERROR_AUTHORITY_CLOSE, ERROR_DESCRIPTOR, ERROR_PROBE, ERROR_PROTOCOL, ERROR_RESTRICTION,
     FLAG_MATERIALIZE, FLAG_MEMBER_PREFIX_READ, FLAG_MEMBER_READ, FLAG_STAGE, READY_FLAGS,
+    close_inherited_authority, configure_timeout, receive_packet, send_packet,
 };
 use crate::sealed::{self, BlobRole};
 use crate::seccomp;
 use crate::{HELPER_BOOTSTRAP_ABI, HELPER_FEATURE_ID};
 use landlock::{
-    make_bitflags, Access, AccessFs, CompatLevel, Compatible, LandlockStatus, PathBeneath, Ruleset,
-    RulesetAttr, RulesetCreatedAttr, RulesetStatus, ABI,
+    ABI, Access, AccessFs, CompatLevel, Compatible, LandlockStatus, PathBeneath, Ruleset,
+    RulesetAttr, RulesetCreatedAttr, RulesetStatus, make_bitflags,
 };
 use rustix::fd::{AsFd, AsRawFd, OwnedFd};
 use rustix::fs::{FileType, Mode, OFlags};
@@ -461,11 +461,9 @@ fn run(
     mode.exit_at(FaultPoint::SourceProbe);
     let outside_errno = verify_outside_denied(stage.as_ref())?;
     mode.exit_at(FaultPoint::OutsideDenial);
-    if !materialize {
-        if let Some(stage) = &stage {
-            create_stage_probe(stage)?;
-            mode.exit_at(FaultPoint::StageCreate);
-        }
+    if !materialize && let Some(stage) = &stage {
+        create_stage_probe(stage)?;
+        mode.exit_at(FaultPoint::StageCreate);
     }
     mode.stall_at(StallPoint::ProbeExecution);
 

@@ -202,7 +202,7 @@ rustix-linux-procfs 0.1.1
 Declared license: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
 Source: https://github.com/sunfishcode/rustix-linux-procfs
 
-ruzstd 0.9.0
+ruzstd 0.9.1
 Declared license: MIT
 Source: https://github.com/KillingSpark/zstd-rs
 
@@ -237,6 +237,10 @@ Source: https://github.com/dtolnay/syn
 syn 3.0.3
 Declared license: MIT OR Apache-2.0
 Source: https://github.com/dtolnay/syn
+
+terminal_size 0.4.4
+Declared license: MIT OR Apache-2.0
+Source: https://github.com/eminence/terminal-size
 
 thiserror 2.0.20
 Declared license: MIT OR Apache-2.0
@@ -1574,6 +1578,7 @@ Used by:
 - colorchoice 1.0.5
 - crc32fast 1.5.0
 - is_terminal_polyfill 1.70.2
+- terminal_size 0.4.4
 
                                  Apache License
                            Version 2.0, January 2004
@@ -3139,7 +3144,7 @@ MIT License
 ===============================================================================
 
 Used by:
-- ruzstd 0.9.0
+- ruzstd 0.9.1
 
 MIT License
 

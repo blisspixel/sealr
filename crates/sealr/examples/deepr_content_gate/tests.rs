@@ -5,10 +5,10 @@ use std::fs;
 use std::io::{Cursor, ErrorKind, Write as _};
 use std::path::PathBuf;
 
-use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelIdentities, WheelLimits};
+use sealr::wheel::{WheelEvaluation, WheelIdentities, WheelLimits, evaluate_wheel};
 use sealr::{
-    apply_with_options, ApplyOptions, Outcome, Policy, Request, RetentionPlan, RetentionStatus,
-    Source, VerifiedArchive, ZipInterpretationProfile,
+    ApplyOptions, Outcome, Policy, Request, RetentionPlan, RetentionStatus, Source,
+    VerifiedArchive, ZipInterpretationProfile, apply_with_options,
 };
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
@@ -177,10 +177,12 @@ fn assert_failure_report(failure: &super::GateFailure, stage: &str, code: &str) 
         })
     );
     assert!(!failure.detail.is_empty());
-    assert!(failure
-        .finding_codes
-        .windows(2)
-        .all(|pair| pair[0] < pair[1]));
+    assert!(
+        failure
+            .finding_codes
+            .windows(2)
+            .all(|pair| pair[0] < pair[1])
+    );
 }
 
 fn assert_gate_denial(fixture: &Fixture, expected: &str) {
@@ -202,10 +204,12 @@ fn assert_archive_denial(bytes: &[u8], expected_code: &str) {
     let failure = super::require_admitted(&outcome).err().unwrap();
     assert_failure_report(&failure, "admission", "archive-not-admitted");
     assert!(!failure.private_source_deleted_before_evaluation);
-    assert!(failure
-        .finding_codes
-        .iter()
-        .any(|code| code == expected_code));
+    assert!(
+        failure
+            .finding_codes
+            .iter()
+            .any(|code| code == expected_code)
+    );
     assert!(
         outcome
             .view
@@ -389,9 +393,11 @@ fn pycache_is_denied_by_wheel_semantics_and_the_defensive_business_rule() {
         let archive = capability(&outcome);
         match evaluate_wheel(WHEEL_NAME, archive, WheelLimits::default()) {
             WheelEvaluation::Denied { findings } => {
-                assert!(findings
-                    .iter()
-                    .any(|finding| finding.code == "wheel.pycache-payload"));
+                assert!(
+                    findings
+                        .iter()
+                        .any(|finding| finding.code == "wheel.pycache-payload")
+                );
             }
             other => panic!("pycache must be denied before the business gate: {other:?}"),
         }

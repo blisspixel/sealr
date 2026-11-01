@@ -220,7 +220,7 @@ The current receipt is versioned unsigned JSON (`signed: false`). The repository
     "content": { "sealrTreeV1": "..." }
   },
   "view_digest": { "sha256": "..." },
-  "tool": { "name": "sealr", "version": "0.1.0-alpha.18" },
+  "tool": { "name": "sealr", "version": "0.1.0-alpha.19" },
   "environment": { "os": "windows", "arch": "x86_64", "kernel_jail": "unavailable" },
   "materialization": {
     "schema": "sealr.materialization.v2",
@@ -404,7 +404,7 @@ verified.write_evidence(output)?;
 
 ### Rust compatibility
 
-The current MSRV is Rust 1.98, declared by the package `rust-version` and exercised as exact Rust 1.98.0 in CI. Preview releases may raise it only with a changelog entry and corresponding metadata update. Once a stable 1.x line exists, patch releases will not raise the MSRV.
+The current MSRV is Rust 1.99, declared by the package `rust-version` and exercised as exact Rust 1.99.1 in CI. Preview releases may raise it only with a changelog entry and corresponding metadata update. Once a stable 1.x line exists, patch releases will not raise the MSRV.
 
 ### Semantic identities
 
@@ -445,6 +445,6 @@ Not Mojo. Not `extract_all()` that returns `None`.
 
 ## Compatibility
 
-Current `schema` fields are versioned. Adding a finding code is compatible. Changing default policy bytes requires a new policy `id`. Changing view member fields requires a new `sealr.view.vN`.
+Current `schema` fields are versioned. Adding a finding code is compatible. Numeric discriminants of existing `FindingCode` variants stay pinned, strings from `as_str()` are the wire format, and `ZipSymlink` is discriminant 79. New variants append. Semantic-record tags are a separate encoding. Changing default policy bytes requires a new policy `id`. Changing view member fields requires a new `sealr.view.vN`.
 
 Future interpretation profiles are semantic versions, not loose presets. A stable profile must not silently change the meaning of accepted bytes. A security correction that changes interpretation requires a new profile version or explicit revocation of the affected profile.

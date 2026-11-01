@@ -10,8 +10,8 @@
 mod evidence;
 
 pub use evidence::{
+    EVIDENCE_CONFORMANCE_SCHEMA, EvidenceVerificationSummary, MAX_EVIDENCE_BYTES,
     reject_duplicate_json_properties, verify_canonical_evidence, verify_evidence_conformance_json,
-    EvidenceVerificationSummary, EVIDENCE_CONFORMANCE_SCHEMA, MAX_EVIDENCE_BYTES,
 };
 
 use std::collections::{HashMap, HashSet};
@@ -4200,8 +4200,7 @@ fn tar_bzip2_profile_canonical_bytes(
         bzip2_blocks: "one-to-65536-magic-scan-and-chain-fold-verified",
         bzip2_level: "header-digit-1-to-9-caps-decoder-memory-preallocation",
         bzip2_randomized_blocks: "denied",
-        bzip2_integrity:
-            "combined-crc-extracted-and-verified-single-block-re-hashed-footer-padding-zero",
+        bzip2_integrity: "combined-crc-extracted-and-verified-single-block-re-hashed-footer-padding-zero",
         bzip2_trailing_input: "denied-including-concatenated-streams",
         derived_output: "private-immutable-bounded-and-sha256-bound",
         inner_profile: TAR_PORTABLE_PROFILE_SCHEMA,
@@ -4857,8 +4856,7 @@ fn sevenz_profile_canonical_bytes() -> Result<Vec<u8>, VerifyError> {
         integrity: "start-next-pack-folder-substream-crc32-all-sealr-verified",
         numbers: "minimal-variable-length-encodings-required-checked-arithmetic",
         names: "utf16le-non-external-null-terminated-portable-utf8-path-v1",
-        empty_matrix:
-            "empty-stream-and-empty-file-vectors-authoritative-directory-attribute-must-agree",
+        empty_matrix: "empty-stream-and-empty-file-vectors-authoritative-directory-attribute-must-agree",
         container_facts: "attributes-and-mtime-evidence-only-never-applied",
         denied_features: [
             "encoded-header",
@@ -5059,12 +5057,12 @@ fn verify_sevenz_case(case: &SevenZCase, manifest: &SevenZManifest) -> Result<()
                 "a 7z member kind disagrees with the empty-stream matrix",
             ));
         }
-        if let Some(attributes) = parsed_member.attributes {
-            if (attributes & SEVENZ_FILE_ATTRIBUTE_DIRECTORY != 0) != is_dir {
-                return Err(VerifyError::new(
-                    "a 7z directory attribute disagrees with the member kind",
-                ));
-            }
+        if let Some(attributes) = parsed_member.attributes
+            && (attributes & SEVENZ_FILE_ATTRIBUTE_DIRECTORY != 0) != is_dir
+        {
+            return Err(VerifyError::new(
+                "a 7z directory attribute disagrees with the member kind",
+            ));
         }
         if parsed_member.payload != member.sevenz.payload
             || parsed_member.declared_crc != member.sevenz.declared_crc
@@ -5097,12 +5095,12 @@ fn verify_sevenz_case(case: &SevenZCase, manifest: &SevenZManifest) -> Result<()
                 "a 7z member's measured facts disagree with its payload bytes",
             ));
         }
-        if let Some(declared) = member.sevenz.declared_crc {
-            if declared != crc32_ieee_bytes(payload) {
-                return Err(VerifyError::new(
-                    "a 7z member's declared CRC32 disagrees with its payload bytes",
-                ));
-            }
+        if let Some(declared) = member.sevenz.declared_crc
+            && declared != crc32_ieee_bytes(payload)
+        {
+            return Err(VerifyError::new(
+                "a 7z member's declared CRC32 disagrees with its payload bytes",
+            ));
         }
         if !member.normalization_actions.is_empty() {
             return Err(VerifyError::new(
@@ -5283,11 +5281,7 @@ const fn sevenz_minimal_number_extra(value: u64) -> usize {
         }
         extra += 1;
     }
-    if value < 1_u64 << 56 {
-        7
-    } else {
-        8
-    }
+    if value < 1_u64 << 56 { 7 } else { 8 }
 }
 
 /// Independently re-parse one restricted raw-header Copy-only 7z container.
@@ -6933,12 +6927,12 @@ fn verify_zstd_wrapper(
 
     let derived_len = u64::try_from(derived.len())
         .map_err(|_| VerifyError::new("derived TAR length exceeds u64"))?;
-    if let Some(declared) = frame_content_size {
-        if declared != derived_len {
-            return Err(VerifyError::new(
-                "zstd frame content size disagrees with the derived TAR length",
-            ));
-        }
+    if let Some(declared) = frame_content_size
+        && declared != derived_len
+    {
+        return Err(VerifyError::new(
+            "zstd frame content size disagrees with the derived TAR length",
+        ));
     }
 
     let window_size = match window_descriptor {
@@ -7121,12 +7115,11 @@ fn verify_xz_wrapper(
             ));
         }
         if let (Some(compressed), Some(uncompressed)) = (declared_compressed, declared_uncompressed)
+            && (compressed != block.compressed.len || uncompressed != block.uncompressed_len)
         {
-            if compressed != block.compressed.len || uncompressed != block.uncompressed_len {
-                return Err(VerifyError::new(
-                    "xz declared block sizes disagree with the block geometry",
-                ));
-            }
+            return Err(VerifyError::new(
+                "xz declared block sizes disagree with the block geometry",
+            ));
         }
         if decode_xz_varint(&header_bytes[..crc_at], &mut cursor)? != LZMA2_FILTER_ID
             || decode_xz_varint(&header_bytes[..crc_at], &mut cursor)? != 1
@@ -9078,10 +9071,9 @@ fn verify_axes(axes: &Axes, findings: &[Finding]) -> Result<(), VerifyError> {
         verified_members,
         pending_members,
     } = axes.verification
+        && (verified_members.checked_add(pending_members).is_none() || pending_members == 0)
     {
-        if verified_members.checked_add(pending_members).is_none() || pending_members == 0 {
-            return Err(VerifyError::new("invalid partial verification counts"));
-        }
+        return Err(VerifyError::new("invalid partial verification counts"));
     }
     if let ViewCompleteness::Partial { phase, cause } = &axes.view_completeness {
         if cause.is_empty() || !findings.iter().any(|finding| finding.code == *cause) {
@@ -9167,10 +9159,10 @@ fn validate_ir(ir: &ArchiveIr) -> Result<(), VerifyError> {
             }
         }
 
-        if let MemberVerification::Failed { cause } = &member.verification {
-            if cause.is_empty() {
-                return Err(VerifyError::new("failed member has an empty cause"));
-            }
+        if let MemberVerification::Failed { cause } = &member.verification
+            && cause.is_empty()
+        {
+            return Err(VerifyError::new("failed member has an empty cause"));
         }
         if matches!(member.verification, MemberVerification::Verified) {
             let actual_size = member
@@ -9931,8 +9923,8 @@ mod tests {
         assert!(error.to_string().contains("checksum"));
 
         let mut vector: serde_json::Value = serde_json::from_slice(TAR_PAX_VECTORS).unwrap();
-        vector["cases"][1]["archive_ir"]["members"][0]["tar_pax"]["path_source"]
-            ["extension_index"] = serde_json::json!(0);
+        vector["cases"][1]["archive_ir"]["members"][0]["tar_pax"]["path_source"]["extension_index"] =
+            serde_json::json!(0);
         let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
         assert!(error.to_string().contains("resolved state"));
     }
@@ -9990,9 +9982,11 @@ mod tests {
         let Err(error) = parse_tar_pax_header(&header(1, b'5')) else {
             panic!("nonzero underlying directory size must be rejected");
         };
-        assert!(error
-            .to_string()
-            .contains("PAX directory has a nonzero underlying size"));
+        assert!(
+            error
+                .to_string()
+                .contains("PAX directory has a nonzero underlying size")
+        );
         parse_tar_pax_header(&header(0, b'5')).expect("zero-size directory remains canonical");
         parse_tar_pax_header(&header(1, b'0')).expect("nonzero regular file remains canonical");
     }
@@ -10085,8 +10079,8 @@ mod tests {
 
         let mut vector: serde_json::Value =
             serde_json::from_slice(TAR_GNU_LONGNAME_VECTORS).unwrap();
-        vector["cases"][0]["archive_ir"]["members"][0]["tar_gnu_longname"]["path_source"]
-            ["carrier_index"] = serde_json::json!(1);
+        vector["cases"][0]["archive_ir"]["members"][0]["tar_gnu_longname"]["path_source"]["carrier_index"] =
+            serde_json::json!(1);
         let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
         assert!(error.to_string().contains("resolved state"));
     }
@@ -10245,16 +10239,20 @@ mod tests {
         let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_PAX_VECTORS).unwrap();
         vector["derived_tar"]["raw_layout_root"]["sealrTreeV5"] = serde_json::json!("0".repeat(64));
         let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("raw TAR/PAX layout root mismatch"));
+        assert!(
+            error
+                .to_string()
+                .contains("raw TAR/PAX layout root mismatch")
+        );
 
         let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_PAX_VECTORS).unwrap();
         vector["cases"][0]["gzip"]["declared_isize"] = serde_json::json!(1);
         let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("CRC32, ISIZE, length, or SHA-256 disagree"));
+        assert!(
+            error
+                .to_string()
+                .contains("CRC32, ISIZE, length, or SHA-256 disagree")
+        );
 
         let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_PAX_VECTORS).unwrap();
         vector["profile"]["digest"]["sha256"] = serde_json::json!("0".repeat(64));
@@ -10301,17 +10299,21 @@ mod tests {
             serde_json::from_slice(TAR_GZIP_GNU_LONGNAME_VECTORS).unwrap();
         vector["derived_tar"]["raw_layout_root"]["sealrTreeV6"] = serde_json::json!("0".repeat(64));
         let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("raw TAR/GNU long-name layout root mismatch"));
+        assert!(
+            error
+                .to_string()
+                .contains("raw TAR/GNU long-name layout root mismatch")
+        );
 
         let mut vector: serde_json::Value =
             serde_json::from_slice(TAR_GZIP_GNU_LONGNAME_VECTORS).unwrap();
         vector["cases"][1]["gzip"]["declared_crc32"] = serde_json::json!(1);
         let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("CRC32, ISIZE, length, or SHA-256 disagree"));
+        assert!(
+            error
+                .to_string()
+                .contains("CRC32, ISIZE, length, or SHA-256 disagree")
+        );
 
         let mut vector: serde_json::Value =
             serde_json::from_slice(TAR_GZIP_GNU_LONGNAME_VECTORS).unwrap();
@@ -10700,9 +10702,11 @@ mod tests {
         let mut vector: serde_json::Value = serde_json::from_slice(TAR_BZIP2_VECTORS).unwrap();
         vector["multiblock"]["layout_root"]["sealrTreeV11"] = serde_json::json!("0".repeat(64));
         let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("multiblock layout root mismatch"));
+        assert!(
+            error
+                .to_string()
+                .contains("multiblock layout root mismatch")
+        );
     }
 
     #[test]
@@ -10828,9 +10832,11 @@ mod tests {
         manifest["cases"][0]["source_bytes_hex"] = serde_json::json!(hex_bytes(&source));
         manifest["cases"][0]["source"]["sha256"] = serde_json::json!(sha256_hex(&source));
         let error = verify_manifest_json(&serde_json::to_vec(&manifest).unwrap()).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("exactly partition one source member"));
+        assert!(
+            error
+                .to_string()
+                .contains("exactly partition one source member")
+        );
 
         let mut manifest: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
         let mut derived = decode_hex(
@@ -10842,9 +10848,11 @@ mod tests {
         manifest["derived_tar"]["bytes_hex"] = serde_json::json!(hex_bytes(&derived));
         manifest["derived_tar"]["source"]["sha256"] = serde_json::json!(sha256_hex(&derived));
         let error = verify_manifest_json(&serde_json::to_vec(&manifest).unwrap()).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("terminator contains nonzero bytes"));
+        assert!(
+            error
+                .to_string()
+                .contains("terminator contains nonzero bytes")
+        );
     }
 
     #[test]
@@ -11025,16 +11033,20 @@ mod tests {
         vector["cases"].as_array_mut().unwrap().push(cloned_case);
         vector["transform"]["definition_hex"] = serde_json::json!("00");
         let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("exactly the two canonical ordered cases"));
+        assert!(
+            error
+                .to_string()
+                .contains("exactly the two canonical ordered cases")
+        );
 
         let mut vector: serde_json::Value = serde_json::from_slice(TAR_GZIP_VECTORS).unwrap();
         vector["cases"].as_array_mut().unwrap().swap(0, 1);
         let error = verify_manifest_json(&serde_json::to_vec(&vector).unwrap()).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("exactly the two canonical ordered cases"));
+        assert!(
+            error
+                .to_string()
+                .contains("exactly the two canonical ordered cases")
+        );
     }
 
     #[test]
@@ -11246,25 +11258,31 @@ mod tests {
         let case = &manifest.cases[0];
         let mut source = decode_hex(&case.source_bytes_hex, "test source").unwrap();
         source[0] ^= 1;
-        assert!(verify_zip64_covering(&source, &case.archive_ir)
-            .unwrap_err()
-            .to_string()
-            .contains("signature"));
+        assert!(
+            verify_zip64_covering(&source, &case.archive_ir)
+                .unwrap_err()
+                .to_string()
+                .contains("signature")
+        );
 
         let mut source = decode_hex(&case.source_bytes_hex, "test source").unwrap();
         source[35] ^= 1;
-        assert!(verify_zip64_covering(&source, &case.archive_ir)
-            .unwrap_err()
-            .to_string()
-            .contains("value shape"));
+        assert!(
+            verify_zip64_covering(&source, &case.archive_ir)
+                .unwrap_err()
+                .to_string()
+                .contains("value shape")
+        );
 
         let case = &manifest.cases[1];
         let mut source = decode_hex(&case.source_bytes_hex, "test source").unwrap();
         source[0] ^= 1;
-        assert!(verify_zip64_covering(&source, &case.archive_ir)
-            .unwrap_err()
-            .to_string()
-            .contains("EOCD"));
+        assert!(
+            verify_zip64_covering(&source, &case.archive_ir)
+                .unwrap_err()
+                .to_string()
+                .contains("EOCD")
+        );
     }
 
     const ZIP64_STRUCTURAL_SIGNATURES: [[u8; 4]; 6] = [
@@ -11811,12 +11829,14 @@ mod tests {
     #[test]
     fn tampered_extra_range_is_rejected_before_root_comparison() {
         let mut manifest: serde_json::Value = serde_json::from_slice(VECTORS).unwrap();
-        manifest["cases"][2]["archive_ir"]["members"][0]["extra_fields"][0]["header_range"]
-            ["len"] = serde_json::json!(3);
+        manifest["cases"][2]["archive_ir"]["members"][0]["extra_fields"][0]["header_range"]["len"] =
+            serde_json::json!(3);
         let error = verify_manifest_json(&serde_json::to_vec(&manifest).unwrap()).unwrap_err();
-        assert!(error
-            .to_string()
-            .contains("extra header does not exactly precede"));
+        assert!(
+            error
+                .to_string()
+                .contains("extra header does not exactly precede")
+        );
     }
 
     #[test]

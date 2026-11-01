@@ -21,10 +21,10 @@ use std::fs;
 use std::io::{Cursor, Write as _};
 use std::path::{Path, PathBuf};
 
-use sealr::wheel::{evaluate_wheel, RealizedOutput, WheelEvaluation, WheelLimits};
+use sealr::wheel::{RealizedOutput, WheelEvaluation, WheelLimits, evaluate_wheel};
 use sealr::{
-    apply_with_options, ApplyOptions, Policy, Request, Source, VerifiedArchive,
-    ZipInterpretationProfile,
+    ApplyOptions, Policy, Request, Source, VerifiedArchive, ZipInterpretationProfile,
+    apply_with_options,
 };
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;

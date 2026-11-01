@@ -6,7 +6,9 @@
 //! Links, special files, PAX, GNU extensions, sparse encodings, base-256
 //! numbers, concatenation, and recovery parsing fail closed.
 
-use crate::findings::{Finding, FindingCode};
+use crate::findings::{
+    Finding, FindingCode, checksum_field_detail, label_header_member, unsupported_typeflag_finding,
+};
 use crate::ir::ByteRange;
 use crate::policy::hex_sha256;
 use crate::snapshot::SourceSnapshot;
@@ -173,7 +175,8 @@ fn parse_header(header: &[u8; BLOCK_LEN_USIZE], offset: u64) -> Result<TarMember
             "header is not exact POSIX ustar magic and version",
         ));
     }
-    let stored_checksum = parse_checksum(&header[148..156])?;
+    let stored_checksum = parse_checksum(&header[148..156])
+        .map_err(|finding| label_header_member(finding, header))?;
     let actual_checksum = header
         .iter()
         .enumerate()
@@ -186,9 +189,12 @@ fn parse_header(header: &[u8; BLOCK_LEN_USIZE], offset: u64) -> Result<TarMember
         })
         .sum::<u32>();
     if stored_checksum != actual_checksum {
-        return Err(Finding::error(
-            FindingCode::TarChecksum,
-            format!("header checksum {stored_checksum:o} != computed {actual_checksum:o}"),
+        return Err(label_header_member(
+            Finding::error(
+                FindingCode::TarChecksum,
+                format!("header checksum {stored_checksum:o} != computed {actual_checksum:o}"),
+            ),
+            header,
         ));
     }
 
@@ -196,10 +202,7 @@ fn parse_header(header: &[u8; BLOCK_LEN_USIZE], offset: u64) -> Result<TarMember
         b'0' | 0 => false,
         b'5' => true,
         typeflag if is_known_unsupported_typeflag(typeflag) => {
-            return Err(Finding::error(
-                FindingCode::TarFeatureUnsupported,
-                format!("unsupported ustar typeflag 0x{typeflag:02x}"),
-            ));
+            return Err(unsupported_typeflag_finding(header, typeflag));
         }
         typeflag => {
             return Err(Finding::error(
@@ -315,7 +318,7 @@ fn parse_checksum(field: &[u8]) -> Result<u32, Finding> {
     {
         return Err(Finding::error(
             FindingCode::TarChecksum,
-            "checksum field must be six octal digits followed by NUL and space",
+            checksum_field_detail(field),
         ));
     }
     let value = parse_octal_digits(&field[..6], "checksum")?;
@@ -1024,9 +1027,11 @@ mod tests {
                 .code,
             FindingCode::QuotaMetadata
         );
-        assert!(crate::snapshot::test_read_ranges()
-            .iter()
-            .all(|(offset, len)| offset + len <= 1536));
+        assert!(
+            crate::snapshot::test_read_ranges()
+                .iter()
+                .all(|(offset, len)| offset + len <= 1536)
+        );
     }
 
     #[test]

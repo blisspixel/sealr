@@ -24,8 +24,8 @@ use ::bzip2::{Decompress, Status};
 use crate::findings::{Finding, FindingCode};
 use crate::ir::ByteRange;
 use crate::snapshot::{
-    as_io_error, DomainRange, SnapshotDomainId, SnapshotRangeReader, SnapshotSet, SourceSnapshot,
-    TransformGraph, TransformProfile,
+    DomainRange, SnapshotDomainId, SnapshotRangeReader, SnapshotSet, SourceSnapshot,
+    TransformGraph, TransformProfile, as_io_error,
 };
 
 /// The four-byte stream header: `"BZh"` plus the level digit.
@@ -893,8 +893,8 @@ pub(crate) mod test_support {
 #[cfg(test)]
 mod tests {
     use super::test_support::{
-        conformance_tar, decode_hex, multiblock_tar, BZ2_CLI_LEVEL1_HEX, BZ2_CLI_LEVEL9_HEX,
-        BZ2_CLI_MULTIBLOCK_HEX, BZ2_EMPTY_HEX, BZ2_NON_TAR_HEX,
+        BZ2_CLI_LEVEL1_HEX, BZ2_CLI_LEVEL9_HEX, BZ2_CLI_MULTIBLOCK_HEX, BZ2_EMPTY_HEX,
+        BZ2_NON_TAR_HEX, conformance_tar, decode_hex, multiblock_tar,
     };
     use super::*;
 

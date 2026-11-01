@@ -28,10 +28,10 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::io::{Cursor, Write as _};
 
-use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelIdentities, WheelLimits};
+use sealr::wheel::{WheelEvaluation, WheelIdentities, WheelLimits, evaluate_wheel};
 use sealr::{
-    apply_with_options, ApplyOptions, Policy, Request, Source, VerifiedArchive,
-    ZipInterpretationProfile,
+    ApplyOptions, Policy, Request, Source, VerifiedArchive, ZipInterpretationProfile,
+    apply_with_options,
 };
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;

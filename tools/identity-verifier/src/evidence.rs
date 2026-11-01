@@ -6,7 +6,7 @@ use std::fmt;
 use serde::de::{self, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer};
 
-use super::{decode_hex, preimage, sha256_hex, VerificationSummary, VerifyError};
+use super::{VerificationSummary, VerifyError, decode_hex, preimage, sha256_hex};
 
 pub const MAX_EVIDENCE_BYTES: usize = 16 * 1024 * 1024;
 pub const EVIDENCE_CONFORMANCE_SCHEMA: &str = "sealr.evidence-conformance.v1";
@@ -732,12 +732,12 @@ fn verify_policy(policy: &PolicyMeta) -> Result<(), VerifyError> {
         }
         _ => None,
     };
-    if let Some(expected) = known {
-        if policy.digest.sha256 != expected {
-            return Err(VerifyError::new(
-                "known default policy id carries the wrong canonical digest",
-            ));
-        }
+    if let Some(expected) = known
+        && policy.digest.sha256 != expected
+    {
+        return Err(VerifyError::new(
+            "known default policy id carries the wrong canonical digest",
+        ));
     }
     Ok(())
 }
@@ -935,13 +935,11 @@ fn verify_outcome(view: &EvidenceView, receipt: &EvidenceReceipt) -> Result<(), 
         verified_members,
         pending_members,
     } = view.verification
-    {
-        if verified_members.checked_add(pending_members).is_none()
+        && (verified_members.checked_add(pending_members).is_none()
             || pending_members == 0
-            || usize::try_from(verified_members).ok() != Some(view.members.len())
-        {
-            return Err(VerifyError::new("invalid partial verification counts"));
-        }
+            || usize::try_from(verified_members).ok() != Some(view.members.len()))
+    {
+        return Err(VerifyError::new("invalid partial verification counts"));
     }
     if matches!(view.view_completeness, ViewCompleteness::Complete)
         != matches!(view.verification, VerificationStatus::Complete)
@@ -950,12 +948,12 @@ fn verify_outcome(view: &EvidenceView, receipt: &EvidenceReceipt) -> Result<(), 
             "view completeness contradicts verification status",
         ));
     }
-    if let ViewCompleteness::Partial { cause, .. } = &view.view_completeness {
-        if cause.is_empty() || !view.findings.iter().any(|finding| finding.code == *cause) {
-            return Err(VerifyError::new(
-                "partial evidence cause is not present in findings",
-            ));
-        }
+    if let ViewCompleteness::Partial { cause, .. } = &view.view_completeness
+        && (cause.is_empty() || !view.findings.iter().any(|finding| finding.code == *cause))
+    {
+        return Err(VerifyError::new(
+            "partial evidence cause is not present in findings",
+        ));
     }
 
     let expected_verdict = match (&view.admission, &view.verification, &view.effect) {

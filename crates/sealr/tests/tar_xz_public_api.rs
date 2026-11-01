@@ -2,11 +2,12 @@ use std::fs;
 use std::path::PathBuf;
 
 use sealr::{
-    apply_with_options, tar_ustar_portable_v1_digest, tar_xz_ustar_portable_v1_canonical_bytes,
-    tar_xz_ustar_portable_v1_digest, AdmissionStatus, ApplyOptions, ArchiveFormat, FindingCode,
-    InterpretationStatus, Policy, Request, RetentionPlan, Source, TarGzipInterpretationProfile,
-    TarInterpretationProfile, TarXzInterpretationProfile, TarZstdInterpretationProfile, TreeRoot,
-    VerificationStatus, TAR_XZ_ARCHIVE_IR_SCHEMA, TAR_XZ_USTAR_PORTABLE_V1,
+    AdmissionStatus, ApplyOptions, ArchiveFormat, FindingCode, InterpretationStatus, Policy,
+    Request, RetentionPlan, Source, TAR_XZ_ARCHIVE_IR_SCHEMA, TAR_XZ_USTAR_PORTABLE_V1,
+    TarGzipInterpretationProfile, TarInterpretationProfile, TarXzInterpretationProfile,
+    TarZstdInterpretationProfile, TreeRoot, VerificationStatus, apply_with_options,
+    tar_ustar_portable_v1_digest, tar_xz_ustar_portable_v1_canonical_bytes,
+    tar_xz_ustar_portable_v1_digest,
 };
 
 /// XZ Utils v5.8.1 `xz -6 -T1` output for the exact conformance derived TAR
@@ -444,11 +445,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Unsupported
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::FormatUnsupported));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::FormatUnsupported)
+    );
 
     let dict64m = decode_hex(XZ_CLI_DICT64M_HEX);
     let outcome = inspect(&dict64m, &policy, &options());
@@ -456,11 +459,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Unsupported
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::FormatUnsupported));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::FormatUnsupported)
+    );
 
     let concatenated = [member.clone(), member.clone()].concat();
     let outcome = inspect(&concatenated, &policy, &options());
@@ -468,11 +473,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Unsupported
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::CodecXzTrailingInput));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CodecXzTrailingInput)
+    );
 
     let mut padded = member.clone();
     padded.extend_from_slice(&[0, 0, 0, 0]);
@@ -481,11 +488,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Unsupported
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::CodecXzTrailingInput));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CodecXzTrailingInput)
+    );
 
     let mut trailing = member.clone();
     trailing.push(0x7f);
@@ -494,11 +503,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Malformed
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::CodecXzTrailingInput));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CodecXzTrailingInput)
+    );
 
     let mut check_lie = member.clone();
     let backward = u32::from_le_bytes([
@@ -515,11 +526,13 @@ fn wrapper_and_inner_language_fail_closed() {
         outcome.interpretation,
         InterpretationStatus::Malformed
     ));
-    assert!(outcome
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::CrcMismatch));
+    assert!(
+        outcome
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::CrcMismatch)
+    );
 
     let invalid_inner = built_stream(b"not a tar archive at all");
     let outcome = inspect(&invalid_inner, &policy, &options());
@@ -537,42 +550,50 @@ fn wrapper_and_inner_language_fail_closed() {
         InterpretationStatus::Interpreted
     ));
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaDerived));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaDerived)
+    );
 
     let compressible = decode_hex(XZ_CLI_CRC64_HEX);
     let mut ratio = Policy::default_v9();
     ratio.max_ratio = Some(1);
     let denied = inspect(&compressible, &ratio, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaRatio));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaRatio)
+    );
 
     let mut source_cap = Policy::default_v9();
     source_cap.max_archive_bytes = (member.len() - 1) as u64;
     let denied = inspect(&member, &source_cap, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaArchive));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaArchive)
+    );
 
     let mut metadata = Policy::default_v9();
     metadata.max_metadata_bytes = 12;
     let denied = inspect(&member, &metadata, &options());
     assert!(matches!(denied.admission, AdmissionStatus::Denied));
-    assert!(denied
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::QuotaMetadata));
+    assert!(
+        denied
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::QuotaMetadata)
+    );
 }
 
 #[test]
@@ -581,11 +602,13 @@ fn policy_and_format_selection_do_not_alias_other_profiles() {
 
     let older = inspect(&member, &Policy::default_v8(), &options());
     assert!(!matches!(older.admission, AdmissionStatus::Admitted));
-    assert!(older
-        .view
-        .findings
-        .iter()
-        .any(|finding| finding.code == FindingCode::PolicyUnsupported));
+    assert!(
+        older
+            .view
+            .findings
+            .iter()
+            .any(|finding| finding.code == FindingCode::PolicyUnsupported)
+    );
 
     let raw_selection = apply_with_options(
         Request {

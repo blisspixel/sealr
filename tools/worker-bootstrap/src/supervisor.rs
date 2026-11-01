@@ -1,14 +1,14 @@
 use crate::fault::{ChildMode, FaultPoint, StallPoint};
 use crate::frame::{Frame, Kind};
-use crate::helper::{parse_digest, HelperArtifact};
+use crate::helper::{HelperArtifact, parse_digest};
 use crate::linux::{
-    configure_timeout, receive_packet, send_packet, send_raw_conformance_packet, TransportError,
     DETAIL_ANCILLARY_UNKNOWN, DETAIL_CONTROL_TRUNCATED, DETAIL_DATA_TRUNCATED, DETAIL_SHORT_FRAME,
-    ERROR_DESCRIPTOR, ERROR_PROTOCOL, ERROR_RESTRICTION, FLAG_STAGE, READY_FLAGS,
+    ERROR_DESCRIPTOR, ERROR_PROTOCOL, ERROR_RESTRICTION, FLAG_STAGE, READY_FLAGS, TransportError,
+    configure_timeout, receive_packet, send_packet, send_raw_conformance_packet,
 };
 use crate::sealed::{self, BlobRole};
 use crate::{CHILD_MARKER, HELPER_BOOTSTRAP_ABI, HELPER_FEATURE_ID};
-use landlock::{make_bitflags, Access, AccessFs, ABI};
+use landlock::{ABI, Access, AccessFs, make_bitflags};
 use rustix::fd::{AsFd, AsRawFd, BorrowedFd, OwnedFd};
 use rustix::fs::OFlags;
 use rustix::io::FdFlags;
@@ -1483,7 +1483,7 @@ fn finish_observed_crash(
             return Err(io::Error::other(
                 "an observation checkpoint was requested for an unsupported crash point",
             )
-            .into())
+            .into());
         }
     };
     let deadline = EpochDeadline::start(epoch);
@@ -2142,10 +2142,10 @@ impl ChildBoundary {
         mode: ChildMode,
     ) -> Result<Self, BoundaryBindError> {
         let mut boundary = Self::bind(child)?;
-        if mode == ChildMode::Normal {
-            if let Err(error) = boundary.authenticate_production(control) {
-                return Err(boundary.reject_authentication(error));
-            }
+        if mode == ChildMode::Normal
+            && let Err(error) = boundary.authenticate_production(control)
+        {
+            return Err(boundary.reject_authentication(error));
         }
         Ok(boundary)
     }

@@ -6,7 +6,7 @@ use std::cell::Cell;
 
 use crate::findings::{Finding, FindingCode};
 use crate::ir::{NormalizationAction, ZipInterpretationProfile};
-use unicode_general_category::{get_general_category, GeneralCategory};
+use unicode_general_category::{GeneralCategory, get_general_category};
 use unicode_normalization::UnicodeNormalization;
 
 /// Jailed relative components plus the recorded normalization actions.
@@ -481,12 +481,14 @@ mod tests {
             '\u{202f}', '\u{205f}', '\u{3000}', '\u{061c}', '\u{200e}', '\u{200f}', '\u{202a}',
             '\u{202e}', '\u{2066}', '\u{2069}',
         ] {
-            assert!(jail_name_for_profile(
-                &format!("a{character}b"),
-                32,
-                ZipInterpretationProfile::PortableUtf8V1,
-            )
-            .is_err());
+            assert!(
+                jail_name_for_profile(
+                    &format!("a{character}b"),
+                    32,
+                    ZipInterpretationProfile::PortableUtf8V1,
+                )
+                .is_err()
+            );
         }
         assert!(
             jail_name_for_profile("a\u{180e}b", 32, ZipInterpretationProfile::PortableUtf8V1,)

@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-10-13.
+Updated 2026-10-31.
 
 Sealr's product is the boundary:
 
@@ -10,7 +10,7 @@ Archive bytes -> versioned interpretation -> verified admitted tree
 All stages                                 -> evidence
 ```
 
-This source tree targets `v0.1.0-alpha.18`, built with Rust 1.98. Published native archives remain on the [Alpha.17 release page](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.17) until Alpha.18 artifacts exist. Alpha.18 admits minimal GNU tar records and keeps `max_ratio` at 100. Alpha.17 contains typed publisher outcomes, tested evidence and Rust consumer migrations, named durability controls, and reproducible assurance bookkeeping. The owner-maintained [validation project](https://github.com/blisspixel/sealr-validation) consumes real release artifacts. Independent adoption and an independent security audit remain unproven.
+This source tree targets `v0.1.0-alpha.19`, built with Rust 1.99. Published native archives remain on the [Alpha.17 release page](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.17) until Alpha.19 artifacts exist. Alpha.19 explains a refusal on the terminal and pins finding-code discriminants. It does not change admission or policy. Alpha.18 admits minimal GNU tar records and keeps `max_ratio` at 100. Alpha.17 contains typed publisher outcomes, tested evidence and Rust consumer migrations, named durability controls, and reproducible assurance bookkeeping. The owner-maintained [validation project](https://github.com/blisspixel/sealr-validation) consumes real release artifacts. Independent adoption and an independent security audit remain unproven. Measuring time spent in each repeated-read phase, then lifecycle closure, remains the priority.
 
 Progress and release readiness use executable evidence. Human approval, adopter recruitment, and paid review are not prerequisites. Automation cannot manufacture independent adoption or audit claims. Existing fail-closed CI, artifact authentication, semantic identities, and security limits still apply.
 
@@ -121,7 +121,7 @@ Agent workspaces and hermetic build inputs are the next consumer candidates. Bin
 | Question | Source |
 |---|---|
 | What works now? | [README](README.md), [API](docs/api.md), [security policy](SECURITY.md) |
-| What changed? | [Milestones](docs/milestones.md), [changelog](CHANGELOG.md), [Alpha.18 notes](docs/releases/v0.1.0-alpha.18.md) |
+| What changed? | [Milestones](docs/milestones.md), [changelog](CHANGELOG.md), [Alpha.19 notes](docs/releases/v0.1.0-alpha.19.md) |
 | What is the next bounded plan? | [Near-term execution](docs/near-term.md) and [iteration record](docs/autonomous-improvement.md) |
 | What may a consumer pin? | [Candidate inventory](docs/candidate-surface.md) |
 | What proves usefulness? | [Usefulness test](docs/usefulness.md) |

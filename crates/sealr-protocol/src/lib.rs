@@ -555,13 +555,13 @@ pub fn decode_result(
         let size = cursor.u64()?;
         let sha256 = cursor.array()?;
         let path = cursor.bounded_string(path_len, StringKind::Path)?;
-        if let Some(previous) = manifest.last() {
-            if previous.path.as_str() >= path.as_str() {
-                return Err(cursor.error(
-                    ProtocolErrorKind::NonCanonicalOrder,
-                    "manifest paths are not strictly ordered",
-                ));
-            }
+        if let Some(previous) = manifest.last()
+            && previous.path.as_str() >= path.as_str()
+        {
+            return Err(cursor.error(
+                ProtocolErrorKind::NonCanonicalOrder,
+                "manifest paths are not strictly ordered",
+            ));
         }
         if kind == ManifestKind::Directory && (size != 0 || sha256 != [0; 32]) {
             return Err(cursor.error(
@@ -870,12 +870,11 @@ fn validate_manifest_topology(manifest: &[ManifestEntry]) -> Result<(), Protocol
             let ancestor = &entry.path[..separator];
             if let Ok(index) =
                 manifest.binary_search_by(|candidate| candidate.path.as_str().cmp(ancestor))
+                && manifest[index].kind == ManifestKind::File
             {
-                if manifest[index].kind == ManifestKind::File {
-                    return Err(invalid_state(
-                        "manifest file is an ancestor of another object",
-                    ));
-                }
+                return Err(invalid_state(
+                    "manifest file is an ancestor of another object",
+                ));
             }
         }
     }

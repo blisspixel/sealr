@@ -7,13 +7,13 @@
 use std::fs;
 
 use sealr::{
-    apply, apply_with_options, hex_sha256, zip_portable_utf8_v1_canonical_bytes,
-    zip_portable_utf8_v1_digest, zip_strict_ascii_v1_canonical_bytes, zip_strict_ascii_v1_digest,
+    AdmissionStatus, ApplyOptions, EffectStatus, InterpretationStatus, Policy, Request, Source,
+    VerificationStatus, ZIP_PORTABLE_UTF8_V1, ZIP_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2,
+    ZIP_WHEEL_UTF8_V1, ZipInterpretationProfile, apply, apply_with_options, hex_sha256,
+    zip_portable_utf8_v1_canonical_bytes, zip_portable_utf8_v1_digest,
+    zip_strict_ascii_v1_canonical_bytes, zip_strict_ascii_v1_digest,
     zip_strict_ascii_v2_canonical_bytes, zip_strict_ascii_v2_digest,
-    zip_wheel_utf8_v1_canonical_bytes, zip_wheel_utf8_v1_digest, AdmissionStatus, ApplyOptions,
-    EffectStatus, InterpretationStatus, Policy, Request, Source, VerificationStatus,
-    ZipInterpretationProfile, ZIP_PORTABLE_UTF8_V1, ZIP_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2,
-    ZIP_WHEEL_UTF8_V1,
+    zip_wheel_utf8_v1_canonical_bytes, zip_wheel_utf8_v1_digest,
 };
 
 #[path = "../../../scripts/walkthrough_fixtures.rs"]

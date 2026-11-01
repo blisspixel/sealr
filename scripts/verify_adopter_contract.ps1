@@ -70,7 +70,7 @@ Assert-ExactProperties -Value $contract.release -Expected @(
     'version', 'tag', 'commit', 'rust_version', 'role'
 ) -Label 'adopter release'
 Assert-ExactProperties -Value $contract.current_source -Expected @(
-    'version', 'requirement', 'delivery', 'baseline_relationship'
+    'version', 'requirement', 'delivery', 'baseline_relationship', 'rust_version'
 ) -Label 'current evaluation source'
 Assert-ExactProperties -Value $contract.crate -Expected @(
     'package', 'requirement', 'registry', 'delivery', 'publication_source', 'packaged_with',
@@ -150,7 +150,8 @@ if ([string]$contract.current_source.version -notmatch '^0\.1\.0-alpha\.(?<previ
 Assert-Equal "=$($package[0].version)" $contract.current_source.requirement 'current evaluation requirement'
 Assert-Equal 'github-only-prerelease' $contract.current_source.delivery 'current evaluation delivery'
 Assert-Equal 'historical-baseline-superseded-by-deflate-completion-fix' $contract.current_source.baseline_relationship 'historical baseline relationship'
-Assert-Equal $contract.release.rust_version $package[0].rust_version 'adopter crate Rust version'
+Assert-Equal '1.98' $contract.release.rust_version 'historical baseline Rust version'
+Assert-Equal $contract.current_source.rust_version $package[0].rust_version 'current evaluation Rust version'
 if (@($package[0].publish).Count -ne 1) {
     throw 'adopter crate must allow exactly one registry'
 }
@@ -160,7 +161,7 @@ $crateContract = Get-Content -Raw -LiteralPath (Join-Path $workspace 'tests/pack
     ConvertFrom-Json -Depth 20
 Assert-Equal $contract.crate.package $crateContract.package 'crate package contract name'
 Assert-Equal $contract.crate.registry $crateContract.registry 'crate package contract registry'
-Assert-Equal $contract.release.rust_version $crateContract.rust_version 'crate package contract Rust version'
+Assert-Equal $contract.current_source.rust_version $crateContract.rust_version 'crate package contract Rust version'
 
 $manifestPath = Join-Path $workspace $contract.crate.manifest_template
 if (-not [IO.File]::Exists($manifestPath)) {
@@ -170,7 +171,7 @@ $manifest = Get-Content -Raw -LiteralPath $manifestPath
 $dependency = [regex]::Match($manifest, '(?m)^sealr = "(?<value>[^"]+)"\r?$').Groups['value'].Value
 $manifestRust = [regex]::Match($manifest, '(?m)^rust-version = "(?<value>[^"]+)"\r?$').Groups['value'].Value
 Assert-Equal $contract.current_source.requirement $dependency 'handoff Sealr dependency'
-Assert-Equal $contract.release.rust_version $manifestRust 'handoff Rust version'
+Assert-Equal $contract.current_source.rust_version $manifestRust 'handoff Rust version'
 Assert-Equal 'verified-tag-package-not-for-retroactive-publication' $contract.crate.delivery 'crate delivery state'
 
 $rootReadme = Get-Content -Raw -LiteralPath (Join-Path $workspace 'README.md')

@@ -9,7 +9,7 @@
 
 use std::io::{Cursor, Write};
 
-use sealr::{apply, Policy, Request, Source};
+use sealr::{Policy, Request, Source, apply};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;

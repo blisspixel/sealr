@@ -22,7 +22,7 @@ silently give the same bytes a different meaning.
 Download the published native Linux, macOS, or Windows archive from
 [`v0.1.0-alpha.17`](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.17)
 and [verify the release](docs/release-verification.md) before running it.
-This source tree is `v0.1.0-alpha.18` and does not yet have native release artifacts.
+This source tree is `v0.1.0-alpha.19` and does not yet have native release artifacts.
 
 ```sh
 # On a terminal this prints a one-line summary. A pipe or --json keeps JSON.
@@ -36,7 +36,7 @@ ZIP32 is the default. Select ZIP64 explicitly with `--format zip64`.
 The destination must be new and its parent must already exist.
 Exit `0` means verified, `2` means not admitted, and `3` means a failed destination effect.
 
-To build from source, the repository pins Rust 1.98.0:
+To build from source, the repository pins Rust 1.99.1:
 
 ```sh
 git clone https://github.com/blisspixel/sealr.git
@@ -55,24 +55,26 @@ Inspecting a two-member ZIP verifies both members without writing a destination:
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-light.png">
-  <img alt="Linux terminal summary, captured with Alpha.17, verifying two ZIP members with no destination written." src="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-light.png" width="1000">
+  <img alt="Linux terminal summary verifying two ZIP members with no destination written." src="docs/assets/readme-walkthrough/sealr-inspect-allowed-terminal-light.png" width="1000">
 </picture>
 
-This image renders the JSON view and receipt. On a terminal, the current CLI
-prints a one-line summary instead. Redirected output and `--json` keep the JSON.
+This image is rendered from the measured view and receipt of this source tree.
+On a terminal, the CLI prints a one-line summary. Redirected output and
+`--json` keep the JSON. The displayed version matches the receipt.
 The [full walkthrough](docs/walkthrough.md) includes parent-path rejection,
 materialization, both themes, and reproduction instructions.
 
 ## Current status
 
-This source tree targets `v0.1.0-alpha.18`. It admits minimal GNU tar records.
-Real bombs still fail `quota.ratio`: only the one 10240-byte record that
-contains the terminator is excluded from the derived ratio numerator, and the
-default `max_ratio` stays 100. The
-[Alpha.18 release notes](docs/releases/v0.1.0-alpha.18.md) describe this source
+This source tree targets `v0.1.0-alpha.19`, built with Rust 1.99. A terminal
+refusal names the member and the next step. Exit 3 says `not written` when the
+destination already exists. `--machine` prints one versioned command result.
+Finding-code discriminants are pinned, and `ZipSymlink` is 79. Real bombs
+still fail `quota.ratio`, and the default `max_ratio` stays 100. The
+[Alpha.19 release notes](docs/releases/v0.1.0-alpha.19.md) describe this source
 tree. Published native archives remain
 [`v0.1.0-alpha.17`](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.17)
-until Alpha.18 artifacts exist.
+until Alpha.19 artifacts exist.
 [Release verification](docs/release-verification.md) checksums those published
 archives.
 

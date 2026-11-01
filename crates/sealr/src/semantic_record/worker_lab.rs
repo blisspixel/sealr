@@ -7,16 +7,16 @@ use std::path::Path;
 use sha2::{Digest, Sha256};
 
 use super::{
-    decode_completion, decode_planning, encode_planning, parse_hex_32, InvocationBinding,
-    PlanningDisposition, PlanningRecord, RequestedEffect, RetentionBinding,
+    InvocationBinding, PlanningDisposition, PlanningRecord, RequestedEffect, RetentionBinding,
+    decode_completion, decode_planning, encode_planning, parse_hex_32,
 };
-use crate::apply::{plan_source, PlanDecision, PlanningContext, Source};
+use crate::apply::{PlanDecision, PlanningContext, Source, plan_source};
 use crate::ir::{MemberVerification, ZipInterpretationProfile};
 use crate::materialize::{CapabilityMaterializer, StageWriteRoot};
 use crate::outcome::VerificationStatus;
 use crate::policy::Policy;
 use crate::snapshot::SourceSnapshot;
-use crate::verification::{verify_payload, PayloadPlan};
+use crate::verification::{PayloadPlan, verify_payload};
 use crate::verified::RetentionPlan;
 use crate::zip as zip_ranges;
 
@@ -1198,16 +1198,18 @@ mod tests {
         assert_eq!(crate::verification::verify_payload_calls(), 6);
         let mut changed_retained = retained_content.clone();
         *changed_retained.last_mut().unwrap() ^= 1;
-        assert!(authorize_materialize_retained_execution(
-            File::open(&source_path).unwrap(),
-            source.len() as u64,
-            operation_id,
-            &planning,
-            &completion,
-            &changed_retained,
-            &retention,
-        )
-        .is_err());
+        assert!(
+            authorize_materialize_retained_execution(
+                File::open(&source_path).unwrap(),
+                source.len() as u64,
+                operation_id,
+                &planning,
+                &completion,
+                &changed_retained,
+                &retention,
+            )
+            .is_err()
+        );
         stage.audit(&manifest).unwrap().publish().unwrap();
 
         verify_materialized_tree(&destination);
@@ -1359,25 +1361,29 @@ mod tests {
 
         let mut mutated = executed.retained_content().to_vec();
         *mutated.last_mut().unwrap() ^= 1;
-        assert!(validate_inspect_retained_content(
-            &source,
-            operation_id,
-            &planning,
-            executed.completion(),
-            &mutated,
-            &retention,
-        )
-        .is_err());
-        for length in 0..executed.retained_content().len() {
-            assert!(validate_inspect_retained_content(
+        assert!(
+            validate_inspect_retained_content(
                 &source,
                 operation_id,
                 &planning,
                 executed.completion(),
-                &executed.retained_content()[..length],
+                &mutated,
                 &retention,
             )
-            .is_err());
+            .is_err()
+        );
+        for length in 0..executed.retained_content().len() {
+            assert!(
+                validate_inspect_retained_content(
+                    &source,
+                    operation_id,
+                    &planning,
+                    executed.completion(),
+                    &executed.retained_content()[..length],
+                    &retention,
+                )
+                .is_err()
+            );
         }
         drop(executed);
         fs::remove_file(path).unwrap();
@@ -1445,40 +1451,42 @@ mod tests {
             .unwrap(),
             evidence
         );
-        assert!(create_inspect_member_read_request(
-            &source,
-            authority,
-            [0x73; 16],
-            "planned.txt",
-            bytes.len() as u64 - 1,
-        )
-        .is_err());
-        assert!(create_inspect_member_read_request(
-            &source,
-            authority,
-            [0x74; 16],
-            "missing.txt",
-            64,
-        )
-        .is_err());
-        assert!(create_inspect_member_read_request(
-            &source,
-            authority,
-            [0x75; 16],
-            "planned.txt",
-            super::super::MAX_ISOLATED_READ_BYTES + 1,
-        )
-        .is_err());
+        assert!(
+            create_inspect_member_read_request(
+                &source,
+                authority,
+                [0x73; 16],
+                "planned.txt",
+                bytes.len() as u64 - 1,
+            )
+            .is_err()
+        );
+        assert!(
+            create_inspect_member_read_request(&source, authority, [0x74; 16], "missing.txt", 64,)
+                .is_err()
+        );
+        assert!(
+            create_inspect_member_read_request(
+                &source,
+                authority,
+                [0x75; 16],
+                "planned.txt",
+                super::super::MAX_ISOLATED_READ_BYTES + 1,
+            )
+            .is_err()
+        );
         let mut mutated = bytes.clone();
         mutated[0] ^= 1;
-        assert!(validate_inspect_member_read_result(
-            &source,
-            authority,
-            &request,
-            read_operation_id,
-            &mutated,
-        )
-        .is_err());
+        assert!(
+            validate_inspect_member_read_result(
+                &source,
+                authority,
+                &request,
+                read_operation_id,
+                &mutated,
+            )
+            .is_err()
+        );
 
         let policy = Policy::default_v1();
         let context = context(&policy).unwrap();
@@ -1487,41 +1495,49 @@ mod tests {
         let decoded = decode_planning(&planning, &binding, &snapshot).unwrap();
         let mut wrong_read_operation = request.clone();
         wrong_read_operation[16] ^= 1;
-        assert!(super::super::member_read::decode(
-            &decoded,
-            executed.completion(),
-            &wrong_read_operation,
-            read_operation_id,
-        )
-        .is_err());
-        let mut wrong_completion = request.clone();
-        wrong_completion[16 + 16 + 16 + 32 + 32] ^= 1;
-        assert!(super::super::member_read::decode(
-            &decoded,
-            executed.completion(),
-            &wrong_completion,
-            read_operation_id,
-        )
-        .is_err());
-
-        for length in 0..request.len() {
-            assert!(super::super::member_read::decode(
+        assert!(
+            super::super::member_read::decode(
                 &decoded,
                 executed.completion(),
-                &request[..length],
+                &wrong_read_operation,
                 read_operation_id,
             )
-            .is_err());
+            .is_err()
+        );
+        let mut wrong_completion = request.clone();
+        wrong_completion[16 + 16 + 16 + 32 + 32] ^= 1;
+        assert!(
+            super::super::member_read::decode(
+                &decoded,
+                executed.completion(),
+                &wrong_completion,
+                read_operation_id,
+            )
+            .is_err()
+        );
+
+        for length in 0..request.len() {
+            assert!(
+                super::super::member_read::decode(
+                    &decoded,
+                    executed.completion(),
+                    &request[..length],
+                    read_operation_id,
+                )
+                .is_err()
+            );
         }
         let mut trailing = request.clone();
         trailing.push(0);
-        assert!(super::super::member_read::decode(
-            &decoded,
-            executed.completion(),
-            &trailing,
-            read_operation_id,
-        )
-        .is_err());
+        assert!(
+            super::super::member_read::decode(
+                &decoded,
+                executed.completion(),
+                &trailing,
+                read_operation_id,
+            )
+            .is_err()
+        );
         drop(executed);
         fs::remove_file(path).unwrap();
     }
@@ -1587,7 +1603,7 @@ mod tests {
     #[test]
     fn supervisor_replay_rejects_a_canonical_forged_content_digest() {
         use crate::semantic_record::{
-            encode_completion, CompletionDisposition, CompletionRecord, MemberCompletion,
+            CompletionDisposition, CompletionRecord, MemberCompletion, encode_completion,
         };
 
         let source = source();

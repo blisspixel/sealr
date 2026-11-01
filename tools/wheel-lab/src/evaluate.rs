@@ -1,16 +1,16 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use sealr::{content_root, MemberKind, VerifiedArchive, ZIP_WHEEL_UTF8_V1};
+use sealr::{MemberKind, VerifiedArchive, ZIP_WHEEL_UTF8_V1, content_root};
 use unicode_normalization::UnicodeNormalization;
 
 use crate::identity::{
     artifact_identity, consumer_profile_digest, plan_identity, realization_identity,
 };
 use crate::model::{
-    EntryPoint, EvaluationStage, ExecutableDisposition, InstallEntry, InstallScheme,
-    InstallTransform, RealizedOutput, RecordBinding, WheelArtifactIR, WheelEvaluation,
-    WheelFinding, WheelIdentities, WheelInstallPlan, WheelLimits, WheelMemberFacts,
-    ARTIFACT_ENCODING_ID, CONSUMER_PROFILE_ID, PLAN_ENCODING_ID, SPEC_SNAPSHOT_ID,
+    ARTIFACT_ENCODING_ID, CONSUMER_PROFILE_ID, EntryPoint, EvaluationStage, ExecutableDisposition,
+    InstallEntry, InstallScheme, InstallTransform, PLAN_ENCODING_ID, RealizedOutput, RecordBinding,
+    SPEC_SNAPSHOT_ID, WheelArtifactIR, WheelEvaluation, WheelFinding, WheelIdentities,
+    WheelInstallPlan, WheelLimits, WheelMemberFacts,
 };
 use crate::parse::{
     decode_sha256_record, normalize_distribution, normalize_version, parse_core_metadata,
@@ -831,7 +831,7 @@ mod tests {
     use std::io::{Cursor, Write};
 
     use sealr::{
-        apply_with_options, ApplyOptions, Policy, Request, Source, ZipInterpretationProfile,
+        ApplyOptions, Policy, Request, Source, ZipInterpretationProfile, apply_with_options,
     };
     use sha2::{Digest, Sha256};
     use zip::write::SimpleFileOptions;

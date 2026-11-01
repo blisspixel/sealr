@@ -5,12 +5,12 @@ use std::collections::BTreeMap;
 use sha2::{Digest, Sha256};
 
 use super::{
-    decode_completion, Encoder, RecordError, RecordErrorKind, RetentionBinding,
-    ValidatedPlanningRecord, KIND_RETAINED_CONTENT, MAX_RECORD_BYTES,
+    Encoder, KIND_RETAINED_CONTENT, MAX_RECORD_BYTES, RecordError, RecordErrorKind,
+    RetentionBinding, ValidatedPlanningRecord, decode_completion,
 };
 use crate::ir::{MemberKind, MemberVerification};
+use crate::verified::{MAX_RETENTION_PATH_BYTES, MAX_RETENTION_PATHS};
 use crate::verified::{RetentionBuild, RetentionEntry, RetentionPlan};
-use crate::verified::{MAX_RETENTION_PATHS, MAX_RETENTION_PATH_BYTES};
 
 pub(super) const MAX_TRANSFER_CONTENT_BYTES: usize = 63 * 1024 * 1024;
 const MIN_ENTRY_BYTES: usize = 12;

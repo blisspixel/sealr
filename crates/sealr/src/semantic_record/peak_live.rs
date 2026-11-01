@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 
 use super::*;
 use crate::apply::{
-    apply_with_options, plan_source, ApplyOptions, PlanDecision, PlanningContext, Request, Source,
+    ApplyOptions, PlanDecision, PlanningContext, Request, Source, apply_with_options, plan_source,
 };
 use crate::policy::Policy;
 
@@ -323,11 +323,13 @@ fn prepare_case(mode: &str) -> PreparedCase {
                     verified_members: (MEMBER_COUNT - 1) as u64,
                     pending_members: 1,
                 },
-                vec![Finding::error(
-                    FindingCode::CrcMismatch,
-                    "d".repeat(MAX_FINDING_DETAIL_BYTES),
-                )
-                .on("m".repeat(MAX_NAME_BYTES))],
+                vec![
+                    Finding::error(
+                        FindingCode::CrcMismatch,
+                        "d".repeat(MAX_FINDING_DETAIL_BYTES),
+                    )
+                    .on("m".repeat(MAX_NAME_BYTES)),
+                ],
             )
         }
         "late-invalid" => {

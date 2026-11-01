@@ -15,11 +15,11 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::Instant;
 
-use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelIdentities, WheelLimits};
+use sealr::wheel::{WheelEvaluation, WheelIdentities, WheelLimits, evaluate_wheel};
 use sealr::{
-    apply_supervised, AdmissionStatus, ApplyOptions, EffectStatus, LinuxWorker, MemberKind,
-    Outcome, Policy, Request, RetentionPlan, Source, SupervisionError, SupervisionErrorKind,
-    VerificationStatus, VerifiedArchive, ZipInterpretationProfile,
+    AdmissionStatus, ApplyOptions, EffectStatus, LinuxWorker, MemberKind, Outcome, Policy, Request,
+    RetentionPlan, Source, SupervisionError, SupervisionErrorKind, VerificationStatus,
+    VerifiedArchive, ZipInterpretationProfile, apply_supervised,
 };
 use serde::Serialize;
 

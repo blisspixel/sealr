@@ -14,8 +14,8 @@ pwsh -NoProfile -File scripts/generate_tcb_report.ps1
 
 | Measurement | Value |
 |---|---|
-| Runtime Rust lines (crates/sealr/src) | 45427 |
-| In-crate test lines | 18908 |
+| Runtime Rust lines (crates/sealr/src) | 45532 |
+| In-crate test lines | 19168 |
 | `unsafe` uses in runtime code | 51 |
 | `unsafe` uses in test code | 13 |
 | `extern "C"` blocks in runtime code | 1 |
@@ -56,9 +56,9 @@ These figures restate the pinned dependency contract at `tests/dependency-contra
 
 Pinned graph digests:
 
-- `aarch64-apple-darwin`: `2dff7756827aff64d7d25b24eedfcffc97caf3686f1b56489a184e664bed0cae`
-- `x86_64-pc-windows-msvc`: `4c7efa8f929460265fc44b66fdf14103fc701f849885483f7c465f4f1b9059d2`
-- `x86_64-unknown-linux-gnu`: `62f15efe65f390bee405af5930e71540c061b12d391d11456bbce1d1539351a3`
+- `aarch64-apple-darwin`: `b9e5bb8d954385c5951bb67d62d19fe53664198a3257b9b5853a56ae0be28bd6`
+- `x86_64-pc-windows-msvc`: `52bb77209b91564f50e300c178941307c8511621ac6136b6fed673c91fba7319`
+- `x86_64-unknown-linux-gnu`: `d6fc8cf52f7b62576e211bcf40253ebf107c72d452a3bb6ccc8b33389005117c`
 
 ## Conditionally compiled modules
 
@@ -78,53 +78,53 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 
 | File | Runtime lines | Test lines | Runtime `unsafe` | Runtime panic sites |
 |---|---|---|---|---|
-| `crates/sealr/src/apply.rs` | 5625 | 2191 | 0 | 53 |
+| `crates/sealr/src/apply.rs` | 5650 | 2232 | 0 | 53 |
 | `crates/sealr/src/bzip2.rs` | 892 | 205 | 0 | 3 |
 | `crates/sealr/src/canonical_json.rs` | 175 | 132 | 0 | 0 |
-| `crates/sealr/src/covering.rs` | 3182 | 1082 | 0 | 11 |
+| `crates/sealr/src/covering.rs` | 3182 | 1084 | 0 | 11 |
 | `crates/sealr/src/deflate.rs` | 94 | 75 | 0 | 0 |
-| `crates/sealr/src/findings.rs` | 248 | 31 | 0 | 0 |
+| `crates/sealr/src/findings.rs` | 336 | 142 | 0 | 0 |
 | `crates/sealr/src/gzip.rs` | 1092 | 380 | 0 | 13 |
-| `crates/sealr/src/hints.rs` | 98 | 45 | 0 | 0 |
+| `crates/sealr/src/hints.rs` | 98 | 47 | 0 | 0 |
 | `crates/sealr/src/identity.rs` | 1225 | 118 | 0 | 6 |
 | `crates/sealr/src/interval.rs` | 128 | 90 | 0 | 1 |
-| `crates/sealr/src/ir.rs` | 3501 | 277 | 0 | 16 |
-| `crates/sealr/src/jail.rs` | 375 | 183 | 0 | 4 |
-| `crates/sealr/src/lib.rs` | 220 | 0 | 0 | 0 |
-| `crates/sealr/src/materialize.rs` | 1744 | 1135 | 0 | 0 |
+| `crates/sealr/src/ir.rs` | 3492 | 281 | 0 | 16 |
+| `crates/sealr/src/jail.rs` | 375 | 185 | 0 | 4 |
+| `crates/sealr/src/lib.rs` | 222 | 0 | 0 | 0 |
+| `crates/sealr/src/materialize.rs` | 1740 | 1147 | 0 | 0 |
 | `crates/sealr/src/materialize/apple.rs` | 33 | 39 | 3 | 0 |
 | `crates/sealr/src/materialize/windows.rs` | 730 | 69 | 35 | 5 |
 | `crates/sealr/src/outcome.rs` | 265 | 78 | 0 | 0 |
-| `crates/sealr/src/policy.rs` | 955 | 798 | 0 | 1 |
+| `crates/sealr/src/policy.rs` | 955 | 808 | 0 | 1 |
 | `crates/sealr/src/quota.rs` | 82 | 51 | 0 | 0 |
 | `crates/sealr/src/ratio.rs` | 75 | 99 | 0 | 0 |
-| `crates/sealr/src/semantic_record.rs` | 4709 | 4014 | 0 | 45 |
-| `crates/sealr/src/semantic_record/executor.rs` | 500 | 0 | 0 | 0 |
+| `crates/sealr/src/semantic_record.rs` | 4711 | 4032 | 0 | 45 |
+| `crates/sealr/src/semantic_record/executor.rs` | 498 | 0 | 0 | 0 |
 | `crates/sealr/src/semantic_record/member_read.rs` | 383 | 0 | 0 | 0 |
-| `crates/sealr/src/semantic_record/peak_live.rs` | 0 | 489 | 0 | 0 |
+| `crates/sealr/src/semantic_record/peak_live.rs` | 0 | 491 | 0 | 0 |
 | `crates/sealr/src/semantic_record/retained_content.rs` | 382 | 0 | 0 | 0 |
-| `crates/sealr/src/semantic_record/worker_lab.rs` | 1026 | 609 | 0 | 0 |
-| `crates/sealr/src/semantic_record/worker_runtime.rs` | 781 | 528 | 0 | 0 |
-| `crates/sealr/src/sevenz.rs` | 1113 | 273 | 0 | 10 |
+| `crates/sealr/src/semantic_record/worker_lab.rs` | 1026 | 625 | 0 | 0 |
+| `crates/sealr/src/semantic_record/worker_runtime.rs` | 781 | 554 | 0 | 0 |
+| `crates/sealr/src/sevenz.rs` | 1109 | 273 | 0 | 10 |
 | `crates/sealr/src/snapshot.rs` | 1414 | 664 | 0 | 6 |
 | `crates/sealr/src/supervised.rs` | 642 | 0 | 0 | 5 |
 | `crates/sealr/src/supervised/linux.rs` | 1684 | 0 | 4 | 4 |
 | `crates/sealr/src/supervised/linux/materialize.rs` | 288 | 0 | 0 | 0 |
-| `crates/sealr/src/tar.rs` | 664 | 381 | 0 | 7 |
-| `crates/sealr/src/tar_gnu.rs` | 863 | 294 | 0 | 9 |
-| `crates/sealr/src/tar_pax.rs` | 1018 | 442 | 0 | 10 |
+| `crates/sealr/src/tar.rs` | 667 | 383 | 0 | 7 |
+| `crates/sealr/src/tar_gnu.rs` | 866 | 294 | 0 | 9 |
+| `crates/sealr/src/tar_pax.rs` | 1017 | 442 | 0 | 10 |
 | `crates/sealr/src/verification.rs` | 456 | 0 | 0 | 1 |
-| `crates/sealr/src/verified.rs` | 819 | 568 | 0 | 1 |
-| `crates/sealr/src/wheel/evaluate.rs` | 1081 | 698 | 0 | 2 |
+| `crates/sealr/src/verified.rs` | 820 | 568 | 0 | 1 |
+| `crates/sealr/src/wheel/evaluate.rs` | 1081 | 700 | 0 | 2 |
 | `crates/sealr/src/wheel/identity.rs` | 278 | 0 | 0 | 1 |
 | `crates/sealr/src/wheel/mod.rs` | 33 | 0 | 0 | 0 |
 | `crates/sealr/src/wheel/model.rs` | 362 | 0 | 0 | 0 |
-| `crates/sealr/src/wheel/parse.rs` | 977 | 260 | 0 | 4 |
+| `crates/sealr/src/wheel/parse.rs` | 976 | 262 | 0 | 4 |
 | `crates/sealr/src/worker_protocol/frame.rs` | 141 | 93 | 0 | 1 |
 | `crates/sealr/src/worker_protocol/helper.rs` | 388 | 121 | 0 | 2 |
 | `crates/sealr/src/worker_protocol/linux.rs` | 390 | 263 | 9 | 0 |
 | `crates/sealr/src/worker_protocol/mod.rs` | 15 | 0 | 0 | 0 |
 | `crates/sealr/src/worker_protocol/sealed.rs` | 254 | 132 | 0 | 2 |
-| `crates/sealr/src/xz.rs` | 1096 | 337 | 0 | 2 |
-| `crates/sealr/src/zip.rs` | 2231 | 1295 | 0 | 84 |
-| `crates/sealr/src/zstd.rs` | 700 | 369 | 0 | 3 |
+| `crates/sealr/src/xz.rs` | 1095 | 337 | 0 | 2 |
+| `crates/sealr/src/zip.rs` | 2230 | 1303 | 0 | 84 |
+| `crates/sealr/src/zstd.rs` | 704 | 369 | 0 | 3 |

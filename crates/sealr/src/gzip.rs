@@ -13,8 +13,8 @@ use crc32fast::Hasher as Crc;
 use crate::findings::{Finding, FindingCode};
 use crate::ir::ByteRange;
 use crate::snapshot::{
-    as_io_error, finding_from_io, DomainRange, SnapshotDomainId, SnapshotRangeReader, SnapshotSet,
-    SourceSnapshot, TransformGraph, TransformProfile,
+    DomainRange, SnapshotDomainId, SnapshotRangeReader, SnapshotSet, SourceSnapshot,
+    TransformGraph, TransformProfile, as_io_error, finding_from_io,
 };
 
 const FIXED_HEADER_LEN: u64 = 10;
@@ -1094,8 +1094,8 @@ fn classify_fuzz_input(input: &[u8]) -> FuzzClassification {
 mod tests {
     use std::io::Write;
 
-    use flate2::write::DeflateEncoder;
     use flate2::Compression;
+    use flate2::write::DeflateEncoder;
 
     use super::*;
     use crate::snapshot::SnapshotKind;

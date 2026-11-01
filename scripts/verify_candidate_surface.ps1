@@ -205,13 +205,19 @@ if (($operations -join "`n") -cne ($expectedOperations -join "`n")) {
 }
 
 Assert-ExactProperties -Value $contract.cli -Expected @(
-    'class', 'admitted_exit', 'not_admitted_exit', 'effect_failed_exit', 'operational_exit'
+    'class', 'admitted_exit', 'not_admitted_exit', 'effect_failed_exit', 'operational_exit',
+    'machine_result_schema'
 ) -Label 'candidate CLI'
 Assert-Equal 'preview' $contract.cli.class 'CLI class'
 Assert-Equal 0 $contract.cli.admitted_exit 'CLI admitted exit'
 Assert-Equal 2 $contract.cli.not_admitted_exit 'CLI not-admitted exit'
 Assert-Equal 3 $contract.cli.effect_failed_exit 'CLI effect-failed exit'
 Assert-Equal 1 $contract.cli.operational_exit 'CLI operational exit'
+Assert-Equal 'sealr.command-result.v1' $contract.cli.machine_result_schema 'CLI machine result schema'
+$cliMachine = Get-Content -Raw -LiteralPath (Join-Path $workspace 'crates/sealr-cli/src/machine.rs')
+$candidateDoc = Get-Content -Raw -LiteralPath (Join-Path $workspace 'docs/candidate-surface.md')
+Assert-Contains $cliMachine 'pub const SCHEMA: &str = "sealr.command-result.v1";' 'CLI machine result schema source'
+Assert-Contains $candidateDoc 'sealr.command-result.v1' 'CLI machine result schema documentation'
 Assert-Contains $applySource '=> 0,' 'CLI admitted exit implementation'
 Assert-Contains $applySource '=> 3,' 'CLI effect-failed exit implementation'
 Assert-Contains $applySource '_ => 2,' 'CLI not-admitted exit implementation'

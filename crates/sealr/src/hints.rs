@@ -134,10 +134,12 @@ mod tests {
         assert_eq!(gnu.formats, vec!["tar-gzip-gnu-longname"]);
         let ustar = hint_for_tar_dialect(TarWrapperClass::Gzip, b"ustar\x0000").unwrap();
         assert_eq!(ustar.formats, vec!["tar-gzip-ustar", "tar-gzip-pax"]);
-        assert!(hint_for_tar_dialect(TarWrapperClass::Zstd, b"ustar  \0")
-            .unwrap()
-            .formats
-            .is_empty());
+        assert!(
+            hint_for_tar_dialect(TarWrapperClass::Zstd, b"ustar  \0")
+                .unwrap()
+                .formats
+                .is_empty()
+        );
         assert!(hint_for_tar_dialect(TarWrapperClass::Raw, b"no magic").is_none());
     }
 }

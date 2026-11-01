@@ -893,15 +893,28 @@ fn gzip_wrapped(tar: &[u8]) -> Vec<u8> {
 
 // A handcrafted RFC 8878 zstd frame carrying its derived TAR as one raw
 // (uncompressed) block with no content checksum, so the exact wrapper bytes
-// remain reviewable without a compression dependency.
+// remain reviewable without a compression dependency. The window is the
+// smallest spec window that can hold that block: Block_Maximum_Size is the
+// smaller of the window and 128 KiB.
 fn zstd_wrapped(tar: &[u8]) -> Vec<u8> {
     let mut bytes = 0xFD2F_B528_u32.to_le_bytes().to_vec();
     bytes.push(0x00);
-    bytes.push(0x08);
+    bytes.push(zstd_window_descriptor(tar.len()));
     let block_header = ((tar.len() as u32) << 3) | 1;
     bytes.extend_from_slice(&block_header.to_le_bytes()[..3]);
     bytes.extend_from_slice(tar);
     bytes
+}
+
+fn zstd_window_descriptor(len: usize) -> u8 {
+    let len = u64::try_from(len).expect("consumer TAR fixture fits a zstd window");
+    for exponent in 0u32..=13 {
+        let window_base = 1_u64 << (10 + exponent);
+        if window_base >= len {
+            return u8::try_from(exponent << 3).expect("window exponent fits one byte");
+        }
+    }
+    panic!("consumer TAR fixture exceeds the 8 MiB zstd window ceiling");
 }
 
 // A handcrafted single-stream XZ container carrying its derived TAR as

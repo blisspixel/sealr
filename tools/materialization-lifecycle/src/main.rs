@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use sealr::{
-    apply, AdmissionStatus, EffectStatus, FindingCode, InterpretationStatus, Policy, Request,
-    Source, VerificationStatus,
+    AdmissionStatus, EffectStatus, FindingCode, InterpretationStatus, Policy, Request, Source,
+    VerificationStatus, apply,
 };
 use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipWriter};

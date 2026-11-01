@@ -42,7 +42,7 @@ The release matrix remains:
 
 ## Rust version policy
 
-The current minimum supported Rust version is 1.98. Package metadata declares `rust-version = "1.98"`, `rust-toolchain.toml` pins 1.98.0 for contributors, and required CI installs exactly 1.98.0 rather than relying on a moving stable channel.
+The current minimum supported Rust version is 1.99. Package metadata declares `rust-version = "1.99"`, `rust-toolchain.toml` pins 1.99.1 for contributors, and required CI installs exactly 1.99.1 rather than relying on a moving stable channel.
 
 During the preview series, raising the MSRV requires an explicit changelog entry, package-metadata update, and green packaged-consumer build on the new minimum. After a stable 1.x release, patch releases do not raise the MSRV. A minor release may raise it only as a documented compatibility decision.
 

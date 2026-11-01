@@ -14,8 +14,8 @@ concurrency:
 
 env:
   MACOSX_DEPLOYMENT_TARGET: "15.0"
-  RELEASE_VERSION: 0.1.0-alpha.18
-  RUST_VERSION: 1.98.0
+  RELEASE_VERSION: 0.1.0-alpha.19
+  RUST_VERSION: 1.99.1
 
 jobs:
   validate:
@@ -94,7 +94,7 @@ jobs:
           tag_commit="$(git rev-list -n 1 "${GITHUB_REF}")"
           required_jobs=(
             "Format, lint, test, and docs"
-            "Test on windows-2022"
+            "Test on windows-2025"
             "Test on macos-15"
             "ZipDiff 14-class gate"
             "Supply chain"
@@ -273,7 +273,7 @@ jobs:
       matrix:
         os:
           - ubuntu-24.04
-          - windows-2022
+          - windows-2025
           - macos-15
     steps:
       - name: Check out tagged source
@@ -439,7 +439,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          release_title="sealr ${RELEASE_VERSION}: minimal GNU tar records"
+          release_title="sealr ${RELEASE_VERSION}: a gate that explains itself"
           notes_file="docs/releases/v${RELEASE_VERSION}.md"
           if [[ ! -f "${notes_file}" ]]; then
             echo "::error::missing release notes: ${notes_file}"

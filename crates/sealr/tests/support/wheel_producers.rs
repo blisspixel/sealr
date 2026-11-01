@@ -4,10 +4,10 @@ use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 
-use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelLimits};
-use sealr::{apply_with_options, ApplyOptions, Policy, Request, Source, ZipInterpretationProfile};
+use sealr::wheel::{WheelEvaluation, WheelLimits, evaluate_wheel};
+use sealr::{ApplyOptions, Policy, Request, Source, ZipInterpretationProfile, apply_with_options};
 use serde::Deserialize;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
 #[derive(Deserialize)]
@@ -138,9 +138,11 @@ pub fn measure(fixture: &Fixture, source_path: Option<&Path>, dest: Option<&Path
             content
         );
         if !content.is_empty() {
-            assert!(archive
-                .read_member(&expected.path, content.len() as u64 - 1)
-                .is_err());
+            assert!(
+                archive
+                    .read_member(&expected.path, content.len() as u64 - 1)
+                    .is_err()
+            );
             let prefix = archive.read_member_prefix(&expected.path, 3).unwrap();
             assert_eq!(prefix, &content[..content.len().min(3)]);
         }

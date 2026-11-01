@@ -12,3 +12,4 @@ __pycache__/
 /tests/pypa-installer-consumer/target
 /verification/kani/target
 /.kani
+.agents/

@@ -1,6 +1,6 @@
 # Candidate surface inventory
 
-Updated 2026-09-13.
+Updated 2026-10-31.
 
 > Status: inventory, not a freeze. Required CI rejects drift between this page, [`tests/package-contract/candidate-surface.json`](../tests/package-contract/candidate-surface.json), the public profile, policy, identity, evidence, CLI, and package constants, crate features, and the [optional adopter pilot contract](adopter-pilot.md). Nothing here is frozen. Candidate stability follows automated downstream evidence. External feedback adds cases whenever it arrives.
 
@@ -123,15 +123,16 @@ The shipped CLI is a preview facade over the library. The first pilot's authorit
 | Admitted, complete, no effect failure | exit `0` | preview |
 | Admission or verification did not complete | exit `2` | preview |
 | Admitted, destination effect failed | exit `3` | preview |
-| Operational or argument error | exit `1` | preview |
+| Operational failure | exit `1` | preview |
+| Machine result schema | `sealr.command-result.v1` | preview |
 
-Canonical `--view`/`--receipt --canonical` files are the digested RFC 8785 bytes. Pretty stdout/stderr JSON is presentation.
+`--machine` writes that schema on stdout. It is not `--json`, and it is rejected together with `--json` or `--canonical`. Clap syntax errors exit 2 and do not emit the envelope. Canonical `--view`/`--receipt --canonical` files are the digested RFC 8785 bytes. Pretty stdout/stderr JSON is presentation.
 
 ## Distribution
 
 | Contract | Value | Class |
 |---|---|---|
-| MSRV | `1.98` | candidate-stable-for-pilot |
+| MSRV | `1.99` | candidate-stable-for-pilot |
 | SemVer until 1.0 | prerelease; every breaking change in the changelog | preview |
 | Publishable crate | `sealr` only | candidate-stable-for-pilot |
 | Linux native archive | eight-file helper contract | candidate-stable-for-pilot |

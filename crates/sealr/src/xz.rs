@@ -21,8 +21,8 @@ use sha2::{Digest, Sha256};
 use crate::findings::{Finding, FindingCode};
 use crate::ir::ByteRange;
 use crate::snapshot::{
-    as_io_error, finding_from_io, DomainRange, SnapshotDomainId, SnapshotRangeReader, SnapshotSet,
-    SourceSnapshot, TransformGraph, TransformProfile,
+    DomainRange, SnapshotDomainId, SnapshotRangeReader, SnapshotSet, SourceSnapshot,
+    TransformGraph, TransformProfile, as_io_error, finding_from_io,
 };
 
 pub(crate) const STREAM_HEADER_LEN: u64 = 12;
@@ -697,27 +697,27 @@ fn parse_block(
         .ok_or_else(|| {
             XzError::structure("an XZ index record is smaller than its block framing")
         })?;
-    if let Some(declared) = declared_compressed {
-        if declared != compressed_len {
-            return Err(XzError::new(
-                XzErrorKind::DeclaredSize,
-                FindingCode::QuotaDeclaredLie,
-                format!(
-                    "xz block declares {declared} compressed bytes but the index records {compressed_len}"
-                ),
-            ));
-        }
+    if let Some(declared) = declared_compressed
+        && declared != compressed_len
+    {
+        return Err(XzError::new(
+            XzErrorKind::DeclaredSize,
+            FindingCode::QuotaDeclaredLie,
+            format!(
+                "xz block declares {declared} compressed bytes but the index records {compressed_len}"
+            ),
+        ));
     }
-    if let Some(declared) = declared_uncompressed {
-        if declared != uncompressed {
-            return Err(XzError::new(
-                XzErrorKind::DeclaredSize,
-                FindingCode::QuotaDeclaredLie,
-                format!(
-                    "xz block declares {declared} uncompressed bytes but the index records {uncompressed}"
-                ),
-            ));
-        }
+    if let Some(declared) = declared_uncompressed
+        && declared != uncompressed
+    {
+        return Err(XzError::new(
+            XzErrorKind::DeclaredSize,
+            FindingCode::QuotaDeclaredLie,
+            format!(
+                "xz block declares {declared} uncompressed bytes but the index records {uncompressed}"
+            ),
+        ));
     }
 
     let compressed_offset = block_offset + header_len;
@@ -802,16 +802,15 @@ fn classify_trailing(source: &SourceSnapshot<'_>, consumed: u64) -> XzError {
         );
     }
     let trailing_len = source.len() - consumed;
-    if trailing_len.is_multiple_of(4) {
-        if let Ok(trailing) = source.read_vec(consumed, trailing_len) {
-            if trailing.iter().all(|byte| *byte == 0) {
-                return XzError::new(
-                    XzErrorKind::ConcatenatedStream,
-                    FindingCode::CodecXzTrailingInput,
-                    "xz stream padding is outside the single-stream profile",
-                );
-            }
-        }
+    if trailing_len.is_multiple_of(4)
+        && let Ok(trailing) = source.read_vec(consumed, trailing_len)
+        && trailing.iter().all(|byte| *byte == 0)
+    {
+        return XzError::new(
+            XzErrorKind::ConcatenatedStream,
+            FindingCode::CodecXzTrailingInput,
+            "xz stream padding is outside the single-stream profile",
+        );
     }
     XzError::new(
         XzErrorKind::TrailingInput,

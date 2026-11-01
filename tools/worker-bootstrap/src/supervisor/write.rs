@@ -1,15 +1,15 @@
 use super::{
-    configure_supervisor_control, descriptor_identity, finish_fixture, observe_accepted_child,
-    observe_completed_child, observe_plan_accepted_child, observe_restricted_child,
-    random_operation_id, require_no_supervisor_children, source_bytes, source_identity,
-    spawn_child, supervisor_descriptor_count, transport_until, AuthorityEpoch, ChildBoundary,
-    EpochDeadline, Fixture, SOURCE_MEMBER_COUNT, SOURCE_RETAINED_BYTES,
+    AuthorityEpoch, ChildBoundary, EpochDeadline, Fixture, SOURCE_MEMBER_COUNT,
+    SOURCE_RETAINED_BYTES, configure_supervisor_control, descriptor_identity, finish_fixture,
+    observe_accepted_child, observe_completed_child, observe_plan_accepted_child,
+    observe_restricted_child, random_operation_id, require_no_supervisor_children, source_bytes,
+    source_identity, spawn_child, supervisor_descriptor_count, transport_until,
 };
 use crate::fault::{ChildMode, FaultPoint, StallPoint};
 use crate::frame::{Frame, Kind};
-use crate::linux::{receive_packet, send_packet, FLAG_MATERIALIZE, FLAG_STAGE, READY_FLAGS};
+use crate::linux::{FLAG_MATERIALIZE, FLAG_STAGE, READY_FLAGS, receive_packet, send_packet};
 use crate::sealed::{self, BlobRole};
-use landlock::{make_bitflags, Access, AccessFs, ABI};
+use landlock::{ABI, Access, AccessFs, make_bitflags};
 use rustix::fd::{AsFd, OwnedFd};
 use std::fs::{self, File};
 use std::io;

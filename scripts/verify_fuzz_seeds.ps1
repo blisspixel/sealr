@@ -36,35 +36,35 @@ $zip64Manifest = Get-Content -Raw -LiteralPath $zip64ManifestPath | ConvertFrom-
 
 if ($manifest.schema -ne 'sealr.fuzz-seeds.v1' -or
     $manifest.target -ne 'protocol_decoders' -or
-    $manifest.toolchain -ne 'nightly-2026-08-01' -or
+    $manifest.toolchain -ne 'nightly-2026-10-31' -or
     $manifest.cargoFuzzVersion -ne '0.13.2' -or
     $manifest.libfuzzerSysVersion -ne '0.4.13') {
     throw 'Fuzz manifest identity or pinned tools changed unexpectedly'
 }
 if ($semanticManifest.schema -ne 'sealr.semantic-fuzz-seeds.v1' -or
     $semanticManifest.target -ne 'semantic_records' -or
-    $semanticManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $semanticManifest.toolchain -ne 'nightly-2026-10-31' -or
     $semanticManifest.cargoFuzzVersion -ne '0.13.2' -or
     $semanticManifest.libfuzzerSysVersion -ne '0.4.13') {
     throw 'Semantic fuzz manifest identity or pinned tools changed unexpectedly'
 }
 if ($tarManifest.schema -ne 'sealr.tar-fuzz-seeds.v1' -or
     $tarManifest.target -ne 'tar_ustar_portable_v1' -or
-    $tarManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $tarManifest.toolchain -ne 'nightly-2026-10-31' -or
     $tarManifest.cargoFuzzVersion -ne '0.13.2' -or
     $tarManifest.libfuzzerSysVersion -ne '0.4.13') {
     throw 'TAR fuzz manifest identity or pinned tools changed unexpectedly'
 }
 if ($tarPaxManifest.schema -ne 'sealr.tar-pax-fuzz-seeds.v1' -or
     $tarPaxManifest.target -ne 'tar_pax_portable_v1' -or
-    $tarPaxManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $tarPaxManifest.toolchain -ne 'nightly-2026-10-31' -or
     $tarPaxManifest.cargoFuzzVersion -ne '0.13.2' -or
     $tarPaxManifest.libfuzzerSysVersion -ne '0.4.13') {
     throw 'TAR PAX fuzz manifest identity or pinned tools changed unexpectedly'
 }
 if ($tarGnuLongNameManifest.schema -ne 'sealr.tar-gnu-longname-fuzz-seeds.v1' -or
     $tarGnuLongNameManifest.target -ne 'tar_gnu_longname_portable_v1' -or
-    $tarGnuLongNameManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $tarGnuLongNameManifest.toolchain -ne 'nightly-2026-10-31' -or
     $tarGnuLongNameManifest.cargoFuzzVersion -ne '0.13.2' -or
     $tarGnuLongNameManifest.libfuzzerSysVersion -ne '0.4.13' -or
     $tarGnuLongNameManifest.sanitizer -ne 'address') {
@@ -72,14 +72,14 @@ if ($tarGnuLongNameManifest.schema -ne 'sealr.tar-gnu-longname-fuzz-seeds.v1' -o
 }
 if ($gzipManifest.schema -ne 'sealr.gzip-fuzz-seeds.v1' -or
     $gzipManifest.target -ne 'gzip_rfc1952_single_member_v1' -or
-    $gzipManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $gzipManifest.toolchain -ne 'nightly-2026-10-31' -or
     $gzipManifest.cargoFuzzVersion -ne '0.13.2' -or
     $gzipManifest.libfuzzerSysVersion -ne '0.4.13') {
     throw 'gzip fuzz manifest identity or pinned tools changed unexpectedly'
 }
 if ($tarGzipManifest.schema -ne 'sealr.tar-gzip-fuzz-seeds.v1' -or
     $tarGzipManifest.target -ne 'tar_gzip_ustar_portable_v1' -or
-    $tarGzipManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $tarGzipManifest.toolchain -ne 'nightly-2026-10-31' -or
     $tarGzipManifest.cargoFuzzVersion -ne '0.13.2' -or
     $tarGzipManifest.libfuzzerSysVersion -ne '0.4.13' -or
     $tarGzipManifest.sanitizer -ne 'address') {
@@ -87,7 +87,7 @@ if ($tarGzipManifest.schema -ne 'sealr.tar-gzip-fuzz-seeds.v1' -or
 }
 if ($tarGzipPaxManifest.schema -ne 'sealr.tar-gzip-pax-fuzz-seeds.v1' -or
     $tarGzipPaxManifest.target -ne 'tar_gzip_pax_portable_v1' -or
-    $tarGzipPaxManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $tarGzipPaxManifest.toolchain -ne 'nightly-2026-10-31' -or
     $tarGzipPaxManifest.cargoFuzzVersion -ne '0.13.2' -or
     $tarGzipPaxManifest.libfuzzerSysVersion -ne '0.4.13' -or
     $tarGzipPaxManifest.sanitizer -ne 'address') {
@@ -95,7 +95,7 @@ if ($tarGzipPaxManifest.schema -ne 'sealr.tar-gzip-pax-fuzz-seeds.v1' -or
 }
 if ($tarGzipGnuLongNameManifest.schema -ne 'sealr.tar-gzip-gnu-longname-fuzz-seeds.v1' -or
     $tarGzipGnuLongNameManifest.target -ne 'tar_gzip_gnu_longname_portable_v1' -or
-    $tarGzipGnuLongNameManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $tarGzipGnuLongNameManifest.toolchain -ne 'nightly-2026-10-31' -or
     $tarGzipGnuLongNameManifest.cargoFuzzVersion -ne '0.13.2' -or
     $tarGzipGnuLongNameManifest.libfuzzerSysVersion -ne '0.4.13' -or
     $tarGzipGnuLongNameManifest.sanitizer -ne 'address') {
@@ -103,7 +103,7 @@ if ($tarGzipGnuLongNameManifest.schema -ne 'sealr.tar-gzip-gnu-longname-fuzz-see
 }
 if ($tarZstdManifest.schema -ne 'sealr.tar-zstd-fuzz-seeds.v1' -or
     $tarZstdManifest.target -ne 'tar_zstd_ustar_portable_v1' -or
-    $tarZstdManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $tarZstdManifest.toolchain -ne 'nightly-2026-10-31' -or
     $tarZstdManifest.cargoFuzzVersion -ne '0.13.2' -or
     $tarZstdManifest.libfuzzerSysVersion -ne '0.4.13' -or
     $tarZstdManifest.sanitizer -ne 'address') {
@@ -111,7 +111,7 @@ if ($tarZstdManifest.schema -ne 'sealr.tar-zstd-fuzz-seeds.v1' -or
 }
 if ($tarXzManifest.schema -ne 'sealr.tar-xz-fuzz-seeds.v1' -or
     $tarXzManifest.target -ne 'tar_xz_ustar_portable_v1' -or
-    $tarXzManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $tarXzManifest.toolchain -ne 'nightly-2026-10-31' -or
     $tarXzManifest.cargoFuzzVersion -ne '0.13.2' -or
     $tarXzManifest.libfuzzerSysVersion -ne '0.4.13' -or
     $tarXzManifest.sanitizer -ne 'address') {
@@ -119,7 +119,7 @@ if ($tarXzManifest.schema -ne 'sealr.tar-xz-fuzz-seeds.v1' -or
 }
 if ($tarBzip2Manifest.schema -ne 'sealr.tar-bzip2-fuzz-seeds.v1' -or
     $tarBzip2Manifest.target -ne 'tar_bzip2_ustar_portable_v1' -or
-    $tarBzip2Manifest.toolchain -ne 'nightly-2026-08-01' -or
+    $tarBzip2Manifest.toolchain -ne 'nightly-2026-10-31' -or
     $tarBzip2Manifest.cargoFuzzVersion -ne '0.13.2' -or
     $tarBzip2Manifest.libfuzzerSysVersion -ne '0.4.13' -or
     $tarBzip2Manifest.sanitizer -ne 'address') {
@@ -127,7 +127,7 @@ if ($tarBzip2Manifest.schema -ne 'sealr.tar-bzip2-fuzz-seeds.v1' -or
 }
 if ($sevenzManifest.schema -ne 'sealr.sevenz-copy-fuzz-seeds.v1' -or
     $sevenzManifest.target -ne 'sevenz_copy_portable_v1' -or
-    $sevenzManifest.toolchain -ne 'nightly-2026-08-01' -or
+    $sevenzManifest.toolchain -ne 'nightly-2026-10-31' -or
     $sevenzManifest.cargoFuzzVersion -ne '0.13.2' -or
     $sevenzManifest.libfuzzerSysVersion -ne '0.4.13' -or
     $sevenzManifest.sanitizer -ne 'address') {
@@ -135,7 +135,7 @@ if ($sevenzManifest.schema -ne 'sealr.sevenz-copy-fuzz-seeds.v1' -or
 }
 if ($zip64Manifest.schema -ne 'sealr.zip64-fuzz-seeds.v1' -or
     $zip64Manifest.target -ne 'zip64_strict_ascii_v1' -or
-    $zip64Manifest.toolchain -ne 'nightly-2026-08-01' -or
+    $zip64Manifest.toolchain -ne 'nightly-2026-10-31' -or
     $zip64Manifest.cargoFuzzVersion -ne '0.13.2' -or
     $zip64Manifest.libfuzzerSysVersion -ne '0.4.13') {
     throw 'ZIP64 fuzz manifest identity or pinned tools changed unexpectedly'
@@ -387,7 +387,7 @@ function Assert-TarPaxManifestContract {
     if (($rootProperties -join "`n") -cne ($expectedRootProperties -join "`n") -or
         $Candidate.schema -cne 'sealr.tar-pax-fuzz-seeds.v1' -or
         $Candidate.target -cne 'tar_pax_portable_v1' -or
-        $Candidate.toolchain -cne 'nightly-2026-08-01' -or
+        $Candidate.toolchain -cne 'nightly-2026-10-31' -or
         $Candidate.cargoFuzzVersion -cne '0.13.2' -or
         $Candidate.libfuzzerSysVersion -cne '0.4.13' -or
         $Candidate.generator -cne 'fuzz/generate_tar_pax_fuzz_seeds.ps1') {
@@ -460,7 +460,7 @@ function Assert-TarGnuLongNameManifestContract {
     if (($rootProperties -join "`n") -cne ($expectedRootProperties -join "`n") -or
         $Candidate.schema -cne 'sealr.tar-gnu-longname-fuzz-seeds.v1' -or
         $Candidate.target -cne 'tar_gnu_longname_portable_v1' -or
-        $Candidate.toolchain -cne 'nightly-2026-08-01' -or
+        $Candidate.toolchain -cne 'nightly-2026-10-31' -or
         $Candidate.cargoFuzzVersion -cne '0.13.2' -or
         $Candidate.libfuzzerSysVersion -cne '0.4.13' -or
         $Candidate.sanitizer -cne 'address' -or
@@ -534,7 +534,7 @@ function Assert-TarGzipManifestContract {
     if (($rootProperties -join "`n") -cne ($expectedRootProperties -join "`n") -or
         $Candidate.schema -cne 'sealr.tar-gzip-fuzz-seeds.v1' -or
         $Candidate.target -cne 'tar_gzip_ustar_portable_v1' -or
-        $Candidate.toolchain -cne 'nightly-2026-08-01' -or
+        $Candidate.toolchain -cne 'nightly-2026-10-31' -or
         $Candidate.cargoFuzzVersion -cne '0.13.2' -or
         $Candidate.libfuzzerSysVersion -cne '0.4.13' -or
         $Candidate.sanitizer -cne 'address' -or
@@ -608,7 +608,7 @@ function Assert-TarGzipPaxManifestContract {
     if (($rootProperties -join "`n") -cne ($expectedRootProperties -join "`n") -or
         $Candidate.schema -cne 'sealr.tar-gzip-pax-fuzz-seeds.v1' -or
         $Candidate.target -cne 'tar_gzip_pax_portable_v1' -or
-        $Candidate.toolchain -cne 'nightly-2026-08-01' -or
+        $Candidate.toolchain -cne 'nightly-2026-10-31' -or
         $Candidate.cargoFuzzVersion -cne '0.13.2' -or
         $Candidate.libfuzzerSysVersion -cne '0.4.13' -or
         $Candidate.sanitizer -cne 'address' -or
@@ -682,7 +682,7 @@ function Assert-TarGzipGnuLongNameManifestContract {
     if (($rootProperties -join "`n") -cne ($expectedRootProperties -join "`n") -or
         $Candidate.schema -cne 'sealr.tar-gzip-gnu-longname-fuzz-seeds.v1' -or
         $Candidate.target -cne 'tar_gzip_gnu_longname_portable_v1' -or
-        $Candidate.toolchain -cne 'nightly-2026-08-01' -or
+        $Candidate.toolchain -cne 'nightly-2026-10-31' -or
         $Candidate.cargoFuzzVersion -cne '0.13.2' -or
         $Candidate.libfuzzerSysVersion -cne '0.4.13' -or
         $Candidate.sanitizer -cne 'address' -or
@@ -756,7 +756,7 @@ function Assert-TarZstdManifestContract {
     if (($rootProperties -join "`n") -cne ($expectedRootProperties -join "`n") -or
         $Candidate.schema -cne 'sealr.tar-zstd-fuzz-seeds.v1' -or
         $Candidate.target -cne 'tar_zstd_ustar_portable_v1' -or
-        $Candidate.toolchain -cne 'nightly-2026-08-01' -or
+        $Candidate.toolchain -cne 'nightly-2026-10-31' -or
         $Candidate.cargoFuzzVersion -cne '0.13.2' -or
         $Candidate.libfuzzerSysVersion -cne '0.4.13' -or
         $Candidate.sanitizer -cne 'address' -or
@@ -830,7 +830,7 @@ function Assert-TarXzManifestContract {
     if (($rootProperties -join "`n") -cne ($expectedRootProperties -join "`n") -or
         $Candidate.schema -cne 'sealr.tar-xz-fuzz-seeds.v1' -or
         $Candidate.target -cne 'tar_xz_ustar_portable_v1' -or
-        $Candidate.toolchain -cne 'nightly-2026-08-01' -or
+        $Candidate.toolchain -cne 'nightly-2026-10-31' -or
         $Candidate.cargoFuzzVersion -cne '0.13.2' -or
         $Candidate.libfuzzerSysVersion -cne '0.4.13' -or
         $Candidate.sanitizer -cne 'address' -or
@@ -904,7 +904,7 @@ function Assert-TarBzip2ManifestContract {
     if (($rootProperties -join "`n") -cne ($expectedRootProperties -join "`n") -or
         $Candidate.schema -cne 'sealr.tar-bzip2-fuzz-seeds.v1' -or
         $Candidate.target -cne 'tar_bzip2_ustar_portable_v1' -or
-        $Candidate.toolchain -cne 'nightly-2026-08-01' -or
+        $Candidate.toolchain -cne 'nightly-2026-10-31' -or
         $Candidate.cargoFuzzVersion -cne '0.13.2' -or
         $Candidate.libfuzzerSysVersion -cne '0.4.13' -or
         $Candidate.sanitizer -cne 'address' -or
@@ -978,7 +978,7 @@ function Assert-SevenZManifestContract {
     if (($rootProperties -join "`n") -cne ($expectedRootProperties -join "`n") -or
         $Candidate.schema -cne 'sealr.sevenz-copy-fuzz-seeds.v1' -or
         $Candidate.target -cne 'sevenz_copy_portable_v1' -or
-        $Candidate.toolchain -cne 'nightly-2026-08-01' -or
+        $Candidate.toolchain -cne 'nightly-2026-10-31' -or
         $Candidate.cargoFuzzVersion -cne '0.13.2' -or
         $Candidate.libfuzzerSysVersion -cne '0.4.13' -or
         $Candidate.sanitizer -cne 'address' -or
@@ -2614,7 +2614,7 @@ function Assert-FuzzMetadataBinding {
         if ($actualTargetPath -cne $expectedTargetPath -or
             @($target.kind).Count -ne 1 -or $target.kind[0] -cne 'bin' -or
             @($target.crate_types).Count -ne 1 -or $target.crate_types[0] -cne 'bin' -or
-            [string]$target.edition -cne '2021' -or
+            [string]$target.edition -cne '2024' -or
             [bool]$target.doc -or [bool]$target.doctest -or [bool]$target.test) {
             throw "$($targetContract.Name) Cargo metadata must bind its exact non-test fuzz target"
         }
@@ -2642,7 +2642,7 @@ function Assert-FuzzMetadataBinding {
             (Join-Path $workspace 'crates/sealr-protocol')
         )
         if ($sealrDependency.Count -ne 1 -or
-            [string]$sealrDependency[0].req -cne '=0.1.0-alpha.18' -or
+            [string]$sealrDependency[0].req -cne '=0.1.0-alpha.19' -or
             [IO.Path]::GetFullPath((Get-OptionalMetadataText $sealrDependency[0] 'path')) -cne $expectedSealrPath -or
             (@($sealrDependency[0].features) -join "`n") -cne '__internal-fuzzing' -or
             [bool]$sealrDependency[0].optional -or
@@ -2655,7 +2655,7 @@ function Assert-FuzzMetadataBinding {
             throw 'Cargo metadata must enable only the exact hidden Sealr fuzz feature dependency'
         }
         if ($protocolDependency.Count -ne 1 -or
-            [string]$protocolDependency[0].req -cne '=0.1.0-alpha.18' -or
+            [string]$protocolDependency[0].req -cne '=0.1.0-alpha.19' -or
             [IO.Path]::GetFullPath((Get-OptionalMetadataText $protocolDependency[0] 'path')) -cne $expectedProtocolPath -or
             @($protocolDependency[0].features).Count -ne 0 -or
             [bool]$protocolDependency[0].optional -or
@@ -3192,7 +3192,7 @@ function Assert-FuzzCargoManifestContract {
         '[package]'
         'name = "sealr-fuzz"'
         'version = "0.0.0"'
-        'edition = "2021"'
+        'edition = "2024"'
         'license = "Apache-2.0"'
         'publish = false'
         ''
@@ -3201,8 +3201,8 @@ function Assert-FuzzCargoManifestContract {
         ''
         '[dependencies]'
         'libfuzzer-sys = "=0.4.13"'
-        'sealr = { path = "../crates/sealr", version = "=0.1.0-alpha.18", features = ["__internal-fuzzing"] }'
-        'sealr-worker-protocol = { path = "../crates/sealr-protocol", version = "=0.1.0-alpha.18" }'
+        'sealr = { path = "../crates/sealr", version = "=0.1.0-alpha.19", features = ["__internal-fuzzing"] }'
+        'sealr-worker-protocol = { path = "../crates/sealr-protocol", version = "=0.1.0-alpha.19" }'
         ''
         '[[bin]]'
         'name = "protocol_decoders"'
@@ -3483,7 +3483,7 @@ try {
 [package]
 name = "sealr-fuzz"
 version = "0.0.0"
-edition = "2021"
+edition = "2024"
 publish = false
 
 [package.metadata]
@@ -3706,13 +3706,13 @@ bench = false
 [package]
 name = "sealr-fuzz"
 version = "0.0.0"
-edition = "2021"
+edition = "2024"
 publish = false
 
 [dependencies]
 libfuzzer-sys = { path = "fake-libfuzzer", version = "=0.4.13" }
-sealr = { path = "$sealrDependencyPath", version = "=0.1.0-alpha.18", features = ["__internal-fuzzing"] }
-sealr-worker-protocol = { path = "$protocolDependencyPath", version = "=0.1.0-alpha.18" }
+sealr = { path = "$sealrDependencyPath", version = "=0.1.0-alpha.19", features = ["__internal-fuzzing"] }
+sealr-worker-protocol = { path = "$protocolDependencyPath", version = "=0.1.0-alpha.19" }
 
 [[bin]]
 name = "protocol_decoders"

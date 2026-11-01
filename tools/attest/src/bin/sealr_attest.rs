@@ -10,11 +10,11 @@ use std::io::{Read, Write};
 use std::process::ExitCode;
 
 use sealr_identity_verifier::{
-    reject_duplicate_json_properties, verify_canonical_evidence, MAX_EVIDENCE_BYTES,
+    MAX_EVIDENCE_BYTES, reject_duplicate_json_properties, verify_canonical_evidence,
 };
 use serde::Serialize;
-use serde_json::value::RawValue;
 use serde_json::Value;
+use serde_json::value::RawValue;
 use sha2::{Digest, Sha256};
 
 const STATEMENT_TYPE: &str = "https://in-toto.io/Statement/v1";
@@ -322,9 +322,11 @@ mod tests {
         let statement: Value = serde_json::from_slice(&output).unwrap();
         assert_eq!(statement["predicateType"], PREDICATE_TYPE_V3);
         assert_eq!(statement["subject"][0]["digest"]["sha256"], source_digest);
-        assert!(output
-            .windows(receipt.len())
-            .any(|window| window == receipt));
+        assert!(
+            output
+                .windows(receipt.len())
+                .any(|window| window == receipt)
+        );
 
         assert!(build_statement(&receipt, None, Some(&source_digest), &arguments()).is_err());
         assert!(build_statement(&receipt, Some(&view), None, &arguments()).is_err());

@@ -6,16 +6,16 @@ use std::io::{self, BufReader};
 use sha2::{Digest, Sha256};
 
 use super::{
-    encode_completion, retained_content, validate_snapshot_binding, CompletionDisposition,
-    CompletionRecord, MemberCompletion, PlanningDisposition, RecordError, RecordErrorKind,
-    RequestedEffect, RetentionBinding, ValidatedPlanningRecord,
+    CompletionDisposition, CompletionRecord, MemberCompletion, PlanningDisposition, RecordError,
+    RecordErrorKind, RequestedEffect, RetentionBinding, ValidatedPlanningRecord, encode_completion,
+    retained_content, validate_snapshot_binding,
 };
 use crate::findings::{Finding, FindingCode};
 use crate::ir::{IrMember, MemberKind};
-use crate::materialize::{process_member_to_file, StageWriteRoot};
+use crate::materialize::{StageWriteRoot, process_member_to_file};
 use crate::quota::{QuotaError, QuotaState};
 use crate::snapshot::SourceSnapshot;
-use crate::verification::{verify_payload, PayloadPlan};
+use crate::verification::{PayloadPlan, verify_payload};
 use crate::verified::{RetentionBuild, RetentionEntry};
 use crate::zip;
 
@@ -256,14 +256,12 @@ fn execute_completion(
             )
         })?;
         if matches!(member.kind, MemberKind::Directory) {
-            if let Some(stage) = stage {
-                if let Err(finding) =
+            if let Some(stage) = stage
+                && let Err(finding) =
                     stage.create_directory(&member.components, &member.decoded_name)
-                {
-                    let completion =
-                        stopped_completion(planning, members, ir.members.len(), finding)?;
-                    return finish_execution(planning, completion, retention.into_entries());
-                }
+            {
+                let completion = stopped_completion(planning, members, ir.members.len(), finding)?;
+                return finish_execution(planning, completion, retention.into_entries());
             }
             members.push(MemberCompletion::Verified {
                 actual_uncomp_size: 0,

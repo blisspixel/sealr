@@ -171,6 +171,7 @@ dependencies = [
  "anstyle",
  "clap_lex",
  "strsim",
+ "terminal_size",
 ]
 
 [[package]]
@@ -519,16 +520,16 @@ dependencies = [
 
 [[package]]
 name = "ruzstd"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a252f5e20f038fe7b4ea53e073e65398d652c864cc162fc77c56c2f13717b888"
+checksum = "69e4ce4a039f42bf25920b95667e4d789e98749ab11bbb8d2c2936f788421bb5"
 dependencies = [
  "twox-hash",
 ]
 
 [[package]]
 name = "sealr"
-version = "0.1.0-alpha.18"
+version = "0.1.0-alpha.19"
 dependencies = [
  "bzip2",
  "cap-fs-ext",
@@ -555,7 +556,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-attest"
-version = "0.1.0-alpha.18"
+version = "0.1.0-alpha.19"
 dependencies = [
  "sealr-identity-verifier",
  "serde",
@@ -565,9 +566,10 @@ dependencies = [
 
 [[package]]
 name = "sealr-cli"
-version = "0.1.0-alpha.18"
+version = "0.1.0-alpha.19"
 dependencies = [
  "clap",
+ "libc",
  "sealr",
  "serde",
  "serde_json",
@@ -575,7 +577,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-identity-verifier"
-version = "0.1.0-alpha.18"
+version = "0.1.0-alpha.19"
 dependencies = [
  "serde",
  "serde_json",
@@ -584,7 +586,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-materialization-lifecycle"
-version = "0.1.0-alpha.18"
+version = "0.1.0-alpha.19"
 dependencies = [
  "getrandom",
  "sealr",
@@ -593,7 +595,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-release-license-closure"
-version = "0.1.0-alpha.18"
+version = "0.1.0-alpha.19"
 dependencies = [
  "clap",
  "sealr",
@@ -605,7 +607,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-wheel-inventory-v4"
-version = "0.1.0-alpha.18"
+version = "0.1.0-alpha.19"
 dependencies = [
  "sealr",
  "serde",
@@ -615,7 +617,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-wheel-inventory-v5"
-version = "0.1.0-alpha.18"
+version = "0.1.0-alpha.19"
 dependencies = [
  "sealr",
  "serde",
@@ -625,7 +627,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-wheel-lab"
-version = "0.1.0-alpha.18"
+version = "0.1.0-alpha.19"
 dependencies = [
  "sealr",
  "serde",
@@ -637,7 +639,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-worker-bootstrap-lab"
-version = "0.1.0-alpha.18"
+version = "0.1.0-alpha.19"
 dependencies = [
  "crc32fast",
  "getrandom",
@@ -652,7 +654,7 @@ dependencies = [
 
 [[package]]
 name = "sealr-worker-protocol"
-version = "0.1.0-alpha.18"
+version = "0.1.0-alpha.19"
 
 [[package]]
 name = "serde"
@@ -740,6 +742,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "terminal_size"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "230a1b821ccbd75b185820a1f1ff7b14d21da1e442e22c0863ea5f08771a8874"
+dependencies = [
+ "rustix",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

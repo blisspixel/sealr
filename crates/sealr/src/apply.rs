@@ -25,14 +25,14 @@ use crate::ir::{
     ZipInterpretationProfile, ZstdWrapperEvidence,
 };
 use crate::jail::{jail_name_for_profile, portable_name_violation, profile_case_fold};
-use crate::materialize::{process_member_to_file, CapabilityMaterializer, MaterializationMeta};
+use crate::materialize::{CapabilityMaterializer, MaterializationMeta, process_member_to_file};
 use crate::outcome::{
     AdmissionStatus, DigestHex, EffectStatus, InterpretationStatus, SemanticAxes, SourceDigest,
     StoppingPhase, VerificationStatus, ViewCompleteness,
 };
 use crate::policy::{
-    hex_sha256, ratio_exceeds, CompiledControls, Policy, ResourceBudget,
-    POLICY_FORMAT_TAR_GNU_LONGNAME, POLICY_FORMAT_TAR_PAX, POLICY_FORMAT_TAR_USTAR,
+    CompiledControls, POLICY_FORMAT_TAR_GNU_LONGNAME, POLICY_FORMAT_TAR_PAX,
+    POLICY_FORMAT_TAR_USTAR, Policy, ResourceBudget, hex_sha256, ratio_exceeds,
 };
 use crate::quota::{QuotaError, QuotaState};
 use crate::ratio::derived_tar_ratio_numerator;
@@ -44,7 +44,7 @@ use crate::snapshot::{
 use crate::tar;
 use crate::tar_gnu;
 use crate::tar_pax;
-use crate::verification::{digest_hex, planned_payload_reader, verify_payload, PayloadPlan};
+use crate::verification::{PayloadPlan, digest_hex, planned_payload_reader, verify_payload};
 use crate::verified::{RetentionBuild, RetentionPlan, VerifiedArchive};
 use crate::zip::{self, ZipMember};
 use crate::{bzip2, bzip2::Bzip2ErrorKind};
@@ -1819,20 +1819,20 @@ fn apply_sevenz_with_options(
             );
             continue;
         }
-        if let Some(max_ratio) = budget.max_ratio {
-            if ratio_exceeds(member.size, member.size, max_ratio) {
-                findings.push(
-                    Finding::error(
-                        FindingCode::QuotaRatio,
-                        format!(
-                            "declared {}:{} exceeds {max_ratio}:1",
-                            member.size, member.size
-                        ),
-                    )
-                    .on(&member.name),
-                );
-                continue;
-            }
+        if let Some(max_ratio) = budget.max_ratio
+            && ratio_exceeds(member.size, member.size, max_ratio)
+        {
+            findings.push(
+                Finding::error(
+                    FindingCode::QuotaRatio,
+                    format!(
+                        "declared {}:{} exceeds {max_ratio}:1",
+                        member.size, member.size
+                    ),
+                )
+                .on(&member.name),
+            );
+            continue;
         }
         match declared_total.consume(member.size) {
             Ok(_) => {}
@@ -2204,8 +2204,37 @@ fn denied_quota(
     )
 }
 
+fn enrich_container_hint(
+    finding: &mut Finding,
+    snapshot: &SourceSnapshot<'_>,
+    class: TarWrapperClass,
+) {
+    if finding.code == FindingCode::TarDialect && finding.hint.is_none() {
+        finding.hint = tar_dialect_hint(snapshot, class);
+    }
+    let Some(hint) = finding.hint.as_mut() else {
+        return;
+    };
+    if !hint.formats.is_empty() {
+        return;
+    }
+    if hint.observed != "PAX extended header" && hint.observed != "PAX global header" {
+        return;
+    }
+    let sibling = match class {
+        TarWrapperClass::Raw => "tar-pax",
+        TarWrapperClass::Gzip => "tar-gzip-pax",
+        TarWrapperClass::Zstd | TarWrapperClass::Xz | TarWrapperClass::Bzip2 => return,
+    };
+    hint.formats.push(sibling.to_owned());
+}
+
 fn hint_format_finding(mut finding: Finding, snapshot: &SourceSnapshot<'_>) -> Finding {
-    if finding.code != FindingCode::FormatUnsupported || finding.hint.is_some() {
+    if !matches!(
+        finding.code,
+        FindingCode::FormatUnsupported | FindingCode::FormatMagic
+    ) || finding.hint.is_some()
+    {
         return finding;
     }
     let len = usize::try_from(snapshot.len().min(512)).unwrap_or(0);
@@ -2407,9 +2436,7 @@ fn plan_tar_domains(
             ) {
                 return outcome;
             }
-            if finding.code == FindingCode::TarDialect {
-                finding.hint = tar_dialect_hint(tar_snapshot, ustar_wrapper_class(&profile));
-            }
+            enrich_container_hint(&mut finding, tar_snapshot, ustar_wrapper_class(&profile));
             let axes = parse_failure_axes(&finding);
             let original = snapshots.original();
             return finish(
@@ -2459,20 +2486,20 @@ fn plan_tar_domains(
             );
             continue;
         }
-        if let Some(max_ratio) = budget.max_ratio {
-            if ratio_exceeds(member.size, member.size, max_ratio) {
-                findings.push(
-                    Finding::error(
-                        FindingCode::QuotaRatio,
-                        format!(
-                            "declared {}:{} exceeds {max_ratio}:1",
-                            member.size, member.size
-                        ),
-                    )
-                    .on(&member.name),
-                );
-                continue;
-            }
+        if let Some(max_ratio) = budget.max_ratio
+            && ratio_exceeds(member.size, member.size, max_ratio)
+        {
+            findings.push(
+                Finding::error(
+                    FindingCode::QuotaRatio,
+                    format!(
+                        "declared {}:{} exceeds {max_ratio}:1",
+                        member.size, member.size
+                    ),
+                )
+                .on(&member.name),
+            );
+            continue;
         }
         match declared_total.consume(member.size) {
             Ok(_) => {}
@@ -2656,13 +2683,11 @@ fn plan_tar_pax(
             ) {
                 return outcome;
             }
-            if finding.code == FindingCode::TarDialect {
-                let class = match &profile {
-                    PaxPlanProfile::Raw(_) => TarWrapperClass::Raw,
-                    PaxPlanProfile::Gzip(_, _) => TarWrapperClass::Gzip,
-                };
-                finding.hint = tar_dialect_hint(tar_snapshot, class);
-            }
+            let class = match &profile {
+                PaxPlanProfile::Raw(_) => TarWrapperClass::Raw,
+                PaxPlanProfile::Gzip(_, _) => TarWrapperClass::Gzip,
+            };
+            enrich_container_hint(&mut finding, tar_snapshot, class);
             let axes = parse_failure_axes(&finding);
             let original = snapshots.original();
             return finish(
@@ -2750,20 +2775,20 @@ fn plan_tar_pax(
             );
             continue;
         }
-        if let Some(max_ratio) = budget.max_ratio {
-            if ratio_exceeds(member.size, member.size, max_ratio) {
-                findings.push(
-                    Finding::error(
-                        FindingCode::QuotaRatio,
-                        format!(
-                            "declared {}:{} exceeds {max_ratio}:1",
-                            member.size, member.size
-                        ),
-                    )
-                    .on(&member.name),
-                );
-                continue;
-            }
+        if let Some(max_ratio) = budget.max_ratio
+            && ratio_exceeds(member.size, member.size, max_ratio)
+        {
+            findings.push(
+                Finding::error(
+                    FindingCode::QuotaRatio,
+                    format!(
+                        "declared {}:{} exceeds {max_ratio}:1",
+                        member.size, member.size
+                    ),
+                )
+                .on(&member.name),
+            );
+            continue;
         }
         match declared_total.consume(member.size) {
             Ok(_) => {}
@@ -2976,13 +3001,11 @@ fn plan_tar_gnu_longname(
             ) {
                 return outcome;
             }
-            if finding.code == FindingCode::TarDialect {
-                let class = match &profile {
-                    GnuLongNamePlanProfile::Raw(_) => TarWrapperClass::Raw,
-                    GnuLongNamePlanProfile::Gzip(_, _) => TarWrapperClass::Gzip,
-                };
-                finding.hint = tar_dialect_hint(tar_snapshot, class);
-            }
+            let class = match &profile {
+                GnuLongNamePlanProfile::Raw(_) => TarWrapperClass::Raw,
+                GnuLongNamePlanProfile::Gzip(_, _) => TarWrapperClass::Gzip,
+            };
+            enrich_container_hint(&mut finding, tar_snapshot, class);
             let axes = parse_failure_axes(&finding);
             let original = snapshots.original();
             return finish(
@@ -3057,20 +3080,20 @@ fn plan_tar_gnu_longname(
             );
             continue;
         }
-        if let Some(max_ratio) = budget.max_ratio {
-            if ratio_exceeds(member.size, member.size, max_ratio) {
-                findings.push(
-                    Finding::error(
-                        FindingCode::QuotaRatio,
-                        format!(
-                            "declared {}:{} exceeds {max_ratio}:1",
-                            member.size, member.size
-                        ),
-                    )
-                    .on(&member.name),
-                );
-                continue;
-            }
+        if let Some(max_ratio) = budget.max_ratio
+            && ratio_exceeds(member.size, member.size, max_ratio)
+        {
+            findings.push(
+                Finding::error(
+                    FindingCode::QuotaRatio,
+                    format!(
+                        "declared {}:{} exceeds {max_ratio}:1",
+                        member.size, member.size
+                    ),
+                )
+                .on(&member.name),
+            );
+            continue;
         }
         match declared_total.consume(member.size) {
             Ok(_) => {}
@@ -3594,20 +3617,20 @@ fn plan_snapshot<'a>(snapshot: SourceSnapshot<'a>, context: PlanningContext) -> 
             );
             continue;
         }
-        if let Some(max_ratio) = budget.max_ratio {
-            if ratio_exceeds(member.uncomp_size, member.comp_size, max_ratio) {
-                findings.push(
-                    Finding::error(
-                        FindingCode::QuotaRatio,
-                        format!(
-                            "declared {}:{} exceeds {max_ratio}:1",
-                            member.uncomp_size, member.comp_size
-                        ),
-                    )
-                    .on(&member.name),
-                );
-                continue;
-            }
+        if let Some(max_ratio) = budget.max_ratio
+            && ratio_exceeds(member.uncomp_size, member.comp_size, max_ratio)
+        {
+            findings.push(
+                Finding::error(
+                    FindingCode::QuotaRatio,
+                    format!(
+                        "declared {}:{} exceeds {max_ratio}:1",
+                        member.uncomp_size, member.comp_size
+                    ),
+                )
+                .on(&member.name),
+            );
+            continue;
         }
         match declared_total.consume(member.uncomp_size) {
             Ok(_) => {}
@@ -3648,13 +3671,13 @@ fn plan_snapshot<'a>(snapshot: SourceSnapshot<'a>, context: PlanningContext) -> 
                     );
                     continue;
                 }
-                if interpretation_profile == ZipInterpretationProfile::PortableUtf8V1 {
-                    if let Some(detail) = portable_name_violation(&jailed) {
-                        findings.push(
-                            Finding::error(FindingCode::PathInvalidChar, detail).on(&member.name),
-                        );
-                        continue;
-                    }
+                if interpretation_profile == ZipInterpretationProfile::PortableUtf8V1
+                    && let Some(detail) = portable_name_violation(&jailed)
+                {
+                    findings.push(
+                        Finding::error(FindingCode::PathInvalidChar, detail).on(&member.name),
+                    );
+                    continue;
                 }
                 actions.extend(jailed.actions);
                 let parts = jailed.components;
@@ -4088,12 +4111,12 @@ fn audit_tar_zstd_composite(
     audit_zstd_wrapper_covering(original, wrapper)?;
     audit_tar_covering(derived, ir)?;
 
-    if let Some(declared) = wrapper.frame_content_size {
-        if declared != derived.len() {
-            return Err(ready_inconsistent(
-                "zstd frame content size does not match the terminal derived TAR snapshot",
-            ));
-        }
+    if let Some(declared) = wrapper.frame_content_size
+        && declared != derived.len()
+    {
+        return Err(ready_inconsistent(
+            "zstd frame content size does not match the terminal derived TAR snapshot",
+        ));
     }
     if let Some(declared) = wrapper.declared_checksum {
         use core::hash::Hasher as _;
@@ -4383,35 +4406,35 @@ fn execute_ready_archive(
 
     for (index, payload_spec) in payloads.iter().copied().enumerate() {
         if matches!(ir.members[index].kind, MemberKind::Directory) {
-            if let Some(materializer) = stage.as_ref() {
-                if let Err(finding) = materializer.create_directory(
+            if let Some(materializer) = stage.as_ref()
+                && let Err(finding) = materializer.create_directory(
                     &ir.members[index].components,
                     &ir.members[index].decoded_name,
-                ) {
-                    ir.members[index].mark_failed(finding.code.as_str());
-                    findings.push(finding);
-                    materialization = abort_and_report(&mut stage, &mut findings, materialization);
-                    let cause = first_error(&findings);
-                    let verified = members_view.len() as u64;
-                    return Ok(with_ir(
-                        finish(
-                            (snapshot.path_owned(), source_digest, snapshot.kind()),
-                            magic,
-                            policy,
-                            findings,
-                            members_view,
-                            materialization,
-                            SemanticAxes::admitted_verification_stop(
-                                verified,
-                                planned_count.saturating_sub(verified),
-                                &cause,
-                                write,
-                            ),
-                            identities_base.clone(),
+                )
+            {
+                ir.members[index].mark_failed(finding.code.as_str());
+                findings.push(finding);
+                materialization = abort_and_report(&mut stage, &mut findings, materialization);
+                let cause = first_error(&findings);
+                let verified = members_view.len() as u64;
+                return Ok(with_ir(
+                    finish(
+                        (snapshot.path_owned(), source_digest, snapshot.kind()),
+                        magic,
+                        policy,
+                        findings,
+                        members_view,
+                        materialization,
+                        SemanticAxes::admitted_verification_stop(
+                            verified,
+                            planned_count.saturating_sub(verified),
+                            &cause,
+                            write,
                         ),
-                        ir,
-                    ));
-                }
+                        identities_base.clone(),
+                    ),
+                    ir,
+                ));
             }
             ir.members[index].mark_directory_verified();
             members_view.push(member_view(&ir.members[index]));
@@ -4697,10 +4720,10 @@ fn path_conflict(seen: &BTreeMap<String, bool>, path: &str, is_dir: bool) -> Opt
     }
     if !is_dir {
         let prefix = format!("{path}/");
-        if let Some((candidate, _)) = seen.range(prefix.clone()..).next() {
-            if candidate.starts_with(&prefix) {
-                return Some(candidate.clone());
-            }
+        if let Some((candidate, _)) = seen.range(prefix.clone()..).next()
+            && candidate.starts_with(&prefix)
+        {
+            return Some(candidate.clone());
         }
     }
     None
@@ -5011,8 +5034,8 @@ fn parse_failure_axes_for_profile(
 #[cfg(test)]
 mod tar_gzip_ready_tests {
     use super::*;
-    use flate2::write::DeflateEncoder;
     use flate2::Compression;
+    use flate2::write::DeflateEncoder;
     use std::io::Write;
 
     fn write_octal(field: &mut [u8], value: u64) {
@@ -5137,12 +5160,14 @@ mod tar_gzip_ready_tests {
         let source = gzip(&tar);
         let (snapshots, transforms, ir, payloads) = ready(&source);
         validate_ready_archive(&snapshots, &transforms, &ir, &payloads).unwrap();
-        assert!(validate_ready_source_identity(
-            &snapshots,
-            &ir,
-            &SourceDigest::available("00".repeat(32))
-        )
-        .is_err());
+        assert!(
+            validate_ready_source_identity(
+                &snapshots,
+                &ir,
+                &SourceDigest::available("00".repeat(32))
+            )
+            .is_err()
+        );
 
         let (snapshots, mut transforms, ir, payloads) = ready(&source);
         transforms.records_mut()[0].input.range.offset = 1;
@@ -6061,11 +6086,12 @@ mod tests {
             });
 
             assert!(out.rejected(), "{label} was accepted: {:?}", out.view);
-            assert!(out
-                .view
-                .findings
-                .iter()
-                .any(|finding| finding.code == FindingCode::CodecDeflateTrailingInput));
+            assert!(
+                out.view
+                    .findings
+                    .iter()
+                    .any(|finding| finding.code == FindingCode::CodecDeflateTrailingInput)
+            );
         }
     }
 
@@ -6423,11 +6449,12 @@ mod tests {
             dest: Some(&dir),
         });
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|f| f.code == FindingCode::PathDotDot));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|f| f.code == FindingCode::PathDotDot)
+        );
         assert!(out.receipt.source.is_available());
         assert_eq!(out.interpretation, InterpretationStatus::Interpreted);
         assert_eq!(out.admission, AdmissionStatus::Denied);
@@ -6464,11 +6491,12 @@ mod tests {
             dest: None,
         });
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|f| f.code == FindingCode::PathAds));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|f| f.code == FindingCode::PathAds)
+        );
     }
 
     #[test]
@@ -6594,11 +6622,12 @@ mod tests {
         });
 
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::MaterializeExists));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::MaterializeExists)
+        );
         assert_eq!(fs::read(dir.join("keep.txt")).unwrap(), b"keep");
         assert!(!dir.join("new.txt").exists());
         assert_eq!(out.receipt.materialization.outcome, "setup-failed");
@@ -6635,16 +6664,18 @@ mod tests {
         assert_eq!(out.admission, AdmissionStatus::Admitted);
         assert_eq!(out.verification, VerificationStatus::StructureOnly);
         assert_eq!(out.effect, EffectStatus::Failed);
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::MaterializeExists));
-        assert!(!out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::CrcMismatch));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::MaterializeExists)
+        );
+        assert!(
+            !out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::CrcMismatch)
+        );
         assert_eq!(fs::read(dir.join("keep.txt")).unwrap(), b"keep");
         let _ = fs::remove_dir_all(&dir);
     }
@@ -6666,11 +6697,12 @@ mod tests {
         });
 
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::MaterializeIo));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::MaterializeIo)
+        );
         assert!(!parent.exists());
         assert_eq!(out.receipt.materialization.outcome, "setup-failed");
         assert_eq!(out.receipt.materialization.cleanup, "not-created");
@@ -6709,11 +6741,12 @@ mod tests {
         });
 
         assert!(out.rejected(), "{:?}", out.view.findings);
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::CrcMismatch));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::CrcMismatch)
+        );
         assert!(!dir.exists(), "rejected output must not become visible");
         assert_eq!(out.receipt.materialization.outcome, "aborted");
         assert_eq!(out.receipt.materialization.cleanup, "removed");
@@ -6812,11 +6845,12 @@ mod tests {
                 dest: None,
             });
             assert!(out.rejected());
-            assert!(out
-                .view
-                .findings
-                .iter()
-                .any(|finding| finding.code == FindingCode::PathConflict));
+            assert!(
+                out.view
+                    .findings
+                    .iter()
+                    .any(|finding| finding.code == FindingCode::PathConflict)
+            );
         }
     }
 
@@ -6864,11 +6898,12 @@ mod tests {
         });
 
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::ZipEncoding));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::ZipEncoding)
+        );
     }
 
     #[test]
@@ -6886,11 +6921,12 @@ mod tests {
         });
 
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::QuotaArchive));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::QuotaArchive)
+        );
         assert_eq!(out.receipt.policy.id, policy.id);
         let digest = hex_sha256(&bytes);
         assert_eq!(out.receipt.source.sha256(), Some(digest.as_str()));
@@ -6916,11 +6952,12 @@ mod tests {
         assert_eq!(out.admission, AdmissionStatus::NotEvaluated);
         assert_eq!(out.effect, EffectStatus::NotRequested);
         assert_eq!(out.receipt.source_snapshot, SnapshotKind::Unavailable);
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::SourceIo));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::SourceIo)
+        );
         let json = serde_json::to_value(&out.receipt.source).unwrap();
         assert_eq!(json, serde_json::json!({"status": "unavailable"}));
         assert_ne!(json, serde_json::json!({"sha256": "00".repeat(32)}));
@@ -7108,20 +7145,22 @@ mod tests {
         let sigma_collision = make_zip(&[("\u{3c3}.txt", b"sigma"), ("\u{3c2}.txt", b"final")]);
         let out = apply_portable_utf8_v1(&sigma_collision);
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::PathCaseFold));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::PathCaseFold)
+        );
 
         let private_use = make_zip(&[("\u{e000}.txt", b"private")]);
         let out = apply_portable_utf8_v1(&private_use);
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::PathInvalidChar));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::PathInvalidChar)
+        );
     }
 
     #[test]
@@ -7167,11 +7206,12 @@ mod tests {
         let bytes = make_zip(&[("cafe\u{301}.txt", b"content")]);
         let out = apply_wheel_utf8_v1(&bytes);
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::PathUnicode));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::PathUnicode)
+        );
     }
 
     #[test]
@@ -7179,11 +7219,12 @@ mod tests {
         let bytes = make_zip(&[("\u{c9}.txt", b"one"), ("\u{e9}.txt", b"two")]);
         let out = apply_wheel_utf8_v1(&bytes);
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::PathCaseFold));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::PathCaseFold)
+        );
     }
 
     #[test]
@@ -7192,20 +7233,24 @@ mod tests {
         add_matching_flags(&mut descriptor, 0x0008);
         let descriptor_out = apply_wheel_utf8_v1(&descriptor);
         assert!(descriptor_out.rejected());
-        assert!(descriptor_out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::ZipFlags));
+        assert!(
+            descriptor_out
+                .view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::ZipFlags)
+        );
 
         let dot = make_zip(&[("./member.txt", b"content")]);
         let dot_out = apply_wheel_utf8_v1(&dot);
         assert!(dot_out.rejected());
-        assert!(dot_out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::PathInvalidChar));
+        assert!(
+            dot_out
+                .view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::PathInvalidChar)
+        );
     }
 
     #[test]
@@ -7223,11 +7268,12 @@ mod tests {
         });
 
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::ZipDiffA3Name));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::ZipDiffA3Name)
+        );
     }
 
     #[test]
@@ -7245,11 +7291,12 @@ mod tests {
         });
 
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::ZipExtra));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::ZipExtra)
+        );
     }
 
     #[test]
@@ -7272,12 +7319,16 @@ mod tests {
         assert!(extras.iter().any(|extra| {
             extra.id == 0x7855 && extra.disposition == crate::ir::ExtraDisposition::Ignored
         }));
-        assert!(extras
-            .iter()
-            .any(|extra| extra.site == crate::ir::ExtraSite::Local));
-        assert!(extras
-            .iter()
-            .any(|extra| extra.site == crate::ir::ExtraSite::Central));
+        assert!(
+            extras
+                .iter()
+                .any(|extra| extra.site == crate::ir::ExtraSite::Local)
+        );
+        assert!(
+            extras
+                .iter()
+                .any(|extra| extra.site == crate::ir::ExtraSite::Central)
+        );
     }
 
     #[test]
@@ -7329,11 +7380,12 @@ mod tests {
         assert!(out.rejected());
         assert_eq!(out.interpretation, InterpretationStatus::Indeterminate);
         assert_eq!(out.admission, AdmissionStatus::Denied);
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::PolicyUnsupported));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::PolicyUnsupported)
+        );
         assert_eq!(out.receipt.source_snapshot, SnapshotKind::Unavailable);
         assert!(out.receipt.source.sha256().is_none());
         assert!(out.receipt.identities.layout.hex().is_none());
@@ -7388,10 +7440,11 @@ mod tests {
             .iter()
             .find(|member| member.kind == MemberKind::Directory)
             .expect("directory member");
-        assert!(directory
-            .normalization_actions
-            .iter()
-            .any(|action| { matches!(action, NormalizationAction::StripDirectoryTrailingSlash) }));
+        assert!(
+            directory.normalization_actions.iter().any(|action| {
+                matches!(action, NormalizationAction::StripDirectoryTrailingSlash)
+            })
+        );
         assert!(!directory.canonical_path.ends_with('/'));
     }
 
@@ -7411,11 +7464,12 @@ mod tests {
         });
 
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::ZipDiffA4Dir));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::ZipDiffA4Dir)
+        );
     }
 
     #[test]
@@ -7463,16 +7517,18 @@ mod tests {
         });
 
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::ZipDiffA4Dir));
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .all(|finding| finding.code != FindingCode::ZipSymlink));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::ZipDiffA4Dir)
+        );
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .all(|finding| finding.code != FindingCode::ZipSymlink)
+        );
     }
 
     #[test]
@@ -7494,11 +7550,12 @@ mod tests {
         });
 
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::ZipDiffA4Dir));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::ZipDiffA4Dir)
+        );
     }
 
     #[test]
@@ -7520,11 +7577,12 @@ mod tests {
         });
 
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::ZipDiffA4Dir));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::ZipDiffA4Dir)
+        );
     }
 
     #[test]
@@ -7542,11 +7600,12 @@ mod tests {
         });
 
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::ZipDiffC5Zip64));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::ZipDiffC5Zip64)
+        );
     }
 
     #[test]
@@ -7566,11 +7625,12 @@ mod tests {
         });
 
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::ZipDiffC3Count));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::ZipDiffC3Count)
+        );
 
         put_u16(&mut bytes, central[0] + 34, u16::MAX);
         let out = apply(Request {
@@ -7582,11 +7642,12 @@ mod tests {
             dest: None,
         });
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::ZipDiffC5Zip64));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::ZipDiffC5Zip64)
+        );
     }
 
     #[test]
@@ -7634,11 +7695,12 @@ mod tests {
         });
 
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::ZipDiffC1Stream));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::ZipDiffC1Stream)
+        );
     }
 
     #[test]
@@ -7660,11 +7722,12 @@ mod tests {
         });
 
         assert!(out.rejected());
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::ZipDiffC1Stream));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::ZipDiffC1Stream)
+        );
     }
 
     #[test]
@@ -7731,11 +7794,12 @@ mod tests {
         });
 
         assert!(out.rejected(), "{:?}", out.view.findings);
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::MaterializeUnsafeComponent));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::MaterializeUnsafeComponent)
+        );
         assert!(!dest.exists());
         assert!(!outside.join("leaf.txt").exists());
         assert_eq!(fs::read(outside.join("sentinel.txt")).unwrap(), b"outside");
@@ -7762,11 +7826,12 @@ mod tests {
         });
 
         assert!(out.rejected(), "{:?}", out.view.findings);
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::MaterializeAudit));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::MaterializeAudit)
+        );
         assert!(!dest.exists());
         assert_eq!(out.receipt.materialization.outcome, "aborted");
         assert_eq!(out.receipt.materialization.cleanup, "removed");
@@ -7804,11 +7869,12 @@ mod tests {
         });
 
         assert!(out.rejected(), "{:?}", out.view.findings);
-        assert!(out
-            .view
-            .findings
-            .iter()
-            .any(|finding| finding.code == FindingCode::MaterializeAudit));
+        assert!(
+            out.view
+                .findings
+                .iter()
+                .any(|finding| finding.code == FindingCode::MaterializeAudit)
+        );
         assert!(!dest.exists());
         assert_eq!(out.cli_exit_code(), 3);
         assert_eq!(out.effect, EffectStatus::Failed);

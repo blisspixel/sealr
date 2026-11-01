@@ -231,10 +231,11 @@
     "admitted_exit": 0,
     "not_admitted_exit": 2,
     "effect_failed_exit": 3,
-    "operational_exit": 1
+    "operational_exit": 1,
+    "machine_result_schema": "sealr.command-result.v1"
   },
   "distribution": {
-    "msrv": "1.98",
+    "msrv": "1.99",
     "msrv_class": "candidate-stable-for-pilot",
     "semver_policy": "prerelease-changelog-required",
     "publishable_crate": "sealr",

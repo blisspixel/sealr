@@ -6,8 +6,8 @@
 //! of the tree bytes. The encoding does not use JSON, so tree identity is
 //! independent of `view_digest` and of later RFC 8785 canonicalization.
 
-use serde::ser::{SerializeMap, Serializer};
 use serde::Serialize;
+use serde::ser::{SerializeMap, Serializer};
 
 use crate::ir::{
     ArchiveFormat, ArchiveIR, ExtraDisposition, ExtraSite, GnuLongNamePathSource, IrMember,

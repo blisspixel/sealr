@@ -15,9 +15,10 @@ use rustix::process::{PidfdFlags, Signal};
 use sha2::{Digest, Sha256};
 
 use super::{LinuxWorker, SupervisionError, SupervisionErrorKind};
+use crate::Policy;
 use crate::apply::{
-    finish_with_jail, member_view, plan_supervised_source, reject_only, with_ir,
-    with_verified_archive, ApplyOptions, PlanDecision, PlanningContext, Request, Source,
+    ApplyOptions, PlanDecision, PlanningContext, Request, Source, finish_with_jail, member_view,
+    plan_supervised_source, reject_only, with_ir, with_verified_archive,
 };
 use crate::identity::OutcomeIdentities;
 use crate::ir::ZipInterpretationProfile;
@@ -33,12 +34,11 @@ use crate::verified::VerifiedArchive;
 use crate::worker_protocol::frame::{Frame, Kind};
 use crate::worker_protocol::helper::HelperArtifact;
 use crate::worker_protocol::linux::{
-    configure_timeout, receive_packet, send_packet, TransportError, ERROR_RESTRICTION,
-    FLAG_MATERIALIZE, FLAG_MEMBER_PREFIX_READ, FLAG_MEMBER_READ, FLAG_STAGE, READY_FLAGS,
+    ERROR_RESTRICTION, FLAG_MATERIALIZE, FLAG_MEMBER_PREFIX_READ, FLAG_MEMBER_READ, FLAG_STAGE,
+    READY_FLAGS, TransportError, configure_timeout, receive_packet, send_packet,
 };
 use crate::worker_protocol::sealed::{self, BlobRole};
 use crate::worker_protocol::{HELPER_BOOTSTRAP_ABI, HELPER_FEATURE_ID};
-use crate::Policy;
 
 mod materialize;
 

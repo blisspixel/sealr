@@ -127,7 +127,7 @@ fn named_rust_controls_do_not_create_a_second_json_policy_language() {
 #[cfg(any(target_os = "linux", target_os = "macos", windows))]
 mod materialization {
     use super::*;
-    use sealr::{apply, hex_sha256, AdmissionStatus, EffectStatus, Request, Source};
+    use sealr::{AdmissionStatus, EffectStatus, Request, Source, apply, hex_sha256};
     use std::fs;
     use std::io::{Cursor, Write};
     use std::path::PathBuf;

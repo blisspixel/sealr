@@ -1,15 +1,21 @@
 use std::fs;
 #[cfg(unix)]
+use std::io::Read;
+#[cfg(unix)]
 use std::net::Shutdown;
 #[cfg(unix)]
-use std::os::fd::OwnedFd;
+use std::os::fd::{FromRawFd, OwnedFd};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
+#[cfg(unix)]
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
 use std::process::Stdio;
 use std::process::{Command, Output};
 use std::sync::atomic::{AtomicU64, Ordering};
+#[cfg(unix)]
+use std::thread;
 
 use serde_json::Value;
 
@@ -568,9 +574,11 @@ fn explicit_tar_pax_format_inspects_materializes_and_is_not_autodetected() {
     );
     assert!(receipt["identities"]["layout"].get("sealrTreeV5").is_some());
     assert!(receipt["identities"]["layout"].get("sealrTreeV1").is_none());
-    assert!(receipt["identities"]["content"]
-        .get("sealrTreeV1")
-        .is_some());
+    assert!(
+        receipt["identities"]["content"]
+            .get("sealrTreeV1")
+            .is_some()
+    );
     assert_eq!(receipt["policy"], view["policy"]);
 
     let destination = run.path.join("materialized");
@@ -655,9 +663,11 @@ fn explicit_tar_gnu_longname_inspects_materializes_and_is_not_autodetected() {
         "08fe2698806da997bc42e7e13a45cbf412a4a7056dec39c62456202680b91fa4"
     );
     assert!(receipt["identities"]["layout"].get("sealrTreeV6").is_some());
-    assert!(receipt["identities"]["content"]
-        .get("sealrTreeV1")
-        .is_some());
+    assert!(
+        receipt["identities"]["content"]
+            .get("sealrTreeV1")
+            .is_some()
+    );
 
     let destination = run.path.join("materialized");
     let materialize = sealr(&[
@@ -738,9 +748,11 @@ fn explicit_tar_gzip_pax_format_inspects_and_materializes() {
     );
     assert!(receipt["identities"]["layout"].get("sealrTreeV7").is_some());
     assert!(receipt["identities"]["layout"].get("sealrTreeV5").is_none());
-    assert!(receipt["identities"]["content"]
-        .get("sealrTreeV1")
-        .is_some());
+    assert!(
+        receipt["identities"]["content"]
+            .get("sealrTreeV1")
+            .is_some()
+    );
     assert_eq!(receipt["policy"], view["policy"]);
 
     let destination = run.path.join("materialized");
@@ -834,9 +846,11 @@ fn explicit_tar_gzip_gnu_longname_format_inspects_and_materializes() {
     );
     assert!(receipt["identities"]["layout"].get("sealrTreeV8").is_some());
     assert!(receipt["identities"]["layout"].get("sealrTreeV6").is_none());
-    assert!(receipt["identities"]["content"]
-        .get("sealrTreeV1")
-        .is_some());
+    assert!(
+        receipt["identities"]["content"]
+            .get("sealrTreeV1")
+            .is_some()
+    );
     assert_eq!(receipt["policy"], view["policy"]);
 
     let destination = run.path.join("materialized");
@@ -1132,9 +1146,11 @@ fn explicit_tar_bzip2_ustar_format_inspects_and_materializes() {
         receipt["identities"]["layout"]["sealrTreeV11"],
         "6adec7927d150611af780ea135964e96cf1581d42a407f637ee752b63ac3894e"
     );
-    assert!(receipt["identities"]["layout"]
-        .get("sealrTreeV10")
-        .is_none());
+    assert!(
+        receipt["identities"]["layout"]
+            .get("sealrTreeV10")
+            .is_none()
+    );
     assert_eq!(
         receipt["identities"]["content"]["sealrTreeV1"],
         "bc8f6d6f7870aeab647cff08db25471a729bd2a41e095d49d6254c49afc34278"
@@ -1250,9 +1266,11 @@ fn explicit_sevenz_copy_format_inspects_and_materializes() {
         receipt["identities"]["layout"]["sealrTreeV12"],
         "df4c1271279959b9fbd90e56078913779e134f52a69c52d959878ad76bff9a9d"
     );
-    assert!(receipt["identities"]["layout"]
-        .get("sealrTreeV11")
-        .is_none());
+    assert!(
+        receipt["identities"]["layout"]
+            .get("sealrTreeV11")
+            .is_none()
+    );
     assert_eq!(
         receipt["identities"]["content"]["sealrTreeV1"],
         "bc8f6d6f7870aeab647cff08db25471a729bd2a41e095d49d6254c49afc34278"
@@ -1934,9 +1952,11 @@ fn the_materialize_subcommand_publishes_the_same_tree_as_the_dest_flag() {
     assert_eq!(view["verdict"], "allowed");
     assert_eq!(view["wrote"], true);
     assert_eq!(receipt["effect"]["status"], "committed");
-    assert!(destination
-        .join(walkthrough_fixtures::CONFIG_PATH)
-        .is_file());
+    assert!(
+        destination
+            .join(walkthrough_fixtures::CONFIG_PATH)
+            .is_file()
+    );
     assert!(destination.join(walkthrough_fixtures::HELLO_PATH).is_file());
 }
 
@@ -2031,4 +2051,590 @@ fn format_hint_comes_from_signature_bytes_not_the_filename() {
     let formats = zip_view["findings"][0]["hint"]["formats"].to_string();
     assert!(!formats.contains("tar-gzip"));
     assert_ne!(zip_view["findings"][0]["hint"]["observed"], "gzip member");
+}
+
+fn terminated_tar(header: [u8; 512], payload: &[u8]) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    append_tar_record(&mut bytes, header, payload);
+    bytes.resize(bytes.len() + 1024, 0);
+    bytes
+}
+
+#[test]
+fn invalid_gzip_alias_names_the_three_gzip_tar_formats() {
+    let (run, fixtures) = fixture_set("format-alias");
+    let output = sealr(&[
+        Path::new("--format"),
+        Path::new("tar-gz"),
+        &fixtures.allowed,
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(output.stdout.is_empty());
+    let message = String::from_utf8_lossy(&output.stderr);
+    assert!(message.contains("tar-gz is not a sealr format"));
+    assert!(message.contains("See formats: sealr --help"));
+    assert!(message.contains("tar-gzip-ustar"));
+    assert!(message.contains("tar-gzip-pax"));
+    assert!(message.contains("tar-gzip-gnu-longname"));
+    assert!(
+        !message.contains("similar"),
+        "a gzip alias must not be a single fuzzy match: {message}"
+    );
+    let _ = run;
+}
+
+#[test]
+fn refusal_text_names_the_member_and_the_observed_bytes() {
+    let run = RunDirectory::create("refusal-words");
+
+    let mut seven = tar_header(b"README", 0, b'0');
+    seven[148..155].copy_from_slice(b"0000000");
+    seven[155] = 0;
+    let checksum_path = run.path.join("seven.tar");
+    fs::write(&checksum_path, terminated_tar(seven, b"")).unwrap();
+    let checksum = sealr(&[
+        Path::new("--format"),
+        Path::new("tar-ustar"),
+        &checksum_path,
+    ]);
+    assert_eq!(checksum.status.code(), Some(2));
+    let checksum_view = json(&checksum.stdout, "seven-digit view");
+    assert_eq!(checksum_view["findings"][0]["code"], "tar.checksum");
+    assert_eq!(checksum_view["findings"][0]["member"], "README");
+    assert!(
+        checksum_view["findings"][0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("observed 7-digit checksum, as written by git archive and npm")
+    );
+    assert!(checksum_view["findings"][0].get("hint").is_none());
+
+    let link_path = run.path.join("link.tar");
+    fs::write(
+        &link_path,
+        terminated_tar(tar_header(b"linkname", 0, b'2'), b""),
+    )
+    .unwrap();
+    let link = sealr(&[Path::new("--format"), Path::new("tar-ustar"), &link_path]);
+    let link_view = json(&link.stdout, "symlink view");
+    assert_eq!(link_view["findings"][0]["code"], "tar.feature_unsupported");
+    assert_eq!(link_view["findings"][0]["member"], "linkname");
+    assert!(
+        link_view["findings"][0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("symlink")
+    );
+    assert!(link_view["findings"][0].get("hint").is_none());
+
+    let xz_path = run.path.join("stream.tar.gz");
+    let mut xz_bytes = vec![0xfd, 0x37, 0x7a, 0x58, 0x5a, 0x00];
+    xz_bytes.resize(32, 0);
+    fs::write(&xz_path, xz_bytes).unwrap();
+    let xz = sealr(&[Path::new("--format"), Path::new("tar-gzip-ustar"), &xz_path]);
+    let xz_view = json(&xz.stdout, "xz view");
+    assert_eq!(xz_view["findings"][0]["code"], "format.magic");
+    assert_eq!(xz_view["findings"][0]["hint"]["observed"], "xz stream");
+    assert_eq!(
+        xz_view["findings"][0]["hint"]["formats"],
+        serde_json::json!(["tar-xz-ustar"])
+    );
+
+    let extension = pax_record("mtime", "0");
+    let pax_tar = terminated_tar(
+        tar_header(b"PaxHeader", extension.len() as u64, b'x'),
+        &extension,
+    );
+    let keyword_path = run.path.join("mtime.tar.gz");
+    fs::write(&keyword_path, gzip_fixture_bytes(&pax_tar)).unwrap();
+    let keyword = sealr(&[
+        Path::new("--format"),
+        Path::new("tar-gzip-pax"),
+        &keyword_path,
+    ]);
+    let keyword_view = json(&keyword.stdout, "keyword view");
+    assert_eq!(
+        keyword_view["findings"][0]["detail"],
+        "pax keyword mtime is outside the closed path/size profile"
+    );
+    assert!(keyword_view["findings"][0].get("hint").is_none());
+
+    let header_path = run.path.join("header.tar.gz");
+    fs::write(&header_path, gzip_fixture_bytes(&pax_tar)).unwrap();
+    let header = sealr(&[
+        Path::new("--format"),
+        Path::new("tar-gzip-ustar"),
+        &header_path,
+    ]);
+    let header_view = json(&header.stdout, "pax header view");
+    assert_eq!(header_view["findings"][0]["member"], "PaxHeader");
+    assert!(
+        header_view["findings"][0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("PAX extended header")
+    );
+    assert_eq!(
+        header_view["findings"][0]["hint"]["observed"],
+        "PAX extended header"
+    );
+    assert_eq!(
+        header_view["findings"][0]["hint"]["formats"],
+        serde_json::json!(["tar-gzip-pax"])
+    );
+}
+
+#[test]
+fn existing_destination_stays_admitted_and_names_the_library_detail() {
+    let (run, fixtures) = fixture_set("dest-exists");
+    let destination = run.path.join("exists");
+    fs::create_dir(&destination).unwrap();
+    let output = sealr(&[&fixtures.allowed, Path::new("--dest"), &destination]);
+    assert_eq!(output.status.code(), Some(3));
+    let view = json(&output.stdout, "stdout");
+    assert_eq!(view["admission"]["status"], "admitted");
+    assert_eq!(view["effect"]["status"], "failed");
+    assert_eq!(view["verdict"], "rejected");
+    assert_eq!(view["findings"][0]["code"], "materialize.exists");
+    assert_eq!(
+        view["findings"][0]["detail"],
+        "destination already exists; replacement is not implemented"
+    );
+    assert!(destination.is_dir());
+}
+
+fn classify_command_result(value: &Value) -> &'static str {
+    if value.get("schema").and_then(Value::as_str) != Some("sealr.command-result.v1") {
+        return "unknown";
+    }
+    match value.get("category").and_then(Value::as_str) {
+        Some("semantic") => {
+            let admission = value["semantic"]["admission"]["status"].as_str();
+            let effect = value["semantic"]["effect"]["status"].as_str();
+            let wrote = value["semantic"]["wrote"].as_bool();
+            let finding = value["semantic"]["findings"]
+                .get(0)
+                .and_then(|finding| finding["code"].as_str());
+            let output_status = value["output"]["status"].as_str();
+            if output_status == Some("failed") && wrote == Some(true) {
+                "evidence-write-after-commit"
+            } else if finding == Some("source.io") {
+                "missing-source"
+            } else if finding == Some("materialize.exists")
+                && admission == Some("admitted")
+                && effect == Some("failed")
+            {
+                "destination-collision"
+            } else if admission == Some("admitted") && value["exit"] == 0 {
+                "admission"
+            } else if value["exit"] == 2 {
+                "archive-refusal"
+            } else {
+                "unknown"
+            }
+        }
+        Some("policy") => "invalid-policy",
+        Some("worker") => "worker-manifest-failure",
+        Some("output") if value["evaluated"] == false => "evidence-file-collision",
+        _ => "unknown",
+    }
+}
+
+#[test]
+fn machine_result_classifies_outcomes_without_reading_human_text() {
+    let (run, fixtures) = fixture_set("machine-result");
+
+    let admitted = sealr(&[&fixtures.allowed, Path::new("--machine")]);
+    assert_eq!(admitted.status.code(), Some(0));
+    assert!(admitted.stderr.is_empty());
+    let admitted_doc = json(&admitted.stdout, "admitted");
+    assert_eq!(classify_command_result(&admitted_doc), "admission");
+    assert_eq!(admitted_doc["evaluated"], true);
+    assert_eq!(admitted_doc["semantic_exit"], 0);
+    assert_eq!(admitted_doc["output"]["status"], "delivered");
+    assert!(admitted_doc["semantic"].get("source").is_none());
+    assert!(admitted.stdout.windows(2).all(|pair| pair != b"\x1b["));
+
+    let refused = sealr(&[&fixtures.rejected, Path::new("--machine")]);
+    assert_eq!(refused.status.code(), Some(2));
+    assert_eq!(
+        classify_command_result(&json(&refused.stdout, "refused")),
+        "archive-refusal"
+    );
+
+    let missing = run.path.join("nope.zip");
+    let missing_output = sealr(&[&missing, Path::new("--machine")]);
+    assert_eq!(missing_output.status.code(), Some(2));
+    let missing_doc = json(&missing_output.stdout, "missing");
+    assert_eq!(classify_command_result(&missing_doc), "missing-source");
+    assert_eq!(
+        missing_doc["semantic"]["admission"]["status"],
+        "not-evaluated"
+    );
+    assert!(missing_doc["semantic"].get("source").is_none());
+
+    let destination = run.path.join("exists");
+    fs::create_dir(&destination).unwrap();
+    let collision = sealr(&[
+        &fixtures.allowed,
+        Path::new("--dest"),
+        &destination,
+        Path::new("--machine"),
+    ]);
+    assert_eq!(collision.status.code(), Some(3));
+    let collision_doc = json(&collision.stdout, "collision");
+    assert_eq!(
+        classify_command_result(&collision_doc),
+        "destination-collision"
+    );
+    assert_eq!(collision_doc["semantic_exit"], 3);
+    assert_eq!(
+        collision_doc["semantic"]["findings"][0]["detail"],
+        "destination already exists; replacement is not implemented"
+    );
+
+    let policy_path = run.path.join("bad-policy.json");
+    fs::write(&policy_path, b"{\"id\":").unwrap();
+    let policy = sealr(&[
+        &fixtures.allowed,
+        Path::new("--policy"),
+        &policy_path,
+        Path::new("--machine"),
+    ]);
+    assert_eq!(policy.status.code(), Some(2));
+    let policy_doc = json(&policy.stdout, "policy");
+    assert_eq!(classify_command_result(&policy_doc), "invalid-policy");
+    assert_eq!(policy_doc["evaluated"], false);
+    assert!(policy_doc.get("semantic").is_none() || policy_doc["semantic"].is_null());
+    assert_eq!(policy_doc["failure"]["code"], "policy.invalid_json");
+
+    let manifest = run.path.join("sealr-worker.manifest");
+    let worker = sealr(&[
+        Path::new("--worker-manifest"),
+        &manifest,
+        &fixtures.allowed,
+        Path::new("--machine"),
+    ]);
+    assert_eq!(worker.status.code(), Some(1));
+    let worker_doc = json(&worker.stdout, "worker");
+    assert_eq!(
+        classify_command_result(&worker_doc),
+        "worker-manifest-failure"
+    );
+    assert_eq!(worker_doc["evaluated"], false);
+    // Linux reads the manifest and reports the missing helper. Other targets
+    // refuse authenticated workers before opening the manifest.
+    let worker_code = if cfg!(target_os = "linux") {
+        "worker.helper_artifact"
+    } else {
+        "worker.isolation_unavailable"
+    };
+    assert_eq!(worker_doc["failure"]["code"], worker_code);
+
+    let view_path = run.path.join("taken.view.json");
+    fs::write(&view_path, b"keep").unwrap();
+    let occupied = sealr(&[
+        &fixtures.allowed,
+        Path::new("--view"),
+        &view_path,
+        Path::new("--machine"),
+    ]);
+    assert_eq!(occupied.status.code(), Some(1));
+    let occupied_doc = json(&occupied.stdout, "occupied");
+    assert_eq!(
+        classify_command_result(&occupied_doc),
+        "evidence-file-collision"
+    );
+    assert_eq!(occupied_doc["failure"]["code"], "output.view_exists");
+    assert_eq!(occupied_doc["output"]["status"], "failed");
+    assert_eq!(occupied_doc["output"]["stage"], "view");
+    assert_eq!(fs::read(&view_path).unwrap(), b"keep");
+
+    let incompatible = sealr(&[
+        &fixtures.allowed,
+        Path::new("--machine"),
+        Path::new("--json"),
+    ]);
+    assert_eq!(incompatible.status.code(), Some(2));
+    let incompatible_doc = json(&incompatible.stdout, "incompatible");
+    assert_eq!(incompatible_doc["category"], "usage");
+    assert_eq!(
+        incompatible_doc["failure"]["code"],
+        "usage.incompatible_flags"
+    );
+    assert_eq!(classify_command_result(&incompatible_doc), "unknown");
+
+    let mut future = admitted_doc.clone();
+    future["category"] = serde_json::json!("future");
+    future["semantic"] = Value::Null;
+    assert_eq!(classify_command_result(&future), "unknown");
+    future["schema"] = serde_json::json!("sealr.command-result.v0");
+    assert_eq!(classify_command_result(&future), "unknown");
+}
+
+#[cfg(unix)]
+#[test]
+fn machine_evidence_write_failure_keeps_a_committed_destination() {
+    let (run, fixtures) = fixture_set("machine-write-failure");
+    let destination = run.path.join("pkg");
+    let view_path = run.path.join("out.view.json");
+    let archive_len = fs::metadata(&fixtures.allowed)
+        .expect("archive length")
+        .len();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_sealr"));
+    command
+        .arg(&fixtures.allowed)
+        .arg("--dest")
+        .arg(&destination)
+        .arg("--view")
+        .arg(&view_path)
+        .arg("--machine");
+    // RLIMIT_FSIZE is per file. The private snapshot is the archive length and
+    // the destination members are smaller, so this limit lets publication
+    // finish and then rejects the larger view document.
+    unsafe {
+        command.pre_exec(move || {
+            libc::signal(libc::SIGXFSZ, libc::SIG_IGN);
+            let limit = libc::rlimit {
+                rlim_cur: archive_len,
+                rlim_max: archive_len,
+            };
+            if libc::setrlimit(libc::RLIMIT_FSIZE, &limit) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            Ok(())
+        });
+    }
+    let output = command.output().expect("sealr should start");
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "stdout={} stderr={}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let document = json(&output.stdout, "machine stdout");
+    assert_eq!(
+        classify_command_result(&document),
+        "evidence-write-after-commit",
+        "{document} stderr={}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(document["category"], "semantic");
+    assert_eq!(document["exit"], 1);
+    assert_eq!(document["semantic_exit"], 0);
+    assert_eq!(document["semantic"]["effect"]["status"], "committed");
+    assert_eq!(document["semantic"]["wrote"], true);
+    assert_eq!(document["output"]["status"], "failed");
+    assert_eq!(document["output"]["stage"], "view");
+    assert_eq!(document["failure"]["code"], "output.write_failed");
+    assert_eq!(
+        fs::read(destination.join(walkthrough_fixtures::HELLO_PATH)).expect("dest remains"),
+        walkthrough_fixtures::HELLO_BYTES
+    );
+    assert!(!view_path.exists(), "a partial view file is removed");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(
+        "view output was not completely written after a committed destination. The destination was not rolled back. Do not retry the write blindly."
+    ));
+    assert!(!stderr.contains("was rolled back"));
+}
+
+#[cfg(unix)]
+#[test]
+fn closed_machine_stdout_keeps_the_committed_destination() {
+    let (run, fixtures) = fixture_set("machine-closed-stdout");
+    let destination = run.path.join("pkg");
+    let output = sealr_with_unwritable_stdout(&[
+        &fixtures.allowed,
+        Path::new("--dest"),
+        &destination,
+        Path::new("--machine"),
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains(
+        "command result was not written to stdout after a committed destination. The destination was not rolled back. Do not retry the write blindly."
+    ));
+    assert!(!stderr.contains("was rolled back"));
+    assert_eq!(
+        fs::read(destination.join(walkthrough_fixtures::HELLO_PATH)).expect("dest remains"),
+        walkthrough_fixtures::HELLO_BYTES
+    );
+    let _ = run;
+}
+
+fn sealr_text_env(arguments: &[&str], env: &[(&str, &str)]) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_sealr"));
+    command.args(arguments);
+    command.env_remove("NO_COLOR");
+    command.env_remove("CLICOLOR");
+    command.env_remove("CLICOLOR_FORCE");
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    command.output().expect("sealr should start")
+}
+
+#[test]
+fn redirected_summary_color_follows_the_flag_and_leaves_json_plain() {
+    let (run, fixtures) = fixture_set("summary-color");
+    let archive = fixtures.allowed.to_str().expect("fixture path is unicode");
+    let plain = sealr_text_env(&[archive], &[]);
+    assert_eq!(plain.status.code(), Some(0));
+    assert!(!plain.stderr.contains(&b'\x1b'));
+    assert!(!plain.stdout.contains(&b'\x1b'));
+    assert_eq!(json(&plain.stdout, "plain view")["schema"], "sealr.view.v1");
+
+    let forced = sealr_text_env(&[archive, "--color", "always"], &[("NO_COLOR", "1")]);
+    assert_eq!(forced.status.code(), Some(0));
+    let stderr = String::from_utf8_lossy(&forced.stderr);
+    assert!(
+        stderr.contains("\u{1b}[32mallowed\u{1b}[0m"),
+        "always ignores NO_COLOR when the summary is redirected: {stderr}"
+    );
+    assert!(!forced.stdout.contains(&b'\x1b'));
+    assert_eq!(
+        json(&forced.stdout, "forced view")["schema"],
+        "sealr.view.v1"
+    );
+    assert!(
+        !stderr.contains("content tree"),
+        "redirected stderr omits the preview"
+    );
+    let _ = run;
+}
+
+#[cfg(unix)]
+fn sealr_with_stderr_tty(arguments: &[&str], env: &[(&str, &str)]) -> Output {
+    let mut master: libc::c_int = -1;
+    let mut slave: libc::c_int = -1;
+    let rc = unsafe {
+        libc::openpty(
+            &mut master,
+            &mut slave,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    assert_eq!(rc, 0, "openpty: {}", std::io::Error::last_os_error());
+    unsafe {
+        for fd in [master, slave] {
+            let flags = libc::fcntl(fd, libc::F_GETFD);
+            libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+        }
+    }
+    let slave = unsafe { OwnedFd::from_raw_fd(slave) };
+    let master = unsafe { OwnedFd::from_raw_fd(master) };
+    let mut command = Command::new(env!("CARGO_BIN_EXE_sealr"));
+    command.args(arguments);
+    command.env_remove("NO_COLOR");
+    command.env_remove("CLICOLOR");
+    command.env_remove("CLICOLOR_FORCE");
+    command.env("TERM", "xterm-256color");
+    for (key, value) in env {
+        command.env(key, value);
+    }
+    unsafe {
+        command.pre_exec(|| {
+            libc::setsid();
+            libc::signal(libc::SIGTTOU, libc::SIG_IGN);
+            libc::signal(libc::SIGTTIN, libc::SIG_IGN);
+            Ok(())
+        });
+    }
+    command.stdout(Stdio::piped()).stderr(Stdio::from(slave));
+    let mut child = command.spawn().expect("sealr should start on a pty");
+    drop(command);
+    let mut stdout_pipe = child.stdout.take().expect("stdout pipe");
+    let stdout_thread = thread::spawn(move || {
+        let mut bytes = Vec::new();
+        stdout_pipe.read_to_end(&mut bytes).expect("stdout read");
+        bytes
+    });
+    let stderr_thread = thread::spawn(move || {
+        let mut file = fs::File::from(master);
+        let mut bytes = Vec::new();
+        let mut chunk = [0_u8; 4096];
+        loop {
+            match file.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(count) => bytes.extend_from_slice(&chunk[..count]),
+                // The pty master returns EIO once the slave side closes.
+                Err(error) if error.raw_os_error() == Some(libc::EIO) => break,
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(error) => panic!("pty read: {error}"),
+            }
+        }
+        bytes
+    });
+    let started = std::time::Instant::now();
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("try_wait") {
+            break status;
+        }
+        if started.elapsed() > std::time::Duration::from_secs(3) {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("sealr did not exit while stderr was a terminal");
+        }
+        thread::sleep(std::time::Duration::from_millis(20));
+    };
+    Output {
+        status,
+        stdout: stdout_thread.join().expect("stdout thread"),
+        stderr: stderr_thread.join().expect("stderr thread"),
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn terminal_summary_color_follows_no_color_and_clicolor_force() {
+    let (run, fixtures) = fixture_set("tty-color");
+    let archive = fixtures.allowed.to_str().expect("fixture path is unicode");
+    let destination = run.path.join("pkg");
+    let dest = destination.to_str().expect("dest is unicode");
+
+    let colored = sealr_with_stderr_tty(&[archive, "--dest", dest], &[]);
+    assert_eq!(
+        colored.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&colored.stderr)
+    );
+    let stderr = String::from_utf8_lossy(&colored.stderr);
+    assert!(stderr.contains("\u{1b}[32mallowed\u{1b}[0m"), "{stderr}");
+    assert!(stderr.contains("content tree "), "{stderr}");
+    assert!(stderr.contains("(preview identity, unsigned)"), "{stderr}");
+    assert!(!colored.stdout.contains(&b'\x1b'));
+    assert_eq!(
+        json(&colored.stdout, "piped view")["schema"],
+        "sealr.view.v1"
+    );
+
+    let quiet_dest = run.path.join("plain");
+    let quiet_path = quiet_dest.to_str().expect("dest is unicode");
+    let quiet = sealr_with_stderr_tty(
+        &[archive, "--dest", quiet_path],
+        &[("NO_COLOR", "1"), ("CLICOLOR_FORCE", "1")],
+    );
+    let quiet_err = String::from_utf8_lossy(&quiet.stderr);
+    assert!(!quiet_err.contains('\u{1b}'), "{quiet_err}");
+    assert!(quiet_err.contains("content tree "), "{quiet_err}");
+    assert!(quiet_err.contains("allowed:"), "{quiet_err}");
+
+    let forced = sealr_with_stderr_tty(&[archive], &[("CLICOLOR_FORCE", "1"), ("TERM", "dumb")]);
+    let forced_err = String::from_utf8_lossy(&forced.stderr);
+    assert!(
+        forced_err.contains("\u{1b}[32mallowed\u{1b}[0m"),
+        "{forced_err}"
+    );
+    assert!(!forced_err.contains("content tree "));
+
+    let dumb = sealr_with_stderr_tty(&[archive], &[("TERM", "dumb")]);
+    let dumb_err = String::from_utf8_lossy(&dumb.stderr);
+    assert!(!dumb_err.contains('\u{1b}'), "{dumb_err}");
+    assert!(dumb_err.starts_with("allowed:"), "{dumb_err}");
 }

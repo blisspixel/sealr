@@ -5,10 +5,10 @@ use std::fs;
 use std::io::{Cursor, Write};
 use std::path::{Path, PathBuf};
 
-use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelLimits, CONSUMER_PROFILE_ID};
+use sealr::wheel::{CONSUMER_PROFILE_ID, WheelEvaluation, WheelLimits, evaluate_wheel};
 use sealr::{
-    apply_with_options, ApplyOptions, Policy, Request, Source, ZipInterpretationProfile,
-    ZIP_PORTABLE_UTF8_V1,
+    ApplyOptions, Policy, Request, Source, ZIP_PORTABLE_UTF8_V1, ZipInterpretationProfile,
+    apply_with_options,
 };
 use sha2::{Digest, Sha256};
 use zip::write::SimpleFileOptions;
@@ -157,10 +157,12 @@ fn supported_consumer_uses_only_the_verified_capability_after_source_deletion() 
         "2fd5f81e38b6ad483fa0e998f665cc466a9bd9816382299f4a64a0202f4a91bb"
     );
     assert_eq!(artifact.interpretation_profile, ZIP_PORTABLE_UTF8_V1);
-    assert!(artifact
-        .record
-        .iter()
-        .any(|binding| binding.path == "demo/caf\u{e9}.py"));
+    assert!(
+        artifact
+            .record
+            .iter()
+            .any(|binding| binding.path == "demo/caf\u{e9}.py")
+    );
     assert_eq!(plan.artifact_sha256(), identities.artifact_sha256);
     assert_eq!(
         identities.source_sha256,

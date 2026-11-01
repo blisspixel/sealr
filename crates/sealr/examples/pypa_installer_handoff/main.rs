@@ -10,16 +10,16 @@ use std::process::{Command, Stdio};
 #[cfg(target_os = "linux")]
 use std::time::{Duration, Instant};
 
-use sealr::wheel::{evaluate_wheel, WheelEvaluation, WheelLimits};
+use sealr::wheel::{WheelEvaluation, WheelLimits, evaluate_wheel};
 use sealr::{
-    apply_supervised, AdmissionStatus, ApplyOptions, EffectStatus, LinuxWorker, Outcome, Policy,
-    Request, Source, VerificationStatus, VerifiedArchive, ZipInterpretationProfile,
+    AdmissionStatus, ApplyOptions, EffectStatus, LinuxWorker, Outcome, Policy, Request, Source,
+    VerificationStatus, VerifiedArchive, ZipInterpretationProfile, apply_supervised,
 };
 use serde::Serialize;
 
 use stage::{
-    configure_process_group, prepare_wheel_source, validate_existing_poetry_venv, wait_for_child,
-    HandoffTarget, PreparationTarget, PrivateRoot,
+    HandoffTarget, PreparationTarget, PrivateRoot, configure_process_group, prepare_wheel_source,
+    validate_existing_poetry_venv, wait_for_child,
 };
 
 const PREPARED_SCHEMA: &str = "sealr.pypa-wheel-source-prepared.v1";

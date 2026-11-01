@@ -178,7 +178,7 @@ foreach ($term in @(
     '`cargo package --list`',
     '`ubuntu-24.04`',
     '`macos-15`',
-    '`windows-2022`',
+    '`windows-2025`',
     '`MACOSX_DEPLOYMENT_TARGET=15.0`',
     'patch releases never raise the MSRV'
 )) {
@@ -190,7 +190,7 @@ foreach ($term in @(
     '"schema": "sealr.native-package-floor.v1"',
     '"runner": "ubuntu-24.04"',
     '"runner": "macos-15"',
-    '"runner": "windows-2022"'
+    '"runner": "windows-2025"'
 )) {
     if (-not $nativeFloorContract.Contains($term, [StringComparison]::Ordinal)) {
         throw "native package floor contract is missing its exact declaration: $term"
@@ -301,7 +301,7 @@ foreach ($job in @(
     @{
         Name = 'platform'
         Text = $platformJob
-        Runner = 'os: [macos-15, windows-2022]'
+        Runner = 'os: [macos-15, windows-2025]'
         Floor = 'scripts/verify_native_floor.ps1 -ExpectedTarget $target'
     }
 )) {

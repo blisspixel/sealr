@@ -145,7 +145,7 @@ try {
     }
 
     $fixtureTool = Join-Path $ToolRoot "walkthrough-fixtures$executableSuffix"
-    & rustc --edition=2021 scripts/walkthrough_fixtures.rs -o $fixtureTool
+    & rustc --edition=2024 scripts/walkthrough_fixtures.rs -o $fixtureTool
     if ($LASTEXITCODE -ne 0) {
         throw "fixture tool build failed with exit code $LASTEXITCODE"
     }

@@ -6,7 +6,10 @@
 //! member types fail closed. Extension carriers are metadata and their names
 //! are therefore retained as bytes without applying destination-path rules.
 
-use crate::findings::{Finding, FindingCode};
+use crate::findings::{
+    Finding, FindingCode, checksum_field_detail, label_header_member, pax_keyword_refusal,
+    unsupported_typeflag_finding,
+};
 use crate::ir::{ByteRange, PaxExtensionKind, PaxKeyword, PaxValueSource};
 use crate::policy::hex_sha256;
 use crate::snapshot::SourceSnapshot;
@@ -550,12 +553,7 @@ fn parse_records(payload: &[u8], payload_offset: u64) -> Result<Vec<PaxRecord>, 
                     PaxRecordValue::Size(parse_decimal(value_bytes, "pax size")?),
                 )
             }
-            _ => {
-                return Err(Finding::error(
-                    FindingCode::TarFeatureUnsupported,
-                    "pax keyword is outside the closed path/size profile",
-                ));
-            }
+            _ => return Err(pax_keyword_refusal(keyword_bytes)),
         };
         let relative_offset = u64::try_from(length_start)
             .map_err(|_| pax_syntax("pax record offset does not fit u64"))?;
@@ -654,7 +652,8 @@ fn parse_header(header: &[u8; BLOCK_LEN_USIZE], offset: u64) -> Result<ParsedHea
             "header is not exact POSIX ustar magic and version",
         ));
     }
-    let stored_checksum = parse_checksum(&header[148..156])?;
+    let stored_checksum = parse_checksum(&header[148..156])
+        .map_err(|finding| label_header_member(finding, header))?;
     let actual_checksum = header
         .iter()
         .enumerate()
@@ -667,9 +666,12 @@ fn parse_header(header: &[u8; BLOCK_LEN_USIZE], offset: u64) -> Result<ParsedHea
         })
         .sum::<u32>();
     if stored_checksum != actual_checksum {
-        return Err(Finding::error(
-            FindingCode::TarChecksum,
-            format!("header checksum {stored_checksum:o} != computed {actual_checksum:o}"),
+        return Err(label_header_member(
+            Finding::error(
+                FindingCode::TarChecksum,
+                format!("header checksum {stored_checksum:o} != computed {actual_checksum:o}"),
+            ),
+            header,
         ));
     }
     let kind = match header[156] {
@@ -678,10 +680,7 @@ fn parse_header(header: &[u8; BLOCK_LEN_USIZE], offset: u64) -> Result<ParsedHea
         b'g' => HeaderKind::GlobalExtension,
         b'x' => HeaderKind::LocalExtension,
         typeflag if is_known_unsupported_typeflag(typeflag) => {
-            return Err(Finding::error(
-                FindingCode::TarFeatureUnsupported,
-                format!("unsupported pax-profile typeflag 0x{typeflag:02x}"),
-            ));
+            return Err(unsupported_typeflag_finding(header, typeflag));
         }
         typeflag => {
             return Err(Finding::error(
@@ -780,7 +779,7 @@ fn parse_checksum(field: &[u8]) -> Result<u32, Finding> {
     {
         return Err(Finding::error(
             FindingCode::TarChecksum,
-            "checksum field must be six octal digits followed by NUL and space",
+            checksum_field_detail(field),
         ));
     }
     let value = parse_octal_digits(&field[..6], "checksum")?;

@@ -9,9 +9,9 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 use sealr::{
-    apply_supervised, zip_strict_ascii_v2_digest, AdmissionStatus, ApplyOptions, ExtraDisposition,
-    ExtraSite, LinuxWorker, MemberKind, NormalizationAction, Policy, Request, Severity, Source,
-    ZipInterpretationProfile, ZIP_STRICT_ASCII_V2,
+    AdmissionStatus, ApplyOptions, ExtraDisposition, ExtraSite, LinuxWorker, MemberKind,
+    NormalizationAction, Policy, Request, Severity, Source, ZIP_STRICT_ASCII_V2,
+    ZipInterpretationProfile, apply_supervised, zip_strict_ascii_v2_digest,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -335,10 +335,10 @@ fn validate_manifest(manifest: &Manifest) -> Result<(), AnyError> {
         if entry.filename.len() > 1_024 || !is_safe_wheel_filename(&entry.filename) {
             return invalid(format!("invalid wheel filename {}", entry.filename));
         }
-        if let Some(prior) = prior_filename {
-            if prior >= entry.filename.as_str() {
-                return invalid("manifest entries must be strictly sorted by filename");
-            }
+        if let Some(prior) = prior_filename
+            && prior >= entry.filename.as_str()
+        {
+            return invalid("manifest entries must be strictly sorted by filename");
         }
         prior_filename = Some(&entry.filename);
         if !filenames.insert(entry.filename.as_str()) {
@@ -1503,16 +1503,20 @@ mod tests {
     #[test]
     fn rejects_duplicate_or_unsorted_artifacts() {
         let digest = "0".repeat(64);
-        assert!(validate_manifest(&manifest(vec![
-            entry("b-1-py3-none-any.whl", &digest),
-            entry("a-1-py3-none-any.whl", &"1".repeat(64)),
-        ]))
-        .is_err());
-        assert!(validate_manifest(&manifest(vec![
-            entry("a-1-py3-none-any.whl", &digest),
-            entry("b-1-py3-none-any.whl", &digest),
-        ]))
-        .is_err());
+        assert!(
+            validate_manifest(&manifest(vec![
+                entry("b-1-py3-none-any.whl", &digest),
+                entry("a-1-py3-none-any.whl", &"1".repeat(64)),
+            ]))
+            .is_err()
+        );
+        assert!(
+            validate_manifest(&manifest(vec![
+                entry("a-1-py3-none-any.whl", &digest),
+                entry("b-1-py3-none-any.whl", &digest),
+            ]))
+            .is_err()
+        );
     }
 
     #[test]

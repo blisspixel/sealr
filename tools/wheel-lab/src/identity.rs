@@ -1,10 +1,10 @@
 use sha2::{Digest, Sha256};
 
 use crate::model::{
-    CoreMetadata, EntryPoint, ExecutableDisposition, InstallEntry, InstallScheme, InstallTransform,
-    RealizedOutput, RecordBinding, WheelArtifactIR, WheelHeaders, WheelInstallPlan, WheelLimits,
-    ARTIFACT_ENCODING_ID, CONSUMER_PROFILE_ID, CONSUMER_PROFILE_SCHEMA, PLAN_ENCODING_ID,
-    REALIZATION_ENCODING_ID, SPEC_SNAPSHOT_ID,
+    ARTIFACT_ENCODING_ID, CONSUMER_PROFILE_ID, CONSUMER_PROFILE_SCHEMA, CoreMetadata, EntryPoint,
+    ExecutableDisposition, InstallEntry, InstallScheme, InstallTransform, PLAN_ENCODING_ID,
+    REALIZATION_ENCODING_ID, RealizedOutput, RecordBinding, SPEC_SNAPSHOT_ID, WheelArtifactIR,
+    WheelHeaders, WheelInstallPlan, WheelLimits,
 };
 
 pub(crate) fn consumer_profile_digest(limits: WheelLimits) -> String {

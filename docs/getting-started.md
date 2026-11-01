@@ -4,11 +4,11 @@ Sealr verifies one archive under an explicitly selected interpretation. After ad
 
 ## Install and run
 
-The repository pins Rust 1.98.0 in `rust-toolchain.toml`; rustup selects it automatically.
+The repository pins Rust 1.99.1 in `rust-toolchain.toml`; rustup selects it automatically.
 
-The crate's current minimum supported Rust version is 1.98, declared through `rust-version`. CI selects exactly 1.98.0. Preview releases may raise this minimum only as a documented compatibility change; patch releases within a stable 1.x line will not.
+The crate's current minimum supported Rust version is 1.99, declared through `rust-version`. CI selects exactly 1.99.1. Preview releases may raise this minimum only as a documented compatibility change; patch releases within a stable 1.x line will not.
 
-Download the published native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.17` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.17). Runnable checksum and provenance commands are in [release verification](https://github.com/blisspixel/sealr/blob/main/docs/release-verification.md). Every archive extracts the `sealr` CLI and independent `sealr-identity-verifier` companion. This source tree is `v0.1.0-alpha.18` and does not yet have native release artifacts, so those download commands stay on Alpha.17.
+Download the published native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.17` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.17). Runnable checksum and provenance commands are in [release verification](https://github.com/blisspixel/sealr/blob/main/docs/release-verification.md). Every archive extracts the `sealr` CLI and independent `sealr-identity-verifier` companion. This source tree is `v0.1.0-alpha.19` and does not yet have native release artifacts, so those download commands stay on Alpha.17.
 
 ```text
 # After checksumming and extracting the native archive:
@@ -45,9 +45,27 @@ cargo run --locked -p sealr-cli -- path/to/archive.zip --dest ./out
 
 The library and shipped CLI are Rust. CI runs native tests and release builds on Ubuntu, macOS, and Windows; the platform-specific materializers are release gates, not secondary ports. Some repository maintenance and release scripts are currently PowerShell because the same scripts run on all three GitHub-hosted runner families and the local release operator uses Windows. PowerShell is not a runtime dependency of `sealr`, but this is more scripting surface than the project should keep. Shared deterministic repository tasks are scheduled to move into a small Rust `xtask`, leaving only thin host-specific wrappers where an operating-system or operator boundary requires one.
 
-The CLI exits `0` only when the archive is admitted and completely verified without an effect failure, `2` when admission or verification does not complete successfully, and `3` when admission succeeds but a requested destination effect fails. The inspectable view now includes the same interpretation, admission, verification, effect, and completeness axes as the receipt. The compatibility `verdict` maps incomplete verification and an admitted archive with a failed destination to `rejected`. Operational command-line errors use the normal Clap exit behavior.
+The CLI exits `0` only when the archive is admitted and completely verified without an effect failure, `2` when admission or verification does not complete successfully, and `3` when admission succeeds but a requested destination effect fails. The inspectable view includes the same interpretation, admission, verification, effect, and completeness axes as the receipt. The compatibility `verdict` maps incomplete verification and an admitted archive with a failed destination to `rejected`. The summary uses the exit class: exit 3 says `not written`, not `rejected`. Operational failures exit `1`. Clap syntax errors exit `2` and do not emit a machine envelope.
 
-A leading `./` on a TAR member, including the archive-root directory from `tar -C dir .`, is normalized away. Absolute paths, `..`, embedded dot components, and links are still rejected. On a terminal, with neither `--view` nor `--receipt`, sealr prints a one-line summary on stderr instead of the receipt JSON. Redirected output stays JSON. `--json` forces JSON on a terminal. A `format.unsupported` or `tar.dialect` finding includes a hint naming the observed signature and the `--format` values that start with it. The hint is not a selection.
+A leading `./` on a TAR member, including the archive-root directory from `tar -C dir .`, is normalized away. Absolute paths, `..`, embedded dot components, and links are still rejected. When stderr is a terminal and neither `--json` nor `--receipt` is set, sealr prints a one-line summary on stderr even if stdout is piped, and the view JSON still goes to stdout. Both terminals print only the summary. `--json` forces the view and receipt JSON on a terminal. `--color always` forces the colored summary when stderr is redirected. JSON is never colored. After a written admitted tree, a terminal adds one dim line with the first 16 hex characters of the unsigned `sealrTreeV1` content identity. A refusal names the member when the header has one, and it names another `--format` only from bytes already read. The hint is not a selection.
+
+## Choose `--format`
+
+The file name does not select a format. Pass the profile that matches how the bytes were produced. The [restricted PAX profile](profiles/tar-pax-portable-v1.md) is the closed path and size recipe named below.
+
+| Bytes | `--format` |
+|---|---|
+| Ordinary ZIP | `zip` (the default) |
+| ZIP64 | `zip64` |
+| GNU tar `--format=ustar`, uncompressed | `tar-ustar` |
+| That ustar stream inside gzip, zstd, xz, or bzip2 | `tar-gzip-ustar`, `tar-zstd-ustar`, `tar-xz-ustar`, or `tar-bzip2-ustar` |
+| GNU tar `--format=pax` or `--format=posix` after `atime`, `ctime`, and `mtime` are deleted, leaving only `path` and `size` | `tar-pax`, or `tar-gzip-pax` when gzip-wrapped |
+| A GNU long name inside the portable long-name profile | `tar-gnu-longname`, or `tar-gzip-gnu-longname` when gzip-wrapped |
+| `git archive` and npm pack | Refused. The checksum field is seven octal digits. Rebuild with ustar, or with the closed PAX recipe above. |
+| bsdtar | Only ustar output, or the same closed PAX recipe, is in scope. |
+| Copy-only 7z | `7z-copy` |
+
+Executable permission bits are not restored. The exact Poetry 2.4.2 fixture stays on CPython 3.12 because its wheelhouse is `cp312`. New work treats CPython 3.11 through 3.15 as maintained.
 
 ## Use the Rust capability
 

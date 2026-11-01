@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
-use sealr::{apply, Policy, Request, SnapshotKind, Source};
+use sealr::{Policy, Request, SnapshotKind, Source, apply};
 
 const RESOURCE_PROBE_PATH: &str = "SEALR_RESOURCE_PROBE_PATH";
 const PEAK_RSS_MARKER: &str = "SEALR_PEAK_RSS_BYTES=";
@@ -114,8 +114,8 @@ fn write_u32(file: &mut File, value: u32) {
 #[cfg(windows)]
 fn mark_sparse(file: &File) {
     use std::os::windows::io::AsRawHandle;
-    use windows_sys::Win32::System::Ioctl::FSCTL_SET_SPARSE;
     use windows_sys::Win32::System::IO::DeviceIoControl;
+    use windows_sys::Win32::System::Ioctl::FSCTL_SET_SPARSE;
 
     let mut returned = 0_u32;
     // Safety: the file handle remains live for the call, this control code has
@@ -148,7 +148,7 @@ fn allocated_file_bytes(path: &Path) -> u64 {
 #[cfg(windows)]
 fn allocated_file_bytes(path: &Path) -> u64 {
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Foundation::{GetLastError, SetLastError, ERROR_SUCCESS};
+    use windows_sys::Win32::Foundation::{ERROR_SUCCESS, GetLastError, SetLastError};
     use windows_sys::Win32::Storage::FileSystem::{GetCompressedFileSizeW, INVALID_FILE_SIZE};
 
     let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();

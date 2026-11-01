@@ -3,11 +3,11 @@
 use std::io::{Cursor, Write};
 
 use sealr::{
-    apply, apply_with_options, ApplyOptions, EnvMeta, MaterializationMeta, MemberContainerFacts,
-    MemberEvidence, MemberReadErrorKind, Outcome, OutcomeIdentities, Policy, PolicyMeta, Receipt,
-    Request, RetentionPlan, RetentionStatus, SnapshotKind, Source, SourceMeta, ToolMeta,
-    VerifiedArchive, View, ZipInterpretationProfile, ZipMemberEvidence, ZIP_PORTABLE_UTF8_V1,
-    ZIP_STRICT_ASCII_V2, ZIP_WHEEL_UTF8_V1,
+    ApplyOptions, EnvMeta, MaterializationMeta, MemberContainerFacts, MemberEvidence,
+    MemberReadErrorKind, Outcome, OutcomeIdentities, Policy, PolicyMeta, Receipt, Request,
+    RetentionPlan, RetentionStatus, SnapshotKind, Source, SourceMeta, ToolMeta, VerifiedArchive,
+    View, ZIP_PORTABLE_UTF8_V1, ZIP_STRICT_ASCII_V2, ZIP_WHEEL_UTF8_V1, ZipInterpretationProfile,
+    ZipMemberEvidence, apply, apply_with_options,
 };
 #[cfg(not(target_os = "linux"))]
 use sealr::{LinuxWorker, SupervisionErrorKind};

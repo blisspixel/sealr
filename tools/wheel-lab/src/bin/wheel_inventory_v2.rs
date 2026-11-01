@@ -6,10 +6,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use sealr::{
-    apply_with_options, ApplyOptions, Policy, Request, Source, ZipInterpretationProfile,
-    ZIP_WHEEL_UTF8_V1,
+    ApplyOptions, Policy, Request, Source, ZIP_WHEEL_UTF8_V1, ZipInterpretationProfile,
+    apply_with_options,
 };
-use sealr_wheel_lab::{evaluate_wheel, InstallScheme, WheelEvaluation, WheelLimits};
+use sealr_wheel_lab::{InstallScheme, WheelEvaluation, WheelLimits, evaluate_wheel};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
