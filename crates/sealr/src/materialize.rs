@@ -2770,14 +2770,21 @@ mod tests {
         let error = materializer.commit().unwrap_err();
         assert_eq!(error.code, FindingCode::MaterializeCommit);
         assert!(error.detail.contains("audited root"));
-        let _ = materializer.abort();
-        if stage_path.exists() {
-            fs::remove_dir_all(&stage_path).unwrap();
-        }
-        if moved_path.exists() {
-            fs::remove_dir_all(&moved_path).unwrap();
-        }
+        fs::write(stage_path.join("substitute.txt"), b"not-the-stage").unwrap();
+
+        materializer.abort().unwrap();
+        assert_eq!(materializer.report().outcome, "aborted");
+        assert_eq!(materializer.report().cleanup, "removed");
+        assert!(
+            !moved_path.exists(),
+            "abort removes the retained stage object, not the name that replaced it"
+        );
+        assert_eq!(
+            fs::read(stage_path.join("substitute.txt")).unwrap(),
+            b"not-the-stage"
+        );
         assert!(!dest.exists());
+        fs::remove_dir_all(&stage_path).unwrap();
     }
 
     #[test]

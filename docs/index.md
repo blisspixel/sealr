@@ -28,6 +28,7 @@ Start with the [getting started guide](getting-started.md) and [illustrated CLI 
 |---|---|
 | [Implementation and security boundary](implementation.md) | Current implementation, measured evidence, limits, and research basis |
 | [Safety specification](safety.md) | Normative safety rules |
+| [Abandoned stage ownership](abandoned-stage.md) | Retained-capability ownership, current cleanup evidence, and the unimplemented recovery rule |
 | [Threat model](threat-model.md) | Adversaries, exclusions, and parser-differential threats |
 | [Invariants](invariants.md) | Properties that implementation and evidence must preserve |
 | [Assurance](assurance.md) | Current evidence and the layered verification program |

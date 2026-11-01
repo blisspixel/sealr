@@ -78,12 +78,20 @@ acceptance:
 retain private staging and native no-replace publication. Neither syncs
 directories or promises crash recovery or power-loss durability.
 
-Specify authenticated abandoned-stage ownership and recovery. Exercise
-interruption at stage creation, writes, audit, publication, and cleanup. Test
-hostile renames, links and substituted directories, unrelated neighbors, and
-existing destinations on each advertised platform. No cleanup may rely on a
-filename pattern. Any stronger durability guarantee needs a new explicit
-contract and fault evidence rather than a renamed flush operation.
+[Abandoned-stage ownership](abandoned-stage.md) records the current proof and
+the recovery rule. Live cleanup and publication use the retained stage
+capability. Tests cover identity substitution, exhausted cleanup, and a later
+materialization that preserves the abandoned stage, a lookalike, a link, an
+unrelated file, and a pre-existing directory. No cleanup lists a filename
+pattern.
+
+The recovery operation itself is still open. It needs a versioned witness
+before it may remove anything the process no longer holds. Exercise that
+future operation at stage creation, writes, audit, publication, and cleanup,
+including hostile renames, links and substituted directories, unrelated
+neighbors, and existing destinations on each advertised platform. Any stronger
+durability guarantee needs a new explicit contract and fault evidence rather
+than a renamed flush operation.
 
 ## 3. Coordinate dependency maintenance and assurance history
 

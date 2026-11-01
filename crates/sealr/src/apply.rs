@@ -6828,6 +6828,158 @@ mod tests {
         fs::remove_dir_all(parent).unwrap();
     }
 
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    fn stage_component(name: &std::ffi::OsStr) -> bool {
+        let Some(text) = name.to_str() else {
+            return false;
+        };
+        let Some(suffix) = text.strip_prefix(".sealr-stage-") else {
+            return false;
+        };
+        suffix.len() == 32
+            && suffix
+                .bytes()
+                .all(|byte| matches!(byte, b'0'..=b'9' | b'a'..=b'f'))
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    #[test]
+    fn later_materialization_preserves_abandoned_stage_lookalike_and_neighbor() {
+        let policy = Policy::default_v1();
+        let parent = temp_dest("abandoned-stage-parent");
+        fs::create_dir(&parent).unwrap();
+        let outside = temp_dest("abandoned-stage-outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("sentinel"), b"outside").unwrap();
+
+        let abandoned = {
+            let _guard = crate::materialize::inject_cleanup_failures_for_current_thread(2);
+            let failed = apply(Request {
+                source: Source::Bytes {
+                    path: Some("abandoned-stage.zip"),
+                    data: &make_crc_mismatch_zip(),
+                },
+                policy: &policy,
+                dest: Some(&parent.join("output")),
+            });
+            assert!(failed.rejected());
+            assert_eq!(failed.receipt.materialization.outcome, "aborted");
+            assert_eq!(failed.receipt.materialization.cleanup, "failed");
+            assert!(!parent.join("output").exists());
+            let mut entries = fs::read_dir(&parent)
+                .unwrap()
+                .map(|entry| entry.unwrap().file_name())
+                .collect::<Vec<_>>();
+            assert_eq!(entries.len(), 1);
+            assert!(
+                stage_component(&entries[0]),
+                "abandoned entry was {}",
+                entries[0].to_string_lossy()
+            );
+            entries.pop().unwrap()
+        };
+
+        let lookalike_name = format!(".sealr-stage-{}", "ab".repeat(16));
+        let link_name = format!(".sealr-stage-{}", "cd".repeat(16));
+        assert_ne!(abandoned.to_string_lossy(), lookalike_name);
+        assert_ne!(abandoned.to_string_lossy(), link_name);
+        let lookalike = parent.join(&lookalike_name);
+        fs::create_dir(&lookalike).unwrap();
+        fs::write(lookalike.join("keep"), b"lookalike").unwrap();
+        let link = parent.join(&link_name);
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        #[cfg(windows)]
+        {
+            let output = std::process::Command::new("cmd")
+                .args(["/d", "/c", "mklink", "/J"])
+                .arg(&link)
+                .arg(&outside)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "create stage-name junction: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+        fs::write(parent.join("unrelated.txt"), b"unrelated caller file").unwrap();
+        fs::create_dir(parent.join("existing")).unwrap();
+        fs::write(parent.join("existing").join("owner.txt"), b"existing").unwrap();
+
+        let published = apply(Request {
+            source: Source::Bytes {
+                path: Some("published.zip"),
+                data: &make_zip(&[("kept.txt", b"kept")]),
+            },
+            policy: &policy,
+            dest: Some(&parent.join("published")),
+        });
+        assert!(published.wrote(), "{:?}", published.view.findings);
+        assert_eq!(published.receipt.materialization.outcome, "committed");
+        assert_eq!(
+            published.receipt.materialization.cleanup,
+            "not-applicable-after-commit"
+        );
+
+        let abandoned_path = parent.join(&abandoned);
+        let names = fs::read_dir(&parent)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<std::collections::BTreeSet<_>>();
+        let expected = [
+            abandoned,
+            lookalike_name.into(),
+            link_name.into(),
+            "unrelated.txt".into(),
+            "existing".into(),
+            "published".into(),
+        ]
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(names, expected);
+        assert!(abandoned_path.is_dir());
+        assert!(parent.join("published").join("kept.txt").is_file());
+        assert_eq!(fs::read(lookalike.join("keep")).unwrap(), b"lookalike");
+        assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert!(
+                fs::symlink_metadata(&link)
+                    .unwrap()
+                    .file_type()
+                    .is_symlink()
+            );
+            let mode = fs::metadata(&abandoned_path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o077, 0);
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x0000_0400;
+            let metadata = fs::symlink_metadata(&link).unwrap();
+            assert_ne!(metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT, 0);
+        }
+        assert_eq!(
+            fs::read(parent.join("unrelated.txt")).unwrap(),
+            b"unrelated caller file"
+        );
+        assert_eq!(
+            fs::read(parent.join("existing").join("owner.txt")).unwrap(),
+            b"existing"
+        );
+        assert!(!parent.join("output").exists());
+
+        #[cfg(unix)]
+        fs::remove_file(&link).unwrap();
+        #[cfg(windows)]
+        fs::remove_dir(&link).unwrap();
+        fs::remove_dir_all(&parent).unwrap();
+        assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
+        fs::remove_dir_all(&outside).unwrap();
+    }
+
     #[test]
     fn rejects_file_directory_topology_conflicts_in_either_order() {
         let policy = Policy::default_v1();
