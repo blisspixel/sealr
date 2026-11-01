@@ -182,7 +182,7 @@ quote 1.0.47
 Declared license: MIT OR Apache-2.0
 Source: https://github.com/dtolnay/quote
 
-ruzstd 0.9.0
+ruzstd 0.9.1
 Declared license: MIT
 Source: https://github.com/KillingSpark/zstd-rs
 
@@ -3234,7 +3234,7 @@ MIT License
 ===============================================================================
 
 Used by:
-- ruzstd 0.9.0
+- ruzstd 0.9.1
 
 MIT License
 

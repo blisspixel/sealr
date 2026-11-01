@@ -163,7 +163,7 @@ The zstd-wrapped ustar profile is the first codec promotion, so its threat model
 | Header interpretation divergence | Sealr parses the frame header byte-exactly for evidence, then cross-checks the decoder's consumed length, content size, and checksum state; any disagreement is an integrity failure, never a silent preference. |
 | Checksum or size lies | The XXH64 checksum and `Frame_Content_Size` are verified when present, Sealr owns the comparisons, and the ready boundary independently re-hashes the derived snapshot before any destination stage exists. |
 | Concatenation and trailing bytes | Exactly one frame must consume the complete source; magic-prefixed trailing bytes are unsupported concatenation and everything else is malformed. |
-| Decoder implementation faults | The reviewed `ruzstd` 0.9.0 floor postdates RUSTSEC-2024-0400 and the first-frame window-cap fix; its remaining `unsafe` ring buffer is a named review item, bounded incremental decoding avoids the crate's multi-frame conveniences, and a dedicated fuzz campaign exercises the wrapper. |
+| Decoder implementation faults | The reviewed `ruzstd` floor postdates RUSTSEC-2024-0400 and the first-frame window-cap fix. The workspace pins `0.9.1`, which also enforces the per-block output bound from RUSTSEC-2026-0344. Its remaining `unsafe` ring buffer is a named review item, bounded incremental decoding avoids the crate's multi-frame conveniences, and a dedicated fuzz campaign exercises the wrapper. |
 
 ### Xz wrapper threats
 

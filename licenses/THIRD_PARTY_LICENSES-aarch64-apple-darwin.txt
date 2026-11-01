@@ -186,7 +186,7 @@ rustix 1.1.4
 Declared license: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
 Source: https://github.com/bytecodealliance/rustix
 
-ruzstd 0.9.0
+ruzstd 0.9.1
 Declared license: MIT
 Source: https://github.com/KillingSpark/zstd-rs
 
@@ -2757,7 +2757,7 @@ MIT License
 ===============================================================================
 
 Used by:
-- ruzstd 0.9.0
+- ruzstd 0.9.1
 
 MIT License
 

@@ -8,6 +8,11 @@ targets = [
 
 [advisories]
 yanked = "deny"
+ignore = [
+  { id = "RUSTSEC-2026-0367", reason = "The zip crate is used only through ZipWriter to build fixtures. Sealr never calls ZipArchive::extract or ZipStreamReader::extract, and its own parser admits archives." },
+  { id = "RUSTSEC-2026-0368", reason = "The zip crate is used only through ZipWriter to build fixtures. Sealr never calls ZipArchive::extract or ZipStreamReader::extract, and its own parser admits archives." },
+  { id = "RUSTSEC-2026-0369", reason = "The zip crate is used only through ZipWriter to build fixtures. Sealr never calls ZipArchive::extract or ZipStreamReader::extract, and its own parser admits archives." },
+]
 
 [licenses]
 version = 2

@@ -56,9 +56,9 @@ These figures restate the pinned dependency contract at `tests/dependency-contra
 
 Pinned graph digests:
 
-- `aarch64-apple-darwin`: `2dff7756827aff64d7d25b24eedfcffc97caf3686f1b56489a184e664bed0cae`
-- `x86_64-pc-windows-msvc`: `4c7efa8f929460265fc44b66fdf14103fc701f849885483f7c465f4f1b9059d2`
-- `x86_64-unknown-linux-gnu`: `62f15efe65f390bee405af5930e71540c061b12d391d11456bbce1d1539351a3`
+- `aarch64-apple-darwin`: `b9e5bb8d954385c5951bb67d62d19fe53664198a3257b9b5853a56ae0be28bd6`
+- `x86_64-pc-windows-msvc`: `52bb77209b91564f50e300c178941307c8511621ac6136b6fed673c91fba7319`
+- `x86_64-unknown-linux-gnu`: `d6fc8cf52f7b62576e211bcf40253ebf107c72d452a3bb6ccc8b33389005117c`
 
 ## Conditionally compiled modules
 

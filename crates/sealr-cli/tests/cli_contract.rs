@@ -2322,7 +2322,14 @@ fn machine_result_classifies_outcomes_without_reading_human_text() {
         "worker-manifest-failure"
     );
     assert_eq!(worker_doc["evaluated"], false);
-    assert_eq!(worker_doc["failure"]["code"], "worker.helper_artifact");
+    // Linux reads the manifest and reports the missing helper. Other targets
+    // refuse authenticated workers before opening the manifest.
+    let worker_code = if cfg!(target_os = "linux") {
+        "worker.helper_artifact"
+    } else {
+        "worker.isolation_unavailable"
+    };
+    assert_eq!(worker_doc["failure"]["code"], worker_code);
 
     let view_path = run.path.join("taken.view.json");
     fs::write(&view_path, b"keep").unwrap();

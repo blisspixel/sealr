@@ -51,7 +51,7 @@ The default v8 policy sets both original and derived archive caps to 512 MiB.
 
 ## Dependency boundary
 
-This is the first Gate B codec promotion under the [codec dependency gates](../codec-dependency-gates.md). It adds exactly two runtime packages — `ruzstd` 0.9.0 and `twox-hash` 2.1.4 (`xxhash64` feature only) — with no build scripts, no `links` packages, no native code, and MIT licenses inside the existing allowlist. The pinned per-target dependency contract records the +2 delta on all three release floors. `ruzstd`'s `unsafe` surface is confined to its ring buffer and remains a named review item in the promotion evidence; the version floor 0.9.0 postdates the RUSTSEC-2024-0400 fix and includes the first-frame window-cap correction.
+This is the first Gate B codec promotion under the [codec dependency gates](../codec-dependency-gates.md). It adds exactly two runtime packages — `ruzstd` and `twox-hash` 2.1.4 (`xxhash64` feature only) — with no build scripts, no `links` packages, no native code, and MIT licenses inside the existing allowlist. The pinned per-target dependency contract records the +2 delta on all three release floors. The workspace now pins `ruzstd` 0.9.1. `ruzstd`'s `unsafe` surface is confined to its ring buffer and remains a named review item in the promotion evidence; 0.9.0 postdated the RUSTSEC-2024-0400 fix and the first-frame window-cap correction, and 0.9.1 adds the per-block output bound from RUSTSEC-2026-0344.
 
 ## Evidence and identities
 

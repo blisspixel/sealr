@@ -21,7 +21,9 @@ The project is in initial development. Compatibility may change between preview 
 
 - Existing `FindingCode` discriminants are explicit and unchanged from source-baseline-20260913. `ZipSymlink` is 79. Strings from `as_str()` remain the wire format. Semantic-record tags were not renumbered.
 - The repository toolchain is Rust 1.99.1, `rust-version` is 1.99, and the workspace uses edition 2024. Fuzzing pins `nightly-2026-10-31`. Required Windows jobs run on `windows-2025`, Windows Server 2025, NT build 26100. The Poetry fixture stays on CPython 3.12 because its wheelhouse is cp312. Maintained CPython for new work is 3.11 through 3.15. Kani stays on its Rust 1.93 compiler.
-- Native release license bundles include `terminal_size` 0.4.4 because wrapped help needs it. The pinned counts are 73 on Linux, 68 on macOS, and 76 on Windows. The `sealr` crate runtime graph is unchanged.
+- Native release license bundles include `terminal_size` 0.4.4 because wrapped help needs it. The pinned counts are 73 on Linux, 68 on macOS, and 76 on Windows.
+- `ruzstd` is pinned at 0.9.1 so one small zstd frame cannot force an unbounded block allocation (RUSTSEC-2026-0344). Features stay `hash` and `std`. The runtime package count is unchanged.
+- `cargo deny` ignores RUSTSEC-2026-0367, RUSTSEC-2026-0368, and RUSTSEC-2026-0369. Those advisories cover `zip` extract APIs. This repository uses `zip` only as `ZipWriter` to build fixtures.
 - Admission, policy bytes, and the view and receipt schemas are unchanged. Measuring repeated-read phases, then lifecycle closure, remains the roadmap priority. This preview is not an audit and not a stable 1.0.
 
 ## [0.1.0-alpha.18] - 2026-10-13

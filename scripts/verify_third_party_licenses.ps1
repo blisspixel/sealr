@@ -114,7 +114,7 @@ try {
                 'caseless 0.2.2',
                 'once_cell 1.21.4',
                 'pep440_rs 0.7.3',
-                'ruzstd 0.9.0',
+                'ruzstd 0.9.1',
                 'strsim 0.11.1',
                 'tinyvec 1.12.0',
                 'twox-hash 2.1.4',
