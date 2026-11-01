@@ -20,9 +20,8 @@ silently give the same bytes a different meaning.
 ## Try it
 
 Download the published native Linux, macOS, or Windows archive from
-[`v0.1.0-alpha.17`](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.17)
+[`v0.1.0-alpha.19`](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.19)
 and [verify the release](docs/release-verification.md) before running it.
-This source tree is `v0.1.0-alpha.19` and does not yet have native release artifacts.
 
 ```sh
 # On a terminal this prints a one-line summary. A pipe or --json keeps JSON.
@@ -72,9 +71,8 @@ destination already exists. `--machine` prints one versioned command result.
 Finding-code discriminants are pinned, and `ZipSymlink` is 79. Real bombs
 still fail `quota.ratio`, and the default `max_ratio` stays 100. The
 [Alpha.19 release notes](docs/releases/v0.1.0-alpha.19.md) describe this source
-tree. Published native archives remain
-[`v0.1.0-alpha.17`](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.17)
-until Alpha.19 artifacts exist.
+tree. Published native archives are
+[`v0.1.0-alpha.19`](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.19).
 [Release verification](docs/release-verification.md) checksums those published
 archives.
 

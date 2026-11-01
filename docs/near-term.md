@@ -1,8 +1,8 @@
 # Near-term execution plan
 
-Updated 2026-10-13.
+Updated 2026-11-01.
 
-This source tree targets Alpha.18. The completed publisher, artifact replay,
+This source tree targets Alpha.19. The completed publisher, artifact replay,
 migration, and assurance increments are recorded below. The next implementation
 question is measuring time spent in each repeated-read phase, followed by lifecycle
 closure. Technical acceptance criteria govern progress; external maintainer
@@ -11,7 +11,7 @@ participation and independent human review are not dependencies.
 Earlier remote tags, releases, and run identities are retired. Historical
 reports do not establish current artifact availability or qualification; all
 six active assurance histories restart at zero. New downstream acquisition
-must use Alpha.18 source. Published native archives remain Alpha.17 until that release exists. See [distribution history](distribution-history.md).
+must use Alpha.19 source. Published native archives are Alpha.19. See [distribution history](distribution-history.md).
 
 ## Completed consumer and automation increments
 

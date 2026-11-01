@@ -2,7 +2,7 @@
 
 Updated 2026-10-31.
 
-This page records preview contents through the Alpha.19 source tree. Alpha.1 through Alpha.16 remote releases and tags are retired; their notes remain historical snapshots. Published native artifacts remain Alpha.17 until Alpha.19 is released. See [distribution history](distribution-history.md). The [changelog](../CHANGELOG.md) is the compact file-level history.
+This page records preview contents through the Alpha.19 source tree. Alpha.1 through Alpha.16 remote releases and tags are retired; their notes remain historical snapshots. Published native artifacts are Alpha.19. See [distribution history](distribution-history.md). The [changelog](../CHANGELOG.md) is the compact file-level history.
 
 All previews remain non-production releases. A completed milestone means its bounded repository gate shipped, not that the whole security boundary became stable.
 

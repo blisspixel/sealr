@@ -7,9 +7,8 @@ retain their original digests but are not live acquisition promises. See
 
 Current source evaluation uses Alpha.19, including the terminal explanation
 and the pinned finding-code discriminants, on top of the Deflate completion
-correction. Published authenticated native companions remain Alpha.17 until
-Alpha.19 artifacts exist. It remains a GitHub-only
-prerelease. The Alpha.13 package measurements below are historical reproducibility
+correction. Published authenticated native companions are Alpha.19. It remains
+a GitHub-only prerelease. The Alpha.13 package measurements below are historical reproducibility
 evidence, and the adopter contract now records the current source separately.
 Neither GitHub-only release is a retroactive crates.io publication candidate.
 

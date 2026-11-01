@@ -8,7 +8,7 @@ The repository pins Rust 1.99.1 in `rust-toolchain.toml`; rustup selects it auto
 
 The crate's current minimum supported Rust version is 1.99, declared through `rust-version`. CI selects exactly 1.99.1. Preview releases may raise this minimum only as a documented compatibility change; patch releases within a stable 1.x line will not.
 
-Download the published native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.17` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.17). Runnable checksum and provenance commands are in [release verification](https://github.com/blisspixel/sealr/blob/main/docs/release-verification.md). Every archive extracts the `sealr` CLI and independent `sealr-identity-verifier` companion. This source tree is `v0.1.0-alpha.19` and does not yet have native release artifacts, so those download commands stay on Alpha.17.
+Download the published native preview archives, `SHA256SUMS`, and provenance from the [`v0.1.0-alpha.19` release](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.19). Runnable checksum and provenance commands are in [release verification](https://github.com/blisspixel/sealr/blob/main/docs/release-verification.md). Every archive extracts the `sealr` CLI and independent `sealr-identity-verifier` companion.
 
 ```text
 # After checksumming and extracting the native archive:
