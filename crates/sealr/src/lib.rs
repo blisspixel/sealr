@@ -202,7 +202,9 @@ pub use jail::{
     JailedName, PORTABLE_NAME_MAX_COMPONENT_UTF8_BYTES, PORTABLE_NAME_MAX_COMPONENT_UTF16_UNITS,
     jail_name, jail_relative, join_under_dest,
 };
-pub use materialize::{MaterializationMeta, WindowsMaterializationEvidence};
+pub use materialize::{
+    MaterializationMeta, WindowsMaterializationEvidence, recover_abandoned_stage,
+};
 pub use outcome::{
     AdmissionStatus, DigestHex, EffectStatus, InterpretationStatus, SourceDigest, StoppingPhase,
     VerificationStatus, ViewCompleteness,
@@ -216,6 +218,9 @@ pub use policy::{
     ValidatedPolicy, hex_sha256, ratio_exceeds,
 };
 pub use snapshot::SnapshotKind;
+pub use stage_witness::{
+    STAGE_RETENTION_SCHEMA, STAGE_WITNESS_SCHEMA, StageRetention, StageWitnessRecord,
+};
 pub use supervised::{
     LinuxWorker, SupervisionError, SupervisionErrorKind, apply_supervised, inspect_supervised,
 };

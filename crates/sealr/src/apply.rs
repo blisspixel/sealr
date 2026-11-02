@@ -530,6 +530,15 @@ impl Outcome {
         compat_exit_code(&self.admission, &self.verification, &self.effect)
     }
 
+    /// Record for a stage whose cleanup failed.
+    ///
+    /// This is absent from [`Receipt`] and from [`Self::canonical_evidence`].
+    /// A caller that wants a later process to remove that stage has to store
+    /// the record itself. Successful cleanup and a killed process produce none.
+    pub fn stage_retention(&self) -> Option<&crate::stage_witness::StageRetention> {
+        self.receipt.materialization.stage_retention.as_ref()
+    }
+
     /// Emit this outcome's evidence in the canonical RFC 8785 lineage:
     /// `sealr.view.v2` and `sealr.receipt.v3`.
     ///
@@ -6785,6 +6794,7 @@ mod tests {
                 .count(),
             1
         );
+        assert!(out.stage_retention().is_none());
         assert!(fs::read_dir(&parent).unwrap().next().is_none());
         fs::remove_dir(parent).unwrap();
     }
@@ -6825,7 +6835,83 @@ mod tests {
         assert_eq!(entries.len(), 1);
         assert!(entries[0].to_string_lossy().starts_with(".sealr-stage-"));
         assert!(!dir.exists());
+        let receipt = serde_json::to_string(&out.receipt).unwrap();
+        let canonical = String::from_utf8(out.canonical_evidence().unwrap().receipt_bytes).unwrap();
+        assert!(!receipt.contains("stage-retention"));
+        assert!(!receipt.contains("stage-witness"));
+        assert!(!canonical.contains("stage-retention"));
+        assert!(!canonical.contains("stage-witness"));
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            let retention = out
+                .stage_retention()
+                .expect("failed cleanup records retention");
+            assert!(!receipt.contains(&retention.stage_component));
+            assert!(!canonical.contains(&retention.stage_component));
+            assert_eq!(retention.stage_component, entries[0].to_string_lossy());
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        assert!(out.stage_retention().is_none());
         fs::remove_dir_all(parent).unwrap();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn presented_retention_removes_only_the_matching_stage() {
+        let bytes = make_crc_mismatch_zip();
+        let policy = Policy::default_v1();
+        let parent = temp_dest("retention-recovery-parent");
+        fs::create_dir(&parent).unwrap();
+        let outside = temp_dest("retention-recovery-outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("sentinel"), b"outside").unwrap();
+        let retention = {
+            let _guard = crate::materialize::inject_cleanup_failures_for_current_thread(2);
+            let out = apply(Request {
+                source: Source::Bytes {
+                    path: Some("retention-recovery.zip"),
+                    data: &bytes,
+                },
+                policy: &policy,
+                dest: Some(&parent.join("output")),
+            });
+            assert_eq!(out.receipt.materialization.cleanup, "failed");
+            out.stage_retention().unwrap().clone()
+        };
+        let lookalike_name = format!(".sealr-stage-{}", "ab".repeat(16));
+        assert_ne!(retention.stage_component, lookalike_name);
+        let lookalike = parent.join(&lookalike_name);
+        fs::create_dir(&lookalike).unwrap();
+        fs::write(lookalike.join("keep"), b"lookalike").unwrap();
+        let link_name = format!(".sealr-stage-{}", "cd".repeat(16));
+        let link = parent.join(&link_name);
+        std::os::unix::fs::symlink(&outside, &link).unwrap();
+        fs::write(parent.join("unrelated.txt"), b"unrelated").unwrap();
+
+        let mut mismatched = retention.clone();
+        mismatched.witness.inode = mismatched.witness.inode.wrapping_add(1);
+        let mismatch = crate::recover_abandoned_stage(&parent, &mismatched).unwrap_err();
+        assert_eq!(mismatch.code, FindingCode::MaterializeAudit);
+        assert!(parent.join(&retention.stage_component).is_dir());
+        assert!(lookalike.join("keep").is_file());
+        assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+        assert!(outside.join("sentinel").is_file());
+
+        let forged = serde_json::from_str::<crate::StageRetention>(&format!(
+            r#"{{"schema":"sealr.stage-retention.v1","stage_component":"{link_name}","witness":{{"schema":"sealr.stage-witness.v1","device":1,"inode":1}}}}"#
+        ))
+        .unwrap();
+        assert!(crate::recover_abandoned_stage(&parent, &forged).is_err());
+        assert!(link.symlink_metadata().unwrap().file_type().is_symlink());
+        assert!(outside.join("sentinel").is_file());
+
+        crate::recover_abandoned_stage(&parent, &retention).unwrap();
+        assert!(!parent.join(&retention.stage_component).exists());
+        assert!(lookalike.join("keep").is_file());
+        assert!(parent.join("unrelated.txt").is_file());
+        assert!(!parent.join("output").exists());
+        fs::remove_dir_all(&parent).unwrap();
+        fs::remove_dir_all(&outside).unwrap();
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
@@ -6921,6 +7007,7 @@ mod tests {
             published.receipt.materialization.cleanup,
             "not-applicable-after-commit"
         );
+        assert!(published.stage_retention().is_none());
 
         let abandoned_path = parent.join(&abandoned);
         let names = fs::read_dir(&parent)

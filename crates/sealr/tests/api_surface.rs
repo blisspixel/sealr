@@ -35,7 +35,8 @@ use sealr::{
     PORTABLE_NAME_MAX_COMPONENT_UTF8_BYTES, PORTABLE_NAME_MAX_COMPONENT_UTF16_UNITS, Policy,
     PolicyDocument, PolicyMeta, Receipt, Request, ResourceBudget, RetentionPlan,
     RetentionPlanError, RetentionPlanErrorKind, RetentionStatus, SEVENZ_COPY_PORTABLE_V1,
-    SevenZInterpretationProfile, Severity, SnapshotKind, Source, SourceDigest, SourceMeta,
+    STAGE_RETENTION_SCHEMA, STAGE_WITNESS_SCHEMA, SevenZInterpretationProfile, Severity,
+    SnapshotKind, Source, SourceDigest, SourceMeta, StageRetention, StageWitnessRecord,
     StoppingPhase, SupervisionError, SupervisionErrorKind, TAR_BZIP2_USTAR_PORTABLE_V1,
     TAR_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_GNU_LONGNAME_PORTABLE_V1, TAR_GZIP_PAX_PORTABLE_V1,
     TAR_GZIP_USTAR_PORTABLE_V1, TAR_PAX_PORTABLE_V1, TAR_USTAR_PORTABLE_V1,
@@ -53,6 +54,7 @@ use sealr::{
     encode_tar_gzip_layout, encode_tar_gzip_pax_layout, encode_tar_layout, encode_tar_pax_layout,
     encode_tar_xz_layout, encode_tar_zstd_layout, encode_zip64_layout, hex_sha256,
     inspect_supervised, jail_name, jail_relative, join_under_dest, layout_root, ratio_exceeds,
+    recover_abandoned_stage,
 };
 
 #[test]
@@ -71,6 +73,13 @@ fn the_core_operation_signatures_are_pinned() {
     let _: fn(&[u8]) -> String = hex_sha256;
     let _: fn(&ArchiveIR) -> TreeRoot = content_root;
     let _: fn(&ArchiveIR) -> TreeRoot = layout_root;
+    let _: fn(&std::path::Path, &StageRetention) -> Result<(), Finding> = recover_abandoned_stage;
+    let _: fn(&Outcome) -> Option<&StageRetention> = Outcome::stage_retention;
+    let _ = (
+        STAGE_RETENTION_SCHEMA,
+        STAGE_WITNESS_SCHEMA,
+        std::any::type_name::<StageWitnessRecord>(),
+    );
     let _: fn(&Policy) -> Durability = Policy::durability;
     let _: fn(&mut Policy, Durability) = Policy::set_durability;
     let _: fn(Policy, Durability) -> Policy = Policy::with_durability;

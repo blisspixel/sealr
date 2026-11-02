@@ -3,8 +3,9 @@
 Contract: `sealr.abandoned-stage.v1`.
 
 This document specifies how a materialization stage is owned, how the current
-operation removes or publishes it, and what a later recovery operation would
-have to prove. Recovery after the creating process is gone is not implemented.
+operation removes or publishes it, and what recovery must prove.
+`recover_abandoned_stage` removes one directory only when the caller presents
+the record from a failed cleanup. A killed process still has no record.
 `Durability::FlushOnly` and `Durability::MemberSync` do not change.
 
 ## Live ownership
@@ -75,9 +76,9 @@ if the process died before writing one, does not exist. The receipt, if a
 cleanup failure was recorded, does not contain the stage name, device, inode,
 or Windows file identifier.
 
-## Recovery is not implemented
+## Recovery
 
-A future recovery operation may remove one directory only when all of the
+`recover_abandoned_stage` may remove one directory only when all of the
 following are true:
 
 1. The caller presents the destination parent and the exact stage component
@@ -98,12 +99,19 @@ of that same object, checked through a newly opened handle that also passes
 the DACL verification. The witness is not a stage name and not a parent
 listing. It is not a field of `sealr.materialization.v2` or `sealr.receipt.v3`.
 
-The creating operation keeps the Linux and macOS identity on the live
-materializer only. It does not persist that witness, the receipt does not
-record the stage name, and Windows does not record a file identifier yet. A
-later process therefore cannot make the proof in step 4. Until a later process
-can present a recorded witness, recovery must not remove a directory. In
-particular, it must not recursively delete a filename pattern.
+When cleanup fails on Linux or macOS, `Outcome::stage_retention` returns
+`sealr.stage-retention.v1`: the exact stage component plus the
+`sealr.stage-witness.v1` device and inode. That record is not written into
+`sealr.materialization.v2` or `sealr.receipt.v3`. The caller stores it. A
+later process presents the parent and that record. Recovery opens the exact
+component without listing the parent and removes the opened directory only
+when the witness matches. A mismatch, a link, or a failed parent check leaves
+the object in place.
+
+Windows does not record a file identifier, so recovery removes nothing there.
+A killed process does not return the record, and recovery must not invent one
+by listing `.sealr-stage-*`. Successful cleanup does not return a record,
+because the directory is already gone and its inode may be reused.
 
 If any check fails, the object stays. Recovery must not fall back to deleting
 the name. It must not publish, replace an existing destination, sync

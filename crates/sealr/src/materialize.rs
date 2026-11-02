@@ -253,6 +253,10 @@ pub struct MaterializationMeta {
     pub cleanup: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub windows: Option<WindowsMaterializationEvidence>,
+    /// Present only when cleanup failed and a witness was recorded. It is not
+    /// serialized into `sealr.materialization.v2` or the receipt.
+    #[serde(skip)]
+    pub(crate) stage_retention: Option<crate::stage_witness::StageRetention>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -311,6 +315,7 @@ impl MaterializationMeta {
                 outcome: "not-started",
                 cleanup: "not-created",
                 windows: initial_windows_evidence(),
+                stage_retention: None,
             }
         } else {
             Self {
@@ -325,6 +330,7 @@ impl MaterializationMeta {
                 outcome: "not-requested",
                 cleanup: "not-applicable",
                 windows: None,
+                stage_retention: None,
             }
         }
     }
@@ -455,8 +461,9 @@ pub(crate) struct CapabilityMaterializer {
     outcome: &'static str,
     cleanup: &'static str,
     windows: Option<WindowsMaterializationEvidence>,
-    /// Identity of the retained stage object. It is not copied into the
-    /// materialization report or the receipt, and it is not persisted.
+    /// Identity of the retained stage object. The materialization report and
+    /// the receipt do not serialize it. A failed cleanup may copy it into the
+    /// separate stage-retention record returned with the outcome.
     witness: Option<crate::stage_witness::StageWitness>,
 }
 
@@ -1057,7 +1064,17 @@ impl CapabilityMaterializer {
             outcome: self.outcome,
             cleanup: self.cleanup,
             windows: self.windows.clone(),
+            stage_retention: self.failed_stage_retention(),
         }
+    }
+
+    fn failed_stage_retention(&self) -> Option<crate::stage_witness::StageRetention> {
+        if self.cleanup != "failed" {
+            return None;
+        }
+        let witness = self.witness?;
+        let component = self.stage_name.to_str()?;
+        crate::stage_witness::StageRetention::from_live(component, witness)
     }
 
     fn root(&self) -> Result<&CapDir, Finding> {
@@ -1283,6 +1300,91 @@ fn ensure_single_link(_file: &CapFile) -> io::Result<()> {
         io::ErrorKind::Unsupported,
         "file link-count audit is unavailable on this platform",
     ))
+}
+
+/// Remove one abandoned stage when the caller presents the record from the
+/// creating operation.
+///
+/// The parent is admitted again, the exact component is opened without
+/// following links, and the witness must match that open directory. This
+/// function does not list the parent and does not remove a directory when any
+/// check fails. Linux and macOS can make the device and inode proof. Other
+/// platforms have no recorded file identifier, so they remove nothing.
+pub fn recover_abandoned_stage(
+    parent: &Path,
+    retention: &crate::stage_witness::StageRetention,
+) -> Result<(), Finding> {
+    if !retention.validate() {
+        return Err(Finding::error(
+            FindingCode::MaterializeUnsafeComponent,
+            "abandoned stage retention is not an exact recorded witness",
+        ));
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = parent;
+        return Err(Finding::error(
+            FindingCode::MaterializeIo,
+            "abandoned stage recovery has no recorded file identifier on this platform",
+        ));
+    }
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        let parent_path = fs::canonicalize(parent).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("resolve destination parent: {error}"),
+            )
+        })?;
+        let parent_dir =
+            CapDir::open_ambient_dir(&parent_path, ambient_authority()).map_err(|error| {
+                Finding::error(
+                    FindingCode::MaterializeIo,
+                    format!("open destination parent capability: {error}"),
+                )
+            })?;
+        ensure_parent_namespace_safe(&parent_dir)?;
+        let root = parent_dir
+            .open_dir_nofollow(Path::new(&retention.stage_component))
+            .map_err(|error| {
+                Finding::error(
+                    FindingCode::MaterializeIo,
+                    format!("open abandoned stage without following links: {error}"),
+                )
+            })?;
+        ensure_directory_handle_is_not_reparse(&root).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeUnsafeComponent,
+                format!("abandoned stage is a reparse point: {error}"),
+            )
+        })?;
+        ensure_stage_namespace_safe(&root)?;
+        let observed = retained_stage_witness(&root).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("read abandoned stage witness: {error}"),
+            )
+        })?;
+        let presented = crate::stage_witness::StageWitness::unix(
+            retention.witness.device,
+            retention.witness.inode,
+        );
+        if crate::stage_witness::compare_witnesses(Some(&presented), observed.as_ref())
+            != crate::stage_witness::WitnessComparison::SameObject
+        {
+            return Err(Finding::error(
+                FindingCode::MaterializeAudit,
+                "abandoned stage witness does not match the opened directory",
+            ));
+        }
+        root.remove_open_dir_all().map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeCleanup,
+                format!("remove abandoned stage: {error}"),
+            )
+        })?;
+        Ok(())
+    }
 }
 
 fn retained_stage_witness(root: &CapDir) -> io::Result<Option<crate::stage_witness::StageWitness>> {

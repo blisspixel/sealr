@@ -94,7 +94,7 @@ The Rust policy field `atomic` defaults to false. When true, completed member fi
 
 Publication is native and no-replace on the three release platforms. Linux uses `renameat2` with `RENAME_NOREPLACE`; macOS uses `renameatx_np` with `RENAME_EXCL`. Windows creates the stage relative to the retained parent handle with `NtCreateFile`, `FILE_CREATE`, reparse-point-open semantics, and the explicit protected DACL. It withholds delete sharing, retains the returned stage handle for the full write, and publishes that same object with `NtSetInformationFile`, the retained parent as `RootDirectory`, and replacement disabled.
 
-Abandoned-stage recovery is specified in [abandoned-stage.md](abandoned-stage.md) and is not implemented. A live operation removes or publishes only the retained stage capability. A filename prefix is not ownership. `FlushOnly` and `MemberSync` do not gain directory sync, crash recovery, or power-loss durability.
+Abandoned-stage recovery is specified in [abandoned-stage.md](abandoned-stage.md). `recover_abandoned_stage` removes one opened directory only when the caller presents the stage-retention record from the creating operation and the namespace checks pass. It does not list the parent or delete by filename. A killed process has no record. A live operation otherwise removes or publishes only the retained stage capability. A filename prefix is not ownership. `FlushOnly` and `MemberSync` do not gain directory sync, crash recovery, or power-loss durability.
 
 Linux, macOS, and Windows are the supported materialization platforms. Every other target fails closed with `materialize.unsupported`; Windows storage outside the matrix below fails with `materialize.unsupported_filesystem`.
 
