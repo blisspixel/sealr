@@ -19,22 +19,26 @@ use windows_sys::Win32::Foundation::{
     ERROR_INSUFFICIENT_BUFFER, ERROR_NO_TOKEN, GetLastError, HANDLE, INVALID_HANDLE_VALUE,
     LocalFree, OBJ_CASE_INSENSITIVE, RtlNtStatusToDosError, UNICODE_STRING,
 };
-use windows_sys::Win32::Security::Authorization::{GetSecurityInfo, SE_FILE_OBJECT};
+use windows_sys::Win32::Security::Authorization::{
+    GetSecurityInfo, SE_FILE_OBJECT, SetSecurityInfo,
+};
 use windows_sys::Win32::Security::{
     ACCESS_ALLOWED_ACE, ACL, ACL_REVISION, ACL_SIZE_INFORMATION, AclSizeInformation,
     AddAccessAllowedAceEx, CONTAINER_INHERIT_ACE, CopySid, DACL_SECURITY_INFORMATION, EqualSid,
     GetAce, GetAclInformation, GetLengthSid, GetSecurityDescriptorControl, GetTokenInformation,
     INHERIT_ONLY_ACE, InitializeAcl, InitializeSecurityDescriptor, IsValidSid, OBJECT_INHERIT_ACE,
-    OWNER_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID, SE_DACL_PROTECTED, SECURITY_DESCRIPTOR,
-    SetSecurityDescriptorControl, SetSecurityDescriptorDacl, SetSecurityDescriptorOwner,
-    TOKEN_INFORMATION_CLASS, TOKEN_QUERY, TOKEN_USER, TokenUser,
+    OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, PSECURITY_DESCRIPTOR, PSID,
+    SE_DACL_PROTECTED, SECURITY_DESCRIPTOR, SetSecurityDescriptorControl,
+    SetSecurityDescriptorDacl, SetSecurityDescriptorOwner, TOKEN_INFORMATION_CLASS, TOKEN_QUERY,
+    TOKEN_USER, TokenUser,
 };
 #[cfg(test)]
 use windows_sys::Win32::Security::{INHERITED_ACE, TOKEN_OWNER, TokenOwner};
 use windows_sys::Win32::Storage::FileSystem::{
-    DELETE, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, GetVolumeInformationByHandleW, READ_CONTROL,
-    SYNCHRONIZE,
+    DELETE, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY, FILE_GENERIC_WRITE, FILE_ID_INFO,
+    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE,
+    FileIdInfo, GetFileInformationByHandleEx, GetVolumeInformationByHandleW, READ_CONTROL,
+    SYNCHRONIZE, WRITE_DAC, WRITE_OWNER,
 };
 use windows_sys::Win32::System::SystemServices::{
     ACCESS_ALLOWED_ACE_TYPE, FILE_PERSISTENT_ACLS, FILE_READ_ONLY_VOLUME,
@@ -292,6 +296,84 @@ pub(super) fn ensure_private_stage_security(root: &CapDir) -> io::Result<()> {
     let expected_sid = effective_user_sid()?;
     validate_private_security(
         root.as_raw_handle(),
+        expected_sid.as_ptr(),
+        expected_sid.as_ptr(),
+        SecurityKind::StageRoot,
+    )
+}
+
+/// Access for a new retention file so `SetSecurityInfo` can replace the
+/// inherited DACL and owner before any record bytes are written.
+///
+/// `FILE_GENERIC_WRITE` does not include `WRITE_DAC` or `WRITE_OWNER`. The
+/// creating token's default owner can differ from the effective token user,
+/// and that user is the only owner the stage DACL accepts.
+pub(super) const RETENTION_FILE_ACCESS: u32 = FILE_GENERIC_WRITE | WRITE_DAC | WRITE_OWNER;
+
+/// Read `FileIdInfo` from an open handle.
+///
+/// This is the 128-bit file identifier, not `nFileIndex` from
+/// `BY_HANDLE_FILE_INFORMATION`. An all-zero identifier is rejected.
+pub(super) fn read_file_id(handle: HANDLE) -> io::Result<(u64, [u8; 16])> {
+    let mut info = FILE_ID_INFO::default();
+    // Safety: `info` is initialized writable storage of the size passed to the
+    // call, and `handle` is a live file or directory handle. The query is
+    // synchronous.
+    let ok = unsafe {
+        GetFileInformationByHandleEx(
+            handle,
+            FileIdInfo,
+            (&mut info as *mut FILE_ID_INFO).cast::<c_void>(),
+            u32::try_from(size_of::<FILE_ID_INFO>()).expect("FILE_ID_INFO fits u32"),
+        )
+    };
+    if ok == 0 {
+        return Err(last_os_error());
+    }
+    let file_id = info.FileId.Identifier;
+    if file_id == [0_u8; 16] {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Windows file identifier is all zeros",
+        ));
+    }
+    Ok((info.VolumeSerialNumber, file_id))
+}
+
+/// Replace the owner and DACL on an open retention file.
+///
+/// The descriptor is the same protected token-user DACL used for a stage root.
+/// The caller deletes the file if this fails, before any record bytes are
+/// written and before the path is remembered.
+pub(super) fn protect_retention_file(handle: HANDLE) -> io::Result<()> {
+    let security = PrivateStageSecurity::for_effective_user()?;
+    // Safety: `handle` is a live file handle opened with WRITE_DAC and
+    // WRITE_OWNER. The owner SID and DACL remain allocated in `security` for
+    // this synchronous call. `SetSecurityInfo` copies them into the object.
+    let status = unsafe {
+        SetSecurityInfo(
+            handle,
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION
+                | DACL_SECURITY_INFORMATION
+                | PROTECTED_DACL_SECURITY_INFORMATION,
+            security.owner_sid(),
+            ptr::null_mut(),
+            security.dacl_ptr(),
+            ptr::null(),
+        )
+    };
+    if status != 0 {
+        return Err(win32_error(status));
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+pub(super) fn ensure_retention_file_is_private(handle: HANDLE) -> io::Result<()> {
+    let expected_sid = effective_user_sid()?;
+    validate_private_security(
+        handle,
         expected_sid.as_ptr(),
         expected_sid.as_ptr(),
         SecurityKind::StageRoot,
@@ -589,6 +671,14 @@ impl PrivateStageSecurity {
             acl_words,
             descriptor,
         })
+    }
+
+    fn owner_sid(&self) -> PSID {
+        self.sid.as_ptr()
+    }
+
+    fn dacl_ptr(&self) -> *const ACL {
+        self.acl_words.as_ptr().cast::<ACL>()
     }
 
     fn descriptor_ptr(&mut self) -> *const SECURITY_DESCRIPTOR {

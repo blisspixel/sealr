@@ -14,13 +14,13 @@ pwsh -NoProfile -File scripts/generate_tcb_report.ps1
 
 | Measurement | Value |
 |---|---|
-| Runtime Rust lines (crates/sealr/src) | 46334 |
-| In-crate test lines | 19761 |
-| `unsafe` uses in runtime code | 51 |
+| Runtime Rust lines (crates/sealr/src) | 46749 |
+| In-crate test lines | 20047 |
+| `unsafe` uses in runtime code | 53 |
 | `unsafe` uses in test code | 13 |
 | `extern "C"` blocks in runtime code | 1 |
-| Panic sites in runtime code (`.unwrap(`, `.expect(`, `panic!(`, `unreachable!(`) | 312 |
-| Panic sites in test code | 1364 |
+| Panic sites in runtime code (`.unwrap(`, `.expect(`, `panic!(`, `unreachable!(`) | 313 |
+| Panic sites in test code | 1408 |
 
 ## Unsafe code
 
@@ -29,7 +29,7 @@ The parsing, verification, and identity path — every module that interprets un
 | File | Runtime `unsafe` uses |
 |---|---|
 | `crates/sealr/src/materialize/apple.rs` | 3 |
-| `crates/sealr/src/materialize/windows.rs` | 35 |
+| `crates/sealr/src/materialize/windows.rs` | 37 |
 | `crates/sealr/src/supervised/linux.rs` | 4 |
 | `crates/sealr/src/worker_protocol/linux.rs` | 9 |
 
@@ -37,9 +37,9 @@ The parsing, verification, and identity path — every module that interprets un
 
 | Pattern | Runtime | Test |
 |---|---|---|
-| `.unwrap(` | 150 | 1209 |
-| `.expect(` | 133 | 107 |
-| `panic!(` | 17 | 45 |
+| `.unwrap(` | 150 | 1247 |
+| `.expect(` | 134 | 108 |
+| `panic!(` | 17 | 50 |
 | `unreachable!(` | 12 | 3 |
 
 Runtime panic sites are not admission verdicts: a panic can never admit an archive, only abort the process. They remain measured here because each one is a denial-of-service question an auditor must be able to enumerate.
@@ -79,7 +79,7 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 
 | File | Runtime lines | Test lines | Runtime `unsafe` | Runtime panic sites |
 |---|---|---|---|---|
-| `crates/sealr/src/apply.rs` | 5700 | 2623 | 0 | 53 |
+| `crates/sealr/src/apply.rs` | 5700 | 2636 | 0 | 53 |
 | `crates/sealr/src/bzip2.rs` | 892 | 205 | 0 | 3 |
 | `crates/sealr/src/canonical_json.rs` | 175 | 132 | 0 | 0 |
 | `crates/sealr/src/covering.rs` | 3182 | 1084 | 0 | 11 |
@@ -91,10 +91,10 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/interval.rs` | 128 | 90 | 0 | 1 |
 | `crates/sealr/src/ir.rs` | 3492 | 281 | 0 | 16 |
 | `crates/sealr/src/jail.rs` | 375 | 185 | 0 | 4 |
-| `crates/sealr/src/lib.rs` | 232 | 0 | 0 | 0 |
-| `crates/sealr/src/materialize.rs` | 2173 | 1207 | 0 | 0 |
+| `crates/sealr/src/lib.rs` | 233 | 0 | 0 | 0 |
+| `crates/sealr/src/materialize.rs` | 2390 | 1395 | 0 | 0 |
 | `crates/sealr/src/materialize/apple.rs` | 33 | 39 | 3 | 0 |
-| `crates/sealr/src/materialize/windows.rs` | 730 | 69 | 35 | 5 |
+| `crates/sealr/src/materialize/windows.rs` | 820 | 69 | 37 | 6 |
 | `crates/sealr/src/outcome.rs` | 265 | 78 | 0 | 0 |
 | `crates/sealr/src/phase_trace.rs` | 144 | 76 | 0 | 0 |
 | `crates/sealr/src/policy.rs` | 955 | 808 | 0 | 1 |
@@ -109,7 +109,7 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/semantic_record/worker_runtime.rs` | 797 | 554 | 0 | 0 |
 | `crates/sealr/src/sevenz.rs` | 1109 | 273 | 0 | 10 |
 | `crates/sealr/src/snapshot.rs` | 1414 | 664 | 0 | 6 |
-| `crates/sealr/src/stage_witness.rs` | 114 | 66 | 0 | 0 |
+| `crates/sealr/src/stage_witness.rs` | 221 | 151 | 0 | 0 |
 | `crates/sealr/src/supervised.rs` | 642 | 0 | 0 | 5 |
 | `crates/sealr/src/supervised/linux.rs` | 1693 | 0 | 4 | 4 |
 | `crates/sealr/src/supervised/linux/materialize.rs` | 314 | 0 | 0 | 0 |

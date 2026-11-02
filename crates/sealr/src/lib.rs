@@ -221,6 +221,7 @@ pub use policy::{
 pub use snapshot::SnapshotKind;
 pub use stage_witness::{
     STAGE_RETENTION_SCHEMA, STAGE_WITNESS_SCHEMA, StageRetention, StageWitnessRecord,
+    WINDOWS_FILE_ID_SCHEMA,
 };
 pub use supervised::{
     LinuxWorker, SupervisionError, SupervisionErrorKind, apply_supervised, inspect_supervised,

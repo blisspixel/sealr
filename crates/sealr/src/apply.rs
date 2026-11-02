@@ -6880,9 +6880,11 @@ mod tests {
         let canonical = String::from_utf8(out.canonical_evidence().unwrap().receipt_bytes).unwrap();
         assert!(!receipt.contains("stage-retention"));
         assert!(!receipt.contains("stage-witness"));
+        assert!(!receipt.contains("windows-file-id"));
         assert!(!canonical.contains("stage-retention"));
         assert!(!canonical.contains("stage-witness"));
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        assert!(!canonical.contains("windows-file-id"));
+        #[cfg(any(target_os = "linux", target_os = "macos", windows))]
         {
             let retention = out
                 .stage_retention()
@@ -6890,8 +6892,16 @@ mod tests {
             assert!(!receipt.contains(&retention.stage_component));
             assert!(!canonical.contains(&retention.stage_component));
             assert_eq!(retention.stage_component, entries[0].to_string_lossy());
+            #[cfg(windows)]
+            {
+                let crate::StageWitnessRecord::Windows { file_id, .. } = &retention.witness else {
+                    panic!("windows failed cleanup records a file identifier");
+                };
+                assert!(!receipt.contains(file_id));
+                assert!(!canonical.contains(file_id));
+            }
         }
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         assert!(out.stage_retention().is_none());
         fs::remove_dir_all(parent).unwrap();
     }
@@ -6930,7 +6940,10 @@ mod tests {
         fs::write(parent.join("unrelated.txt"), b"unrelated").unwrap();
 
         let mut mismatched = retention.clone();
-        mismatched.witness.inode = mismatched.witness.inode.wrapping_add(1);
+        let crate::StageWitnessRecord::Unix { inode, .. } = &mut mismatched.witness else {
+            panic!("linux and macos retention uses the unix witness");
+        };
+        *inode = inode.wrapping_add(1);
         let mismatch = crate::recover_abandoned_stage(&parent, &mismatched).unwrap_err();
         assert_eq!(mismatch.code, FindingCode::MaterializeAudit);
         assert!(parent.join(&retention.stage_component).is_dir());
@@ -7055,7 +7068,7 @@ mod tests {
         fs::remove_dir_all(outside).unwrap();
     }
 
-    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     #[test]
     fn killed_apply_leaves_the_named_retention_file() {
         if std::env::var_os("SEALR_KILL_AFTER_STAGE_RETENTION").is_some() {

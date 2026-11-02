@@ -7,7 +7,7 @@ Everything supported flows through the crate root's re-exports plus the two publ
 | Group | Items |
 |---|---|
 | Operation | `apply`, `apply_with_options`, `Request` (permanently exhaustive: `source`, `policy`, `dest`), `Source`, `ApplyOptions`, `ArchiveSelection`, `Outcome`, `Verdict` |
-| Stage retention | `StageRetention`, `StageWitnessRecord`, `STAGE_RETENTION_SCHEMA`, `STAGE_WITNESS_SCHEMA`, `Outcome::stage_retention`, `recover_abandoned_stage`, `read_stage_retention`, `ApplyOptions::with_stage_retention_path` |
+| Stage retention | `StageRetention`, `StageWitnessRecord`, `STAGE_RETENTION_SCHEMA`, `STAGE_WITNESS_SCHEMA`, `WINDOWS_FILE_ID_SCHEMA`, `Outcome::stage_retention`, `recover_abandoned_stage`, `read_stage_retention`, `ApplyOptions::with_stage_retention_path` |
 | Evidence output | `View`, `Receipt`, `MemberView`, `SourceMeta`, `PolicyMeta`, `ToolMeta`, `EnvMeta`, `MaterializationMeta`, `WindowsMaterializationEvidence`, and the outcome axes: `AdmissionStatus`, `InterpretationStatus`, `VerificationStatus`, `EffectStatus`, `ViewCompleteness`, `StoppingPhase`, `SourceDigest`, `DigestHex` |
 | Canonical lineage | `Outcome::canonical_evidence`, `CanonicalEvidence`, `sealr::canonical_json` (`jcs_bytes`, `CanonicalJsonError`, `CanonicalJsonErrorKind`, `MAX_CANONICAL_INTEGER`) |
 | Findings | `Finding`, `FindingCode`, `Severity` |
@@ -21,6 +21,10 @@ Everything supported flows through the crate root's re-exports plus the two publ
 | Miscellaneous | `SnapshotKind` |
 
 Discipline this surface already holds and the freeze will keep: non-exhaustive markers on output records; output records readable but not constructible where they carry authority (`WheelInstallPlan`, `VerifiedArchive` use private fields and accessors and block caller construction); input types built through constructors and builders; error types exposing accessors rather than public fields.
+
+`StageWitnessRecord` is a non-exhaustive enum. `sealr.stage-witness.v1` carries
+a device and inode. `sealr.windows-file-id.v1` carries a volume serial and a
+32-digit lowercase file identifier. Neither value is part of a receipt.
 
 Named Rust durability controls select the existing policy behavior through its
 sole historical `atomic` backing field. Policy JSON, compiled controls, worker
