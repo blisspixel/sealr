@@ -164,8 +164,8 @@ def verify_wheelhouse(
         manifest["platform"] == "ubuntu-24.04-x86_64-cpython-3.12",
         "wheelhouse platform changed",
     )
-    require(manifest["resolved_at"] == "2026-08-30", "resolution date changed")
-    require(manifest["resolver"] == "uv 0.11.33", "resolver identity changed")
+    require(manifest["resolved_at"] == "2026-11-02", "resolution date changed")
+    require(manifest["resolver"] == "uv 0.13.5", "resolver identity changed")
     artifacts = manifest["artifacts"]
     require(type(artifacts) is list and len(artifacts) == 47, "wheelhouse must bind 47 wheels")
     bound: dict[str, Path] = {}

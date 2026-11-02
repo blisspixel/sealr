@@ -100,8 +100,9 @@ Repeated-read phases are recorded in
 is authenticated abandoned-stage ownership. The
 [contract](docs/abandoned-stage.md) says a live operation acts on the retained
 stage capability, and a later call does not delete a stage by filename.
-Recovery after the process is gone is not implemented. Coordinated dependency
-maintenance follows. Additional formats remain deferred. The
+Recovery after the process is gone is not implemented. The zip 9.2.2 and
+Poetry fixture dependency closure is current. The deferred flate2, lzma, and
+CRC closure remains. Additional formats remain deferred. The
 [iteration record](docs/autonomous-improvement.md) preserves the historical
 artifact pins, exact measurements, and completed migration evidence.
 

@@ -11,6 +11,11 @@ The project is in initial development. Compatibility may change between preview 
 - `__internal-phase-trace` records supervisor time for source hashing, plan validation, worker setup, and payload verification on an unretained Linux member read. It is not a shipped API. `tools/phase-trace` runs one bounded diagnostic on a small archive and on the same members beside an unread stored pad. The default library build and the released helper do not include it. Admission, retention, and evidence are unchanged. The 2026-11-01 run is [docs/repeated-read-phases.md](docs/repeated-read-phases.md).
 - `sealr.abandoned-stage.v1` specifies retained-capability stage ownership and the recovery rule. Recovery after the creating process is gone is not implemented, and cleanup does not list `.sealr-stage-*`. `FlushOnly` and `MemberSync` are unchanged. The contract is [docs/abandoned-stage.md](docs/abandoned-stage.md).
 
+### Changed
+
+- `zip` is 9.2.2 in the workspace and in both downstream consumer lockfiles. The requirement floor is 9.0.5, the first release that covers the open `zip` advisories. `cargo deny` no longer ignores RUSTSEC-2026-0367, RUSTSEC-2026-0368, or RUSTSEC-2026-0369. Sealr still uses `zip` only as `ZipWriter` to build fixtures. The runtime dependency closure is unchanged.
+- The Poetry 2.4.2 fixture still pins Poetry 2.4.2, Poetry Core 2.4.0, installer 1.0.1, and pip 26.2.1. The 47-wheel closure, resolved with uv 0.13.5 on 2026-11-02, uses certifi 2026.10.23, filelock 4.2.7, msgpack 1.2.4, urllib3 2.8.0, and virtualenv 21.15.2. python-discovery is 1.6.1 because that virtualenv release requires it. The flate2, lzma-rust2, and crc32fast closure named in the roadmap is unchanged.
+
 ## [0.1.0-alpha.19] - 2026-10-31
 
 ### Added
