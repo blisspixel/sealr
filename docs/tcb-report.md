@@ -15,7 +15,7 @@ pwsh -NoProfile -File scripts/generate_tcb_report.ps1
 | Measurement | Value |
 |---|---|
 | Runtime Rust lines (crates/sealr/src) | 46833 |
-| In-crate test lines | 20046 |
+| In-crate test lines | 20049 |
 | `unsafe` uses in runtime code | 54 |
 | `unsafe` uses in test code | 13 |
 | `extern "C"` blocks in runtime code | 1 |
@@ -92,7 +92,7 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/ir.rs` | 3492 | 281 | 0 | 16 |
 | `crates/sealr/src/jail.rs` | 375 | 185 | 0 | 4 |
 | `crates/sealr/src/lib.rs` | 233 | 0 | 0 | 0 |
-| `crates/sealr/src/materialize.rs` | 2397 | 1394 | 0 | 0 |
+| `crates/sealr/src/materialize.rs` | 2397 | 1397 | 0 | 0 |
 | `crates/sealr/src/materialize/apple.rs` | 33 | 39 | 3 | 0 |
 | `crates/sealr/src/materialize/windows.rs` | 897 | 69 | 38 | 7 |
 | `crates/sealr/src/outcome.rs` | 265 | 78 | 0 | 0 |
