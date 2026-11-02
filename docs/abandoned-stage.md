@@ -29,13 +29,13 @@ The stage component is `.sealr-stage-` plus 32 lowercase hexadecimal digits,
 created with an exclusive directory operation. That shape is a label for the
 object this operation just created. It is not a search key.
 
-Immediately before publication, Linux and macOS reopen that exact component
-with no-follow semantics and require its device and inode to match the retained
-stage capability. A mismatch is `materialize.commit` and does not publish.
-Windows does not perform that device and inode comparison. While the stage
-handle remains open, Windows denies delete sharing, so a rename or removal of
-that object fails with a sharing violation and publication uses the retained
-handle.
+Immediately before publication, the operation reopens that exact component
+with no-follow semantics and requires it to name the retained stage
+capability. Linux and macOS compare the device and inode. Windows compares
+the 128-bit file identifier. A mismatch is `materialize.commit` and does not
+publish. While the stage handle remains open, Windows also denies delete
+sharing, so a rename or removal of that object fails with a sharing violation
+and publication uses the retained handle.
 
 ## What is not ownership
 
@@ -91,41 +91,45 @@ following are true:
    stage namespace check, including reparse-point rejection.
 4. The caller proves that this object is the one the creating operation
    retained, using a witness recorded by that operation. On Linux and macOS the
-   witness is the device and inode. On Windows it is an identifier of the
-   retained object, checked through a newly opened handle that also passes the
-   DACL verification.
+   witness is the device and inode. On Windows it is the volume serial and the
+   128-bit file identifier, checked through a newly opened handle that also
+   passes the protected DACL verification.
 
-`sealr.stage-witness.v1` is that witness. On Linux and macOS it is the device
-and inode of the retained stage directory. On Windows it will be an identifier
-of that same object, checked through a newly opened handle that also passes
-the DACL verification. The witness is not a stage name and not a parent
-listing. It is not a field of `sealr.materialization.v2` or `sealr.receipt.v3`.
+`sealr.stage-witness.v1` is the Linux and macOS witness: the device and inode
+of the retained stage directory. `sealr.windows-file-id.v1` is the Windows
+witness: the volume serial number and that same object's 128-bit file
+identifier, written as 32 lowercase hexadecimal digits. Windows reads it with
+`FileIdInfo` through a handle. It does not use the 64-bit file index. An
+all-zero identifier is not a witness. Volume serial zero is a real volume and
+is accepted. A witness from another platform fails closed before any directory
+is opened. Neither witness is a stage name or a parent listing. Neither is a
+field of `sealr.materialization.v2` or `sealr.receipt.v3`.
 
-When cleanup fails on Linux or macOS, `Outcome::stage_retention` returns
-`sealr.stage-retention.v1`: the exact stage component plus the
-`sealr.stage-witness.v1` device and inode. That record is not written into
-`sealr.materialization.v2` or `sealr.receipt.v3`. The caller stores it. A
-later process presents the parent and that record. Recovery opens the exact
-component without listing the parent and removes the opened directory only
-when the witness matches. A mismatch, a link, or a failed parent check leaves
-the object in place.
+When cleanup fails, `Outcome::stage_retention` returns
+`sealr.stage-retention.v1`: the exact stage component plus the platform
+witness. That record is not written into `sealr.materialization.v2` or
+`sealr.receipt.v3`. The caller stores it. A later process presents the parent
+and that record. Recovery opens the exact component without listing the parent
+and removes the opened directory only when the witness matches. A mismatch, a
+link, a failed parent check, or a failed DACL check leaves the object in place.
+On Windows, that removal resolves the path of the handle that passed the
+identifier and DACL checks. It does not list the parent or choose another name.
 
 A caller that needs the record to survive process death passes
 `ApplyOptions::with_stage_retention_path` before the operation. After the
-stage exists, sealr creates that file without following its final component,
-sets Unix mode `0600`, and does not write it inside the stage. An existing
-file is left untouched and the operation fails closed. The file is removed
-when the stage is removed or published. A process killed after the write
-leaves the file. `read_stage_retention` opens that exact file without
-following a link. Syncing the file is not directory sync and not a power-loss
-guarantee.
+stage exists, sealr creates that file without following its final component
+and does not write it inside the stage. On Linux and macOS the file mode is
+`0600`. On Windows the file is created with the same protected
+effective-token-user DACL as a stage, so it never exists without that DACL.
+A failed create leaves no file. An existing file is left untouched. The file is removed when the stage
+is removed or published. A process killed after the write leaves the file.
+`read_stage_retention` opens that exact file without following a link. Syncing
+the file is not directory sync and not a power-loss guarantee.
 
-Windows does not record a file identifier. Requesting a retention path there
-fails closed and removes nothing by name. A process killed before the file is
-written still has no record, and recovery must not invent one by listing
-`.sealr-stage-*`. Successful cleanup does not return a record and does not
-leave the file, because the directory is already gone and its inode may be
-reused.
+A process killed before the file is written still has no record, and recovery
+must not invent one by listing `.sealr-stage-*`. Successful cleanup does not
+return a record and does not leave the file, because the directory is already
+gone and its identifier may be reused.
 
 If any check fails, the object stays. Recovery must not fall back to deleting
 the name. It must not publish, replace an existing destination, sync
@@ -142,14 +146,17 @@ evidence.
 | Member verification fails | The stage is aborted. One retry follows. Cleanup is `removed`, or `failed` when both attempts fail. The destination does not appear. |
 | Staged tree disagrees with the admitted IR | `materialize.audit`. The retained stage is removed. The destination does not appear. A planted reparse point does not receive the member write. |
 | Destination appears before publication | `materialize.exists`. The existing destination stays. The retained stage is removed. |
-| Stage name no longer identifies the retained inode | `materialize.commit` on Linux and macOS. Abort removes the retained object and leaves the substitute directory. |
+| Stage name no longer identifies the retained object | `materialize.commit`. Abort removes the retained object and leaves the substitute directory. Linux and macOS compare device and inode. Windows compares the file identifier. |
 | Windows rename while the stage handle is open | Sharing violation. Publication writes the retained tree, not a substitute planted beside it. |
 | Both cleanup attempts fail | The stage remains. A later materialization of a different destination in the same parent leaves that stage, a same-shaped directory, a link to an outside directory, an unrelated file, and a pre-existing directory in place. |
-| Process killed during the operation | Drop does not run. This is the same leftover class as exhausted cleanup and is not given a separate kill test. |
+| Process killed after the retention file is written | Drop does not run. The stage directory and the caller-chosen file both remain. Recovery with that file removes only the matching directory. A kill before the write still has no record. This is not a power-loss test. |
 
 The preservation test is
 `later_materialization_preserves_abandoned_stage_lookalike_and_neighbor`.
 The identity test is `commit_rejects_stage_name_substitution_after_audit`.
+Windows identity is `windows_commit_rejects_a_substituted_stage_name` and
+`windows_retention_file_is_private_and_recovery_requires_the_same_id`.
+The process-death test is `killed_apply_leaves_the_named_retention_file`.
 The native lifecycle oracle covers publication, setup collision, verification
 abort, and a destination that appears before publication. Those tests are the
 fault evidence for this contract. They do not qualify crash recovery or

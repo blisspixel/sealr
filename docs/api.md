@@ -103,7 +103,11 @@ matches. `ApplyOptions::with_stage_retention_path` writes the same record to a
 caller-chosen file after the stage exists and removes that file when the stage
 is removed or published. `read_stage_retention` reads it back without following
 the final link. The record is not part of the receipt. A process killed before
-the file is written does not produce one.
+the file is written does not produce one. `StageWitnessRecord` is a
+non-exhaustive enum. `sealr.stage-witness.v1` carries a device and inode.
+`sealr.windows-file-id.v1` carries a volume serial and 32 lowercase
+hexadecimal digits. Unix JSON for the device and inode object is unchanged.
+A witness from another platform fails closed before recovery opens a directory.
 
 The supported [PyPA handoff](../crates/sealr/examples/pypa_installer_handoff/README.md)
 and Deepr gate use these checks. The extracted-package

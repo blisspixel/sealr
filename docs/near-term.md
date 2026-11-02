@@ -85,15 +85,18 @@ materialization that preserves the abandoned stage, a lookalike, a link, an
 unrelated file, and a pre-existing directory. No cleanup lists a filename
 pattern.
 
-Failed cleanup on Linux and macOS returns `sealr.stage-retention.v1` on the
-outcome and nowhere in the receipt. `with_stage_retention_path` writes that
-record to a caller-chosen file after the stage exists and removes the file
-when the stage is removed or published. A process killed after the write
-leaves the file; a process killed before the write still has no record.
+Failed cleanup returns `sealr.stage-retention.v1` on the outcome and nowhere
+in the receipt. Linux and macOS record a device and inode. Windows records
+`sealr.windows-file-id.v1` and checks it through a newly opened handle that
+also passes DACL verification. `with_stage_retention_path` writes that record
+to a caller-chosen file after the stage exists and removes the file when the
+stage is removed or published. A process killed after the write leaves the
+file; a process killed before the write still has no record.
 `recover_abandoned_stage` removes that one opened directory when the parent is
 admitted again, the exact component opens without following links, and the
-witness matches. A mismatch or a link leaves the object. Windows still has no
-file identifier, so that gap remains. Exercise any broader recovery at
+witness matches. A mismatch, a link, or a failed DACL check leaves the object.
+Directory sync and power-loss durability remain absent. The deferred flate2,
+lzma, and CRC closure is next. Exercise any broader recovery at
 stage creation, writes, audit, publication, and cleanup, including hostile
 renames, links and substituted directories, unrelated neighbors, and existing
 destinations on each advertised platform. Any stronger durability guarantee

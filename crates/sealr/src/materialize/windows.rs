@@ -7,12 +7,12 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::Path;
 use std::ptr;
 
-use cap_std::fs::Dir as CapDir;
+use cap_std::fs::{Dir as CapDir, File as CapFile};
 use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::{
-    FILE_CREATE, FILE_DIRECTORY_FILE, FILE_OPEN_REPARSE_POINT, FILE_RENAME_INFORMATION,
-    FILE_SYNCHRONOUS_IO_NONALERT, FileFsDeviceInformation, FileRenameInformation, NtCreateFile,
-    NtQueryVolumeInformationFile, NtSetInformationFile,
+    FILE_CREATE, FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE, FILE_OPEN_REPARSE_POINT,
+    FILE_RENAME_INFORMATION, FILE_SYNCHRONOUS_IO_NONALERT, FileFsDeviceInformation,
+    FileRenameInformation, NtCreateFile, NtQueryVolumeInformationFile, NtSetInformationFile,
 };
 use windows_sys::Wdk::System::SystemServices::{FILE_FS_DEVICE_INFORMATION, FILE_REMOTE_DEVICE};
 use windows_sys::Win32::Foundation::{
@@ -32,9 +32,11 @@ use windows_sys::Win32::Security::{
 #[cfg(test)]
 use windows_sys::Win32::Security::{INHERITED_ACE, TOKEN_OWNER, TokenOwner};
 use windows_sys::Win32::Storage::FileSystem::{
-    DELETE, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
-    FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE, GetVolumeInformationByHandleW, READ_CONTROL,
-    SYNCHRONIZE,
+    DELETE, FILE_ADD_FILE, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
+    FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_WRITE, FILE_ID_INFO,
+    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
+    FILE_SHARE_WRITE, FILE_TRAVERSE, FileIdInfo, GetFileInformationByHandleEx,
+    GetVolumeInformationByHandleW, READ_CONTROL, SYNCHRONIZE,
 };
 use windows_sys::Win32::System::SystemServices::{
     ACCESS_ALLOWED_ACE_TYPE, FILE_PERSISTENT_ACLS, FILE_READ_ONLY_VOLUME,
@@ -282,6 +284,75 @@ pub(super) fn create_stage(parent: &CapDir, name: &Path) -> io::Result<CapDir> {
     Ok(CapDir::from_std_file(file))
 }
 
+/// Create one retention file with the stage root's protected DACL already installed.
+///
+/// `SetSecurityInfo` after `CreateFile` rewrites inheritable ACE flags on a
+/// file, so the result is not the descriptor the stage verifier accepts.
+/// `FILE_CREATE` is exclusive: an existing name is left untouched and no file
+/// is created when this fails.
+pub(super) fn create_retention_file(parent: &CapDir, name: &Path) -> io::Result<CapFile> {
+    let mut name: Vec<u16> = name.as_os_str().encode_wide().collect();
+    let name_bytes = name
+        .len()
+        .checked_mul(size_of::<u16>())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "retention name is too long"))?;
+    let name_length = u16::try_from(name_bytes)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "retention name is too long"))?;
+    if name.is_empty() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "retention name is empty",
+        ));
+    }
+
+    let mut security = PrivateStageSecurity::for_effective_user()?;
+    let unicode_name = UNICODE_STRING {
+        Length: name_length,
+        MaximumLength: name_length,
+        Buffer: name.as_mut_ptr(),
+    };
+    let attributes = OBJECT_ATTRIBUTES {
+        Length: u32::try_from(size_of::<OBJECT_ATTRIBUTES>()).expect("structure size fits u32"),
+        RootDirectory: parent.as_raw_handle(),
+        ObjectName: &unicode_name,
+        Attributes: OBJ_CASE_INSENSITIVE,
+        SecurityDescriptor: security.descriptor_ptr(),
+        SecurityQualityOfService: ptr::null(),
+    };
+    let mut handle: HANDLE = INVALID_HANDLE_VALUE;
+    let mut status_block = MaybeUninit::<IO_STATUS_BLOCK>::zeroed();
+
+    // Safety: every pointer refers to initialized storage for the duration of the synchronous
+    // call. FILE_CREATE makes creation exclusive, and the returned handle is owned exactly once.
+    let status = unsafe {
+        NtCreateFile(
+            &mut handle,
+            FILE_GENERIC_WRITE | READ_CONTROL,
+            &attributes,
+            status_block.as_mut_ptr(),
+            ptr::null(),
+            FILE_ATTRIBUTE_NORMAL,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            FILE_CREATE,
+            FILE_NON_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
+            ptr::null(),
+            0,
+        )
+    };
+    if status < 0 {
+        return Err(ntstatus_error(status));
+    }
+    if handle == INVALID_HANDLE_VALUE || handle.is_null() {
+        return Err(io::Error::other(
+            "NtCreateFile succeeded without a valid retention handle",
+        ));
+    }
+
+    // Safety: NtCreateFile returned a new owned handle, and File assumes sole ownership.
+    let file = unsafe { File::from_raw_handle(handle) };
+    Ok(CapFile::from_std(file))
+}
+
 pub(super) fn ensure_private_stage_security(root: &CapDir) -> io::Result<()> {
     #[cfg(test)]
     if INJECT_STAGE_SECURITY_FAILURE.with(|inject| inject.replace(false)) {
@@ -292,6 +363,102 @@ pub(super) fn ensure_private_stage_security(root: &CapDir) -> io::Result<()> {
     let expected_sid = effective_user_sid()?;
     validate_private_security(
         root.as_raw_handle(),
+        expected_sid.as_ptr(),
+        expected_sid.as_ptr(),
+        SecurityKind::StageRoot,
+    )
+}
+
+/// Read `FileIdInfo` from an open handle.
+///
+/// This is the 128-bit file identifier, not `nFileIndex` from
+/// `BY_HANDLE_FILE_INFORMATION`. An all-zero identifier is rejected.
+pub(super) fn read_file_id(handle: HANDLE) -> io::Result<(u64, [u8; 16])> {
+    let mut info = FILE_ID_INFO::default();
+    // Safety: `info` is initialized writable storage of the size passed to the
+    // call, and `handle` is a live file or directory handle. The query is
+    // synchronous.
+    let ok = unsafe {
+        GetFileInformationByHandleEx(
+            handle,
+            FileIdInfo,
+            (&mut info as *mut FILE_ID_INFO).cast::<c_void>(),
+            u32::try_from(size_of::<FILE_ID_INFO>()).expect("FILE_ID_INFO fits u32"),
+        )
+    };
+    if ok == 0 {
+        return Err(last_os_error());
+    }
+    let file_id = info.FileId.Identifier;
+    if file_id == [0_u8; 16] {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Windows file identifier is all zeros",
+        ));
+    }
+    Ok((info.VolumeSerialNumber, file_id))
+}
+
+/// Share mode for a short-lived directory probe.
+///
+/// The retained stage handle is opened with `DELETE` and does not share
+/// delete. A second open that omits `FILE_SHARE_DELETE` receives
+/// `ERROR_SHARING_VIOLATION`. This probe shares delete so it can read
+/// `FileIdInfo`. It does not request delete access, and the retained handle
+/// still withholds `FILE_SHARE_DELETE`, so another process cannot delete or
+/// rename the directory.
+const COEXISTING_DIRECTORY_SHARE: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+
+fn coexisting_directory_options() -> cap_std::fs::OpenOptions {
+    use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+    use cap_std::fs::OpenOptionsExt;
+
+    let mut options = cap_std::fs::OpenOptions::new();
+    options
+        .read(true)
+        .follow(FollowSymlinks::No)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .share_mode(COEXISTING_DIRECTORY_SHARE);
+    options
+}
+
+pub(super) fn open_coexisting_directory(parent: &CapDir, name: &Path) -> io::Result<CapFile> {
+    parent.open_with(name, &coexisting_directory_options())
+}
+
+pub(super) fn open_ambient_coexisting_directory(path: &Path) -> io::Result<CapFile> {
+    CapFile::open_ambient_with(
+        path,
+        &coexisting_directory_options(),
+        cap_std::ambient_authority(),
+    )
+}
+
+/// Open a retention parent for creating one child file.
+///
+/// A read-only directory handle cannot add a file on Windows. `FILE_ADD_FILE`
+/// is required. The share mode matches the identifier probe so this open can
+/// sit beside the retained destination-parent handle.
+pub(super) fn open_retention_parent(path: &Path) -> io::Result<CapDir> {
+    use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+    use cap_std::fs::OpenOptionsExt;
+
+    let mut options = cap_std::fs::OpenOptions::new();
+    options
+        .read(true)
+        .access_mode(FILE_ADD_FILE | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE)
+        .follow(FollowSymlinks::No)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .share_mode(COEXISTING_DIRECTORY_SHARE);
+    let file = CapFile::open_ambient_with(path, &options, cap_std::ambient_authority())?;
+    Ok(CapDir::from_std_file(file.into_std()))
+}
+
+#[cfg(test)]
+pub(super) fn ensure_retention_file_is_private(handle: HANDLE) -> io::Result<()> {
+    let expected_sid = effective_user_sid()?;
+    validate_private_security(
+        handle,
         expected_sid.as_ptr(),
         expected_sid.as_ptr(),
         SecurityKind::StageRoot,

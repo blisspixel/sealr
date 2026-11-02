@@ -18,6 +18,8 @@ use std::cell::Cell;
 use std::cell::RefCell;
 #[cfg(any(target_os = "linux", feature = "__internal-worker-lab"))]
 use std::fs::File as StdFile;
+#[cfg(windows)]
+use std::os::windows::io::AsRawHandle;
 
 use crate::findings::{Finding, FindingCode};
 use crate::policy::ResourceBudget;
@@ -461,10 +463,12 @@ pub(crate) struct CapabilityMaterializer {
     outcome: &'static str,
     cleanup: &'static str,
     windows: Option<WindowsMaterializationEvidence>,
-    /// Identity of the retained stage object. The materialization report and
-    /// the receipt do not serialize it. A failed cleanup may copy it into the
-    /// separate stage-retention record returned with the outcome. A caller
-    /// path may also receive that record while the stage exists.
+    /// Identity of the retained stage object. Linux and macOS store a device
+    /// and inode. Windows stores a volume serial and a 128-bit file identifier.
+    /// The materialization report and the receipt do not serialize it. A failed
+    /// cleanup may copy it into the separate stage-retention record returned
+    /// with the outcome. A caller path may also receive that record while the
+    /// stage exists.
     witness: Option<crate::stage_witness::StageWitness>,
     /// Caller-chosen file holding the stage-retention record, when requested.
     /// It is removed after the stage itself is removed or published.
@@ -1038,21 +1042,29 @@ impl CapabilityMaterializer {
     ///
     /// The file is created only after the stage exists. Its final component is
     /// not followed and an existing file is left untouched. The record is not
-    /// written inside the stage. Successful removal and publication delete it.
-    /// A killed process does not, so the caller can present that same file
-    /// later. Syncing this file is not directory sync and not a power-loss
-    /// guarantee.
+    /// written inside the stage. On Linux and macOS the mode is `0600`. On
+    /// Windows the file is created with that same protected token-user DACL
+    /// already installed. A failed create leaves no file.
+    /// Successful removal and publication delete the file. A killed process
+    /// does not, so the caller can present that same file later. Syncing this
+    /// file is not directory sync and not a power-loss guarantee.
     pub(crate) fn persist_stage_retention(&mut self, path: &Path) -> Result<(), Finding> {
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            self.persist_stage_retention_unix(path)
+        }
+        #[cfg(windows)]
+        {
+            self.persist_stage_retention_windows(path)
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         {
             let _ = path;
-            return Err(Finding::error(
+            Err(Finding::error(
                 FindingCode::MaterializeIo,
                 "abandoned stage retention has no recorded file identifier on this platform",
-            ));
+            ))
         }
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
-        self.persist_stage_retention_unix(path)
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1170,6 +1182,141 @@ impl CapabilityMaterializer {
                 format!("sync stage retention record: {error}"),
             )
         })?;
+        self.retention_file = Some(parent_path.join(name));
+        #[cfg(test)]
+        exit_if_retention_kill_requested();
+        Ok(())
+    }
+
+    #[cfg(windows)]
+    fn persist_stage_retention_windows(&mut self, path: &Path) -> Result<(), Finding> {
+        let witness = self.witness.ok_or_else(|| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                "abandoned stage retention has no recorded file identifier on this platform",
+            )
+        })?;
+        if !matches!(witness, crate::stage_witness::StageWitness::Windows { .. }) {
+            return Err(Finding::error(
+                FindingCode::MaterializeIo,
+                "abandoned stage witness does not match this platform",
+            ));
+        }
+        let component = self.stage_name.to_str().ok_or_else(|| {
+            Finding::error(
+                FindingCode::MaterializeUnsafeComponent,
+                "stage component is not unicode",
+            )
+        })?;
+        let retention = crate::stage_witness::StageRetention::from_live(component, witness)
+            .ok_or_else(|| {
+                Finding::error(
+                    FindingCode::MaterializeUnsafeComponent,
+                    "stage component is not an exact recorded name",
+                )
+            })?;
+        let name = single_retention_file_name(path)?;
+        let parent_input = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let parent_path = fs::canonicalize(parent_input).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("resolve stage retention parent: {error}"),
+            )
+        })?;
+        let parent_id = {
+            let parent =
+                windows::open_ambient_coexisting_directory(&parent_path).map_err(|error| {
+                    Finding::error(
+                        FindingCode::MaterializeIo,
+                        format!("open stage retention parent: {error}"),
+                    )
+                })?;
+            windows::read_file_id(parent.as_raw_handle()).map_err(|error| {
+                Finding::error(
+                    FindingCode::MaterializeIo,
+                    format!("read stage retention parent: {error}"),
+                )
+            })?
+        };
+        let root_id = windows::read_file_id(self.root()?.as_raw_handle()).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("read retained stage: {error}"),
+            )
+        })?;
+        if parent_id == root_id {
+            return Err(Finding::error(
+                FindingCode::MaterializeIo,
+                "stage retention record must not be written inside the stage",
+            ));
+        }
+        let destination_id =
+            windows::read_file_id(self.parent.as_raw_handle()).map_err(|error| {
+                Finding::error(
+                    FindingCode::MaterializeIo,
+                    format!("read destination parent: {error}"),
+                )
+            })?;
+        if parent_id == destination_id && Path::new(name) == self.stage_name {
+            return Err(Finding::error(
+                FindingCode::MaterializeIo,
+                "stage retention record must not replace the stage directory",
+            ));
+        }
+        let parent = windows::open_retention_parent(&parent_path).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("open stage retention parent: {error}"),
+            )
+        })?;
+        let bytes = serde_json::to_vec(&retention).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("encode stage retention record: {error}"),
+            )
+        })?;
+        let mut file =
+            windows::create_retention_file(&parent, Path::new(name)).map_err(|error| {
+                Finding::error(
+                    FindingCode::MaterializeIo,
+                    format!("create stage retention record without following links: {error}"),
+                )
+            })?;
+        if let Err(error) = file.write_all(&bytes) {
+            drop(file);
+            let created = parent_path.join(name);
+            return Err(match fs::remove_file(&created) {
+                Ok(()) => Finding::error(
+                    FindingCode::MaterializeIo,
+                    format!("write stage retention record: {error}"),
+                ),
+                Err(remove_error) => Finding::error(
+                    FindingCode::MaterializeIo,
+                    format!(
+                        "write stage retention record: {error}; remove incomplete record: {remove_error}"
+                    ),
+                ),
+            });
+        }
+        if let Err(error) = file.sync_all() {
+            drop(file);
+            let created = parent_path.join(name);
+            return Err(match fs::remove_file(&created) {
+                Ok(()) => Finding::error(
+                    FindingCode::MaterializeIo,
+                    format!("sync stage retention record: {error}"),
+                ),
+                Err(remove_error) => Finding::error(
+                    FindingCode::MaterializeIo,
+                    format!(
+                        "sync stage retention record: {error}; remove incomplete record: {remove_error}"
+                    ),
+                ),
+            });
+        }
         self.retention_file = Some(parent_path.join(name));
         #[cfg(test)]
         exit_if_retention_kill_requested();
@@ -1587,8 +1734,10 @@ fn exit_if_retention_kill_requested() {
 /// The parent is admitted again, the exact component is opened without
 /// following links, and the witness must match that open directory. This
 /// function does not list the parent and does not remove a directory when any
-/// check fails. Linux and macOS can make the device and inode proof. Other
-/// platforms have no recorded file identifier, so they remove nothing.
+/// check fails. Linux and macOS compare the device and inode. Windows compares
+/// the 128-bit file identifier through the newly opened handle after the
+/// protected DACL check. A witness from another platform fails before any
+/// directory is opened. A platform with no recorded identifier removes nothing.
 pub fn recover_abandoned_stage(
     parent: &Path,
     retention: &crate::stage_witness::StageRetention,
@@ -1599,71 +1748,113 @@ pub fn recover_abandoned_stage(
             "abandoned stage retention is not an exact recorded witness",
         ));
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    {
-        let _ = parent;
+    if !retention.witness.is_for_this_platform() {
         return Err(Finding::error(
             FindingCode::MaterializeIo,
-            "abandoned stage recovery has no recorded file identifier on this platform",
+            if cfg!(any(target_os = "linux", target_os = "macos", windows)) {
+                "abandoned stage witness does not match this platform"
+            } else {
+                "abandoned stage recovery has no recorded file identifier on this platform"
+            },
         ));
     }
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        let parent_path = fs::canonicalize(parent).map_err(|error| {
+        let parent_dir = open_recovery_parent(parent)?;
+        ensure_parent_namespace_safe(&parent_dir)?;
+        let root = open_abandoned_stage(&parent_dir, &retention.stage_component)?;
+        remove_matching_opened_stage(root, retention)
+    }
+    #[cfg(windows)]
+    {
+        let parent_dir = open_recovery_parent(parent)?;
+        windows::probe_supported_parent(&parent_dir).map_err(|error| {
             Finding::error(
-                FindingCode::MaterializeIo,
-                format!("resolve destination parent: {error}"),
+                FindingCode::MaterializeUnsupportedFilesystem,
+                format!("Windows destination parent is unsupported: {}", error.error),
             )
         })?;
-        let parent_dir =
-            CapDir::open_ambient_dir(&parent_path, ambient_authority()).map_err(|error| {
-                Finding::error(
-                    FindingCode::MaterializeIo,
-                    format!("open destination parent capability: {error}"),
-                )
-            })?;
-        ensure_parent_namespace_safe(&parent_dir)?;
-        let root = parent_dir
-            .open_dir_nofollow(Path::new(&retention.stage_component))
-            .map_err(|error| {
-                Finding::error(
-                    FindingCode::MaterializeIo,
-                    format!("open abandoned stage without following links: {error}"),
-                )
-            })?;
-        ensure_directory_handle_is_not_reparse(&root).map_err(|error| {
+        let root = open_abandoned_stage(&parent_dir, &retention.stage_component)?;
+        remove_matching_opened_stage(root, retention)
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    {
+        let _ = parent;
+        Err(Finding::error(
+            FindingCode::MaterializeIo,
+            "abandoned stage recovery has no recorded file identifier on this platform",
+        ))
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+fn open_recovery_parent(parent: &Path) -> Result<CapDir, Finding> {
+    let parent_path = fs::canonicalize(parent).map_err(|error| {
+        Finding::error(
+            FindingCode::MaterializeIo,
+            format!("resolve destination parent: {error}"),
+        )
+    })?;
+    CapDir::open_ambient_dir(&parent_path, ambient_authority()).map_err(|error| {
+        Finding::error(
+            FindingCode::MaterializeIo,
+            format!("open destination parent capability: {error}"),
+        )
+    })
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+fn open_abandoned_stage(parent: &CapDir, stage_component: &str) -> Result<CapDir, Finding> {
+    parent
+        .open_dir_nofollow(Path::new(stage_component))
+        .map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("open abandoned stage without following links: {error}"),
+            )
+        })
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+fn remove_matching_opened_stage(
+    root: CapDir,
+    retention: &crate::stage_witness::StageRetention,
+) -> Result<(), Finding> {
+    ensure_directory_handle_is_not_reparse(&root).map_err(|error| {
+        Finding::error(
+            FindingCode::MaterializeUnsafeComponent,
+            format!("abandoned stage is a reparse point: {error}"),
+        )
+    })?;
+    ensure_stage_namespace_safe(&root)?;
+    let observed = retained_stage_witness(&root).map_err(|error| {
+        Finding::error(
+            FindingCode::MaterializeIo,
+            format!("read abandoned stage witness: {error}"),
+        )
+    })?;
+    let presented = crate::stage_witness::StageWitness::from_record(&retention.witness)
+        .ok_or_else(|| {
             Finding::error(
                 FindingCode::MaterializeUnsafeComponent,
-                format!("abandoned stage is a reparse point: {error}"),
+                "abandoned stage retention is not an exact recorded witness",
             )
         })?;
-        ensure_stage_namespace_safe(&root)?;
-        let observed = retained_stage_witness(&root).map_err(|error| {
-            Finding::error(
-                FindingCode::MaterializeIo,
-                format!("read abandoned stage witness: {error}"),
-            )
-        })?;
-        let presented = crate::stage_witness::StageWitness::unix(
-            retention.witness.device,
-            retention.witness.inode,
-        );
-        if crate::stage_witness::compare_witnesses(Some(&presented), observed.as_ref())
-            != crate::stage_witness::WitnessComparison::SameObject
-        {
-            return Err(Finding::error(
-                FindingCode::MaterializeAudit,
-                "abandoned stage witness does not match the opened directory",
-            ));
-        }
-        root.remove_open_dir_all().map_err(|error| {
-            Finding::error(
-                FindingCode::MaterializeCleanup,
-                format!("remove abandoned stage: {error}"),
-            )
-        })?;
-        Ok(())
+    if crate::stage_witness::compare_witnesses(Some(&presented), observed.as_ref())
+        != crate::stage_witness::WitnessComparison::SameObject
+    {
+        return Err(Finding::error(
+            FindingCode::MaterializeAudit,
+            "abandoned stage witness does not match the opened directory",
+        ));
     }
+    root.remove_open_dir_all().map_err(|error| {
+        Finding::error(
+            FindingCode::MaterializeCleanup,
+            format!("remove abandoned stage: {error}"),
+        )
+    })?;
+    Ok(())
 }
 
 fn retained_stage_witness(root: &CapDir) -> io::Result<Option<crate::stage_witness::StageWitness>> {
@@ -1676,7 +1867,21 @@ fn retained_stage_witness(root: &CapDir) -> io::Result<Option<crate::stage_witne
             metadata.ino(),
         )))
     }
-    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    #[cfg(windows)]
+    {
+        let (volume_serial, file_id) = windows::read_file_id(root.as_raw_handle())?;
+        Ok(Some(
+            crate::stage_witness::StageWitness::windows(volume_serial, file_id).ok_or_else(
+                || {
+                    io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "Windows file identifier is all zeros",
+                    )
+                },
+            )?,
+        ))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     {
         let _ = root;
         Ok(None)
@@ -1700,7 +1905,26 @@ fn ensure_stage_name_matches_root(parent: &CapDir, root: &CapDir, name: &Path) -
     }
 }
 
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+#[cfg(windows)]
+fn ensure_stage_name_matches_root(parent: &CapDir, root: &CapDir, name: &Path) -> io::Result<()> {
+    // The retained handle has delete access and does not share delete.
+    // `open_dir_nofollow` omits `FILE_SHARE_DELETE`, so it cannot sit beside
+    // that handle. This probe shares delete, does not request it, and still
+    // refuses to follow a reparse point.
+    let named = windows::open_coexisting_directory(parent, name)?;
+    let named_id = windows::read_file_id(named.as_raw_handle())?;
+    let root_id = windows::read_file_id(root.as_raw_handle())?;
+    if named_id == root_id {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "stage file identifier changed",
+        ))
+    }
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 fn ensure_stage_name_matches_root(
     _parent: &CapDir,
     _root: &CapDir,
@@ -2248,11 +2472,11 @@ mod tests {
         assert!(!text.contains("inode"));
         assert!(!text.contains(&materializer.stage_name.to_string_lossy().to_string()));
 
-        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        #[cfg(any(target_os = "linux", target_os = "macos", windows))]
         {
             let retained = materializer
                 .witness
-                .expect("linux and macos retain a stage witness");
+                .expect("this platform retains a stage witness");
             let observed = retained_stage_witness(materializer.root.as_ref().unwrap())
                 .unwrap()
                 .expect("the retained directory still has a witness");
@@ -2260,12 +2484,67 @@ mod tests {
                 crate::stage_witness::compare_witnesses(Some(&retained), Some(&observed)),
                 crate::stage_witness::WitnessComparison::SameObject
             );
+            assert!(!text.contains(retained.schema()));
+            #[cfg(windows)]
+            {
+                let crate::stage_witness::StageWitness::Windows { file_id, .. } = retained else {
+                    panic!("windows retains a file identifier");
+                };
+                assert_ne!(file_id, [0_u8; 16]);
+                let encoded: String = file_id.iter().map(|byte| format!("{byte:02x}")).collect();
+                assert!(!text.contains(&encoded));
+            }
         }
-        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
         assert!(materializer.witness.is_none());
 
         materializer.abort().unwrap();
         assert!(!dest.exists());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    #[test]
+    fn foreign_stage_witness_does_not_open_a_parent() {
+        let component = format!(".sealr-stage-{}", "ab".repeat(16));
+        let missing = temp_dest("foreign-witness-parent");
+        #[cfg(windows)]
+        let witness = r#"{"schema":"sealr.stage-witness.v1","device":1,"inode":2}"#;
+        #[cfg(not(windows))]
+        let witness = r#"{"schema":"sealr.windows-file-id.v1","volume_serial":0,"file_id":"ab000000000000000000000000000011"}"#;
+        let retention: crate::stage_witness::StageRetention = serde_json::from_str(&format!(
+            r#"{{"schema":"sealr.stage-retention.v1","stage_component":"{component}","witness":{witness}}}"#
+        ))
+        .unwrap();
+        assert!(retention.validate());
+        let error = recover_abandoned_stage(&missing, &retention).unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeIo);
+        assert!(
+            error
+                .detail
+                .contains("abandoned stage witness does not match this platform"),
+            "{}",
+            error.detail
+        );
+        assert!(
+            !error.detail.contains("resolve destination parent"),
+            "{}",
+            error.detail
+        );
+        assert!(!missing.exists());
+    }
+
+    #[test]
+    fn malformed_windows_file_id_does_not_open_a_parent() {
+        let component = format!(".sealr-stage-{}", "ab".repeat(16));
+        let missing = temp_dest("malformed-file-id");
+        let retention: crate::stage_witness::StageRetention = serde_json::from_str(&format!(
+            r#"{{"schema":"sealr.stage-retention.v1","stage_component":"{component}","witness":{{"schema":"sealr.windows-file-id.v1","volume_serial":1,"file_id":"AB000000000000000000000000000011"}}}}"#
+        ))
+        .unwrap();
+        assert!(!retention.validate());
+        let error = recover_abandoned_stage(&missing, &retention).unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeUnsafeComponent);
+        assert!(!missing.exists());
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -2576,6 +2855,141 @@ mod tests {
         root.remove_open_dir_all().unwrap();
         drop(parent);
         fs::remove_dir(&parent_path).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_commit_rejects_a_substituted_stage_name() {
+        let parent = temp_dest("windows-substitute-parent");
+        fs::create_dir(&parent).unwrap();
+        let dest = parent.join("output");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let retained_name = materializer.stage_name.clone();
+        let substitute = format!(".sealr-stage-{}", "ef".repeat(16));
+        fs::create_dir(parent.join(&substitute)).unwrap();
+        let named =
+            windows::open_coexisting_directory(&materializer.parent, &retained_name).unwrap();
+        let named_id = windows::read_file_id(named.as_raw_handle()).unwrap();
+        let root_id =
+            windows::read_file_id(materializer.root.as_ref().unwrap().as_raw_handle()).unwrap();
+        assert_eq!(named_id, root_id);
+        assert_ne!(named_id.1, [0_u8; 16]);
+        drop(named);
+
+        materializer.stage_name = PathBuf::from(&substitute);
+        let error = materializer.commit().unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeCommit);
+        assert!(error.detail.contains("stage file identifier changed"));
+        assert!(!dest.exists());
+        assert!(parent.join(&substitute).is_dir());
+        materializer.abort().unwrap();
+        assert!(!parent.join(&retained_name).exists());
+        assert!(parent.join(&substitute).is_dir());
+        drop(materializer);
+        fs::remove_dir_all(parent).unwrap();
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_retention_file_is_private_and_recovery_requires_the_same_id() {
+        use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+        use cap_std::fs::OpenOptions as CapOpenOptions;
+
+        let parent = temp_dest("windows-retention-parent");
+        fs::create_dir(&parent).unwrap();
+        let dest = parent.join("output");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let inside = materializer.stage_path().join("record.json");
+        let inside_error = materializer.persist_stage_retention(&inside).unwrap_err();
+        assert_eq!(inside_error.code, FindingCode::MaterializeIo);
+        assert!(
+            inside_error
+                .detail
+                .contains("must not be written inside the stage")
+        );
+        assert!(materializer.retention_file.is_none());
+        assert!(!inside.exists());
+
+        let replace_error = materializer
+            .persist_stage_retention(&parent.join(&materializer.stage_name))
+            .unwrap_err();
+        assert_eq!(replace_error.code, FindingCode::MaterializeIo);
+        assert!(
+            replace_error
+                .detail
+                .contains("must not replace the stage directory")
+        );
+        assert!(materializer.stage_path().is_dir());
+
+        let records = temp_dest("windows-retention-records");
+        fs::create_dir(&records).unwrap();
+        let path = records.join("stage.json");
+        materializer.persist_stage_retention(&path).unwrap();
+        {
+            // This ambient open withholds delete sharing. Both handles must
+            // close before the records directory is removed.
+            let record_parent = CapDir::open_ambient_dir(&records, ambient_authority()).unwrap();
+            let mut options = CapOpenOptions::new();
+            options.read(true).follow(FollowSymlinks::No);
+            let record = record_parent
+                .open_with(Path::new("stage.json"), &options)
+                .unwrap();
+            windows::ensure_retention_file_is_private(record.as_raw_handle()).unwrap();
+        }
+        let text = fs::read_to_string(&path).unwrap();
+        assert!(text.contains("sealr.windows-file-id.v1"));
+        assert!(!text.contains("sealr.stage-witness.v1"));
+        let from_file = read_stage_retention(&path).unwrap();
+
+        materializer.cleanup = "failed";
+        let retention = materializer
+            .report()
+            .stage_retention
+            .expect("failed cleanup returns the windows witness");
+        assert_eq!(retention, from_file);
+        let stage_component = retention.stage_component.clone();
+        drop(materializer);
+        assert!(parent.join(&stage_component).is_dir());
+
+        let mut mismatched = retention.clone();
+        let crate::stage_witness::StageWitnessRecord::Windows { file_id, .. } =
+            &mut mismatched.witness
+        else {
+            panic!("windows witness");
+        };
+        let mut flipped = file_id.clone().into_bytes();
+        let last = flipped.len() - 1;
+        flipped[last] = if flipped[last] == b'0' { b'1' } else { b'0' };
+        if flipped.iter().all(|byte| *byte == b'0') {
+            flipped[0] = b'1';
+        }
+        *file_id = String::from_utf8(flipped).unwrap();
+        let mismatch = recover_abandoned_stage(&parent, &mismatched).unwrap_err();
+        assert_eq!(mismatch.code, FindingCode::MaterializeAudit);
+        assert!(parent.join(&stage_component).is_dir());
+
+        {
+            let _guard = windows::inject_stage_security_failure();
+            let denied = recover_abandoned_stage(&parent, &retention).unwrap_err();
+            assert_eq!(denied.code, FindingCode::MaterializeUnsafeStage);
+        }
+        assert!(parent.join(&stage_component).is_dir());
+
+        let lookalike = parent.join(format!(".sealr-stage-{}", "ab".repeat(16)));
+        fs::create_dir(&lookalike).unwrap();
+        fs::write(lookalike.join("keep"), b"lookalike").unwrap();
+        fs::write(parent.join("unrelated.txt"), b"unrelated").unwrap();
+        recover_abandoned_stage(&parent, &retention).unwrap();
+        assert!(!parent.join(&stage_component).exists());
+        assert_eq!(fs::read(lookalike.join("keep")).unwrap(), b"lookalike");
+        assert_eq!(
+            fs::read(parent.join("unrelated.txt")).unwrap(),
+            b"unrelated"
+        );
+        assert!(!dest.exists());
+        assert!(path.is_file());
+        fs::remove_dir_all(parent).unwrap();
+        fs::remove_dir_all(records).unwrap();
     }
 
     #[cfg(windows)]

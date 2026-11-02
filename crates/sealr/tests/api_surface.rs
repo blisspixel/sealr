@@ -47,14 +47,14 @@ use sealr::{
     TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
     TarPaxInterpretationProfile, TarXzInterpretationProfile, TarZstdInterpretationProfile,
     ToolMeta, TreeRoot, ValidatedPolicy, Verdict, VerificationStatus, VerifiedArchive, View,
-    ViewCompleteness, WindowsMaterializationEvidence, ZIP_PORTABLE_UTF8_V1, ZIP_STRICT_ASCII_V1,
-    ZIP_STRICT_ASCII_V2, ZIP_WHEEL_UTF8_V1, ZIP64_STRICT_ASCII_V1, ZipInterpretationProfile, apply,
-    apply_supervised, apply_with_options, content_root, encode_sevenz_layout,
-    encode_tar_bzip2_layout, encode_tar_gnu_longname_layout, encode_tar_gzip_gnu_longname_layout,
-    encode_tar_gzip_layout, encode_tar_gzip_pax_layout, encode_tar_layout, encode_tar_pax_layout,
-    encode_tar_xz_layout, encode_tar_zstd_layout, encode_zip64_layout, hex_sha256,
-    inspect_supervised, jail_name, jail_relative, join_under_dest, layout_root, ratio_exceeds,
-    read_stage_retention, recover_abandoned_stage,
+    ViewCompleteness, WINDOWS_FILE_ID_SCHEMA, WindowsMaterializationEvidence, ZIP_PORTABLE_UTF8_V1,
+    ZIP_STRICT_ASCII_V1, ZIP_STRICT_ASCII_V2, ZIP_WHEEL_UTF8_V1, ZIP64_STRICT_ASCII_V1,
+    ZipInterpretationProfile, apply, apply_supervised, apply_with_options, content_root,
+    encode_sevenz_layout, encode_tar_bzip2_layout, encode_tar_gnu_longname_layout,
+    encode_tar_gzip_gnu_longname_layout, encode_tar_gzip_layout, encode_tar_gzip_pax_layout,
+    encode_tar_layout, encode_tar_pax_layout, encode_tar_xz_layout, encode_tar_zstd_layout,
+    encode_zip64_layout, hex_sha256, inspect_supervised, jail_name, jail_relative, join_under_dest,
+    layout_root, ratio_exceeds, read_stage_retention, recover_abandoned_stage,
 };
 
 #[test]
@@ -81,6 +81,7 @@ fn the_core_operation_signatures_are_pinned() {
     let _ = (
         STAGE_RETENTION_SCHEMA,
         STAGE_WITNESS_SCHEMA,
+        WINDOWS_FILE_ID_SCHEMA,
         std::any::type_name::<StageWitnessRecord>(),
     );
     let _: fn(&Policy) -> Durability = Policy::durability;
