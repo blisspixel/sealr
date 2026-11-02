@@ -16,7 +16,7 @@ $expected = [ordered]@{
             'enumflags2 0.7.12',
             'enumflags2_derive 0.7.12',
             'syn 2.0.119',
-            'lzma-rust2 0.20.0',
+            'lzma-rust2 0.25.0',
             'bzip2 0.6.1',
             'libbz2-rs-sys 0.2.5'
         )
@@ -37,7 +37,7 @@ $expected = [ordered]@{
             'errno 0.3.14',
             'rustix 1.1.4',
             'libc 0.2.189',
-            'lzma-rust2 0.20.0',
+            'lzma-rust2 0.25.0',
             'bzip2 0.6.1',
             'libbz2-rs-sys 0.2.5'
         )
@@ -50,7 +50,7 @@ $expected = [ordered]@{
             'windows-sys 0.61.2',
             'winx 0.36.4',
             'once_cell_polyfill 1.70.2',
-            'lzma-rust2 0.20.0',
+            'lzma-rust2 0.25.0',
             'bzip2 0.6.1',
             'libbz2-rs-sys 0.2.5'
         )

@@ -95,8 +95,8 @@ file; a process killed before the write still has no record.
 `recover_abandoned_stage` removes that one opened directory when the parent is
 admitted again, the exact component opens without following links, and the
 witness matches. A mismatch, a link, or a failed DACL check leaves the object.
-Directory sync and power-loss durability remain absent. The deferred flate2,
-lzma, and CRC closure is next. Exercise any broader recovery at
+Directory sync and power-loss durability remain absent. The flate2 1.1.10,
+lzma-rust2 0.25.0, and crc32fast 1.5.4 closure is current. Exercise any broader recovery at
 stage creation, writes, audit, publication, and cleanup, including hostile
 renames, links and substituted directories, unrelated neighbors, and existing
 destinations on each advertised platform. Any stronger durability guarantee
@@ -110,13 +110,15 @@ The open Dependabot alerts are closed without changing the runtime closure.
 Poetry 2.4.2 fixture uses patched certifi, filelock, msgpack, urllib3, and
 virtualenv wheels. Poetry, Poetry Core, installer, and pip stay pinned.
 
-The partial maintenance updates represented by PRs 121 and 122 still expose
-flate2, lzma, and CRC dependency work. Replace split lockfile changes with one
-coherent closure update across root, fuzz, proof, and consumer projects.
-Regenerate the actual dependency, third-party-license, and TCB evidence and
-pass locked builds. Investigate a budget change against the resolved graph
-rather than raising the limit blindly. These deferred updates do not block the
-unchanged release set.
+The partial maintenance updates represented by PRs 121 and 122 are closed by
+one lockfile update. Root, fuzz, and both extracted-package consumers resolve
+`flate2` 1.1.10, exact `lzma-rust2` 0.25.0, and `crc32fast` 1.5.4.
+`verification/kani` does not resolve those crates, so its proof lock is
+unchanged. The dependency contract, third-party license bundles, and TCB
+report were regenerated from that graph. The runtime package counts did not
+change: `adler2` and `miniz_oxide` were lockfile residue, not runtime-root
+packages. A later codec still has to justify any new package against the
+resolved graph. The ceiling stays two new runtime packages.
 
 Use the [assurance collector and replay contract](assurance-promotion.md) for
 genuine scheduled history. Preserve exact jobs, attempts, commits, evidence

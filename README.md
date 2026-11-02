@@ -106,8 +106,8 @@ record to be written to a path while the stage exists; a killed process leaves
 that file and no other record. Windows records a file identifier and checks it
 through a newly opened handle that also passes DACL verification. Directory
 sync and power-loss durability remain absent. The zip 9.2.2 and Poetry
-fixture dependency closure is current. The deferred flate2, lzma, and CRC
-closure is next. Additional formats remain
+fixture dependency closure is current. The flate2 1.1.10, lzma-rust2 0.25.0,
+and crc32fast 1.5.4 closure is current. Additional formats remain
 deferred. The
 [iteration record](docs/autonomous-improvement.md) preserves the historical
 artifact pins, exact measurements, and completed migration evidence.
