@@ -25,6 +25,7 @@ mod policy;
 mod quota;
 mod ratio;
 mod snapshot;
+mod stage_witness;
 mod supervised;
 mod tar;
 mod tar_gnu;

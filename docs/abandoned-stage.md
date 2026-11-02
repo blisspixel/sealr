@@ -92,10 +92,18 @@ following are true:
    retained object, checked through a newly opened handle that also passes the
    DACL verification.
 
-Today the creating operation does not persist that witness, and the receipt
-does not record the stage name. A later process therefore cannot make the
-proof in step 4. Until a versioned witness exists, recovery must not remove a
-directory. In particular, it must not recursively delete a filename pattern.
+`sealr.stage-witness.v1` is that witness. On Linux and macOS it is the device
+and inode of the retained stage directory. On Windows it will be an identifier
+of that same object, checked through a newly opened handle that also passes
+the DACL verification. The witness is not a stage name and not a parent
+listing. It is not a field of `sealr.materialization.v2` or `sealr.receipt.v3`.
+
+The creating operation keeps the Linux and macOS identity on the live
+materializer only. It does not persist that witness, the receipt does not
+record the stage name, and Windows does not record a file identifier yet. A
+later process therefore cannot make the proof in step 4. Until a later process
+can present a recorded witness, recovery must not remove a directory. In
+particular, it must not recursively delete a filename pattern.
 
 If any check fails, the object stays. Recovery must not fall back to deleting
 the name. It must not publish, replace an existing destination, sync

@@ -455,6 +455,9 @@ pub(crate) struct CapabilityMaterializer {
     outcome: &'static str,
     cleanup: &'static str,
     windows: Option<WindowsMaterializationEvidence>,
+    /// Identity of the retained stage object. It is not copied into the
+    /// materialization report or the receipt, and it is not persisted.
+    witness: Option<crate::stage_witness::StageWitness>,
 }
 
 /// The only stage authority needed by a plan-native archive writer.
@@ -822,6 +825,21 @@ impl CapabilityMaterializer {
                             ),
                         ));
                     }
+                    let witness = match retained_stage_witness(&root) {
+                        Ok(witness) => witness,
+                        Err(error) => {
+                            return Err(MaterializationSetupError::after_stage(
+                                &parent,
+                                root,
+                                &stage_name,
+                                windows_report,
+                                Finding::error(
+                                    FindingCode::MaterializeIo,
+                                    format!("record retained stage witness: {error}"),
+                                ),
+                            ));
+                        }
+                    };
                     return Ok(Self {
                         parent,
                         #[cfg(test)]
@@ -833,6 +851,7 @@ impl CapabilityMaterializer {
                         outcome: "staged",
                         cleanup: "pending",
                         windows: windows_report,
+                        witness,
                     });
                 }
                 Err(error)
@@ -949,6 +968,22 @@ impl CapabilityMaterializer {
                 format!("staging name no longer identifies the audited root: {error}"),
             )
         })?;
+        if let Some(recorded) = self.witness {
+            let observed = retained_stage_witness(root).map_err(|error| {
+                Finding::error(
+                    FindingCode::MaterializeCommit,
+                    format!("reread retained stage witness: {error}"),
+                )
+            })?;
+            if crate::stage_witness::compare_witnesses(Some(&recorded), observed.as_ref())
+                != crate::stage_witness::WitnessComparison::SameObject
+            {
+                return Err(Finding::error(
+                    FindingCode::MaterializeCommit,
+                    "retained stage witness does not match the staged directory",
+                ));
+            }
+        }
         if let Err(error) = plant_injected_destination(&self.parent, &self.final_name) {
             self.outcome = "publication-failed";
             return Err(Finding::error(
@@ -1248,6 +1283,23 @@ fn ensure_single_link(_file: &CapFile) -> io::Result<()> {
         io::ErrorKind::Unsupported,
         "file link-count audit is unavailable on this platform",
     ))
+}
+
+fn retained_stage_witness(root: &CapDir) -> io::Result<Option<crate::stage_witness::StageWitness>> {
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use cap_std::fs::MetadataExt;
+        let metadata = root.dir_metadata()?;
+        Ok(Some(crate::stage_witness::StageWitness::unix(
+            metadata.dev(),
+            metadata.ino(),
+        )))
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = root;
+        Ok(None)
+    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1802,6 +1854,37 @@ mod tests {
                 .get("windows")
                 .is_none()
         );
+    }
+
+    #[test]
+    fn live_stage_witness_stays_off_the_materialization_report() {
+        let dest = temp_dest("witness");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let report = serde_json::to_value(materializer.report()).unwrap();
+        let text = report.to_string();
+        assert!(report.get("witness").is_none());
+        assert!(!text.contains("stage-witness"));
+        assert!(!text.contains("inode"));
+        assert!(!text.contains(&materializer.stage_name.to_string_lossy().to_string()));
+
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        {
+            let retained = materializer
+                .witness
+                .expect("linux and macos retain a stage witness");
+            let observed = retained_stage_witness(materializer.root.as_ref().unwrap())
+                .unwrap()
+                .expect("the retained directory still has a witness");
+            assert_eq!(
+                crate::stage_witness::compare_witnesses(Some(&retained), Some(&observed)),
+                crate::stage_witness::WitnessComparison::SameObject
+            );
+        }
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        assert!(materializer.witness.is_none());
+
+        materializer.abort().unwrap();
+        assert!(!dest.exists());
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]

@@ -54,6 +54,7 @@
     "src/semantic_record/worker_runtime.rs",
     "src/sevenz.rs",
     "src/snapshot.rs",
+    "src/stage_witness.rs",
     "src/supervised.rs",
     "src/supervised/linux.rs",
     "src/supervised/linux/materialize.rs",

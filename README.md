@@ -96,13 +96,15 @@ supported formats, the explicit Linux worker, resource limits, and open gaps.
 ## What comes next
 
 Repeated-read phases are recorded in
-[repeated-read phases](docs/repeated-read-phases.md). The next lifecycle work
-is authenticated abandoned-stage ownership. The
-[contract](docs/abandoned-stage.md) says a live operation acts on the retained
-stage capability, and a later call does not delete a stage by filename.
-Recovery after the process is gone is not implemented. The zip 9.2.2 and
-Poetry fixture dependency closure is current. The deferred flate2, lzma, and
-CRC closure remains. Additional formats remain deferred. The
+[repeated-read phases](docs/repeated-read-phases.md). The
+[abandoned-stage contract](docs/abandoned-stage.md) is current: a live
+operation acts on the retained stage capability, and a later call does not
+delete a stage by filename. The next lifecycle work records a versioned stage
+witness. Recovery after the process is gone is not implemented, and it must
+not remove a directory until a later process can present that witness. The
+zip 9.2.2 and Poetry fixture dependency closure is current. The deferred
+flate2, lzma, and CRC closure follows that witness. Additional formats remain
+deferred. The
 [iteration record](docs/autonomous-improvement.md) preserves the historical
 artifact pins, exact measurements, and completed migration evidence.
 

@@ -40,7 +40,7 @@ The [iteration record](autonomous-improvement.md) preserves exact validation
 scope, source-built versus released artifacts, and historical Alpha.15 pins.
 Neither local tests nor an older release's CI establish Alpha.18 remote results.
 
-## 1. Measure the repeated-read phases
+## 1. Repeated-read phases are measured
 
 The [controlled repeated-read observation](capability-reuse-experiment.md#controlled-repeated-read-observation)
 completed 14 cases and 224 reads with released Alpha.15. Its eight-member,
@@ -85,13 +85,17 @@ materialization that preserves the abandoned stage, a lookalike, a link, an
 unrelated file, and a pre-existing directory. No cleanup lists a filename
 pattern.
 
-The recovery operation itself is still open. It needs a versioned witness
-before it may remove anything the process no longer holds. Exercise that
-future operation at stage creation, writes, audit, publication, and cleanup,
-including hostile renames, links and substituted directories, unrelated
-neighbors, and existing destinations on each advertised platform. Any stronger
-durability guarantee needs a new explicit contract and fault evidence rather
-than a renamed flush operation.
+The recovery operation itself is still open. Linux and macOS now keep a
+`sealr.stage-witness.v1` device and inode on the live materializer. That value
+is not part of `sealr.materialization.v2` or `sealr.receipt.v3`, it is not
+persisted after the process exits, and Windows does not record a file
+identifier yet. Until a later process can present a recorded witness and the
+exact component, recovery must not remove a directory. The removal operation,
+once that witness can be presented, has to be exercised at stage creation,
+writes, audit, publication, and cleanup, including hostile renames, links and
+substituted directories, unrelated neighbors, and existing destinations on
+each advertised platform. Any stronger durability guarantee needs a new
+explicit contract and fault evidence rather than a renamed flush operation.
 
 ## 3. Coordinate dependency maintenance and assurance history
 
@@ -130,10 +134,10 @@ optional independent-adoption contract.
 
 ## Execution and spending
 
-This release is the stopping point for the current implementation loop. Future
-work starts with the first bounded measurement above, with acceptance criteria
-before code changes. No additional parser, hosted UI, binding, or backend is
-needed to finish Alpha.17.
+Section 1 already meets its acceptance. This tree is Alpha.19. The next
+implementation is the stage witness in section 2, and recovery removal stays
+forbidden until a later process can present that witness. No additional
+parser, hosted UI, binding, or backend is part of that increment.
 
 Use local computation, cached artifacts, free public documentation, and ordinary
 public CI. External purchases stay at $0 by default and never exceed the $5

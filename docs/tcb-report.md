@@ -14,13 +14,13 @@ pwsh -NoProfile -File scripts/generate_tcb_report.ps1
 
 | Measurement | Value |
 |---|---|
-| Runtime Rust lines (crates/sealr/src) | 45704 |
-| In-crate test lines | 19403 |
+| Runtime Rust lines (crates/sealr/src) | 45809 |
+| In-crate test lines | 19480 |
 | `unsafe` uses in runtime code | 51 |
 | `unsafe` uses in test code | 13 |
 | `extern "C"` blocks in runtime code | 1 |
 | Panic sites in runtime code (`.unwrap(`, `.expect(`, `panic!(`, `unreachable!(`) | 312 |
-| Panic sites in test code | 1302 |
+| Panic sites in test code | 1309 |
 
 ## Unsafe code
 
@@ -37,8 +37,8 @@ The parsing, verification, and identity path — every module that interprets un
 
 | Pattern | Runtime | Test |
 |---|---|---|
-| `.unwrap(` | 150 | 1150 |
-| `.expect(` | 133 | 104 |
+| `.unwrap(` | 150 | 1155 |
+| `.expect(` | 133 | 106 |
 | `panic!(` | 17 | 45 |
 | `unreachable!(` | 12 | 3 |
 
@@ -91,8 +91,8 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/interval.rs` | 128 | 90 | 0 | 1 |
 | `crates/sealr/src/ir.rs` | 3492 | 281 | 0 | 16 |
 | `crates/sealr/src/jail.rs` | 375 | 185 | 0 | 4 |
-| `crates/sealr/src/lib.rs` | 225 | 0 | 0 | 0 |
-| `crates/sealr/src/materialize.rs` | 1740 | 1154 | 0 | 0 |
+| `crates/sealr/src/lib.rs` | 226 | 0 | 0 | 0 |
+| `crates/sealr/src/materialize.rs` | 1792 | 1185 | 0 | 0 |
 | `crates/sealr/src/materialize/apple.rs` | 33 | 39 | 3 | 0 |
 | `crates/sealr/src/materialize/windows.rs` | 730 | 69 | 35 | 5 |
 | `crates/sealr/src/outcome.rs` | 265 | 78 | 0 | 0 |
@@ -109,6 +109,7 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/semantic_record/worker_runtime.rs` | 797 | 554 | 0 | 0 |
 | `crates/sealr/src/sevenz.rs` | 1109 | 273 | 0 | 10 |
 | `crates/sealr/src/snapshot.rs` | 1414 | 664 | 0 | 6 |
+| `crates/sealr/src/stage_witness.rs` | 52 | 46 | 0 | 0 |
 | `crates/sealr/src/supervised.rs` | 642 | 0 | 0 | 5 |
 | `crates/sealr/src/supervised/linux.rs` | 1693 | 0 | 4 | 4 |
 | `crates/sealr/src/supervised/linux/materialize.rs` | 288 | 0 | 0 | 0 |
