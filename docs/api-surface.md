@@ -29,7 +29,7 @@ durability, crash recovery, or power-loss durability. `ValidatedPolicy` remains
 immutable, so changing a selection after validation requires taking its policy
 and validating the changed value again. See [policy durability](policy.md#named-durability-controls).
 
-The extracted-package PyPA installer conformance proves one substantial downstream use of the supported surface without an internal feature or another workspace crate. The scheduled assurance lane now adds a compiler-accurate diff through SHA-256-authenticated `cargo-semver-checks` 0.49.0 against the self-contained package produced from the exact source-only baseline commit. It augments these source and consumer contracts rather than replacing them. The baseline has zero expected warnings, making the category promotable while its fresh ten-run history starts at zero.
+The extracted-package PyPA installer conformance proves one substantial downstream use of the supported surface without an internal feature or another workspace crate. The scheduled assurance lane now adds a compiler-accurate diff through SHA-256-authenticated `cargo-semver-checks` 0.51.0 against the self-contained package produced from the exact source-only baseline commit. It augments these source and consumer contracts rather than replacing them. The baseline has zero expected warnings, making the category promotable while its fresh ten-run history starts at zero.
 
 Alpha.17 includes executable consumer migrations for the compatibility `Verdict`
 projection and historical `Policy.atomic` selection. Real examples consume

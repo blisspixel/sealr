@@ -7,16 +7,16 @@
     "kani": "0.67.0",
     "cargo_mutants": "27.1.0",
     "cargo_llvm_cov": "0.9.0",
-    "cargo_semver_checks": "0.49.0",
+    "cargo_semver_checks": "0.51.0",
     "rust": "1.99.1"
   },
-  "semver_tool_archive_sha256": "72f6834d75d28a66e02c9fd6a230ce901bb30eee6067b85867a97445df040e4a",
+  "semver_tool_archive_sha256": "cacadafaa5cd27ae6d05a74a103266917ebab4c5e43c898360e177d4fbf06a65",
   "semver_baseline_tag": "source-baseline-20260913",
   "semver_baseline_rev": "157d47168ea7bdab1a5d0a1a7c2c8ec896d195d1",
   "semver_baseline_version": "0.1.0-alpha.16",
   "semver_command": "cargo-semver-checks check-release --manifest-path crates/sealr/Cargo.toml --baseline-root <packaged-source-baseline-20260913-root> --release-type minor",
   "semver_known_warnings": "tests/assurance/semver-source-baseline-20260913-known-warnings.txt",
-  "semver_expected_summary": "196 checks: 196 pass, 57 skip",
+  "semver_expected_summary": "202 checks: 202 pass, 58 skip",
   "kani_command": "cargo kani --manifest-path verification/kani/Cargo.toml --package sealr --default-unwind 1",
   "kani_manifest": "verification/kani/Cargo.toml",
   "kani_compiler_rust": "1.93.0-nightly (53732d5e0 2025-11-20)",
@@ -88,9 +88,9 @@
       "id": "semver.public-api-source-baseline-20260913.v1",
       "tool": "cargo-semver-checks",
       "scope": "Compiler-accurate public API compatibility of the current sealr library against the self-contained Cargo package produced from the exact source-only baseline commit.",
-      "bounded_by": "20-minute Linux job, Rust 1.99.1, cargo-semver-checks 0.49.0 from one SHA-256-authenticated x86_64 Linux release archive, the exact source-baseline-20260913 tag-to-commit binding, and an explicit minor release class so unchanged prerelease version text cannot skip compatibility lints.",
+      "bounded_by": "20-minute Linux job, Rust 1.99.1, cargo-semver-checks 0.51.0 from one SHA-256-authenticated x86_64 Linux release archive, the exact source-baseline-20260913 tag-to-commit binding, and an explicit minor release class so unchanged prerelease version text cannot skip compatibility lints.",
       "result_policy": "Any warning, deny-level compatibility finding, or tool, packaging, tag-binding, rustdoc, summary, or expected-warning drift fails the scheduled job. The expected-warning file is empty at this baseline, and the complete log is retained for review.",
-      "nonclaim": "A clean result covers only the lints implemented by cargo-semver-checks 0.49.0 for Rust-visible public API and does not prove behavioral, wire-format, evidence-schema, filesystem, platform, or security compatibility."
+      "nonclaim": "A clean result covers only the lints implemented by cargo-semver-checks 0.51.0 for Rust-visible public API and does not prove behavioral, wire-format, evidence-schema, filesystem, platform, or security compatibility."
     }
   ],
   "promotion_ledger": "tests/assurance/promotion-ledger.json"
