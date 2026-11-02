@@ -5,7 +5,8 @@ Contract: `sealr.abandoned-stage.v1`.
 This document specifies how a materialization stage is owned, how the current
 operation removes or publishes it, and what recovery must prove.
 `recover_abandoned_stage` removes one directory only when the caller presents
-the record from a failed cleanup. A killed process still has no record.
+the record from a failed cleanup or from a caller-chosen retention file. A
+process killed before that file is written still has no record.
 `Durability::FlushOnly` and `Durability::MemberSync` do not change.
 
 ## Live ownership
@@ -72,9 +73,10 @@ cleanup is `pending`. A receipt that already says `failed` is not cleaned again
 on drop.
 
 A killed process does not run drop. The stage directory can remain. The receipt,
-if the process died before writing one, does not exist. The receipt, if a
-cleanup failure was recorded, does not contain the stage name, device, inode,
-or Windows file identifier.
+if the process died before writing one, does not exist. The receipt does not
+contain the stage name, device, inode, or Windows file identifier. A
+caller-chosen retention file written before the kill is the record a later
+process can present. A kill before that write leaves none.
 
 ## Recovery
 
@@ -108,10 +110,22 @@ component without listing the parent and removes the opened directory only
 when the witness matches. A mismatch, a link, or a failed parent check leaves
 the object in place.
 
-Windows does not record a file identifier, so recovery removes nothing there.
-A killed process does not return the record, and recovery must not invent one
-by listing `.sealr-stage-*`. Successful cleanup does not return a record,
-because the directory is already gone and its inode may be reused.
+A caller that needs the record to survive process death passes
+`ApplyOptions::with_stage_retention_path` before the operation. After the
+stage exists, sealr creates that file without following its final component,
+sets Unix mode `0600`, and does not write it inside the stage. An existing
+file is left untouched and the operation fails closed. The file is removed
+when the stage is removed or published. A process killed after the write
+leaves the file. `read_stage_retention` opens that exact file without
+following a link. Syncing the file is not directory sync and not a power-loss
+guarantee.
+
+Windows does not record a file identifier. Requesting a retention path there
+fails closed and removes nothing by name. A process killed before the file is
+written still has no record, and recovery must not invent one by listing
+`.sealr-stage-*`. Successful cleanup does not return a record and does not
+leave the file, because the directory is already gone and its inode may be
+reused.
 
 If any check fails, the object stays. Recovery must not fall back to deleting
 the name. It must not publish, replace an existing destination, sync

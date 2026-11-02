@@ -54,7 +54,7 @@ use sealr::{
     encode_tar_gzip_layout, encode_tar_gzip_pax_layout, encode_tar_layout, encode_tar_pax_layout,
     encode_tar_xz_layout, encode_tar_zstd_layout, encode_zip64_layout, hex_sha256,
     inspect_supervised, jail_name, jail_relative, join_under_dest, layout_root, ratio_exceeds,
-    recover_abandoned_stage,
+    read_stage_retention, recover_abandoned_stage,
 };
 
 #[test]
@@ -74,6 +74,9 @@ fn the_core_operation_signatures_are_pinned() {
     let _: fn(&ArchiveIR) -> TreeRoot = content_root;
     let _: fn(&ArchiveIR) -> TreeRoot = layout_root;
     let _: fn(&std::path::Path, &StageRetention) -> Result<(), Finding> = recover_abandoned_stage;
+    let _: fn(&std::path::Path) -> Result<StageRetention, Finding> = read_stage_retention;
+    let _: fn(ApplyOptions, std::path::PathBuf) -> ApplyOptions =
+        ApplyOptions::with_stage_retention_path;
     let _: fn(&Outcome) -> Option<&StageRetention> = Outcome::stage_retention;
     let _ = (
         STAGE_RETENTION_SCHEMA,

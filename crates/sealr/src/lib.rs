@@ -203,7 +203,8 @@ pub use jail::{
     jail_name, jail_relative, join_under_dest,
 };
 pub use materialize::{
-    MaterializationMeta, WindowsMaterializationEvidence, recover_abandoned_stage,
+    MaterializationMeta, WindowsMaterializationEvidence, read_stage_retention,
+    recover_abandoned_stage,
 };
 pub use outcome::{
     AdmissionStatus, DigestHex, EffectStatus, InterpretationStatus, SourceDigest, StoppingPhase,

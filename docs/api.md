@@ -99,8 +99,11 @@ and its existing member-sync behavior. These names do not add directory syncing,
 crash recovery, or power-loss guarantees. A failed cleanup can return
 `Outcome::stage_retention`, a separate `sealr.stage-retention.v1` record.
 `recover_abandoned_stage` removes one opened directory only when that record
-matches. The record is not part of the receipt, and a killed process does not
-produce one.
+matches. `ApplyOptions::with_stage_retention_path` writes the same record to a
+caller-chosen file after the stage exists and removes that file when the stage
+is removed or published. `read_stage_retention` reads it back without following
+the final link. The record is not part of the receipt. A process killed before
+the file is written does not produce one.
 
 The supported [PyPA handoff](../crates/sealr/examples/pypa_installer_handoff/README.md)
 and Deepr gate use these checks. The extracted-package

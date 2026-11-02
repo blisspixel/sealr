@@ -40,7 +40,7 @@ The [exact Poetry 2.4.2 fixture](../tests/poetry-consumer/README.md) tests one p
 
 The [Unicode and streaming matrix](wheel-producer-compatibility.md) adds controlled producer evidence and exposed an incomplete Deflate stream admission defect, fixed in Alpha.14. The [Alpha.15 content gate](wheel-content-gate.md) checks real publisher requirements without installing files. The separate owner-maintained [validation project](https://github.com/blisspixel/sealr-validation) consumes released Deepr, Primr, and Recon wheels and records retention experiments.
 
-The separate publisher replay combines ordinary immutable Alpha.15 acquisition with two accepted variants, ten typed refusals, and bounded post-deletion source-open observations. It closes that narrow technical conformance increment. Alpha.17 carries the typed outcome and consumer migration changes; the older report remains Alpha.15 artifact evidence. Independent adoption and an independent security audit remain unproven. Repeated-read phase costs are already attributed. Failed cleanup can return a stage-retention record on Linux and macOS. A killed process and Windows still have no recoverable witness, so the explicit lifecycle gaps are not closed.
+The separate publisher replay combines ordinary immutable Alpha.15 acquisition with two accepted variants, ten typed refusals, and bounded post-deletion source-open observations. It closes that narrow technical conformance increment. Alpha.17 carries the typed outcome and consumer migration changes; the older report remains Alpha.15 artifact evidence. Independent adoption and an independent security audit remain unproven. Repeated-read phase costs are already attributed. Failed cleanup can return a stage-retention record on Linux and macOS, and a caller-chosen file can keep that record across process death. Windows still has no recoverable witness, so that lifecycle gap is not closed.
 
 ## Boundary rules
 
@@ -50,7 +50,7 @@ The separate publisher replay combines ordinary immutable Alpha.15 acquisition w
 - A source digest is distinct from a tree, artifact, or installation identity.
 - Publication occurs only after verification and stage audit, with no replacement and no link following.
 - Supervised operations retain authenticated packaging, supported Linux restrictions, exact completion, and worker cleanup requirements.
-- Same-user attackers, abandoned stages, and power-loss durability retain their documented limitations. Abandoned-stage ownership is specified in [abandoned-stage.md](abandoned-stage.md). A presented stage-retention record can remove one matching directory. A killed process still has no record, and power-loss durability remains absent.
+- Same-user attackers, abandoned stages, and power-loss durability retain their documented limitations. Abandoned-stage ownership is specified in [abandoned-stage.md](abandoned-stage.md). A presented stage-retention record can remove one matching directory. A caller-chosen file can survive process death after it is written. Power-loss durability remains absent.
 - Archive admission does not establish that executable content is safe. Automated checks do not establish an independent audit.
 
 The [roadmap](../ROADMAP.md#active-execution-queue) orders remaining work. See the [semantic model](semantic-model.md#the-consumption-rule), [wheel profile](profiles/python-wheel-v1.md), and [implementation boundary](implementation.md) for exact contracts.
