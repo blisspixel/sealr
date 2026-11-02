@@ -2925,14 +2925,17 @@ mod tests {
         fs::create_dir(&records).unwrap();
         let path = records.join("stage.json");
         materializer.persist_stage_retention(&path).unwrap();
-        let record_parent = CapDir::open_ambient_dir(&records, ambient_authority()).unwrap();
-        let mut options = CapOpenOptions::new();
-        options.read(true).follow(FollowSymlinks::No);
-        let record = record_parent
-            .open_with(Path::new("stage.json"), &options)
-            .unwrap();
-        windows::ensure_retention_file_is_private(record.as_raw_handle()).unwrap();
-        drop(record);
+        {
+            // This ambient open withholds delete sharing. Both handles must
+            // close before the records directory is removed.
+            let record_parent = CapDir::open_ambient_dir(&records, ambient_authority()).unwrap();
+            let mut options = CapOpenOptions::new();
+            options.read(true).follow(FollowSymlinks::No);
+            let record = record_parent
+                .open_with(Path::new("stage.json"), &options)
+                .unwrap();
+            windows::ensure_retention_file_is_private(record.as_raw_handle()).unwrap();
+        }
         let text = fs::read_to_string(&path).unwrap();
         assert!(text.contains("sealr.windows-file-id.v1"));
         assert!(!text.contains("sealr.stage-witness.v1"));
