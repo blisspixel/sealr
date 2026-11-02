@@ -1228,19 +1228,21 @@ impl CapabilityMaterializer {
                 format!("resolve stage retention parent: {error}"),
             )
         })?;
-        let parent =
-            CapDir::open_ambient_dir(&parent_path, ambient_authority()).map_err(|error| {
+        let parent_id = {
+            let parent =
+                windows::open_ambient_coexisting_directory(&parent_path).map_err(|error| {
+                    Finding::error(
+                        FindingCode::MaterializeIo,
+                        format!("open stage retention parent: {error}"),
+                    )
+                })?;
+            windows::read_file_id(parent.as_raw_handle()).map_err(|error| {
                 Finding::error(
                     FindingCode::MaterializeIo,
-                    format!("open stage retention parent: {error}"),
+                    format!("read stage retention parent: {error}"),
                 )
-            })?;
-        let parent_id = windows::read_file_id(parent.as_raw_handle()).map_err(|error| {
-            Finding::error(
-                FindingCode::MaterializeIo,
-                format!("read stage retention parent: {error}"),
-            )
-        })?;
+            })?
+        };
         let root_id = windows::read_file_id(self.root()?.as_raw_handle()).map_err(|error| {
             Finding::error(
                 FindingCode::MaterializeIo,
@@ -1266,6 +1268,12 @@ impl CapabilityMaterializer {
                 "stage retention record must not replace the stage directory",
             ));
         }
+        let parent = windows::open_retention_parent(&parent_path).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("open stage retention parent: {error}"),
+            )
+        })?;
         let bytes = serde_json::to_vec(&retention).map_err(|error| {
             Finding::error(
                 FindingCode::MaterializeIo,
@@ -1904,7 +1912,11 @@ fn ensure_stage_name_matches_root(parent: &CapDir, root: &CapDir, name: &Path) -
 
 #[cfg(windows)]
 fn ensure_stage_name_matches_root(parent: &CapDir, root: &CapDir, name: &Path) -> io::Result<()> {
-    let named = parent.open_dir_nofollow(name)?;
+    // The retained handle has delete access and does not share delete.
+    // `open_dir_nofollow` omits `FILE_SHARE_DELETE`, so it cannot sit beside
+    // that handle. This probe shares delete, does not request it, and still
+    // refuses to follow a reparse point.
+    let named = windows::open_coexisting_directory(parent, name)?;
     let named_id = windows::read_file_id(named.as_raw_handle())?;
     let root_id = windows::read_file_id(root.as_raw_handle())?;
     if named_id == root_id {
@@ -2860,10 +2872,8 @@ mod tests {
         let retained_name = materializer.stage_name.clone();
         let substitute = format!(".sealr-stage-{}", "ef".repeat(16));
         fs::create_dir(parent.join(&substitute)).unwrap();
-        let named = materializer
-            .parent
-            .open_dir_nofollow(&retained_name)
-            .unwrap();
+        let named =
+            windows::open_coexisting_directory(&materializer.parent, &retained_name).unwrap();
         let named_id = windows::read_file_id(named.as_raw_handle()).unwrap();
         let root_id =
             windows::read_file_id(materializer.root.as_ref().unwrap().as_raw_handle()).unwrap();

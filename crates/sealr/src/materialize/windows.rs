@@ -7,7 +7,7 @@ use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
 use std::path::Path;
 use std::ptr;
 
-use cap_std::fs::Dir as CapDir;
+use cap_std::fs::{Dir as CapDir, File as CapFile};
 use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::{
     FILE_CREATE, FILE_DIRECTORY_FILE, FILE_OPEN_REPARSE_POINT, FILE_RENAME_INFORMATION,
@@ -35,8 +35,9 @@ use windows_sys::Win32::Security::{
 #[cfg(test)]
 use windows_sys::Win32::Security::{INHERITED_ACE, TOKEN_OWNER, TokenOwner};
 use windows_sys::Win32::Storage::FileSystem::{
-    DELETE, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY, FILE_GENERIC_WRITE, FILE_ID_INFO,
-    FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE,
+    DELETE, FILE_ADD_FILE, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY, FILE_FLAG_BACKUP_SEMANTICS,
+    FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_WRITE, FILE_ID_INFO, FILE_LIST_DIRECTORY,
+    FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, FILE_TRAVERSE,
     FileIdInfo, GetFileInformationByHandleEx, GetVolumeInformationByHandleW, READ_CONTROL,
     SYNCHRONIZE, WRITE_DAC, WRITE_OWNER,
 };
@@ -338,6 +339,61 @@ pub(super) fn read_file_id(handle: HANDLE) -> io::Result<(u64, [u8; 16])> {
         ));
     }
     Ok((info.VolumeSerialNumber, file_id))
+}
+
+/// Share mode for a short-lived directory probe.
+///
+/// The retained stage handle is opened with `DELETE` and does not share
+/// delete. A second open that omits `FILE_SHARE_DELETE` receives
+/// `ERROR_SHARING_VIOLATION`. This probe shares delete so it can read
+/// `FileIdInfo`. It does not request delete access, and the retained handle
+/// still withholds `FILE_SHARE_DELETE`, so another process cannot delete or
+/// rename the directory.
+const COEXISTING_DIRECTORY_SHARE: u32 = FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE;
+
+fn coexisting_directory_options() -> cap_std::fs::OpenOptions {
+    use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+    use cap_std::fs::OpenOptionsExt;
+
+    let mut options = cap_std::fs::OpenOptions::new();
+    options
+        .read(true)
+        .follow(FollowSymlinks::No)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .share_mode(COEXISTING_DIRECTORY_SHARE);
+    options
+}
+
+pub(super) fn open_coexisting_directory(parent: &CapDir, name: &Path) -> io::Result<CapFile> {
+    parent.open_with(name, &coexisting_directory_options())
+}
+
+pub(super) fn open_ambient_coexisting_directory(path: &Path) -> io::Result<CapFile> {
+    CapFile::open_ambient_with(
+        path,
+        &coexisting_directory_options(),
+        cap_std::ambient_authority(),
+    )
+}
+
+/// Open a retention parent for creating one child file.
+///
+/// A read-only directory handle cannot add a file on Windows. `FILE_ADD_FILE`
+/// is required. The share mode matches the identifier probe so this open can
+/// sit beside the retained destination-parent handle.
+pub(super) fn open_retention_parent(path: &Path) -> io::Result<CapDir> {
+    use cap_fs_ext::{FollowSymlinks, OpenOptionsFollowExt};
+    use cap_std::fs::OpenOptionsExt;
+
+    let mut options = cap_std::fs::OpenOptions::new();
+    options
+        .read(true)
+        .access_mode(FILE_ADD_FILE | FILE_TRAVERSE | FILE_READ_ATTRIBUTES | SYNCHRONIZE)
+        .follow(FollowSymlinks::No)
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+        .share_mode(COEXISTING_DIRECTORY_SHARE);
+    let file = CapFile::open_ambient_with(path, &options, cap_std::ambient_authority())?;
+    Ok(CapDir::from_std_file(file.into_std()))
 }
 
 /// Replace the owner and DACL on an open retention file.
