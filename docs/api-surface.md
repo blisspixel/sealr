@@ -7,6 +7,7 @@ Everything supported flows through the crate root's re-exports plus the two publ
 | Group | Items |
 |---|---|
 | Operation | `apply`, `apply_with_options`, `Request` (permanently exhaustive: `source`, `policy`, `dest`), `Source`, `ApplyOptions`, `ArchiveSelection`, `Outcome`, `Verdict` |
+| Stage retention | `StageRetention`, `StageWitnessRecord`, `STAGE_RETENTION_SCHEMA`, `STAGE_WITNESS_SCHEMA`, `Outcome::stage_retention`, `recover_abandoned_stage` |
 | Evidence output | `View`, `Receipt`, `MemberView`, `SourceMeta`, `PolicyMeta`, `ToolMeta`, `EnvMeta`, `MaterializationMeta`, `WindowsMaterializationEvidence`, and the outcome axes: `AdmissionStatus`, `InterpretationStatus`, `VerificationStatus`, `EffectStatus`, `ViewCompleteness`, `StoppingPhase`, `SourceDigest`, `DigestHex` |
 | Canonical lineage | `Outcome::canonical_evidence`, `CanonicalEvidence`, `sealr::canonical_json` (`jcs_bytes`, `CanonicalJsonError`, `CanonicalJsonErrorKind`, `MAX_CANONICAL_INTEGER`) |
 | Findings | `Finding`, `FindingCode`, `Severity` |

@@ -99,11 +99,12 @@ Repeated-read phases are recorded in
 [repeated-read phases](docs/repeated-read-phases.md). The
 [abandoned-stage contract](docs/abandoned-stage.md) is current: a live
 operation acts on the retained stage capability, and a later call does not
-delete a stage by filename. The next lifecycle work records a versioned stage
-witness. Recovery after the process is gone is not implemented, and it must
-not remove a directory until a later process can present that witness. The
-zip 9.2.2 and Poetry fixture dependency closure is current. The deferred
-flate2, lzma, and CRC closure follows that witness. Additional formats remain
+delete a stage by filename. Failed cleanup on Linux and macOS can return a
+separate stage-retention record, and recovery removes that one directory only
+when the record is presented again. A killed process still produces no record,
+and Windows does not record a file identifier. The zip 9.2.2 and Poetry
+fixture dependency closure is current. The deferred flate2, lzma, and CRC
+closure follows the remaining lifecycle gap. Additional formats remain
 deferred. The
 [iteration record](docs/autonomous-improvement.md) preserves the historical
 artifact pins, exact measurements, and completed migration evidence.

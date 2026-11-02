@@ -85,17 +85,17 @@ materialization that preserves the abandoned stage, a lookalike, a link, an
 unrelated file, and a pre-existing directory. No cleanup lists a filename
 pattern.
 
-The recovery operation itself is still open. Linux and macOS now keep a
-`sealr.stage-witness.v1` device and inode on the live materializer. That value
-is not part of `sealr.materialization.v2` or `sealr.receipt.v3`, it is not
-persisted after the process exits, and Windows does not record a file
-identifier yet. Until a later process can present a recorded witness and the
-exact component, recovery must not remove a directory. The removal operation,
-once that witness can be presented, has to be exercised at stage creation,
-writes, audit, publication, and cleanup, including hostile renames, links and
-substituted directories, unrelated neighbors, and existing destinations on
-each advertised platform. Any stronger durability guarantee needs a new
-explicit contract and fault evidence rather than a renamed flush operation.
+Failed cleanup on Linux and macOS returns `sealr.stage-retention.v1` on the
+outcome and nowhere in the receipt. `recover_abandoned_stage` removes that one
+opened directory when the parent is admitted again, the exact component opens
+without following links, and the witness matches. A mismatch or a link leaves
+the object. Windows still has no file identifier, and a killed process still
+returns no record, so those two gaps remain. Exercise any broader recovery at
+stage creation, writes, audit, publication, and cleanup, including hostile
+renames, links and substituted directories, unrelated neighbors, and existing
+destinations on each advertised platform. Any stronger durability guarantee
+needs a new explicit contract and fault evidence rather than a renamed flush
+operation.
 
 ## 3. Coordinate dependency maintenance and assurance history
 
@@ -135,9 +135,9 @@ optional independent-adoption contract.
 ## Execution and spending
 
 Section 1 already meets its acceptance. This tree is Alpha.19. The next
-implementation is the stage witness in section 2, and recovery removal stays
-forbidden until a later process can present that witness. No additional
-parser, hosted UI, binding, or backend is part of that increment.
+lifecycle gaps are a witness that survives process death and a Windows file
+identifier. No additional parser, hosted UI, binding, or backend is part of
+that increment.
 
 Use local computation, cached artifacts, free public documentation, and ordinary
 public CI. External purchases stay at $0 by default and never exceed the $5
