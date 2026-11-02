@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::{self, BufRead, Write};
+use std::io::{self, BufRead, Read, Write};
 use std::path::{Component, Path, PathBuf};
 
 use cap_fs_ext::{DirExt, FollowSymlinks, OpenOptionsFollowExt};
@@ -463,8 +463,13 @@ pub(crate) struct CapabilityMaterializer {
     windows: Option<WindowsMaterializationEvidence>,
     /// Identity of the retained stage object. The materialization report and
     /// the receipt do not serialize it. A failed cleanup may copy it into the
-    /// separate stage-retention record returned with the outcome.
+    /// separate stage-retention record returned with the outcome. A caller
+    /// path may also receive that record while the stage exists.
     witness: Option<crate::stage_witness::StageWitness>,
+    /// Caller-chosen file holding the stage-retention record, when requested.
+    /// It is removed after the stage itself is removed or published.
+    retention_file: Option<PathBuf>,
+    retention_discard_error: Option<Finding>,
 }
 
 /// The only stage authority needed by a plan-native archive writer.
@@ -859,6 +864,8 @@ impl CapabilityMaterializer {
                         cleanup: "pending",
                         windows: windows_report,
                         witness,
+                        retention_file: None,
+                        retention_discard_error: None,
                     });
                 }
                 Err(error)
@@ -1016,7 +1023,174 @@ impl CapabilityMaterializer {
         drop(self.root.take());
         self.outcome = "committed";
         self.cleanup = "not-applicable-after-commit";
+        self.witness = None;
+        if let Err(finding) = self.discard_stage_retention_file() {
+            self.retention_discard_error = Some(finding);
+        }
         Ok(())
+    }
+
+    pub(crate) fn take_retention_discard_error(&mut self) -> Option<Finding> {
+        self.retention_discard_error.take()
+    }
+
+    /// Write the stage-retention record to a caller-chosen file.
+    ///
+    /// The file is created only after the stage exists. Its final component is
+    /// not followed and an existing file is left untouched. The record is not
+    /// written inside the stage. Successful removal and publication delete it.
+    /// A killed process does not, so the caller can present that same file
+    /// later. Syncing this file is not directory sync and not a power-loss
+    /// guarantee.
+    pub(crate) fn persist_stage_retention(&mut self, path: &Path) -> Result<(), Finding> {
+        #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+        {
+            let _ = path;
+            return Err(Finding::error(
+                FindingCode::MaterializeIo,
+                "abandoned stage retention has no recorded file identifier on this platform",
+            ));
+        }
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
+        self.persist_stage_retention_unix(path)
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    fn persist_stage_retention_unix(&mut self, path: &Path) -> Result<(), Finding> {
+        use cap_std::fs::MetadataExt;
+
+        let witness = self.witness.ok_or_else(|| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                "abandoned stage retention has no recorded file identifier on this platform",
+            )
+        })?;
+        let component = self.stage_name.to_str().ok_or_else(|| {
+            Finding::error(
+                FindingCode::MaterializeUnsafeComponent,
+                "stage component is not unicode",
+            )
+        })?;
+        let retention = crate::stage_witness::StageRetention::from_live(component, witness)
+            .ok_or_else(|| {
+                Finding::error(
+                    FindingCode::MaterializeUnsafeComponent,
+                    "stage component is not an exact recorded name",
+                )
+            })?;
+        let name = single_retention_file_name(path)?;
+        let parent_input = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let parent_path = fs::canonicalize(parent_input).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("resolve stage retention parent: {error}"),
+            )
+        })?;
+        let parent =
+            CapDir::open_ambient_dir(&parent_path, ambient_authority()).map_err(|error| {
+                Finding::error(
+                    FindingCode::MaterializeIo,
+                    format!("open stage retention parent: {error}"),
+                )
+            })?;
+        let parent_metadata = parent.dir_metadata().map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("read stage retention parent: {error}"),
+            )
+        })?;
+        let root_metadata = self.root()?.dir_metadata().map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("read retained stage: {error}"),
+            )
+        })?;
+        if parent_metadata.dev() == root_metadata.dev()
+            && parent_metadata.ino() == root_metadata.ino()
+        {
+            return Err(Finding::error(
+                FindingCode::MaterializeIo,
+                "stage retention record must not be written inside the stage",
+            ));
+        }
+        let destination_metadata = self.parent.dir_metadata().map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("read destination parent: {error}"),
+            )
+        })?;
+        if parent_metadata.dev() == destination_metadata.dev()
+            && parent_metadata.ino() == destination_metadata.ino()
+            && Path::new(name) == self.stage_name
+        {
+            return Err(Finding::error(
+                FindingCode::MaterializeIo,
+                "stage retention record must not replace the stage directory",
+            ));
+        }
+        let bytes = serde_json::to_vec(&retention).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("encode stage retention record: {error}"),
+            )
+        })?;
+        let mut options = CapOpenOptions::new();
+        options
+            .write(true)
+            .create_new(true)
+            .follow(FollowSymlinks::No);
+        let mut file = parent
+            .open_with(Path::new(name), &options)
+            .map_err(|error| {
+                Finding::error(
+                    FindingCode::MaterializeIo,
+                    format!("create stage retention record without following links: {error}"),
+                )
+            })?;
+        rustix::fs::fchmod(&file, rustix::fs::Mode::RUSR | rustix::fs::Mode::WUSR).map_err(
+            |error| {
+                Finding::error(
+                    FindingCode::MaterializeIo,
+                    format!("restrict stage retention record: {error}"),
+                )
+            },
+        )?;
+        file.write_all(&bytes).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("write stage retention record: {error}"),
+            )
+        })?;
+        file.sync_all().map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("sync stage retention record: {error}"),
+            )
+        })?;
+        self.retention_file = Some(parent_path.join(name));
+        #[cfg(test)]
+        exit_if_retention_kill_requested();
+        Ok(())
+    }
+
+    fn discard_stage_retention_file(&mut self) -> Result<(), Finding> {
+        let Some(path) = self.retention_file.take() else {
+            return Ok(());
+        };
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+            Err(error) => {
+                self.retention_file = Some(path);
+                Err(Finding::error(
+                    FindingCode::MaterializeCleanup,
+                    format!("remove stage retention record: {error}"),
+                ))
+            }
+        }
     }
 
     pub(crate) fn abort(&mut self) -> Result<(), Finding> {
@@ -1036,7 +1210,8 @@ impl CapabilityMaterializer {
                     self.outcome = "aborted";
                 }
                 self.cleanup = "removed";
-                Ok(())
+                self.witness = None;
+                self.discard_stage_retention_file()
             }
             Err(error) => {
                 if self.outcome == "staged" {
@@ -1300,6 +1475,110 @@ fn ensure_single_link(_file: &CapFile) -> io::Result<()> {
         io::ErrorKind::Unsupported,
         "file link-count audit is unavailable on this platform",
     ))
+}
+
+/// Read one caller-held stage-retention file.
+///
+/// The final component is opened without following a link. The file must be a
+/// regular file of at most 4096 bytes and must validate as
+/// `sealr.stage-retention.v1`. This does not list a directory or remove
+/// anything.
+pub fn read_stage_retention(path: &Path) -> Result<crate::stage_witness::StageRetention, Finding> {
+    let name = single_retention_file_name(path)?;
+    let parent_input = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    let parent_path = fs::canonicalize(parent_input).map_err(|error| {
+        Finding::error(
+            FindingCode::MaterializeIo,
+            format!("resolve stage retention parent: {error}"),
+        )
+    })?;
+    let parent = CapDir::open_ambient_dir(&parent_path, ambient_authority()).map_err(|error| {
+        Finding::error(
+            FindingCode::MaterializeIo,
+            format!("open stage retention parent: {error}"),
+        )
+    })?;
+    let mut options = CapOpenOptions::new();
+    options.read(true).follow(FollowSymlinks::No);
+    let file = parent
+        .open_with(Path::new(name), &options)
+        .map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("open stage retention record without following links: {error}"),
+            )
+        })?;
+    ensure_file_handle_is_not_reparse(&file).map_err(|error| {
+        Finding::error(
+            FindingCode::MaterializeUnsafeComponent,
+            format!("stage retention record is a reparse point: {error}"),
+        )
+    })?;
+    let metadata = file.metadata().map_err(|error| {
+        Finding::error(
+            FindingCode::MaterializeIo,
+            format!("read stage retention record metadata: {error}"),
+        )
+    })?;
+    if !metadata.is_file() || metadata.len() > 4096 {
+        return Err(Finding::error(
+            FindingCode::MaterializeIo,
+            "stage retention record must be a regular file of at most 4096 bytes",
+        ));
+    }
+    let mut bytes = Vec::new();
+    file.take(4097).read_to_end(&mut bytes).map_err(|error| {
+        Finding::error(
+            FindingCode::MaterializeIo,
+            format!("read stage retention record: {error}"),
+        )
+    })?;
+    if bytes.len() > 4096 {
+        return Err(Finding::error(
+            FindingCode::MaterializeIo,
+            "stage retention record must be a regular file of at most 4096 bytes",
+        ));
+    }
+    let retention: crate::stage_witness::StageRetention =
+        serde_json::from_slice(&bytes).map_err(|error| {
+            Finding::error(
+                FindingCode::MaterializeIo,
+                format!("stage retention record is not sealr.stage-retention.v1: {error}"),
+            )
+        })?;
+    if !retention.validate() {
+        return Err(Finding::error(
+            FindingCode::MaterializeUnsafeComponent,
+            "stage retention record is not an exact recorded witness",
+        ));
+    }
+    Ok(retention)
+}
+
+fn single_retention_file_name(path: &Path) -> Result<&std::ffi::OsStr, Finding> {
+    let name = path.file_name().ok_or_else(|| {
+        Finding::error(
+            FindingCode::MaterializeIo,
+            "stage retention path must name a file",
+        )
+    })?;
+    match path.components().next_back() {
+        Some(Component::Normal(component)) if component == name => Ok(name),
+        _ => Err(Finding::error(
+            FindingCode::MaterializeIo,
+            "stage retention path must name one file",
+        )),
+    }
+}
+
+#[cfg(test)]
+fn exit_if_retention_kill_requested() {
+    if std::env::var_os("SEALR_KILL_AFTER_STAGE_RETENTION").is_some() {
+        std::process::exit(86);
+    }
 }
 
 /// Remove one abandoned stage when the caller presents the record from the
@@ -1987,6 +2266,28 @@ mod tests {
 
         materializer.abort().unwrap();
         assert!(!dest.exists());
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn retention_file_is_not_written_inside_the_stage() {
+        let dest = temp_dest("retention-inside");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        let inside = materializer.stage_path().join("record.json");
+        let error = materializer.persist_stage_retention(&inside).unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeIo);
+        assert!(materializer.retention_file.is_none());
+        assert!(materializer.stage_path().is_dir());
+
+        let records = temp_dest("retention-inside-records");
+        fs::create_dir(&records).unwrap();
+        let path = records.join("stage.json");
+        materializer.persist_stage_retention(&path).unwrap();
+        assert!(path.is_file());
+        materializer.abort().unwrap();
+        assert!(!path.exists());
+        assert!(!materializer.stage_path().exists());
+        fs::remove_dir_all(records).unwrap();
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]

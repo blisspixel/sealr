@@ -14,13 +14,13 @@ pwsh -NoProfile -File scripts/generate_tcb_report.ps1
 
 | Measurement | Value |
 |---|---|
-| Runtime Rust lines (crates/sealr/src) | 45987 |
-| In-crate test lines | 19578 |
+| Runtime Rust lines (crates/sealr/src) | 46334 |
+| In-crate test lines | 19761 |
 | `unsafe` uses in runtime code | 51 |
 | `unsafe` uses in test code | 13 |
 | `extern "C"` blocks in runtime code | 1 |
 | Panic sites in runtime code (`.unwrap(`, `.expect(`, `panic!(`, `unreachable!(`) | 312 |
-| Panic sites in test code | 1328 |
+| Panic sites in test code | 1364 |
 
 ## Unsafe code
 
@@ -37,7 +37,7 @@ The parsing, verification, and identity path — every module that interprets un
 
 | Pattern | Runtime | Test |
 |---|---|---|
-| `.unwrap(` | 150 | 1173 |
+| `.unwrap(` | 150 | 1209 |
 | `.expect(` | 133 | 107 |
 | `panic!(` | 17 | 45 |
 | `unreachable!(` | 12 | 3 |
@@ -79,7 +79,7 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 
 | File | Runtime lines | Test lines | Runtime `unsafe` | Runtime panic sites |
 |---|---|---|---|---|
-| `crates/sealr/src/apply.rs` | 5659 | 2462 | 0 | 53 |
+| `crates/sealr/src/apply.rs` | 5700 | 2623 | 0 | 53 |
 | `crates/sealr/src/bzip2.rs` | 892 | 205 | 0 | 3 |
 | `crates/sealr/src/canonical_json.rs` | 175 | 132 | 0 | 0 |
 | `crates/sealr/src/covering.rs` | 3182 | 1084 | 0 | 11 |
@@ -91,8 +91,8 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/interval.rs` | 128 | 90 | 0 | 1 |
 | `crates/sealr/src/ir.rs` | 3492 | 281 | 0 | 16 |
 | `crates/sealr/src/jail.rs` | 375 | 185 | 0 | 4 |
-| `crates/sealr/src/lib.rs` | 231 | 0 | 0 | 0 |
-| `crates/sealr/src/materialize.rs` | 1894 | 1185 | 0 | 0 |
+| `crates/sealr/src/lib.rs` | 232 | 0 | 0 | 0 |
+| `crates/sealr/src/materialize.rs` | 2173 | 1207 | 0 | 0 |
 | `crates/sealr/src/materialize/apple.rs` | 33 | 39 | 3 | 0 |
 | `crates/sealr/src/materialize/windows.rs` | 730 | 69 | 35 | 5 |
 | `crates/sealr/src/outcome.rs` | 265 | 78 | 0 | 0 |
@@ -112,7 +112,7 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/stage_witness.rs` | 114 | 66 | 0 | 0 |
 | `crates/sealr/src/supervised.rs` | 642 | 0 | 0 | 5 |
 | `crates/sealr/src/supervised/linux.rs` | 1693 | 0 | 4 | 4 |
-| `crates/sealr/src/supervised/linux/materialize.rs` | 288 | 0 | 0 | 0 |
+| `crates/sealr/src/supervised/linux/materialize.rs` | 314 | 0 | 0 | 0 |
 | `crates/sealr/src/tar.rs` | 667 | 383 | 0 | 7 |
 | `crates/sealr/src/tar_gnu.rs` | 866 | 294 | 0 | 9 |
 | `crates/sealr/src/tar_pax.rs` | 1017 | 442 | 0 | 10 |

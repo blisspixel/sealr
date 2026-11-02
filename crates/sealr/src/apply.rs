@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 use std::io::{self, BufReader, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[cfg(test)]
 use std::fs;
@@ -105,6 +105,7 @@ impl Default for ArchiveSelection {
 pub struct ApplyOptions {
     retention: Option<RetentionPlan>,
     selection: ArchiveSelection,
+    stage_retention_path: Option<PathBuf>,
 }
 
 impl ApplyOptions {
@@ -117,6 +118,22 @@ impl ApplyOptions {
     pub fn with_retention(mut self, plan: RetentionPlan) -> Self {
         self.retention = Some(plan);
         self
+    }
+
+    /// Ask the operation to write `sealr.stage-retention.v1` to `path` after
+    /// the stage exists.
+    ///
+    /// The file is removed when that stage is removed or published. A process
+    /// killed after the write leaves the file. This is not a receipt field,
+    /// not a parent listing, and not a power-loss guarantee. Windows has no
+    /// recorded file identifier, so a requested path fails closed there.
+    pub fn with_stage_retention_path(mut self, path: PathBuf) -> Self {
+        self.stage_retention_path = Some(path);
+        self
+    }
+
+    pub(crate) fn stage_retention_path(&self) -> Option<&Path> {
+        self.stage_retention_path.as_deref()
     }
 
     /// Select the exact ZIP interpretation used by this operation.
@@ -4385,7 +4402,28 @@ fn execute_ready_archive(
     let mut stage = match req.dest {
         None => None,
         Some(dest) => match CapabilityMaterializer::create(dest, policy.atomic) {
-            Ok(stage) => {
+            Ok(mut stage) => {
+                if let Some(path) = options.stage_retention_path()
+                    && let Err(finding) = stage.persist_stage_retention(path)
+                {
+                    findings.push(finding);
+                    materialization =
+                        abort_and_report(&mut Some(stage), &mut findings, materialization);
+                    let cause = first_error(&findings);
+                    return Ok(with_ir(
+                        finish(
+                            (snapshot.path_owned(), source_digest, snapshot.kind()),
+                            magic,
+                            policy,
+                            findings,
+                            members_view,
+                            materialization,
+                            SemanticAxes::admitted_setup_failed(&cause),
+                            identities_base.clone(),
+                        ),
+                        ir,
+                    ));
+                }
                 materialization = stage.report();
                 Some(stage)
             }
@@ -4672,6 +4710,9 @@ fn execute_ready_archive(
                 ),
                 archive,
             ));
+        }
+        if let Some(finding) = materializer.take_retention_discard_error() {
+            findings.push(finding);
         }
         materialization = materializer.report();
     }
@@ -6912,6 +6953,167 @@ mod tests {
         assert!(!parent.join("output").exists());
         fs::remove_dir_all(&parent).unwrap();
         fs::remove_dir_all(&outside).unwrap();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn caller_retention_file_survives_cleanup_failure_and_not_success() {
+        let policy = Policy::default_v1();
+        let parent = temp_dest("retention-file-parent");
+        fs::create_dir(&parent).unwrap();
+        let records = temp_dest("retention-file-records");
+        fs::create_dir(&records).unwrap();
+        let failed_record = records.join("failed.json");
+        let bytes = make_crc_mismatch_zip();
+        let failed = {
+            let _guard = crate::materialize::inject_cleanup_failures_for_current_thread(2);
+            apply_with_options(
+                Request {
+                    source: Source::Bytes {
+                        path: Some("retention-file.zip"),
+                        data: &bytes,
+                    },
+                    policy: &policy,
+                    dest: Some(&parent.join("output")),
+                },
+                &ApplyOptions::new().with_stage_retention_path(failed_record.clone()),
+            )
+        };
+        assert_eq!(failed.receipt.materialization.cleanup, "failed");
+        let from_outcome = failed.stage_retention().unwrap().clone();
+        let from_file = crate::read_stage_retention(&failed_record).unwrap();
+        assert_eq!(from_file, from_outcome);
+        let receipt = serde_json::to_string(&failed.receipt).unwrap();
+        assert!(!receipt.contains(&from_file.stage_component));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = fs::metadata(&failed_record).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
+        let kept = records.join("kept.json");
+        fs::write(&kept, b"keep").unwrap();
+        let occupied = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("retention-occupied.zip"),
+                    data: &bytes,
+                },
+                policy: &policy,
+                dest: Some(&parent.join("occupied")),
+            },
+            &ApplyOptions::new().with_stage_retention_path(kept.clone()),
+        );
+        assert!(occupied.rejected());
+        assert_eq!(fs::read(&kept).unwrap(), b"keep");
+        assert!(occupied.stage_retention().is_none());
+        assert!(!parent.join("occupied").exists());
+
+        let outside = temp_dest("retention-file-outside");
+        fs::create_dir(&outside).unwrap();
+        fs::write(outside.join("sentinel"), b"outside").unwrap();
+        let link = records.join("linked.json");
+        std::os::unix::fs::symlink(outside.join("sentinel"), &link).unwrap();
+        let linked = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("retention-link.zip"),
+                    data: &bytes,
+                },
+                policy: &policy,
+                dest: Some(&parent.join("linked")),
+            },
+            &ApplyOptions::new().with_stage_retention_path(link),
+        );
+        assert!(linked.rejected());
+        assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
+        assert!(linked.stage_retention().is_none());
+
+        let success_record = records.join("success.json");
+        let published = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some("retention-success.zip"),
+                    data: &make_zip(&[("kept.txt", b"kept")]),
+                },
+                policy: &policy,
+                dest: Some(&parent.join("published")),
+            },
+            &ApplyOptions::new().with_stage_retention_path(success_record.clone()),
+        );
+        assert!(published.wrote(), "{:?}", published.view.findings);
+        assert!(published.stage_retention().is_none());
+        assert!(!success_record.exists());
+        assert!(parent.join("published").join("kept.txt").is_file());
+
+        crate::recover_abandoned_stage(&parent, &from_file).unwrap();
+        assert!(!parent.join(&from_file.stage_component).exists());
+        assert!(failed_record.is_file());
+        assert!(crate::recover_abandoned_stage(&parent, &from_file).is_err());
+        fs::remove_dir_all(parent).unwrap();
+        fs::remove_dir_all(records).unwrap();
+        fs::remove_dir_all(outside).unwrap();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    #[test]
+    fn killed_apply_leaves_the_named_retention_file() {
+        if std::env::var_os("SEALR_KILL_AFTER_STAGE_RETENTION").is_some() {
+            let parent = PathBuf::from(std::env::var("SEALR_RETENTION_PARENT").unwrap());
+            let record = PathBuf::from(std::env::var("SEALR_RETENTION_RECORD").unwrap());
+            let policy = Policy::default_v1();
+            let bytes = make_crc_mismatch_zip();
+            let _ = apply_with_options(
+                Request {
+                    source: Source::Bytes {
+                        path: Some("retention-kill.zip"),
+                        data: &bytes,
+                    },
+                    policy: &policy,
+                    dest: Some(&parent.join("output")),
+                },
+                &ApplyOptions::new().with_stage_retention_path(record),
+            );
+            std::process::exit(2);
+        }
+
+        let parent = temp_dest("retention-kill-parent");
+        fs::create_dir(&parent).unwrap();
+        let records = temp_dest("retention-kill-records");
+        fs::create_dir(&records).unwrap();
+        let record = records.join("stage.json");
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg("apply::tests::killed_apply_leaves_the_named_retention_file")
+            .arg("--exact")
+            .env("SEALR_KILL_AFTER_STAGE_RETENTION", "1")
+            .env("SEALR_RETENTION_PARENT", &parent)
+            .env("SEALR_RETENTION_RECORD", &record)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(86),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let retention = crate::read_stage_retention(&record).unwrap();
+        assert!(parent.join(&retention.stage_component).is_dir());
+        assert!(!parent.join("output").exists());
+        let lookalike = parent.join(format!(".sealr-stage-{}", "ab".repeat(16)));
+        fs::create_dir(&lookalike).unwrap();
+        fs::write(lookalike.join("keep"), b"lookalike").unwrap();
+        fs::write(parent.join("unrelated.txt"), b"unrelated").unwrap();
+        crate::recover_abandoned_stage(&parent, &retention).unwrap();
+        assert!(!parent.join(&retention.stage_component).exists());
+        assert_eq!(fs::read(lookalike.join("keep")).unwrap(), b"lookalike");
+        assert_eq!(
+            fs::read(parent.join("unrelated.txt")).unwrap(),
+            b"unrelated"
+        );
+        assert!(record.is_file());
+        fs::remove_dir_all(parent).unwrap();
+        fs::remove_dir_all(records).unwrap();
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]

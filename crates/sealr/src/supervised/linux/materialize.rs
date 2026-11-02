@@ -39,7 +39,28 @@ pub(super) fn run(
     let identities = OutcomeIdentities::unavailable_for(source_digest.clone(), context.profile());
 
     let mut stage = match CapabilityMaterializer::create(destination, policy.atomic) {
-        Ok(stage) => stage,
+        Ok(mut stage) => {
+            if let Some(path) = options.stage_retention_path()
+                && let Err(finding) = stage.persist_stage_retention(path)
+            {
+                findings.push(finding);
+                let materialization = abort_semantic(&mut stage, &mut findings);
+                let cause = first_error(&findings);
+                let outcome = finish_with_jail(
+                    (snapshot.path_owned(), source_digest, snapshot.kind()),
+                    "zip",
+                    policy,
+                    findings,
+                    Vec::new(),
+                    materialization,
+                    SemanticAxes::admitted_setup_failed(&cause),
+                    identities,
+                    NOT_ENTERED_JAIL,
+                );
+                return Ok(with_ir(outcome, ir));
+            }
+            stage
+        }
         Err(setup_error) => {
             let (setup_findings, cleanup, windows) = setup_error.into_parts();
             findings.extend(setup_findings);
@@ -219,7 +240,12 @@ pub(super) fn run(
                 SemanticAxes::admitted_publication_failed(&cause),
             )
         }
-        None => (stage.report(), SemanticAxes::materialize_committed()),
+        None => {
+            if let Some(finding) = stage.take_retention_discard_error() {
+                outcome_findings.push(finding);
+            }
+            (stage.report(), SemanticAxes::materialize_committed())
+        }
     };
 
     let outcome = finish_with_jail(
