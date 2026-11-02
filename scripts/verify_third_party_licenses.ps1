@@ -24,10 +24,10 @@ $expected = [ordered]@{
             'errno 0.3.14',
             'windows-sys 0.61.2',
             'once_cell_polyfill 1.70.2',
-            'zip 8.6.0',
+            'zip 9.2.2',
             'zopfli 0.8.3',
             'bumpalo 3.20.3',
-            'typed-path 0.12.3'
+            'typed-path 0.13.0'
         )
     }
     'aarch64-apple-darwin' = [pscustomobject]@{

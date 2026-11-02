@@ -10,4 +10,4 @@ publish = false
 [dependencies]
 sealr = { version = "=0.1.0-alpha.19", path = "../../target/package/sealr-0.1.0-alpha.19" }
 sha2 = "0.11"
-zip = { version = "8", default-features = false, features = ["deflate"] }
+zip = { version = "9.0.5", default-features = false, features = ["deflate"] }

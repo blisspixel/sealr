@@ -1,6 +1,6 @@
 # Roadmap
 
-Updated 2026-10-31.
+Updated 2026-11-02.
 
 Sealr's product is the boundary:
 
@@ -10,7 +10,7 @@ Archive bytes -> versioned interpretation -> verified admitted tree
 All stages                                 -> evidence
 ```
 
-This source tree targets `v0.1.0-alpha.19`, built with Rust 1.99. Published native archives are on the [Alpha.19 release page](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.19). Alpha.19 explains a refusal on the terminal and pins finding-code discriminants. It does not change admission or policy. Alpha.18 admits minimal GNU tar records and keeps `max_ratio` at 100. Alpha.17 contains typed publisher outcomes, tested evidence and Rust consumer migrations, named durability controls, and reproducible assurance bookkeeping. The owner-maintained [validation project](https://github.com/blisspixel/sealr-validation) consumes real release artifacts. Independent adoption and an independent security audit remain unproven. Measuring time spent in each repeated-read phase, then lifecycle closure, remains the priority.
+This source tree targets `v0.1.0-alpha.19`, built with Rust 1.99. Published native archives are on the [Alpha.19 release page](https://github.com/blisspixel/sealr/releases/tag/v0.1.0-alpha.19). Alpha.19 explains a refusal on the terminal and pins finding-code discriminants. It does not change admission or policy. Alpha.18 admits minimal GNU tar records and keeps `max_ratio` at 100. Alpha.17 contains typed publisher outcomes, tested evidence and Rust consumer migrations, named durability controls, and reproducible assurance bookkeeping. The owner-maintained [validation project](https://github.com/blisspixel/sealr-validation) consumes real release artifacts. Independent adoption and an independent security audit remain unproven. Repeated-read phases are measured. Lifecycle recovery remains the priority, followed by the deferred flate2, lzma, and CRC closure.
 
 Progress and release readiness use executable evidence. Human approval, adopter recruitment, and paid review are not prerequisites. Automation cannot manufacture independent adoption or audit claims. Existing fail-closed CI, artifact authentication, semantic identities, and security limits still apply.
 
@@ -24,7 +24,7 @@ zero. The observations below remain historical evidence. See
 
 ## Why this order
 
-The publisher and migration gaps now have executable consumer evidence. A controlled downstream run showed substantial repeated-read cost but did not identify which phase dominated. The [phase observation](docs/repeated-read-phases.md) separates source hashing, plan validation, worker setup, and payload verification for two archive sizes. Lifecycle gaps and coordinated dependency maintenance remain the next explicit work. More formats would increase trusted code before that work is done.
+The publisher and migration gaps now have executable consumer evidence. A controlled downstream run showed substantial repeated-read cost but did not identify which phase dominated. The [phase observation](docs/repeated-read-phases.md) separates source hashing, plan validation, worker setup, and payload verification for two archive sizes. Lifecycle recovery and the deferred flate2, lzma, and CRC closure remain the next explicit work. The zip and Poetry fixture Dependabot closure is current. More formats would increase trusted code before that work is done.
 
 ```text
 typed outcomes and tested consumer migrations
@@ -70,7 +70,9 @@ Done means each additional lifecycle guarantee has a versioned contract and repr
 
 Accumulate genuine scheduled history using the [promotion contract](docs/assurance-promotion.md) and replay tools. The September 13 snapshot leaves every category ineligible and unpromoted under the unchanged ten-distinct-commit rule. Coverage and mutation remain discovery-only. A saved report cannot itself authorize promotion.
 
-Prepare one coordinated dependency closure update for the flate2, lzma, and CRC changes exposed by partial maintenance PRs 121 and 122. Update root, fuzz, proof, and consumer lockfiles together; regenerate dependency, license, and TCB evidence; then pass locked checks. The split updates fail contract gates and are deferred maintenance, not a reason to merge them blindly or block the unchanged release dependency set.
+The open Dependabot alerts are closed by one closure: `zip` 9.2.2 in the workspace and both downstream consumer lockfiles, with the cargo-deny ignores for the extract-only advisories removed, and the Poetry 2.4.2 fixture refreshed to certifi 2026.10.23, filelock 4.2.7, msgpack 1.2.4, urllib3 2.8.0, and virtualenv 21.15.2. Poetry itself, Poetry Core, installer, and pip stay pinned. The runtime dependency closure is unchanged.
+
+The flate2, lzma, and CRC changes exposed by partial maintenance PRs 121 and 122 remain one later coordinated update. Update root, fuzz, proof, and consumer lockfiles together; regenerate dependency, license, and TCB evidence; then pass locked checks. The split updates fail contract gates and are deferred maintenance, not a reason to merge them blindly or block the unchanged release dependency set.
 
 Keep compatibility vectors and tested migration rules current, then write a scoped freeze proposal when all advertised surfaces have evidence. External feedback may add concrete cases whenever it arrives; a maintainer interview is not an exit condition.
 

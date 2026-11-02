@@ -13,6 +13,11 @@ artifact. Required CI downloads only hash-pinned wheels, verifies the exact
 file set, installs the controller without dependency resolution, and requires
 `pip check` before the fixture starts.
 
+The 2026-11-02 closure, resolved with uv 0.13.5, keeps those four pins and
+replaces the vulnerable transitive wheels: certifi 2026.10.23, filelock 4.2.7,
+msgpack 1.2.4, urllib3 2.8.0, and virtualenv 21.15.2. python-discovery is
+1.6.1 because that virtualenv release requires it. The wheel count stays 47.
+
 `project/poetry.lock` contains one wheel-only `demo==1.0` package. The fixture
 first installs a deterministic `demo==0.9` wheel into a real virtual
 environment at the fixed path `/tmp/sealr-poetry-2.4.2-fixture/stable-target`.

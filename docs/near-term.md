@@ -1,6 +1,6 @@
 # Near-term execution plan
 
-Updated 2026-11-01.
+Updated 2026-11-02.
 
 This source tree targets Alpha.19. The completed publisher, artifact replay,
 migration, and assurance increments are recorded below. Repeated-read phases
@@ -95,12 +95,18 @@ than a renamed flush operation.
 
 ## 3. Coordinate dependency maintenance and assurance history
 
-The partial maintenance updates represented by PRs 121 and 122 expose flate2,
-lzma, and CRC dependency work. Replace split lockfile changes with one coherent
-closure update across root, fuzz, proof, and consumer projects. Regenerate the
-actual dependency, third-party-license, and TCB evidence and pass locked builds.
-Investigate a budget change against the resolved graph rather than raising the
-limit blindly. These deferred updates do not block the unchanged release set.
+The open Dependabot alerts are closed without changing the runtime closure.
+`zip` 9.2.2 is locked in the workspace and both downstream consumers, and the
+Poetry 2.4.2 fixture uses patched certifi, filelock, msgpack, urllib3, and
+virtualenv wheels. Poetry, Poetry Core, installer, and pip stay pinned.
+
+The partial maintenance updates represented by PRs 121 and 122 still expose
+flate2, lzma, and CRC dependency work. Replace split lockfile changes with one
+coherent closure update across root, fuzz, proof, and consumer projects.
+Regenerate the actual dependency, third-party-license, and TCB evidence and
+pass locked builds. Investigate a budget change against the resolved graph
+rather than raising the limit blindly. These deferred updates do not block the
+unchanged release set.
 
 Use the [assurance collector and replay contract](assurance-promotion.md) for
 genuine scheduled history. Preserve exact jobs, attempts, commits, evidence
