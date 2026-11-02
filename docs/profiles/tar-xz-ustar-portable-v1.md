@@ -20,7 +20,7 @@ The ready boundary rejects a missing, extra, chained, subrange, redirected, or m
 
 ## Two decoders, one meaning
 
-Like the zstd wrapper, the `lzma-rust2` decoder parses the XZ container itself. Sealr therefore parses the container independently for byte-exact evidence and grammar enforcement, then cross-checks its reading against the decoder's: total consumption and produced length must agree exactly, and any disagreement is an integrity failure that keeps admission not-evaluated. Because the XZ container cannot be statically partitioned without decoding, Sealr's own parse runs footer-and-index first over exactly the decoder-established consumed range, then walks each recorded block forward and re-verifies every header CRC32, size relation, and check value. Neither interpretation is ever preferred silently.
+Like the zstd wrapper, the `lzma-rust2` decoder parses the XZ container itself. Sealr therefore parses the container independently for byte-exact evidence and grammar enforcement, then cross-checks its reading against the decoder's: total consumption and produced length must agree exactly, and any disagreement is an integrity failure that keeps admission not-evaluated. Because the XZ container cannot be statically partitioned without decoding, Sealr's own parse runs footer-and-index first over exactly the decoder-established consumed range, then walks each recorded block forward and re-verifies every header CRC32, size relation, and check value. `XzStream` 0.25.0 also rejects reserved block-flag bits and non-zero padding. It still does not compare the footer backward-size field with the index it walked, and it discards declared block sizes. Sealr's parse remains the authority for those checks. Neither interpretation is ever preferred silently.
 
 ## Accepted xz language
 
@@ -52,7 +52,7 @@ The default v9 policy sets both original and derived archive caps to 512 MiB.
 
 ## Dependency boundary
 
-This is the second Gate B codec promotion under the [codec dependency gates](../codec-dependency-gates.md). It adds exactly one runtime package — `lzma-rust2` 0.20.0 with `default-features = false` and only the `std` and `xz` features — with no build scripts, no `links` packages, no native code, and an Apache-2.0 license inside the existing allowlist. With the `optimization` feature disabled, the crate compiles under `forbid(unsafe_code)`, verified in the promotion evidence via the feature graph. The pinned per-target dependency contract records the +1 delta on all three release floors. The decoder's memory limit classifies as a pre-allocation safety wall; Sealr's own parse remains the language authority.
+This is the second Gate B codec promotion under the [codec dependency gates](../codec-dependency-gates.md). Alpha.12 added exactly one runtime package. The current exact pin is `lzma-rust2` 0.25.0 with `default-features = false` and only the `std` and `xz` features. The `xz` feature requires `sha2`, which Sealr already depends on, so the package count does not grow. The crate has no build script, no `links` key, no native code, and an Apache-2.0 license inside the existing allowlist. With `optimization` disabled, 0.25.0 compiles under `forbid(unsafe_code)`. The pinned per-target dependency contract records that one-package delta on all three release floors. The decoder's memory limit classifies as a pre-allocation safety wall. Sealr does not raise that limit after a refusal. Sealr's own parse remains the language authority for footer backward size and declared block sizes.
 
 ## Evidence and identities
 

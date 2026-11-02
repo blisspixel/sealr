@@ -4,12 +4,12 @@
 //! transformation identity are part of the public admission contract.
 //!
 //! The `lzma-rust2` decoder parses the XZ container itself, so Sealr keeps its
-//! own byte-exact container parse as the structural authority: the decoder
-//! establishes bounded decode and the exact consumed length, and Sealr then
-//! replays the complete stream grammar — header, every block header, index,
-//! and footer, including the spec obligations the decoder does not enforce
-//! (footer backward size, declared block sizes, reserved block-flag bits) —
-//! and cross-checks the two interpretations. Any disagreement fails closed.
+//! own byte-exact container parse as the structural authority. The decoder
+//! establishes bounded decode and the exact consumed length. Sealr then
+//! replays the header, every block header, the index, and the footer.
+//! `XzStream` 0.25.0 rejects reserved block-flag bits and non-zero padding.
+//! It still ignores footer backward size and declared block sizes. Any
+//! disagreement fails closed.
 
 use std::cell::RefCell;
 use std::io::{self, Read};
@@ -449,8 +449,8 @@ struct ParsedContainer {
 }
 
 /// Byte-exact replay of the complete container: footer, index, and every
-/// block header, enforcing the restricted grammar and the spec obligations
-/// the decoder does not check.
+/// block header. This remains the authority for footer backward size and
+/// declared block sizes, which `XzStream` 0.25.0 does not compare.
 fn parse_container(
     source: &SourceSnapshot<'_>,
     check_id: u8,
@@ -1366,7 +1366,9 @@ mod tests {
         let header_len = ((reserved[12] as usize) + 1) * 4;
         let crc = crc32(&reserved[12..12 + header_len - 4]);
         reserved[12 + header_len - 4..12 + header_len].copy_from_slice(&crc.to_le_bytes());
-        assert!(decode_single_stream(&snapshot(&reserved), limits()).is_err());
+        let error = decode_single_stream(&snapshot(&reserved), limits()).unwrap_err();
+        assert_eq!(error.kind, XzErrorKind::StreamStructure);
+        assert_eq!(error.finding().code, FindingCode::CodecXzInvalidStream);
 
         // Truncation sweep.
         for len in 1..member.len() {
@@ -1375,6 +1377,31 @@ mod tests {
                 "prefix {len} unexpectedly decoded"
             );
         }
+    }
+
+    #[test]
+    fn nonzero_block_padding_fails_closed() {
+        let member = built_stream(b"pad", CHECK_CRC64, false);
+        assert!(decode_single_stream(&snapshot(&member), limits()).is_ok());
+        let block_start = STREAM_HEADER_LEN as usize;
+        let header_len = (usize::from(member[block_start]) + 1) * 4;
+        // One uncompressed LZMA2 chunk: control, size, three payload bytes, end.
+        let lzma2_len = 1 + 2 + 3 + 1;
+        let padding_at = block_start + header_len + lzma2_len;
+        assert_eq!(
+            member[padding_at], 0,
+            "block padding was not at the calculated offset"
+        );
+        let mut corrupt = member;
+        corrupt[padding_at] = 0x01;
+        let error = decode_single_stream(&snapshot(&corrupt), limits()).unwrap_err();
+        assert_eq!(error.kind, XzErrorKind::StreamStructure);
+        assert_eq!(error.finding().code, FindingCode::CodecXzInvalidStream);
+        assert!(
+            error.finding().detail.contains("non-zero block padding"),
+            "detail was {}",
+            error.finding().detail
+        );
     }
 
     #[test]
