@@ -14,12 +14,12 @@ pwsh -NoProfile -File scripts/generate_tcb_report.ps1
 
 | Measurement | Value |
 |---|---|
-| Runtime Rust lines (crates/sealr/src) | 46817 |
-| In-crate test lines | 20045 |
-| `unsafe` uses in runtime code | 53 |
+| Runtime Rust lines (crates/sealr/src) | 46833 |
+| In-crate test lines | 20046 |
+| `unsafe` uses in runtime code | 54 |
 | `unsafe` uses in test code | 13 |
 | `extern "C"` blocks in runtime code | 1 |
-| Panic sites in runtime code (`.unwrap(`, `.expect(`, `panic!(`, `unreachable!(`) | 313 |
+| Panic sites in runtime code (`.unwrap(`, `.expect(`, `panic!(`, `unreachable!(`) | 314 |
 | Panic sites in test code | 1408 |
 
 ## Unsafe code
@@ -29,7 +29,7 @@ The parsing, verification, and identity path — every module that interprets un
 | File | Runtime `unsafe` uses |
 |---|---|
 | `crates/sealr/src/materialize/apple.rs` | 3 |
-| `crates/sealr/src/materialize/windows.rs` | 37 |
+| `crates/sealr/src/materialize/windows.rs` | 38 |
 | `crates/sealr/src/supervised/linux.rs` | 4 |
 | `crates/sealr/src/worker_protocol/linux.rs` | 9 |
 
@@ -38,7 +38,7 @@ The parsing, verification, and identity path — every module that interprets un
 | Pattern | Runtime | Test |
 |---|---|---|
 | `.unwrap(` | 150 | 1247 |
-| `.expect(` | 134 | 108 |
+| `.expect(` | 135 | 108 |
 | `panic!(` | 17 | 50 |
 | `unreachable!(` | 12 | 3 |
 
@@ -92,9 +92,9 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/ir.rs` | 3492 | 281 | 0 | 16 |
 | `crates/sealr/src/jail.rs` | 375 | 185 | 0 | 4 |
 | `crates/sealr/src/lib.rs` | 233 | 0 | 0 | 0 |
-| `crates/sealr/src/materialize.rs` | 2402 | 1393 | 0 | 0 |
+| `crates/sealr/src/materialize.rs` | 2397 | 1394 | 0 | 0 |
 | `crates/sealr/src/materialize/apple.rs` | 33 | 39 | 3 | 0 |
-| `crates/sealr/src/materialize/windows.rs` | 876 | 69 | 37 | 6 |
+| `crates/sealr/src/materialize/windows.rs` | 897 | 69 | 38 | 7 |
 | `crates/sealr/src/outcome.rs` | 265 | 78 | 0 | 0 |
 | `crates/sealr/src/phase_trace.rs` | 144 | 76 | 0 | 0 |
 | `crates/sealr/src/policy.rs` | 955 | 808 | 0 | 1 |

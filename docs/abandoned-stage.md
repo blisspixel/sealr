@@ -119,10 +119,9 @@ A caller that needs the record to survive process death passes
 `ApplyOptions::with_stage_retention_path` before the operation. After the
 stage exists, sealr creates that file without following its final component
 and does not write it inside the stage. On Linux and macOS the file mode is
-`0600`. On Windows the open handle receives the same protected
-effective-token-user DACL as a stage before any record bytes are written. If
-that DACL cannot be set, the new file is removed and the operation fails
-closed. An existing file is left untouched. The file is removed when the stage
+`0600`. On Windows the file is created with the same protected
+effective-token-user DACL as a stage, so it never exists without that DACL.
+A failed create leaves no file. An existing file is left untouched. The file is removed when the stage
 is removed or published. A process killed after the write leaves the file.
 `read_stage_retention` opens that exact file without following a link. Syncing
 the file is not directory sync and not a power-loss guarantee.

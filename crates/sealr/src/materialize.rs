@@ -1043,8 +1043,8 @@ impl CapabilityMaterializer {
     /// The file is created only after the stage exists. Its final component is
     /// not followed and an existing file is left untouched. The record is not
     /// written inside the stage. On Linux and macOS the mode is `0600`. On
-    /// Windows the open handle receives the protected token-user DACL before
-    /// any record bytes are written; if that fails, the new file is removed.
+    /// Windows the file is created with that same protected token-user DACL
+    /// already installed. A failed create leaves no file.
     /// Successful removal and publication delete the file. A killed process
     /// does not, so the caller can present that same file later. Syncing this
     /// file is not directory sync and not a power-loss guarantee.
@@ -1190,8 +1190,6 @@ impl CapabilityMaterializer {
 
     #[cfg(windows)]
     fn persist_stage_retention_windows(&mut self, path: &Path) -> Result<(), Finding> {
-        use cap_std::fs::OpenOptionsExt;
-
         let witness = self.witness.ok_or_else(|| {
             Finding::error(
                 FindingCode::MaterializeIo,
@@ -1280,48 +1278,45 @@ impl CapabilityMaterializer {
                 format!("encode stage retention record: {error}"),
             )
         })?;
-        let mut options = CapOpenOptions::new();
-        options
-            .write(true)
-            .create_new(true)
-            .follow(FollowSymlinks::No)
-            .access_mode(windows::RETENTION_FILE_ACCESS);
-        let mut file = parent
-            .open_with(Path::new(name), &options)
-            .map_err(|error| {
+        let mut file =
+            windows::create_retention_file(&parent, Path::new(name)).map_err(|error| {
                 Finding::error(
                     FindingCode::MaterializeIo,
                     format!("create stage retention record without following links: {error}"),
                 )
             })?;
-        if let Err(error) = windows::protect_retention_file(file.as_raw_handle()) {
+        if let Err(error) = file.write_all(&bytes) {
             drop(file);
             let created = parent_path.join(name);
             return Err(match fs::remove_file(&created) {
                 Ok(()) => Finding::error(
                     FindingCode::MaterializeIo,
-                    format!("restrict stage retention record: {error}"),
+                    format!("write stage retention record: {error}"),
                 ),
                 Err(remove_error) => Finding::error(
                     FindingCode::MaterializeIo,
                     format!(
-                        "restrict stage retention record: {error}; remove unrestricted record: {remove_error}"
+                        "write stage retention record: {error}; remove incomplete record: {remove_error}"
                     ),
                 ),
             });
         }
-        file.write_all(&bytes).map_err(|error| {
-            Finding::error(
-                FindingCode::MaterializeIo,
-                format!("write stage retention record: {error}"),
-            )
-        })?;
-        file.sync_all().map_err(|error| {
-            Finding::error(
-                FindingCode::MaterializeIo,
-                format!("sync stage retention record: {error}"),
-            )
-        })?;
+        if let Err(error) = file.sync_all() {
+            drop(file);
+            let created = parent_path.join(name);
+            return Err(match fs::remove_file(&created) {
+                Ok(()) => Finding::error(
+                    FindingCode::MaterializeIo,
+                    format!("sync stage retention record: {error}"),
+                ),
+                Err(remove_error) => Finding::error(
+                    FindingCode::MaterializeIo,
+                    format!(
+                        "sync stage retention record: {error}; remove incomplete record: {remove_error}"
+                    ),
+                ),
+            });
+        }
         self.retention_file = Some(parent_path.join(name));
         #[cfg(test)]
         exit_if_retention_kill_requested();
@@ -2890,6 +2885,7 @@ mod tests {
         materializer.abort().unwrap();
         assert!(!parent.join(&retained_name).exists());
         assert!(parent.join(&substitute).is_dir());
+        drop(materializer);
         fs::remove_dir_all(parent).unwrap();
     }
 
