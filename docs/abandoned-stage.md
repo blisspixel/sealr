@@ -7,7 +7,7 @@ operation removes or publishes it, and what recovery must prove.
 `recover_abandoned_stage` removes one directory only when the caller presents
 the record from a failed cleanup or from a caller-chosen retention file. A
 process killed before that file is written still has no record.
-`Durability::FlushOnly` and `Durability::MemberSync` do not change. Directory sync is the separate `Durability::DirectorySync` selection on policy v12. This contract does not define it.
+`Durability::FlushOnly` and `Durability::MemberSync` do not change. Directory sync is the separate `Durability::DirectorySync` selection on policy v12. This contract does not define it. Process death at the no-replace rename is the separate [publication-crash contract](publication-crash.md). The retention-file kill below is an earlier barrier and is not that evidence.
 
 ## Live ownership
 
@@ -159,8 +159,9 @@ Windows identity is `windows_commit_rejects_a_substituted_stage_name` and
 The process-death test is `killed_apply_leaves_the_named_retention_file`.
 The native lifecycle oracle covers publication, setup collision, verification
 abort, and a destination that appears before publication. Those tests are the
-fault evidence for this contract. They do not qualify crash recovery or
-power-loss durability.
+fault evidence for this contract. They do not qualify publication-crash
+recovery or power-loss durability. Process death at the rename is
+[publication-crash.md](publication-crash.md).
 
 ## Non-claims
 

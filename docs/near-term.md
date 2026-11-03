@@ -76,7 +76,8 @@ acceptance:
 
 `FlushOnly` and `MemberSync` select existing completed-member behavior. Both
 retain private staging and native no-replace publication. Neither syncs
-directories or promises crash recovery or power-loss durability.
+directories or promises power-loss durability. Process death at the rename is
+a separate contract and does not change these modes.
 
 [Abandoned-stage ownership](abandoned-stage.md) records the current proof and
 the recovery rule. Live cleanup and publication use the retained stage
@@ -102,16 +103,18 @@ before parents, then syncs the destination parent after the no-replace rename.
 The receipt says `directory-sync` only when that parent sync succeeds. A parent
 sync failure stays `committed`, reports `member-sync`, and records the finding.
 A staged-directory sync failure does not publish. v1 through v11 reject the
-field. `FlushOnly` and `MemberSync` do not sync directories. This is not crash
-recovery or power-loss durability.
+field. `FlushOnly` and `MemberSync` do not sync directories. Directory sync is
+not power-loss durability. Process death at the rename is
+[publication-crash.md](publication-crash.md) and does not change this mode.
 
 The flate2 1.1.10, lzma-rust2 0.25.0, and crc32fast 1.5.4 closure is current.
-Exercise any broader recovery at stage creation, writes, audit, publication,
-and cleanup, including hostile renames, links and substituted directories,
-unrelated neighbors, and existing
-destinations on each advertised platform. Any stronger durability guarantee
-needs a new explicit contract and fault evidence rather than a renamed flush
-operation.
+Process death immediately before and after publication is
+[publication-crash.md](publication-crash.md). Broader recovery at stage
+creation, writes, audit, and cleanup, including hostile renames, links, and
+substituted directories, remains later work. The publication-crash tests
+already keep an unrelated neighbor and a same-shaped lookalike. Power-loss
+durability still needs its own contract and fault evidence. Do not add that
+claim by renaming an existing flush mode.
 
 ## 3. Coordinate dependency maintenance and assurance history
 
@@ -153,9 +156,11 @@ optional independent-adoption contract.
 ## Execution and spending
 
 Section 1 already meets its acceptance. This tree is Alpha.19. Directory sync
-is the v12 contract above. The remaining lifecycle gaps are crash recovery and
-power-loss durability. No additional parser, hosted UI, binding, or backend is
-part of that increment.
+is the v12 contract above. Process-crash publication is
+[publication-crash.md](publication-crash.md). The remaining lifecycle gap in
+this queue is power-loss durability. Repeated hostile race testing remains
+unfinished. No additional parser, hosted UI, binding, or backend is part of
+that increment.
 
 Use local computation, cached artifacts, free public documentation, and ordinary
 public CI. External purchases stay at $0 by default and never exceed the $5

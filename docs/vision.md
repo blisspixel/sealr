@@ -29,7 +29,7 @@ Inspect and materialize share one planned tree. Every outcome includes structure
 
 The preview line now includes `ArchiveIR`, separately identified layout and content roots, private file-backed snapshots, checked random access, bounded resource evidence, twelve explicit container and codec selections, an authenticated Linux worker for supported ZIP32 records, canonical RFC 8785 evidence, an independently implemented packaged verifier, and a public capability-only Python wheel evaluator. The packaged PyPA handoff and exact Poetry fixture prove the consumer mechanism inside this repository.
 
-This remains a foundation, not a stable product claim. Structural planning still runs in the supervisor, the worker does not establish general process containment, receipts are unsigned, crash recovery and full durability are unfinished, and no separately maintained project has adopted the capability as authoritative. Semantic locks, read-only projection, content-addressed reuse, broader worker-record support, and proof certificates remain future work.
+This remains a foundation, not a stable product claim. Structural planning still runs in the supervisor, the worker does not establish general process containment, receipts are unsigned, power-loss durability and authenticated crash recovery are unfinished, and no separately maintained project has adopted the capability as authoritative. Semantic locks, read-only projection, content-addressed reuse, broader worker-record support, and proof certificates remain future work.
 
 ## The target contract
 

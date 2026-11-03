@@ -1083,6 +1083,10 @@ impl CapabilityMaterializer {
                 format!("plant lifecycle destination before publication: {error}"),
             ));
         }
+        // Test-only process death. The destination name is still absent.
+        // Staged-directory sync, when requested, has already returned.
+        #[cfg(test)]
+        exit_if_before_publication_kill_requested();
         if let Err(error) = rename_noreplace(&self.parent, root, &self.stage_name, &self.final_name)
         {
             self.outcome = "publication-failed";
@@ -1098,6 +1102,11 @@ impl CapabilityMaterializer {
                 )
             });
         }
+        // Test-only process death. The rename has returned. The stage handle
+        // is still open, and destination-parent sync and retention discard
+        // have not run.
+        #[cfg(test)]
+        exit_if_after_publication_kill_requested();
         drop(self.root.take());
         self.outcome = "committed";
         self.cleanup = "not-applicable-after-commit";
@@ -1815,16 +1824,32 @@ fn exit_if_retention_kill_requested() {
     }
 }
 
+#[cfg(test)]
+fn exit_if_before_publication_kill_requested() {
+    if std::env::var_os("SEALR_KILL_BEFORE_PUBLICATION").is_some() {
+        std::process::exit(87);
+    }
+}
+
+#[cfg(test)]
+fn exit_if_after_publication_kill_requested() {
+    if std::env::var_os("SEALR_KILL_AFTER_PUBLICATION").is_some() {
+        std::process::exit(88);
+    }
+}
+
 /// Remove one abandoned stage when the caller presents the record from the
 /// creating operation.
 ///
 /// The parent is admitted again, the exact component is opened without
 /// following links, and the witness must match that open directory. This
 /// function does not list the parent and does not remove a directory when any
-/// check fails. Linux and macOS compare the device and inode. Windows compares
-/// the 128-bit file identifier through the newly opened handle after the
-/// protected DACL check. A witness from another platform fails before any
-/// directory is opened. A platform with no recorded identifier removes nothing.
+/// check fails. A missing component fails before removal. Recovery does not
+/// search by inode, file identifier, or the published name. Linux and macOS
+/// compare the device and inode. Windows compares the 128-bit file identifier
+/// through the newly opened handle after the protected DACL check. A witness
+/// from another platform fails before any directory is opened. A platform with
+/// no recorded identifier removes nothing.
 pub fn recover_abandoned_stage(
     parent: &Path,
     retention: &crate::stage_witness::StageRetention,

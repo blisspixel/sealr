@@ -97,8 +97,8 @@ Alpha.17 also adds [named durability controls](policy.md#named-durability-contro
 on `Policy` and `PolicyDocument`, preserving the historical `atomic` encoding
 and its existing member-sync behavior. `Durability::DirectorySync` is separate:
 it is valid only on policy v12, syncs staged directories and the destination
-parent, and does not add crash recovery or power-loss guarantees. `FlushOnly`
-and `MemberSync` do not sync directories. A failed cleanup can return
+parent, and does not add a crash-recovery mode or power-loss guarantees.
+`FlushOnly` and `MemberSync` do not sync directories. A failed cleanup can return
 `Outcome::stage_retention`, a separate `sealr.stage-retention.v1` record.
 `recover_abandoned_stage` removes one opened directory only when that record
 matches. `ApplyOptions::with_stage_retention_path` writes the same record to a
@@ -110,6 +110,9 @@ non-exhaustive enum. `sealr.stage-witness.v1` carries a device and inode.
 `sealr.windows-file-id.v1` carries a volume serial and 32 lowercase
 hexadecimal digits. Unix JSON for the device and inode object is unchanged.
 A witness from another platform fails closed before recovery opens a directory.
+A record presented after publication still names the stage component. Recovery
+opens that component and does not remove the published destination. That
+behavior is [publication-crash.md](publication-crash.md).
 
 The supported [PyPA handoff](../crates/sealr/examples/pypa_installer_handoff/README.md)
 and Deepr gate use these checks. The extracted-package

@@ -7144,6 +7144,153 @@ mod tests {
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    fn publication_crash_zip() -> Vec<u8> {
+        make_zip(&[("kept.txt", b"kept"), ("nested/other.txt", b"other")])
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    fn assert_publication_tree(root: &Path) {
+        assert_eq!(fs::read(root.join("kept.txt")).unwrap(), b"kept");
+        assert_eq!(
+            fs::read(root.join("nested").join("other.txt")).unwrap(),
+            b"other"
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    fn plant_publication_neighbors(parent: &Path) -> PathBuf {
+        let lookalike = parent.join(format!(".sealr-stage-{}", "ab".repeat(16)));
+        fs::create_dir(&lookalike).unwrap();
+        fs::write(lookalike.join("keep"), b"lookalike").unwrap();
+        fs::write(parent.join("unrelated.txt"), b"unrelated").unwrap();
+        lookalike
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    fn assert_publication_neighbors(parent: &Path, lookalike: &Path) {
+        assert_eq!(fs::read(lookalike.join("keep")).unwrap(), b"lookalike");
+        assert_eq!(
+            fs::read(parent.join("unrelated.txt")).unwrap(),
+            b"unrelated"
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    fn publication_crash_child(policy: &Policy, label: &str) {
+        let parent = PathBuf::from(std::env::var("SEALR_RETENTION_PARENT").unwrap());
+        let record = PathBuf::from(std::env::var("SEALR_RETENTION_RECORD").unwrap());
+        let bytes = publication_crash_zip();
+        let _ = apply_with_options(
+            Request {
+                source: Source::Bytes {
+                    path: Some(label),
+                    data: &bytes,
+                },
+                policy,
+                dest: Some(&parent.join("output")),
+            },
+            &ApplyOptions::new().with_stage_retention_path(record),
+        );
+        std::process::exit(2);
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    fn run_publication_crash(test: &str, kill: &str, code: i32, parent: &Path, record: &Path) {
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .arg(test)
+            .arg("--exact")
+            .env(kill, "1")
+            .env("SEALR_RETENTION_PARENT", parent)
+            .env("SEALR_RETENTION_RECORD", record)
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.code(),
+            Some(code),
+            "stdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    #[test]
+    fn killed_apply_before_publication_leaves_the_stage_and_not_the_destination() {
+        if std::env::var_os("SEALR_KILL_BEFORE_PUBLICATION").is_some() {
+            publication_crash_child(&Policy::default_v1(), "publication-crash-before.zip");
+        }
+
+        let parent = temp_dest("publication-crash-before-parent");
+        fs::create_dir(&parent).unwrap();
+        let records = temp_dest("publication-crash-before-records");
+        fs::create_dir(&records).unwrap();
+        let record = records.join("stage.json");
+        run_publication_crash(
+            "apply::tests::killed_apply_before_publication_leaves_the_stage_and_not_the_destination",
+            "SEALR_KILL_BEFORE_PUBLICATION",
+            87,
+            &parent,
+            &record,
+        );
+        let retention = crate::read_stage_retention(&record).unwrap();
+        let stage = parent.join(&retention.stage_component);
+        assert!(stage.is_dir());
+        assert_publication_tree(&stage);
+        assert!(!parent.join("output").exists());
+        let lookalike = plant_publication_neighbors(&parent);
+        crate::recover_abandoned_stage(&parent, &retention).unwrap();
+        assert!(!stage.exists());
+        assert!(!parent.join("output").exists());
+        assert_publication_neighbors(&parent, &lookalike);
+        assert!(record.is_file());
+        fs::remove_dir_all(parent).unwrap();
+        fs::remove_dir_all(records).unwrap();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    #[test]
+    fn killed_apply_after_publication_keeps_the_destination_and_refuses_stage_recovery() {
+        if std::env::var_os("SEALR_KILL_AFTER_PUBLICATION").is_some() {
+            let policy = Policy::default_v12().with_durability(crate::Durability::DirectorySync);
+            publication_crash_child(&policy, "publication-crash-after.zip");
+        }
+
+        let parent = temp_dest("publication-crash-after-parent");
+        fs::create_dir(&parent).unwrap();
+        let records = temp_dest("publication-crash-after-records");
+        fs::create_dir(&records).unwrap();
+        let record = records.join("stage.json");
+        run_publication_crash(
+            "apply::tests::killed_apply_after_publication_keeps_the_destination_and_refuses_stage_recovery",
+            "SEALR_KILL_AFTER_PUBLICATION",
+            88,
+            &parent,
+            &record,
+        );
+        let retention = crate::read_stage_retention(&record).unwrap();
+        assert!(!parent.join(&retention.stage_component).exists());
+        let output = parent.join("output");
+        assert_publication_tree(&output);
+        let lookalike = plant_publication_neighbors(&parent);
+        let error = crate::recover_abandoned_stage(&parent, &retention).unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeIo);
+        assert!(
+            error
+                .detail
+                .starts_with("open abandoned stage without following links: "),
+            "{}",
+            error.detail
+        );
+        assert!(!parent.join(&retention.stage_component).exists());
+        assert_publication_tree(&output);
+        assert_publication_neighbors(&parent, &lookalike);
+        let reread = crate::read_stage_retention(&record).unwrap();
+        assert_eq!(reread.stage_component, retention.stage_component);
+        fs::remove_dir_all(parent).unwrap();
+        fs::remove_dir_all(records).unwrap();
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     fn stage_component(name: &std::ffi::OsStr) -> bool {
         let Some(text) = name.to_str() else {
             return false;

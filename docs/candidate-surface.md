@@ -308,8 +308,29 @@ destination parent were both synced. If the parent sync fails after the
 rename, the outcome stays `committed`, the receipt says `member-sync`, and a
 finding records the parent sync error. A staged-directory sync failure returns
 before publication. Tests count the sync calls, inject both failures, and
-publish a real archive under the v12 selection. This mode does not claim crash
-recovery or power-loss durability.
+publish a real archive under the v12 selection. This mode does not claim
+power-loss durability. Process death at the rename is the publication-crash
+contract below and does not change this mode.
+
+Migration evidence does not retire compatibility fields or freeze the candidate.
+
+### Publication crash v1
+
+`sealr.publication-crash.v1` records process death at the no-replace rename.
+It does not add a policy schema, a receipt durability string, a worker byte,
+or a CLI flag. `FlushOnly`, `MemberSync`, and `DirectorySync` keep their
+existing meanings. v1 remains `candidate-stable-for-pilot`.
+
+Before the rename is called, the destination name is absent. When the caller
+wrote a retention file, `recover_abandoned_stage` removes only the matching
+stage. After the rename returns and before retention discard, the destination
+contains the audited tree and the recorded stage component is gone. Recovery
+opens that absent component and does not remove the published tree.
+
+The before-publication test uses flush-only policy v1. The after-publication
+test uses directory sync on policy v12, so the kill follows staged-directory
+sync and precedes destination-parent sync. This is not power-loss durability.
+The [publication-crash contract](publication-crash.md) states the non-claims.
 
 Migration evidence does not retire compatibility fields or freeze the candidate.
 
