@@ -40,6 +40,9 @@ pub(super) fn run(
 
     let mut stage = match CapabilityMaterializer::create(destination, policy.atomic) {
         Ok(mut stage) => {
+            if context.controls().effect.directory_sync {
+                stage.enable_directory_sync();
+            }
             if let Some(path) = options.stage_retention_path()
                 && let Err(finding) = stage.persist_stage_retention(path)
             {
@@ -65,7 +68,7 @@ pub(super) fn run(
             let (setup_findings, cleanup, windows) = setup_error.into_parts();
             findings.extend(setup_findings);
             let materialization =
-                MaterializationMeta::setup_failed(policy.atomic, cleanup, windows);
+                MaterializationMeta::setup_failed(policy.durability(), cleanup, windows);
             let cause = first_error(&findings);
             let outcome = finish_with_jail(
                 (snapshot.path_owned(), source_digest, snapshot.kind()),
@@ -242,6 +245,9 @@ pub(super) fn run(
         }
         None => {
             if let Some(finding) = stage.take_retention_discard_error() {
+                outcome_findings.push(finding);
+            }
+            if let Some(finding) = stage.take_parent_directory_sync_error() {
                 outcome_findings.push(finding);
             }
             (stage.report(), SemanticAxes::materialize_committed())

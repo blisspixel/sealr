@@ -13,7 +13,7 @@ Everything supported flows through the crate root's re-exports plus the two publ
 | Findings | `Finding`, `FindingCode`, `Severity` |
 | IR and per-format evidence | `ArchiveIR`, `IrMember`, `ByteRange`, the per-format `*Evidence`/`*Covering` records, the eight `*InterpretationProfile` selections, the per-profile `*_canonical_bytes`/`*_digest` function pairs, and the `*_SCHEMA` and profile-id constants |
 | Identity | `content_root`, `layout_root`, the eleven `encode_*_layout` functions, `OutcomeIdentities`, `TreeRoot`, and the `TREE_ENCODING_*` ids |
-| Policy | `Policy` (non-exhaustive; constructed through the versioned defaults or a validated document), `PolicyDocument`, their `durability`, `set_durability`, and `with_durability` methods, `Durability` (`FlushOnly`, `MemberSync`), `ValidatedPolicy`, `CompiledControls`, `ResourceBudget`, the `POLICY_FORMAT_*` constants, and the stable utilities `hex_sha256` and `ratio_exceeds` |
+| Policy | `Policy` (non-exhaustive; constructed through the versioned defaults or a validated document), `PolicyDocument`, their `durability`, `set_durability`, and `with_durability` methods, `Durability` (`FlushOnly`, `MemberSync`, `DirectorySync`), `ValidatedPolicy`, `CompiledControls`, `ResourceBudget`, the `POLICY_FORMAT_*` constants, and the stable utilities `hex_sha256` and `ratio_exceeds` |
 | Path jail | `jail_name`, `jail_relative`, `join_under_dest`, `JailedName`, and the two portable-name bound constants |
 | Capability | `VerifiedArchive` (including `read_member` and `read_member_prefix`), `RetentionPlan`, `RetentionStatus`, `MemberReadError` and kind, `RetentionPlanError` and kind, and the three retention bound constants |
 | Supervision | `apply_supervised`, `inspect_supervised`, `LinuxWorker`, `SupervisionError` and kind |
@@ -26,11 +26,12 @@ Discipline this surface already holds and the freeze will keep: non-exhaustive m
 a device and inode. `sealr.windows-file-id.v1` carries a volume serial and a
 32-digit lowercase file identifier. Neither value is part of a receipt.
 
-Named Rust durability controls select the existing policy behavior through its
-sole historical `atomic` backing field. Policy JSON, compiled controls, worker
-encoding, and existing policy digests remain compatible. Both modes retain
-private staging and no-replace publication; neither guarantees directory
-durability, crash recovery, or power-loss durability. `ValidatedPolicy` remains
+`FlushOnly` and `MemberSync` select the existing policy behavior through the
+historical `atomic` field. Their policy JSON, worker encoding, and existing
+policy digests remain compatible. `DirectorySync` is a v12 selection. It adds
+an omitted-when-false `directory_sync` field, syncs directories in the
+supervisor, and leaves the worker's one member-sync byte unchanged. None of
+the modes guarantees crash recovery or power-loss durability. `ValidatedPolicy` remains
 immutable, so changing a selection after validation requires taking its policy
 and validating the changed value again. See [policy durability](policy.md#named-durability-controls).
 

@@ -115,6 +115,10 @@
     {
       "id": "sealr:policy/default/v11",
       "class": "preview"
+    },
+    {
+      "id": "sealr:policy/default/v12",
+      "class": "preview"
     }
   ],
   "identities": [

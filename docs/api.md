@@ -31,7 +31,7 @@ pub fn apply(req: Request<'_>) -> Outcome { ... }
 
 pub struct Request<'a> {
     pub source: Source<'a>,          // file path or borrowed bytes
-    pub policy: &'a Policy,          // sealr.policy.v1 through sealr.policy.v11
+    pub policy: &'a Policy,          // sealr.policy.v1 through sealr.policy.v12
     pub dest: Option<&'a Path>,      // Some => request Materialization
 }
 
@@ -95,8 +95,10 @@ member-read authority.
 
 Alpha.17 also adds [named durability controls](policy.md#named-durability-controls)
 on `Policy` and `PolicyDocument`, preserving the historical `atomic` encoding
-and its existing member-sync behavior. These names do not add directory syncing,
-crash recovery, or power-loss guarantees. A failed cleanup can return
+and its existing member-sync behavior. `Durability::DirectorySync` is separate:
+it is valid only on policy v12, syncs staged directories and the destination
+parent, and does not add crash recovery or power-loss guarantees. `FlushOnly`
+and `MemberSync` do not sync directories. A failed cleanup can return
 `Outcome::stage_retention`, a separate `sealr.stage-retention.v1` record.
 `recover_abandoned_stage` removes one opened directory only when that record
 matches. `ApplyOptions::with_stage_retention_path` writes the same record to a

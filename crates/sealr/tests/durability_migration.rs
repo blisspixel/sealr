@@ -45,6 +45,7 @@ fn named_policy_durability_preserves_every_legacy_encoding() {
             let json = serde_json::to_value(&named).unwrap();
             assert_eq!(json["atomic"], atomic);
             assert!(json.get("durability").is_none());
+            assert!(json.get("directory_sync").is_none());
 
             if atomic {
                 assert_ne!(named.digest_hex(), original.digest_hex());
@@ -267,5 +268,65 @@ mod materialization {
             assert_eq!(fs::read(&neighbor).unwrap(), b"unrelated caller file");
             assert_eq!(fs::read_dir(&root.0).unwrap().count(), 2);
         }
+    }
+
+    #[test]
+    fn directory_sync_publishes_and_preserves_an_existing_destination() {
+        let bytes = archive();
+        let root = TempRoot::new();
+        let destination = root.0.join("result");
+        let policy = Policy::default_v12().with_durability(Durability::DirectorySync);
+        let member_sync = Policy::default_v12().with_durability(Durability::MemberSync);
+        assert_ne!(policy.digest_hex(), member_sync.digest_hex());
+        assert_eq!(
+            policy.digest_hex(),
+            "e7f469f14f0bdfdad481b3971e2be89a079905de825cf2003a0b1d5d45627b7b"
+        );
+
+        let materialized = apply(Request {
+            source: Source::Bytes {
+                path: Some("members.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: Some(&destination),
+        });
+        assert_eq!(
+            materialized.effect,
+            EffectStatus::Committed,
+            "{:?}",
+            materialized.view.findings
+        );
+        assert_eq!(
+            fs::read(destination.join("nested/member.txt")).unwrap(),
+            b"verified member content"
+        );
+        assert_eq!(
+            materialized.receipt.materialization.durability,
+            "directory-sync"
+        );
+        assert_eq!(materialized.receipt.materialization.outcome, "committed");
+        assert_eq!(
+            materialized.receipt.policy.digest.sha256,
+            policy.digest_hex()
+        );
+        assert!(materialized.view.findings.is_empty());
+
+        fs::write(destination.join("nested/member.txt"), b"caller replacement").unwrap();
+        let refused = apply(Request {
+            source: Source::Bytes {
+                path: Some("members.zip"),
+                data: &bytes,
+            },
+            policy: &policy,
+            dest: Some(&destination),
+        });
+        assert_eq!(refused.effect, EffectStatus::Failed);
+        assert_eq!(refused.receipt.materialization.outcome, "setup-failed");
+        assert_eq!(refused.receipt.materialization.durability, "directory-sync");
+        assert_eq!(
+            fs::read(destination.join("nested/member.txt")).unwrap(),
+            b"caller replacement"
+        );
     }
 }

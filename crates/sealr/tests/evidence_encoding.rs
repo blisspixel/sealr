@@ -1,7 +1,7 @@
 //! Guard tests for the declaration-order canonical encoding contract.
 //!
 //! [`docs/evidence-encoding.md`] states the normative encoding behind the
-//! policy v1-v11 digests and the receipt's `view_digest`. These tests hold the
+//! policy v1-v12 digests and the receipt's `view_digest`. These tests hold the
 //! machine-checkable half of that statement: the emitted JSON stays inside the
 //! integer-only, ASCII-key, float-free domain an external verifier can
 //! reproduce, and the digests cover exactly the compact bytes the contract
@@ -68,6 +68,7 @@ fn default_policies() -> Vec<Policy> {
         Policy::default_v9(),
         Policy::default_v10(),
         Policy::default_v11(),
+        Policy::default_v12(),
     ]
 }
 

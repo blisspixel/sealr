@@ -293,6 +293,7 @@ mod tests {
             crate::Policy::default_v9(),
             crate::Policy::default_v10(),
             crate::Policy::default_v11(),
+            crate::Policy::default_v12(),
         ] {
             let canonical = jcs_bytes(&policy).unwrap();
             let reparsed: Value = serde_json::from_slice(&canonical).unwrap();

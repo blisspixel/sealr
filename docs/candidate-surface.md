@@ -56,6 +56,7 @@ Every default policy constructor in `crates/sealr/src/policy.rs` appears exactly
 | `sealr:policy/default/v9` | preview |
 | `sealr:policy/default/v10` | preview |
 | `sealr:policy/default/v11` | preview |
+| `sealr:policy/default/v12` | preview |
 
 Policy v1 authorizes ZIP32 only. Later defaults add later formats without changing the v1 bytes.
 
@@ -288,6 +289,28 @@ recovers abandoned stages, or establishes power-loss durability. The
 [abandoned-stage contract](abandoned-stage.md) defines current ownership and
 forbids filename-pattern recovery. A future mode with different guarantees
 requires its own policy and migration contract.
+
+### Directory sync v1
+
+`sealr.policy-directory-sync.v1` adds `Durability::DirectorySync` without
+changing `FlushOnly`, `MemberSync`, v1 through v11 policy bytes, or the worker
+record's single member-sync byte. The selection is valid only on
+`sealr.policy.v12`. Canonical JSON adds `directory_sync` after `atomic` and
+omits it when false. A present `directory_sync` value on v1 through v11 is
+rejected, including explicit `false`. `directory_sync` without member-file sync
+is rejected. The default v12 digest is
+`ed075c44695ee5d0bedeb66c8eef87a05decf5850e91b6c6995704c9d1ba9076`. The
+directory-sync digest of that same default is
+`e7f469f14f0bdfdad481b3971e2be89a079905de825cf2003a0b1d5d45627b7b`.
+
+The receipt says `directory-sync` when the staged directories and the
+destination parent were both synced. If the parent sync fails after the
+rename, the outcome stays `committed`, the receipt says `member-sync`, and a
+finding records the parent sync error. A staged-directory sync failure returns
+before publication. Tests count the sync calls, inject both failures, and
+publish a real archive under the v12 selection. This mode does not claim crash
+recovery or power-loss durability.
+
 Migration evidence does not retire compatibility fields or freeze the candidate.
 
 ## What would make this a freeze

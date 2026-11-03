@@ -10,7 +10,7 @@ use std::ptr;
 use cap_std::fs::{Dir as CapDir, File as CapFile};
 use windows_sys::Wdk::Foundation::OBJECT_ATTRIBUTES;
 use windows_sys::Wdk::Storage::FileSystem::{
-    FILE_CREATE, FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE, FILE_OPEN_REPARSE_POINT,
+    FILE_CREATE, FILE_DIRECTORY_FILE, FILE_NON_DIRECTORY_FILE, FILE_OPEN, FILE_OPEN_REPARSE_POINT,
     FILE_RENAME_INFORMATION, FILE_SYNCHRONOUS_IO_NONALERT, FileFsDeviceInformation,
     FileRenameInformation, NtCreateFile, NtQueryVolumeInformationFile, NtSetInformationFile,
 };
@@ -35,7 +35,7 @@ use windows_sys::Win32::Storage::FileSystem::{
     DELETE, FILE_ADD_FILE, FILE_ALL_ACCESS, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_NORMAL,
     FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_WRITE, FILE_ID_INFO,
     FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ,
-    FILE_SHARE_WRITE, FILE_TRAVERSE, FileIdInfo, GetFileInformationByHandleEx,
+    FILE_SHARE_WRITE, FILE_TRAVERSE, FileIdInfo, FlushFileBuffers, GetFileInformationByHandleEx,
     GetVolumeInformationByHandleW, READ_CONTROL, SYNCHRONIZE,
 };
 use windows_sys::Win32::System::SystemServices::{
@@ -76,6 +76,70 @@ pub(super) const STAGE_CREATION_PRIMITIVE: &str =
     "ntcreatefile-parent-handle-create-directory-explicit-dacl-nofollow";
 pub(super) const PUBLICATION_PRIMITIVE: &str =
     "ntsetinformationfile-retained-source-parent-noreplace";
+
+pub(super) fn flush_directory(dir: &CapDir) -> io::Result<()> {
+    // Retained directory capabilities are not opened for write, and the stage
+    // root has delete access without sharing delete. Reopen `.` for write,
+    // share delete so this handle can sit beside that stage, and flush the
+    // reopened handle. `FlushFileBuffers` on the retained handle itself fails
+    // with an access or sharing error.
+    let reopened = reopen_directory_for_flush(dir)?;
+    let flushed = unsafe { FlushFileBuffers(reopened.as_raw_handle()) };
+    if flushed == 0 {
+        Err(io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+fn reopen_directory_for_flush(dir: &CapDir) -> io::Result<OwnedHandle> {
+    // `.` is one UTF-16 unit, so the NT name length is two bytes.
+    let mut name = [u16::from(b'.')];
+    let unicode_name = UNICODE_STRING {
+        Length: 2,
+        MaximumLength: 2,
+        Buffer: name.as_mut_ptr(),
+    };
+    let attributes = OBJECT_ATTRIBUTES {
+        Length: u32::try_from(size_of::<OBJECT_ATTRIBUTES>()).expect("structure size fits u32"),
+        RootDirectory: dir.as_raw_handle(),
+        ObjectName: &unicode_name,
+        Attributes: OBJ_CASE_INSENSITIVE,
+        SecurityDescriptor: ptr::null(),
+        SecurityQualityOfService: ptr::null(),
+    };
+    let mut handle: HANDLE = INVALID_HANDLE_VALUE;
+    let mut status_block = MaybeUninit::<IO_STATUS_BLOCK>::zeroed();
+
+    // Safety: every pointer refers to initialized storage for the duration of the synchronous
+    // call. FILE_OPEN does not create a file, and the returned handle is owned exactly once.
+    let status = unsafe {
+        NtCreateFile(
+            &mut handle,
+            FILE_GENERIC_WRITE,
+            &attributes,
+            status_block.as_mut_ptr(),
+            ptr::null(),
+            FILE_ATTRIBUTE_DIRECTORY,
+            COEXISTING_DIRECTORY_SHARE,
+            FILE_OPEN,
+            FILE_DIRECTORY_FILE | FILE_OPEN_REPARSE_POINT | FILE_SYNCHRONOUS_IO_NONALERT,
+            ptr::null(),
+            0,
+        )
+    };
+    if status < 0 {
+        return Err(ntstatus_error(status));
+    }
+    if handle == INVALID_HANDLE_VALUE || handle.is_null() {
+        return Err(io::Error::other(
+            "NtCreateFile succeeded without a valid directory flush handle",
+        ));
+    }
+
+    // Safety: NtCreateFile returned a new owned handle, and OwnedHandle assumes sole ownership.
+    Ok(unsafe { OwnedHandle::from_raw_handle(handle) })
+}
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct StorageObservation {

@@ -95,10 +95,20 @@ file; a process killed before the write still has no record.
 `recover_abandoned_stage` removes that one opened directory when the parent is
 admitted again, the exact component opens without following links, and the
 witness matches. A mismatch, a link, or a failed DACL check leaves the object.
-Directory sync and power-loss durability remain absent. The flate2 1.1.10,
-lzma-rust2 0.25.0, and crc32fast 1.5.4 closure is current. Exercise any broader recovery at
-stage creation, writes, audit, publication, and cleanup, including hostile
-renames, links and substituted directories, unrelated neighbors, and existing
+
+`Durability::DirectorySync` on `sealr.policy.v12` is the directory-sync contract.
+It includes member-file sync, then syncs every staged directory with children
+before parents, then syncs the destination parent after the no-replace rename.
+The receipt says `directory-sync` only when that parent sync succeeds. A parent
+sync failure stays `committed`, reports `member-sync`, and records the finding.
+A staged-directory sync failure does not publish. v1 through v11 reject the
+field. `FlushOnly` and `MemberSync` do not sync directories. This is not crash
+recovery or power-loss durability.
+
+The flate2 1.1.10, lzma-rust2 0.25.0, and crc32fast 1.5.4 closure is current.
+Exercise any broader recovery at stage creation, writes, audit, publication,
+and cleanup, including hostile renames, links and substituted directories,
+unrelated neighbors, and existing
 destinations on each advertised platform. Any stronger durability guarantee
 needs a new explicit contract and fault evidence rather than a renamed flush
 operation.
@@ -142,10 +152,10 @@ optional independent-adoption contract.
 
 ## Execution and spending
 
-Section 1 already meets its acceptance. This tree is Alpha.19. The next
-lifecycle gaps are a witness that survives process death and a Windows file
-identifier. No additional parser, hosted UI, binding, or backend is part of
-that increment.
+Section 1 already meets its acceptance. This tree is Alpha.19. Directory sync
+is the v12 contract above. The remaining lifecycle gaps are crash recovery and
+power-loss durability. No additional parser, hosted UI, binding, or backend is
+part of that increment.
 
 Use local computation, cached artifacts, free public documentation, and ordinary
 public CI. External purchases stay at $0 by default and never exceed the $5

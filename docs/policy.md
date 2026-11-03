@@ -3,7 +3,7 @@
 Policy is an input to `apply()` and is bound into every receipt by id and SHA-256 digest. Caps and behavioral choices must not live only in command-line state.
 
 The implemented pre-release schemas are `sealr.policy.v1` through
-`sealr.policy.v11`. Rust callers may use the versioned `Policy` constructors or
+`sealr.policy.v12`. Rust callers may use the versioned `Policy` constructors or
 deserialize the closed `PolicyDocument` shape and call `validate()`.
 `PolicyDocument` rejects unknown fields, unsupported schemas and vocabulary,
 noncanonical format sets, and caps above the double-safe integer ceiling before
@@ -31,21 +31,26 @@ let validated = ValidatedPolicy::new(policy).unwrap();
 assert_eq!(validated.policy().durability(), Durability::MemberSync);
 ```
 
-| Selection | Completed member files | Receipt durability when materialization is requested |
-|---|---|---|
-| `Durability::FlushOnly` (the default) | Flush each completed member file | `flush-only` |
-| `Durability::MemberSync` | Flush and sync each completed member file before publication | `member-sync` |
+| Selection | Completed member files | Directories | Receipt durability when materialization is requested |
+|---|---|---|---|
+| `Durability::FlushOnly` (the default) | Flush each completed member file | Not synced | `flush-only` |
+| `Durability::MemberSync` | Flush and sync each completed member file before publication | Not synced | `member-sync` |
+| `Durability::DirectorySync` | Flush and sync each completed member file before publication | Sync every staged directory, then the destination parent | `directory-sync` when both directory phases succeed. After a successful rename, a failed parent sync reports `member-sync` and a finding. |
 
-Both modes stage members privately and publish with the same native no-replace
-operation. Neither syncs directories or guarantees crash recovery or power-loss
-durability. Inspection performs no materialization and reports durability `none`.
+All three modes stage members privately and publish with the same native no-replace
+operation. None guarantees crash recovery or power-loss durability. Inspection
+performs no materialization and reports durability `none`.
 
-The named methods read and write the existing `atomic` field as the sole backing
-value: `FlushOnly` maps to `false`, and `MemberSync` maps to `true`. This preserves
-the exact serialized bytes and digest of an equivalent historical policy in
-every supported schema. Selecting a different mode changes the policy digest,
-and the compiled selection remains bound into worker planning records.
-There is no independent operation-options override.
+`FlushOnly` and `MemberSync` read and write the existing `atomic` field:
+`FlushOnly` maps to `false`, and `MemberSync` maps to `true`. Their canonical
+JSON omits `directory_sync`. This preserves the exact serialized bytes and
+digest of an equivalent historical policy in v1 through v11. `DirectorySync`
+is valid only for `sealr.policy.v12`. It sets `atomic` to `true` and
+`directory_sync` to `true`, and canonical JSON writes `directory_sync` after
+`atomic`. Selecting a different mode changes the policy digest. The worker
+planning record still stores one member-sync byte; directory sync is performed
+by the supervisor. There is no independent operation-options override and no
+CLI flag.
 
 `PolicyDocument` accepts the historical JSON `atomic` field. An additional or
 replacement JSON `durability` key is rejected as an unknown field. A Rust caller
@@ -209,14 +214,20 @@ Its exact digest is `eada8150e14c0f05dcb25b6c9a90b87d3821fbb5f754192aceaea6d942e
 
 Its exact digest is `afa0aeb04ceca00706b31dfd250216a87f2af0ada6e98d3815873de0d15172fc`. A v11 caller may use any nonempty canonical subset of the format list. `SevenZInterpretationProfile::CopyPortableV1` must still be selected explicitly. The Copy-only container decodes nothing, so no derived-archive or ratio consideration applies to it; the field requirements are preserved unchanged for the wrapped formats.
 
+## Directory-sync default v12
+
+`Policy::default_v12()` preserves the v11 formats and resource controls. It changes the schema and id to `sealr.policy.v12` and `sealr:policy/default/v12`. It does not add a format. The default remains flush-only, so its canonical JSON omits `directory_sync`. Its exact digest is `ed075c44695ee5d0bedeb66c8eef87a05decf5850e91b6c6995704c9d1ba9076`.
+
+`Policy::default_v12().with_durability(Durability::DirectorySync)` is the directory-sync selection. Its digest is `e7f469f14f0bdfdad481b3971e2be89a079905de825cf2003a0b1d5d45627b7b`. v1 through v11 reject that selection. The CLI continues to use `Policy::default_v11()` for Copy-only 7z. Callers that want directory sync pass v12 JSON or the Rust constructor above.
+
 ## Enforced fields
 
 | Field | Current behavior |
 |---|---|
 | `formats` | Policy v1 must equal `["zip"]`. Policy v2 accepts canonical nonempty subsets of `["zip", "tar-ustar"]`. Policy v3 accepts canonical nonempty subsets of `["zip", "zip64", "tar-ustar"]`. Policy v4 accepts canonical nonempty subsets of `["zip", "zip64", "tar-ustar", "tar-gzip-ustar"]`. Policy v5 adds `"tar-pax"`, policy v6 adds `"tar-gnu-longname"`, policy v7 adds `"tar-gzip-pax"` and `"tar-gzip-gnu-longname"`, policy v8 adds `"tar-zstd-ustar"`, policy v9 adds `"tar-xz-ustar"`, policy v10 adds `"tar-bzip2-ustar"`, and policy v11 adds `"7z-copy"`, each accepting canonical nonempty subsets of its list. The explicitly selected format must be present; authorization never implies format detection or fallback. |
 | `max_archive_bytes` | Bounds path reads and borrowed byte inputs before parsing. Path reads use a capped reader so file growth cannot exceed the cap. |
-| `max_derived_archive_bytes` | Policy v4 through v11 only. Bounds the immutable decoded TAR while a gzip, zstd, xz, or bzip2 wrapper is consumed. It is separate from the original source, member, and total extracted-byte caps. Policies v5 through v11 preserve the field even when a raw dialect or container is selected so compiled controls do not drift. |
-| `max_files` | Checked against both format-declared counts where present and the number of members actually parsed. A false low ZIP EOCD count cannot authorize member-vector growth beyond the cap. Policy v2 through v11 cap the configured value at `u32::MAX` because their multi-format identity encodings bind the count as `u32`. Policy v1 preserves the Alpha.8 constructor language; ZIP32 itself bounds actual member counts below that encoding limit. |
+| `max_derived_archive_bytes` | Policy v4 through v12 only. Bounds the immutable decoded TAR while a gzip, zstd, xz, or bzip2 wrapper is consumed. It is separate from the original source, member, and total extracted-byte caps. Policies v5 through v12 preserve the field even when a raw dialect or container is selected so compiled controls do not drift. |
+| `max_files` | Checked against both format-declared counts where present and the number of members actually parsed. A false low ZIP EOCD count cannot authorize member-vector growth beyond the cap. Policy v2 through v12 cap the configured value at `u32::MAX` because their multi-format identity encodings bind the count as `u32`. Policy v1 preserves the Alpha.8 constructor language; ZIP32 itself bounds actual member counts below that encoding limit. |
 | `max_member_bytes` | Checked against declared size and actual bytes while expanding. |
 | `max_total_bytes` | Checked against declared total and actual running total. |
 | `max_ratio` | Integer uncompressed:compressed bound, compared with widened `u128` arithmetic. The default `100` rejects when uncompressed bytes strictly exceed `100 ×` compressed bytes. `null` disables the ratio check. `0` is not “off”: any positive expansion with a positive compressed size fails. A member with uncompressed size `> 0` and compressed size `0` is an infinite ratio. For a derived TAR, the numerator omits the verified 1024-byte terminator and the verified all-zero bytes that finish the single 10240-byte record containing that terminator. Member payloads, headers, per-member block padding, and trailing zeros past that record stay charged. |
@@ -224,7 +235,8 @@ Its exact digest is `afa0aeb04ceca00706b31dfd250216a87f2af0ada6e98d3815873de0d15
 | `max_metadata_bytes` | Bounds format-specific structural metadata. For ZIP this includes the central directory, EOCD comment, and referenced local name and extra bytes. For raw ustar it bounds admitted headers before trailing zero record padding is scanned. For every gzip-, zstd-, xz-, or bzip2-wrapped selection it cumulatively bounds the wrapper's structural bytes (headers, trailers, for xz the block headers, padding, checks, index, and footer, and for bzip2 the bit-granular block frames and padded footer rounded up to whole bytes) plus the inner dialect's structural metadata. For the 7z container it bounds the signature plus next header before the header is read. For raw PAX it additionally includes every extension payload and its zero padding; for raw GNU long-name it includes every carrier header and payload. |
 | `overwrite` | Existing destinations are refused. Replacement is not implemented even if a caller mutates this field. |
 | `encrypted` | Only `"deny"` compiles. Admission rejects traditional encryption bit 0, strong-encryption bit 6, and masked-header bit 13 even when LFH and CDH flags agree. |
-| `atomic` | Historical JSON and Rust backing field for the [named durability controls](#named-durability-controls). `false` selects `Durability::FlushOnly`; `true` selects `Durability::MemberSync`. Both modes retain private staging and native no-replace publication. The field and its position remain unchanged to preserve existing policy bytes and digests. Neither mode implements directory syncing, crash recovery, or power-loss durability. |
+| `atomic` | Historical JSON and Rust backing field for flush-only and member-file sync. `false` selects `Durability::FlushOnly`; `true` without `directory_sync` selects `Durability::MemberSync`. Both modes retain private staging and native no-replace publication. The field and its position remain unchanged to preserve existing policy bytes and digests. Neither mode implements directory syncing, crash recovery, or power-loss durability. |
+| `directory_sync` | Optional JSON field after `atomic`, omitted when false. Valid only on policy v12, and only when `atomic` is `true`. `true` selects `Durability::DirectorySync`. A present value on v1 through v11 is `policy.unsupported`. The supervisor syncs staged directories before publication and the destination parent after the rename. A failed parent sync does not claim `directory-sync`. This is not crash recovery or power-loss durability. |
 
 ## Reserved fields
 

@@ -730,6 +730,9 @@ fn verify_policy(policy: &PolicyMeta) -> Result<(), VerifyError> {
         "sealr:policy/default/v11" => {
             Some("afa0aeb04ceca00706b31dfd250216a87f2af0ada6e98d3815873de0d15172fc")
         }
+        "sealr:policy/default/v12" => {
+            Some("ed075c44695ee5d0bedeb66c8eef87a05decf5850e91b6c6995704c9d1ba9076")
+        }
         _ => None,
     };
     if let Some(expected) = known
