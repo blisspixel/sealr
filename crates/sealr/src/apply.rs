@@ -669,7 +669,7 @@ pub fn apply_with_options(req: Request<'_>, options: &ApplyOptions) -> Outcome {
                 (None, SourceDigest::unavailable(), req.policy.clone()),
                 vec![finding.clone()],
                 None,
-                MaterializationMeta::not_started(req.dest.is_some(), req.policy.atomic),
+                MaterializationMeta::not_started(req.dest.is_some(), req.policy.durability()),
                 SemanticAxes::policy_compile_failed(&finding),
                 SnapshotKind::Unavailable,
                 OutcomeIdentities::without_source_for(profile),
@@ -689,7 +689,7 @@ pub fn apply_with_options(req: Request<'_>, options: &ApplyOptions) -> Outcome {
                 (failure.path, failure.digest, req.policy.clone()),
                 vec![failure.finding.clone()],
                 None,
-                MaterializationMeta::not_started(req.dest.is_some(), req.policy.atomic),
+                MaterializationMeta::not_started(req.dest.is_some(), req.policy.durability()),
                 SemanticAxes::source_failure(&failure.finding, admission),
                 failure.snapshot_kind,
                 OutcomeIdentities::unavailable_for(digest, profile),
@@ -705,7 +705,7 @@ fn apply_tar_with_options(
 ) -> Outcome {
     let policy = req.policy;
     let initial_materialization =
-        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
+        MaterializationMeta::not_started(req.dest.is_some(), policy.durability());
     let controls = match policy.compile_for_format(POLICY_FORMAT_TAR_USTAR) {
         Ok(controls) => controls,
         Err(finding) => {
@@ -764,7 +764,7 @@ fn apply_tar_pax_with_options(
 ) -> Outcome {
     let policy = req.policy;
     let initial_materialization =
-        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
+        MaterializationMeta::not_started(req.dest.is_some(), policy.durability());
     let controls = match policy.compile_for_format(POLICY_FORMAT_TAR_PAX) {
         Ok(controls) => controls,
         Err(finding) => {
@@ -824,7 +824,7 @@ fn apply_tar_gnu_longname_with_options(
 ) -> Outcome {
     let policy = req.policy;
     let initial_materialization =
-        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
+        MaterializationMeta::not_started(req.dest.is_some(), policy.durability());
     let controls = match policy.compile_for_format(POLICY_FORMAT_TAR_GNU_LONGNAME) {
         Ok(controls) => controls,
         Err(finding) => {
@@ -887,7 +887,7 @@ fn apply_tar_gzip_with_options(
 ) -> Outcome {
     let policy = req.policy;
     let initial_materialization =
-        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
+        MaterializationMeta::not_started(req.dest.is_some(), policy.durability());
     let controls = match policy.compile_for_format(profile.policy_format()) {
         Ok(controls) => controls,
         Err(finding) => {
@@ -1088,7 +1088,7 @@ fn apply_tar_zstd_with_options(
 ) -> Outcome {
     let policy = req.policy;
     let initial_materialization =
-        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
+        MaterializationMeta::not_started(req.dest.is_some(), policy.durability());
     let controls = match policy.compile_for_format(profile.policy_format()) {
         Ok(controls) => controls,
         Err(finding) => {
@@ -1284,7 +1284,7 @@ fn apply_tar_xz_with_options(
 ) -> Outcome {
     let policy = req.policy;
     let initial_materialization =
-        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
+        MaterializationMeta::not_started(req.dest.is_some(), policy.durability());
     let controls = match policy.compile_for_format(profile.policy_format()) {
         Ok(controls) => controls,
         Err(finding) => {
@@ -1525,7 +1525,7 @@ fn apply_tar_bzip2_with_options(
 ) -> Outcome {
     let policy = req.policy;
     let initial_materialization =
-        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
+        MaterializationMeta::not_started(req.dest.is_some(), policy.durability());
     let controls = match policy.compile_for_format(profile.policy_format()) {
         Ok(controls) => controls,
         Err(finding) => {
@@ -1721,7 +1721,7 @@ fn apply_sevenz_with_options(
 ) -> Outcome {
     let policy = req.policy;
     let initial_materialization =
-        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
+        MaterializationMeta::not_started(req.dest.is_some(), policy.durability());
     let controls = match policy.compile_for_format(profile.policy_format()) {
         Ok(controls) => controls,
         Err(finding) => {
@@ -2001,6 +2001,7 @@ fn apply_sevenz_with_options(
         findings,
         budget,
         member_sync: controls.effect.member_sync,
+        directory_sync: controls.effect.directory_sync,
         source_digest,
         identities_base,
         magic: "7z",
@@ -2653,6 +2654,7 @@ fn plan_tar_domains(
         findings,
         budget,
         member_sync: controls.effect.member_sync,
+        directory_sync: controls.effect.directory_sync,
         source_digest,
         identities_base,
         magic,
@@ -2971,6 +2973,7 @@ fn plan_tar_pax(
         findings,
         budget,
         member_sync: controls.effect.member_sync,
+        directory_sync: controls.effect.directory_sync,
         source_digest,
         identities_base,
         magic,
@@ -3240,6 +3243,7 @@ fn plan_tar_gnu_longname(
         findings,
         budget,
         member_sync: controls.effect.member_sync,
+        directory_sync: controls.effect.directory_sync,
         source_digest,
         identities_base,
         magic,
@@ -3823,7 +3827,7 @@ fn apply_inner(
 ) -> Result<Outcome, SourceFailure> {
     let policy = req.policy;
     let initial_materialization =
-        MaterializationMeta::not_started(req.dest.is_some(), policy.atomic);
+        MaterializationMeta::not_started(req.dest.is_some(), policy.durability());
     let planning = plan_source(&req.source, planning_context)?;
     let ready = match planning {
         PlanDecision::Ready(ready) => ready,
@@ -3854,6 +3858,7 @@ fn apply_inner(
     let controls = context.controls();
     let budget = controls.budget;
     let member_sync = controls.effect.member_sync;
+    let directory_sync = controls.effect.directory_sync;
     let source_digest = snapshot.digest().clone();
     let identities_base =
         OutcomeIdentities::unavailable_for(source_digest.clone(), context.profile());
@@ -3866,6 +3871,7 @@ fn apply_inner(
         findings,
         budget,
         member_sync,
+        directory_sync,
         source_digest,
         identities_base,
         magic: "zip",
@@ -3882,6 +3888,7 @@ struct ReadyArchive<'a> {
     findings: Vec<Finding>,
     budget: ResourceBudget,
     member_sync: bool,
+    directory_sync: bool,
     source_digest: SourceDigest,
     identities_base: OutcomeIdentities,
     magic: &'static str,
@@ -4350,6 +4357,7 @@ fn execute_ready_archive(
         mut findings,
         budget,
         member_sync,
+        directory_sync,
         source_digest,
         identities_base,
         magic,
@@ -4403,6 +4411,9 @@ fn execute_ready_archive(
         None => None,
         Some(dest) => match CapabilityMaterializer::create(dest, policy.atomic) {
             Ok(mut stage) => {
+                if directory_sync {
+                    stage.enable_directory_sync();
+                }
                 if let Some(path) = options.stage_retention_path()
                     && let Err(finding) = stage.persist_stage_retention(path)
                 {
@@ -4431,7 +4442,7 @@ fn execute_ready_archive(
                 let (setup_findings, cleanup, windows) = setup_error.into_parts();
                 findings.extend(setup_findings);
                 materialization =
-                    MaterializationMeta::setup_failed(policy.atomic, cleanup, windows);
+                    MaterializationMeta::setup_failed(policy.durability(), cleanup, windows);
                 let cause = first_error(&findings);
                 return Ok(with_ir(
                     finish(
@@ -4712,6 +4723,9 @@ fn execute_ready_archive(
             ));
         }
         if let Some(finding) = materializer.take_retention_discard_error() {
+            findings.push(finding);
+        }
+        if let Some(finding) = materializer.take_parent_directory_sync_error() {
             findings.push(finding);
         }
         materialization = materializer.report();

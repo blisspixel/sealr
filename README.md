@@ -105,7 +105,9 @@ directory only when the record is presented again. A caller can ask for that
 record to be written to a path while the stage exists; a killed process leaves
 that file and no other record. Windows records a file identifier and checks it
 through a newly opened handle that also passes DACL verification. Directory
-sync and power-loss durability remain absent. The zip 9.2.2 and Poetry
+sync is an opt-in `sealr.policy.v12` selection: it syncs the staged directories
+and the destination parent, and it does not claim crash recovery or power-loss
+durability. `FlushOnly` and `MemberSync` are unchanged. The zip 9.2.2 and Poetry
 fixture dependency closure is current. The flate2 1.1.10, lzma-rust2 0.25.0,
 and crc32fast 1.5.4 closure is current. Additional formats remain
 deferred. The

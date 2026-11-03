@@ -7,7 +7,7 @@ operation removes or publishes it, and what recovery must prove.
 `recover_abandoned_stage` removes one directory only when the caller presents
 the record from a failed cleanup or from a caller-chosen retention file. A
 process killed before that file is written still has no record.
-`Durability::FlushOnly` and `Durability::MemberSync` do not change.
+`Durability::FlushOnly` and `Durability::MemberSync` do not change. Directory sync is the separate `Durability::DirectorySync` selection on policy v12. This contract does not define it.
 
 ## Live ownership
 

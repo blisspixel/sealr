@@ -49,17 +49,27 @@ pub struct Policy {
     /// Historical serialized durability selector. Prefer [`Policy::set_durability`]
     /// or [`Policy::with_durability`] when constructing a Rust policy.
     ///
-    /// This field remains the sole backing value so existing policy bytes and
-    /// digests stay unchanged. It does not control no-replace publication.
+    /// `false` is flush-only and `true` is member-file sync. This field and its
+    /// position stay in place so existing policy bytes and digests stay
+    /// unchanged. It does not control no-replace publication.
     pub atomic: bool,
+    /// Opt-in directory sync. Omitted from canonical JSON when false, so v1
+    /// through v11 bytes stay unchanged. Valid only on `sealr.policy.v12` and
+    /// only together with member-file sync.
+    #[serde(skip_serializing_if = "is_false")]
+    pub directory_sync: bool,
 }
 
-/// Durability requested for completed member files before publication.
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// Durability requested before publication.
 ///
-/// Both modes use private staging and native no-replace publication. Neither
-/// syncs directories or guarantees crash recovery or power-loss durability.
-/// The named Rust selection preserves the historical policy JSON `atomic`
-/// field and its boolean encoding.
+/// Every mode uses private staging and native no-replace publication. None
+/// guarantees crash recovery or power-loss durability. `FlushOnly` and
+/// `MemberSync` preserve the historical policy JSON `atomic` field.
+/// `DirectorySync` is a separate v12 selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Durability {
@@ -67,6 +77,9 @@ pub enum Durability {
     FlushOnly,
     /// Flush and sync each completed member file before publication.
     MemberSync,
+    /// Sync each completed member file, every staged directory, and the
+    /// destination parent. This is not a power-loss guarantee.
+    DirectorySync,
 }
 
 impl Durability {
@@ -81,8 +94,12 @@ impl Durability {
     const fn member_sync(self) -> bool {
         match self {
             Self::FlushOnly => false,
-            Self::MemberSync => true,
+            Self::MemberSync | Self::DirectorySync => true,
         }
+    }
+
+    const fn directory_sync(self) -> bool {
+        matches!(self, Self::DirectorySync)
     }
 }
 
@@ -115,6 +132,9 @@ pub enum ConsumerProfile {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EffectPolicy {
     pub member_sync: bool,
+    /// Supervisor-side directory sync. The worker record still carries only
+    /// the member-file sync bit.
+    pub directory_sync: bool,
 }
 
 /// Supported controls compiled from a [`Policy`] before source ingestion.
@@ -127,17 +147,28 @@ pub struct CompiledControls {
 }
 
 impl Policy {
-    /// Read the durability selection represented by the historical `atomic` field.
+    /// Read the durability selection.
+    ///
+    /// `directory_sync` selects [`Durability::DirectorySync`] even when
+    /// `atomic` is false. [`Policy::compile`] rejects that combination.
     pub const fn durability(&self) -> Durability {
-        Durability::from_member_sync(self.atomic)
+        if self.directory_sync {
+            Durability::DirectorySync
+        } else {
+            Durability::from_member_sync(self.atomic)
+        }
     }
 
-    /// Select member-file durability without changing the policy JSON shape.
+    /// Select durability.
     ///
-    /// The selection participates in the canonical policy digest. Both modes
-    /// retain no-replace publication; neither guarantees power-loss durability.
+    /// `FlushOnly` and `MemberSync` change only the historical `atomic` field
+    /// and leave `directory_sync` false, so their canonical JSON shape is
+    /// unchanged. `DirectorySync` sets both fields and is valid only for
+    /// `sealr.policy.v12`. The selection participates in the canonical policy
+    /// digest. No mode guarantees power-loss durability.
     pub fn set_durability(&mut self, durability: Durability) {
         self.atomic = durability.member_sync();
+        self.directory_sync = durability.directory_sync();
     }
 
     /// Select member-file durability while building this policy.
@@ -171,6 +202,7 @@ impl Policy {
             magic_vs_extension: "deny",
             encrypted: "deny",
             atomic: false,
+            directory_sync: false,
         }
     }
 
@@ -366,6 +398,20 @@ impl Policy {
         }
     }
 
+    /// Construct the v12 policy.
+    ///
+    /// It authorizes the same formats as v11. `Durability::DirectorySync` is
+    /// valid only on this schema. The default still selects flush-only, and
+    /// the omitted `directory_sync` field keeps that default distinct from a
+    /// new format.
+    pub fn default_v12() -> Self {
+        Self {
+            schema: "sealr.policy.v12",
+            id: "sealr:policy/default/v12".into(),
+            ..Self::default_v11()
+        }
+    }
+
     pub fn digest_hex(&self) -> String {
         let json = serde_json::to_vec(self).expect("policy serializes");
         hex_sha256(&json)
@@ -451,6 +497,13 @@ impl Policy {
                     self.formats
                 )));
             }
+            "sealr.policy.v12" if valid_v11_formats(&self.formats) => {}
+            "sealr.policy.v12" => {
+                return Err(unsupported(format!(
+                    "formats {:?} are not a canonical nonempty subset of [\"zip\", \"zip64\", \"tar-ustar\", \"tar-gzip-ustar\", \"tar-pax\", \"tar-gnu-longname\", \"tar-gzip-pax\", \"tar-gzip-gnu-longname\", \"tar-zstd-ustar\", \"tar-xz-ustar\", \"tar-bzip2-ustar\", \"7z-copy\"]",
+                    self.formats
+                )));
+            }
             "sealr.policy.v10" if valid_v10_formats(&self.formats) => {}
             "sealr.policy.v10" => {
                 return Err(unsupported(format!(
@@ -506,6 +559,7 @@ impl Policy {
                 | "sealr.policy.v9"
                 | "sealr.policy.v10"
                 | "sealr.policy.v11"
+                | "sealr.policy.v12"
         ) && self.max_files > u64::from(u32::MAX)
         {
             return Err(unsupported(format!(
@@ -516,12 +570,14 @@ impl Policy {
         match (self.schema, self.max_derived_archive_bytes) {
             (
                 "sealr.policy.v4" | "sealr.policy.v5" | "sealr.policy.v6" | "sealr.policy.v7"
-                | "sealr.policy.v8" | "sealr.policy.v9" | "sealr.policy.v10" | "sealr.policy.v11",
+                | "sealr.policy.v8" | "sealr.policy.v9" | "sealr.policy.v10" | "sealr.policy.v11"
+                | "sealr.policy.v12",
                 Some(_),
             ) => {}
             (
                 "sealr.policy.v4" | "sealr.policy.v5" | "sealr.policy.v6" | "sealr.policy.v7"
-                | "sealr.policy.v8" | "sealr.policy.v9" | "sealr.policy.v10" | "sealr.policy.v11",
+                | "sealr.policy.v8" | "sealr.policy.v9" | "sealr.policy.v10" | "sealr.policy.v11"
+                | "sealr.policy.v12",
                 None,
             ) => {
                 return Err(unsupported(format!(
@@ -532,9 +588,19 @@ impl Policy {
             (_, None) => {}
             (_, Some(value)) => {
                 return Err(unsupported(format!(
-                    "max_derived_archive_bytes={value} is only supported by sealr.policy.v4 through sealr.policy.v11"
+                    "max_derived_archive_bytes={value} is only supported by sealr.policy.v4 through sealr.policy.v12"
                 )));
             }
+        }
+        if self.directory_sync && self.schema != "sealr.policy.v12" {
+            return Err(unsupported(
+                "directory_sync is only supported by sealr.policy.v12".to_owned(),
+            ));
+        }
+        if self.directory_sync && !self.atomic {
+            return Err(unsupported(
+                "directory_sync requires member file sync".to_owned(),
+            ));
         }
 
         Ok(CompiledControls {
@@ -552,6 +618,7 @@ impl Policy {
             consumer: ConsumerProfile::GenericArchive,
             effect: EffectPolicy {
                 member_sync: self.atomic,
+                directory_sync: self.directory_sync,
             },
         })
     }
@@ -753,7 +820,7 @@ fn unsupported(detail: String) -> Finding {
 /// canonical-JSON lineage.
 const MAX_DOUBLE_SAFE_INTEGER: u64 = (1 << 53) - 1;
 
-const KNOWN_POLICY_SCHEMAS: [&str; 11] = [
+const KNOWN_POLICY_SCHEMAS: [&str; 12] = [
     "sealr.policy.v1",
     "sealr.policy.v2",
     "sealr.policy.v3",
@@ -765,6 +832,7 @@ const KNOWN_POLICY_SCHEMAS: [&str; 11] = [
     "sealr.policy.v9",
     "sealr.policy.v10",
     "sealr.policy.v11",
+    "sealr.policy.v12",
 ];
 
 fn static_schema(schema: &str) -> Result<&'static str, Finding> {
@@ -827,20 +895,35 @@ pub struct PolicyDocument {
     /// Historical JSON field retained for canonical policy compatibility.
     /// Rust callers can use [`PolicyDocument::set_durability`] before validation.
     pub atomic: bool,
+    /// Present only when the caller wrote `directory_sync`. Absence means
+    /// false on every schema. A present value is valid only for
+    /// `sealr.policy.v12`, including explicit `false`.
+    #[serde(default)]
+    pub directory_sync: Option<bool>,
 }
 
 impl PolicyDocument {
     /// Read the requested durability before validating this document.
     pub const fn durability(&self) -> Durability {
-        Durability::from_member_sync(self.atomic)
+        if matches!(self.directory_sync, Some(true)) {
+            Durability::DirectorySync
+        } else {
+            Durability::from_member_sync(self.atomic)
+        }
     }
 
-    /// Select member-file durability before validating this document.
+    /// Select durability before validating this document.
     ///
-    /// This changes only the historical `atomic` backing field. The document
-    /// still requires [`PolicyDocument::validate`] before use for admission.
+    /// `FlushOnly` and `MemberSync` leave `directory_sync` absent so v1
+    /// through v11 documents stay valid. `DirectorySync` records the field
+    /// and still requires [`PolicyDocument::validate`].
     pub fn set_durability(&mut self, durability: Durability) {
         self.atomic = durability.member_sync();
+        self.directory_sync = if durability.directory_sync() {
+            Some(true)
+        } else {
+            None
+        };
     }
 
     /// Select member-file durability while building this unvalidated document.
@@ -859,8 +942,18 @@ impl PolicyDocument {
     /// spelling (for example an explicit `null` for the conditional field)
     /// still validates to the same canonical policy and digest.
     pub fn validate(self) -> Result<ValidatedPolicy, Finding> {
+        let schema = static_schema(&self.schema)?;
+        let directory_sync = match (schema, self.directory_sync) {
+            ("sealr.policy.v12", Some(value)) => value,
+            (_, None) => false,
+            (_, Some(_)) => {
+                return Err(unsupported(
+                    "directory_sync is only supported by sealr.policy.v12".to_owned(),
+                ));
+            }
+        };
         let policy = Policy {
-            schema: static_schema(&self.schema)?,
+            schema,
             id: self.id,
             formats: self.formats,
             max_archive_bytes: self.max_archive_bytes,
@@ -885,6 +978,7 @@ impl PolicyDocument {
             magic_vs_extension: static_vocabulary("magic_vs_extension", &self.magic_vs_extension)?,
             encrypted: static_vocabulary("encrypted", &self.encrypted)?,
             atomic: self.atomic,
+            directory_sync,
         };
         ValidatedPolicy::new(policy)
     }
@@ -1079,6 +1173,20 @@ mod tests {
         r#""encrypted":"deny","atomic":false}"#,
     );
 
+    const DEFAULT_V12_JSON: &str = concat!(
+        r#"{"schema":"sealr.policy.v12","id":"sealr:policy/default/v12","#,
+        r#""formats":["zip","zip64","tar-ustar","tar-gzip-ustar","tar-pax","#,
+        r#""tar-gnu-longname","tar-gzip-pax","tar-gzip-gnu-longname","tar-zstd-ustar","#,
+        r#""tar-xz-ustar","tar-bzip2-ustar","7z-copy"],"#,
+        r#""max_archive_bytes":536870912,"max_derived_archive_bytes":536870912,"#,
+        r#""max_files":10000,"max_member_bytes":1073741824,"#,
+        r#""max_total_bytes":5368709120,"max_ratio":100,"max_path_depth":32,"#,
+        r#""max_metadata_bytes":4194304,"max_dict_bytes":67108864,"symlinks":"deny","#,
+        r#""hardlinks":"deny","overwrite":"refuse","setuid":"strip","nested_depth":1,"#,
+        r#""ambiguity":"deny","case_fold_collision":"deny","magic_vs_extension":"deny","#,
+        r#""encrypted":"deny","atomic":false}"#,
+    );
+
     const DEFAULT_V8_JSON: &str = concat!(
         r#"{"schema":"sealr.policy.v8","id":"sealr:policy/default/v8","#,
         r#""formats":["zip","zip64","tar-ustar","tar-gzip-ustar","tar-pax","#,
@@ -1181,6 +1289,19 @@ mod tests {
     }
 
     #[test]
+    fn directory_sync_policy_digest_is_stable() {
+        assert_eq!(
+            Policy::default_v12().digest_hex(),
+            "ed075c44695ee5d0bedeb66c8eef87a05decf5850e91b6c6995704c9d1ba9076"
+        );
+        let selected = Policy::default_v12().with_durability(Durability::DirectorySync);
+        assert_eq!(
+            selected.digest_hex(),
+            "e7f469f14f0bdfdad481b3971e2be89a079905de825cf2003a0b1d5d45627b7b"
+        );
+    }
+
+    #[test]
     fn every_default_policy_round_trips_through_the_document_to_the_same_bytes() {
         for policy in [
             Policy::default_v1(),
@@ -1194,6 +1315,7 @@ mod tests {
             Policy::default_v9(),
             Policy::default_v10(),
             Policy::default_v11(),
+            Policy::default_v12(),
         ] {
             let json = serde_json::to_string(&policy).unwrap();
             let document: PolicyDocument = serde_json::from_str(&json).unwrap();
@@ -1327,6 +1449,10 @@ mod tests {
             serde_json::to_string(&Policy::default_v11()).unwrap(),
             DEFAULT_V11_JSON
         );
+        assert_eq!(
+            serde_json::to_string(&Policy::default_v12()).unwrap(),
+            DEFAULT_V12_JSON
+        );
     }
 
     #[test]
@@ -1334,6 +1460,7 @@ mod tests {
         let v1 = Policy::default_v1().compile().expect("default compiles");
         assert_eq!(v1.budget.max_ratio, Some(100));
         assert!(!v1.effect.member_sync);
+        assert!(!v1.effect.directory_sync);
         assert_eq!(v1.target, TargetModel::PortableV1);
 
         let v3 = Policy::default_v3().compile().expect("v3 default compiles");
@@ -1727,6 +1854,7 @@ mod tests {
         policy.atomic = true;
         let compiled = policy.compile().unwrap();
         assert!(compiled.effect.member_sync);
+        assert!(!compiled.effect.directory_sync);
     }
 
     #[test]
@@ -1742,6 +1870,7 @@ mod tests {
             Policy::default_v9(),
             Policy::default_v10(),
             Policy::default_v11(),
+            Policy::default_v12(),
         ] {
             policy.max_files = u64::from(u32::MAX) + 1;
             assert_eq!(
@@ -1759,5 +1888,56 @@ mod tests {
             policy.compile().unwrap().budget.max_files,
             u64::from(u32::MAX) + 1
         );
+    }
+
+    #[test]
+    fn directory_sync_is_a_v12_selection_and_preserves_earlier_bytes() {
+        for mut policy in [Policy::default_v1(), Policy::default_v11()] {
+            let bytes = serde_json::to_vec(&policy).unwrap();
+            policy.set_durability(Durability::DirectorySync);
+            assert_ne!(serde_json::to_vec(&policy).unwrap(), bytes);
+            assert!(policy.compile().is_err());
+            let mut value = serde_json::to_value(Policy::default_v1()).unwrap();
+            value
+                .as_object_mut()
+                .unwrap()
+                .insert("directory_sync".into(), serde_json::json!(false));
+            value["schema"] = serde_json::json!(policy.schema);
+            value["id"] = serde_json::json!(policy.id);
+            let document: PolicyDocument = serde_json::from_value(value).unwrap();
+            assert_eq!(
+                document.validate().unwrap_err().code,
+                FindingCode::PolicyUnsupported
+            );
+        }
+
+        let mut inconsistent = Policy::default_v12();
+        inconsistent.directory_sync = true;
+        inconsistent.atomic = false;
+        assert_eq!(
+            inconsistent.compile().unwrap_err().code,
+            FindingCode::PolicyUnsupported
+        );
+
+        let selected = Policy::default_v12().with_durability(Durability::DirectorySync);
+        let compiled = selected.compile().unwrap();
+        assert!(compiled.effect.member_sync);
+        assert!(compiled.effect.directory_sync);
+        let json = serde_json::to_value(&selected).unwrap();
+        assert_eq!(json["atomic"], true);
+        assert_eq!(json["directory_sync"], true);
+        assert!(json.get("durability").is_none());
+
+        let mut explicit_false = serde_json::to_value(Policy::default_v12()).unwrap();
+        explicit_false
+            .as_object_mut()
+            .unwrap()
+            .insert("directory_sync".into(), serde_json::json!(false));
+        let validated = serde_json::from_value::<PolicyDocument>(explicit_false)
+            .unwrap()
+            .validate()
+            .unwrap();
+        assert_eq!(validated.digest_hex(), Policy::default_v12().digest_hex());
+        assert!(!validated.policy().directory_sync);
     }
 }

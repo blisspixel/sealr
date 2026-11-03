@@ -4,18 +4,18 @@
 
 ## Sealr canonical JSON, declaration-order lineage (v1)
 
-The digests of the `sealr.view.v1` and `sealr.receipt.v2` schemas and of every policy schema through `sealr:policy/default/v11` are SHA-256 over **compact declaration-order JSON**:
+The digests of the `sealr.view.v1` and `sealr.receipt.v2` schemas and of every policy schema through `sealr:policy/default/v12` are SHA-256 over **compact declaration-order JSON**:
 
 1. **No whitespace** between any tokens.
 2. **Object keys appear in struct declaration order**, not sorted. The order for each schema is fixed by that schema's published shape and never changes; a schema's key order is part of its digest preimage.
 3. **Strings** escape `"` and `\`, use the two-character escapes `\b`, `\t`, `\n`, `\f`, `\r` for their control characters, lowercase `\u00hh` for other control characters below U+0020, and emit every other character — including non-ASCII — as literal UTF-8.
 4. **Numbers are integers only.** The evidence domain contains no floats anywhere, and every emitted integer is at most 2^53 − 1, so each value is exactly representable as an IEEE-754 double. Integers serialize as their exact minimal decimal form. `max_ratio` may be JSON `null`.
 5. **Object keys are fixed ASCII names.** Member paths and other untrusted text appear only as values, never as keys.
-6. **One conditional field exists**: a policy's `max_derived_archive_bytes` is present exactly when the policy sets it and absent otherwise. No other field is conditional.
+6. **Conditional fields are explicit.** For policy v1 through v11, `max_derived_archive_bytes` is present exactly when the policy sets it and absent otherwise, and no other field is conditional. Policy v12 adds `directory_sync`, present only when true. v1 through v11 bytes omit that field.
 
 Digest definitions:
 
-- **Policy digest** = lowercase-hex SHA-256 over the compact declaration-order bytes of the policy object. The exact serialized bytes and digests of all eleven default policies are byte-pinned in `crates/sealr/src/policy.rs` tests.
+- **Policy digest** = lowercase-hex SHA-256 over the compact declaration-order bytes of the policy object. The exact serialized bytes and digests of all twelve default policies are byte-pinned in `crates/sealr/src/policy.rs` tests.
 - **`view_digest`** (inside the receipt) = lowercase-hex SHA-256 over the compact declaration-order bytes of the view object.
 
 ## The presentation split, stated honestly

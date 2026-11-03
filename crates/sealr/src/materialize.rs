@@ -22,7 +22,7 @@ use std::fs::File as StdFile;
 use std::os::windows::io::AsRawHandle;
 
 use crate::findings::{Finding, FindingCode};
-use crate::policy::ResourceBudget;
+use crate::policy::{Durability, ResourceBudget};
 use crate::verification::{PayloadPlan, verify_payload};
 
 #[cfg(target_os = "macos")]
@@ -56,6 +56,51 @@ std::thread_local! {
 std::thread_local! {
     static AFTER_DIR_COMPONENT: RefCell<Option<(String, PathBuf)>> = const { RefCell::new(None) };
     static STAGE_MUTATION: RefCell<Option<InjectedStageMutation>> = const { RefCell::new(None) };
+    static DIRECTORY_SYNC_SUCCESSES: Cell<u32> = const { Cell::new(0) };
+    static DIRECTORY_SYNC_FAULT: Cell<u8> = const { Cell::new(0) };
+}
+
+#[cfg(test)]
+const DIRECTORY_SYNC_FAULT_STAGED: u8 = 1;
+#[cfg(test)]
+const DIRECTORY_SYNC_FAULT_PARENT: u8 = 2;
+
+#[cfg(test)]
+pub(crate) struct DirectorySyncFaultGuard {
+    previous: u8,
+}
+
+#[cfg(test)]
+impl Drop for DirectorySyncFaultGuard {
+    fn drop(&mut self) {
+        DIRECTORY_SYNC_FAULT.with(|fault| fault.set(self.previous));
+    }
+}
+
+#[cfg(test)]
+fn arm_directory_sync_fault(kind: u8) -> DirectorySyncFaultGuard {
+    let previous = DIRECTORY_SYNC_FAULT.with(|fault| fault.replace(kind));
+    DirectorySyncFaultGuard { previous }
+}
+
+#[cfg(test)]
+pub(crate) fn fail_staged_directory_sync() -> DirectorySyncFaultGuard {
+    arm_directory_sync_fault(DIRECTORY_SYNC_FAULT_STAGED)
+}
+
+#[cfg(test)]
+pub(crate) fn fail_parent_directory_sync() -> DirectorySyncFaultGuard {
+    arm_directory_sync_fault(DIRECTORY_SYNC_FAULT_PARENT)
+}
+
+#[cfg(test)]
+pub(crate) fn reset_directory_sync_successes() {
+    DIRECTORY_SYNC_SUCCESSES.with(|count| count.set(0));
+}
+
+#[cfg(test)]
+pub(crate) fn directory_sync_successes() -> u32 {
+    DIRECTORY_SYNC_SUCCESSES.with(|count| count.get())
 }
 
 #[cfg(any(test, feature = "__internal-worker-lab"))]
@@ -303,7 +348,7 @@ fn windows_evidence(
 }
 
 impl MaterializationMeta {
-    pub(crate) fn not_started(requested: bool, atomic: bool) -> Self {
+    pub(crate) fn not_started(requested: bool, durability: Durability) -> Self {
         if requested {
             Self {
                 schema: SCHEMA,
@@ -312,7 +357,7 @@ impl MaterializationMeta {
                 stage_mode: stage_mode(),
                 stage_creation_primitive: stage_creation_primitive(),
                 member_resolution: MEMBER_RESOLUTION,
-                durability: durability(atomic),
+                durability: durability_label(durability),
                 publication_primitive: publication_primitive(),
                 outcome: "not-started",
                 cleanup: "not-created",
@@ -338,11 +383,11 @@ impl MaterializationMeta {
     }
 
     pub(crate) fn setup_failed(
-        atomic: bool,
+        durability: Durability,
         cleanup: &'static str,
         windows: Option<WindowsMaterializationEvidence>,
     ) -> Self {
-        let mut report = Self::not_started(true, atomic);
+        let mut report = Self::not_started(true, durability);
         report.outcome = "setup-failed";
         report.cleanup = cleanup;
         report.windows = windows;
@@ -460,6 +505,14 @@ pub(crate) struct CapabilityMaterializer {
     stage_name: PathBuf,
     final_name: PathBuf,
     atomic: bool,
+    /// Selected by [`CapabilityMaterializer::enable_directory_sync`] before
+    /// member writes. The worker record does not gain a field for it.
+    directory_sync: bool,
+    /// Set only after publication when the destination parent could not be
+    /// synced. The receipt then reports `member-sync` instead of
+    /// `directory-sync`.
+    parent_directory_sync_failed: bool,
+    parent_directory_sync_error: Option<Finding>,
     outcome: &'static str,
     cleanup: &'static str,
     windows: Option<WindowsMaterializationEvidence>,
@@ -864,6 +917,9 @@ impl CapabilityMaterializer {
                         stage_name,
                         final_name,
                         atomic,
+                        directory_sync: false,
+                        parent_directory_sync_failed: false,
+                        parent_directory_sync_error: None,
                         outcome: "staged",
                         cleanup: "pending",
                         windows: windows_report,
@@ -912,6 +968,15 @@ impl CapabilityMaterializer {
             ),
             windows_report,
         ))
+    }
+
+    /// Request directory sync for this stage.
+    ///
+    /// Member writes that follow also use member-file sync. Call this before
+    /// those writes. Flush-only and member-sync stages never call it.
+    pub(crate) fn enable_directory_sync(&mut self) {
+        self.directory_sync = true;
+        self.atomic = true;
     }
 
     pub(crate) fn create_directory(&self, parts: &[String], member: &str) -> Result<(), Finding> {
@@ -1002,6 +1067,15 @@ impl CapabilityMaterializer {
                 ));
             }
         }
+        if self.directory_sync
+            && let Err(error) = sync_directory_tree(root)
+        {
+            self.outcome = "publication-failed";
+            return Err(Finding::error(
+                FindingCode::MaterializeCommit,
+                format!("sync staged directories before publication: {error}"),
+            ));
+        }
         if let Err(error) = plant_injected_destination(&self.parent, &self.final_name) {
             self.outcome = "publication-failed";
             return Err(Finding::error(
@@ -1028,6 +1102,15 @@ impl CapabilityMaterializer {
         self.outcome = "committed";
         self.cleanup = "not-applicable-after-commit";
         self.witness = None;
+        if self.directory_sync
+            && let Err(error) = sync_directory(&self.parent, DirectorySyncKind::Parent)
+        {
+            self.parent_directory_sync_failed = true;
+            self.parent_directory_sync_error = Some(Finding::error(
+                FindingCode::MaterializeCommit,
+                format!("sync destination parent after publication: {error}"),
+            ));
+        }
         if let Err(finding) = self.discard_stage_retention_file() {
             self.retention_discard_error = Some(finding);
         }
@@ -1036,6 +1119,10 @@ impl CapabilityMaterializer {
 
     pub(crate) fn take_retention_discard_error(&mut self) -> Option<Finding> {
         self.retention_discard_error.take()
+    }
+
+    pub(crate) fn take_parent_directory_sync_error(&mut self) -> Option<Finding> {
+        self.parent_directory_sync_error.take()
     }
 
     /// Write the stage-retention record to a caller-chosen file.
@@ -1381,7 +1468,7 @@ impl CapabilityMaterializer {
             stage_mode: stage_mode(),
             stage_creation_primitive: stage_creation_primitive(),
             member_resolution: MEMBER_RESOLUTION,
-            durability: durability(self.atomic),
+            durability: self.reported_durability(),
             publication_primitive: publication_primitive(),
             outcome: self.outcome,
             cleanup: self.cleanup,
@@ -2129,8 +2216,132 @@ fn capability_path_exists(dir: &CapDir, path: &Path) -> Result<bool, Finding> {
     }
 }
 
-fn durability(atomic: bool) -> &'static str {
-    if atomic { "member-sync" } else { "flush-only" }
+fn durability_label(durability: Durability) -> &'static str {
+    match durability {
+        Durability::FlushOnly => "flush-only",
+        Durability::MemberSync => "member-sync",
+        Durability::DirectorySync => "directory-sync",
+    }
+}
+
+impl CapabilityMaterializer {
+    fn reported_durability(&self) -> &'static str {
+        if self.directory_sync && !self.parent_directory_sync_failed {
+            "directory-sync"
+        } else if self.atomic {
+            "member-sync"
+        } else {
+            "flush-only"
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+enum DirectorySyncKind {
+    Staged,
+    Parent,
+}
+
+fn sync_directory_tree(dir: &CapDir) -> io::Result<()> {
+    let entries = dir.entries()?;
+    for entry in entries {
+        let entry = entry?;
+        let os_name = entry.file_name();
+        let name = os_name.to_str().ok_or_else(|| {
+            io::Error::new(io::ErrorKind::InvalidData, "staged name is not UTF-8")
+        })?;
+        if name == "." || name == ".." {
+            continue;
+        }
+        let metadata = dir.symlink_metadata(Path::new(name))?;
+        if metadata_is_reparse(&metadata) {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "staged directory sync found a reparse point",
+            ));
+        }
+        if metadata.file_type().is_dir() {
+            let child = dir.open_dir_nofollow(Path::new(name))?;
+            ensure_directory_handle_is_not_reparse(&child)?;
+            sync_directory_tree(&child)?;
+        } else if !metadata.file_type().is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "staged directory sync found a non-file, non-directory entry",
+            ));
+        }
+    }
+    sync_directory(dir, DirectorySyncKind::Staged)
+}
+
+fn sync_directory(dir: &CapDir, kind: DirectorySyncKind) -> io::Result<()> {
+    #[cfg(not(test))]
+    let _ = kind;
+    #[cfg(test)]
+    if injected_directory_sync_failure(kind) {
+        return Err(io::Error::other(match kind {
+            DirectorySyncKind::Staged => "injected staged directory sync failure",
+            DirectorySyncKind::Parent => "injected destination parent sync failure",
+        }));
+    }
+    sync_open_directory(dir)?;
+    #[cfg(test)]
+    DIRECTORY_SYNC_SUCCESSES.with(|count| count.set(count.get().saturating_add(1)));
+    Ok(())
+}
+
+#[cfg(test)]
+fn injected_directory_sync_failure(kind: DirectorySyncKind) -> bool {
+    let fault = DIRECTORY_SYNC_FAULT.with(|fault| fault.get());
+    match kind {
+        DirectorySyncKind::Staged => fault == DIRECTORY_SYNC_FAULT_STAGED,
+        DirectorySyncKind::Parent => fault == DIRECTORY_SYNC_FAULT_PARENT,
+    }
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn sync_open_directory(dir: &CapDir) -> io::Result<()> {
+    // cap-std keeps Linux directory capabilities as `O_PATH`. `fsync` on that
+    // descriptor returns `EBADF`, so reopen `.` without `O_PATH` from the
+    // retained capability and sync that descriptor.
+    let reopened = rustix::fs::openat(
+        dir,
+        ".",
+        rustix::fs::OFlags::RDONLY
+            | rustix::fs::OFlags::DIRECTORY
+            | rustix::fs::OFlags::NOFOLLOW
+            | rustix::fs::OFlags::CLOEXEC,
+        rustix::fs::Mode::empty(),
+    )?;
+    sync_reopened_directory(&reopened)
+}
+
+#[cfg(target_os = "linux")]
+fn sync_reopened_directory(dir: &impl rustix::fd::AsFd) -> io::Result<()> {
+    rustix::fs::fsync(dir).map_err(io::Error::from)
+}
+
+#[cfg(target_os = "macos")]
+fn sync_reopened_directory(dir: &impl rustix::fd::AsFd) -> io::Result<()> {
+    match rustix::fs::fcntl_fullfsync(dir) {
+        Ok(()) => Ok(()),
+        Err(rustix::io::Errno::NOTSUP) => rustix::fs::fsync(dir).map_err(io::Error::from),
+        Err(error) => Err(io::Error::from(error)),
+    }
+}
+
+#[cfg(windows)]
+fn sync_open_directory(dir: &CapDir) -> io::Result<()> {
+    windows::flush_directory(dir)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+fn sync_open_directory(dir: &CapDir) -> io::Result<()> {
+    let _ = dir;
+    Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "directory sync is unsupported",
+    ))
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -2398,6 +2609,7 @@ pub(crate) fn ensure_file_handle_is_not_reparse(file: &CapFile) -> io::Result<()
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Durability;
     use std::io::Write;
 
     fn temp_dest(label: &str) -> PathBuf {
@@ -2427,7 +2639,7 @@ mod tests {
     #[cfg(not(windows))]
     #[test]
     fn non_windows_materialization_reports_never_serialize_windows_evidence() {
-        let not_requested = MaterializationMeta::not_started(false, false);
+        let not_requested = MaterializationMeta::not_started(false, Durability::FlushOnly);
         assert!(
             serde_json::to_value(not_requested)
                 .unwrap()
@@ -2452,7 +2664,8 @@ mod tests {
             Err(error) => error,
         };
         let (_, cleanup, windows) = error.into_parts();
-        let setup_failed = MaterializationMeta::setup_failed(false, cleanup, windows);
+        let setup_failed =
+            MaterializationMeta::setup_failed(Durability::FlushOnly, cleanup, windows);
         assert!(
             serde_json::to_value(setup_failed)
                 .unwrap()
@@ -2748,6 +2961,113 @@ mod tests {
         assert_eq!(materializer.report().cleanup, "removed");
         assert_eq!(materializer.report().durability, "member-sync");
         assert_eq!(materializer.report().outcome, "aborted");
+    }
+
+    #[test]
+    fn existing_durability_modes_do_not_sync_directories() {
+        for atomic in [false, true] {
+            reset_directory_sync_successes();
+            let dest = temp_dest(if atomic { "member-sync" } else { "flush-only" });
+            let mut materializer = CapabilityMaterializer::create(&dest, atomic).unwrap();
+            let mut file = materializer
+                .create_file(&["member.txt".to_owned()])
+                .unwrap();
+            file.write_all(b"member").unwrap();
+            drop(file);
+            materializer.commit().unwrap();
+            assert_eq!(directory_sync_successes(), 0);
+            assert_eq!(
+                materializer.report().durability,
+                if atomic { "member-sync" } else { "flush-only" }
+            );
+            fs::remove_dir_all(dest).unwrap();
+        }
+    }
+
+    #[test]
+    fn directory_sync_counts_each_staged_directory_and_the_parent() {
+        reset_directory_sync_successes();
+        let dest = temp_dest("directory-sync-root");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        materializer.enable_directory_sync();
+        let mut file = materializer
+            .create_file(&["member.txt".to_owned()])
+            .unwrap();
+        file.write_all(b"member").unwrap();
+        drop(file);
+        materializer.commit().unwrap();
+        assert_eq!(directory_sync_successes(), 2);
+        assert_eq!(materializer.report().durability, "directory-sync");
+        assert_eq!(materializer.report().outcome, "committed");
+        assert!(materializer.take_parent_directory_sync_error().is_none());
+        fs::remove_dir_all(dest).unwrap();
+
+        reset_directory_sync_successes();
+        let dest = temp_dest("directory-sync-nested");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        materializer.enable_directory_sync();
+        materializer
+            .create_directory(&["empty".to_owned(), "nested".to_owned()], "empty/nested/")
+            .unwrap();
+        let mut file = materializer
+            .create_file(&[
+                "tree".to_owned(),
+                "branch".to_owned(),
+                "leaf.txt".to_owned(),
+            ])
+            .unwrap();
+        file.write_all(b"leaf").unwrap();
+        drop(file);
+        materializer.commit().unwrap();
+        assert_eq!(directory_sync_successes(), 6);
+        assert_eq!(
+            fs::read(dest.join("tree/branch/leaf.txt")).unwrap(),
+            b"leaf"
+        );
+        assert!(dest.join("empty/nested").is_dir());
+        fs::remove_dir_all(dest).unwrap();
+    }
+
+    #[test]
+    fn staged_directory_sync_failure_does_not_publish() {
+        let dest = temp_dest("directory-sync-stage-failure");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        materializer.enable_directory_sync();
+        let stage_path = materializer.stage_path();
+        let _guard = fail_staged_directory_sync();
+        let error = materializer.commit().unwrap_err();
+        assert_eq!(error.code, FindingCode::MaterializeCommit);
+        assert!(error.detail.contains("sync staged directories"));
+        assert!(!dest.exists());
+        assert!(stage_path.exists());
+        assert_eq!(materializer.report().outcome, "publication-failed");
+        assert_eq!(materializer.report().durability, "directory-sync");
+        drop(_guard);
+        materializer.abort().unwrap();
+        assert!(!stage_path.exists());
+    }
+
+    #[test]
+    fn parent_directory_sync_failure_keeps_the_published_tree() {
+        reset_directory_sync_successes();
+        let dest = temp_dest("directory-sync-parent-failure");
+        let mut materializer = CapabilityMaterializer::create(&dest, false).unwrap();
+        materializer.enable_directory_sync();
+        let mut file = materializer
+            .create_file(&["member.txt".to_owned()])
+            .unwrap();
+        file.write_all(b"member").unwrap();
+        drop(file);
+        let _guard = fail_parent_directory_sync();
+        materializer.commit().unwrap();
+        assert_eq!(fs::read(dest.join("member.txt")).unwrap(), b"member");
+        assert_eq!(materializer.report().outcome, "committed");
+        assert_eq!(materializer.report().durability, "member-sync");
+        assert_eq!(directory_sync_successes(), 1);
+        let finding = materializer.take_parent_directory_sync_error().unwrap();
+        assert_eq!(finding.code, FindingCode::MaterializeCommit);
+        assert!(finding.detail.contains("sync destination parent"));
+        fs::remove_dir_all(dest).unwrap();
     }
 
     #[test]
@@ -3056,7 +3376,7 @@ mod tests {
                 .iter()
                 .any(|finding| finding.code == FindingCode::MaterializeUnsafeStage)
         );
-        let report = MaterializationMeta::setup_failed(false, cleanup, evidence);
+        let report = MaterializationMeta::setup_failed(Durability::FlushOnly, cleanup, evidence);
         let serialized = serde_json::to_value(&report).unwrap();
         assert_eq!(serialized["schema"], "sealr.materialization.v2");
         assert_eq!(serialized["windows"]["stage_acl"], "verification-failed");
@@ -3081,7 +3401,7 @@ mod tests {
         assert_eq!(findings.len(), 1);
         assert_eq!(findings[0].code, FindingCode::MaterializeExists);
         assert_eq!(cleanup, "not-created");
-        let report = MaterializationMeta::setup_failed(false, cleanup, evidence);
+        let report = MaterializationMeta::setup_failed(Durability::FlushOnly, cleanup, evidence);
         let serialized = serde_json::to_value(&report).unwrap();
         assert_eq!(serialized["windows"]["stage_acl"], "not-created");
         let evidence = report.windows.unwrap();
