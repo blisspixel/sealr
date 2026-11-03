@@ -79,10 +79,10 @@ pub(super) const PUBLICATION_PRIMITIVE: &str =
 
 pub(super) fn flush_directory(dir: &CapDir) -> io::Result<()> {
     // Retained directory capabilities are not opened for write, and the stage
-    // root has delete access without sharing delete. Reopen `.` for write,
-    // share delete so this handle can sit beside that stage, and flush the
-    // reopened handle. `FlushFileBuffers` on the retained handle itself fails
-    // with an access or sharing error.
+    // root has delete access without sharing delete. Reopen that same object
+    // for write, share delete so this handle can sit beside the stage, and
+    // flush the reopened handle. `FlushFileBuffers` on the retained handle
+    // itself fails with an access or sharing error.
     let reopened = reopen_directory_for_flush(dir)?;
     let flushed = unsafe { FlushFileBuffers(reopened.as_raw_handle()) };
     if flushed == 0 {
@@ -93,12 +93,12 @@ pub(super) fn flush_directory(dir: &CapDir) -> io::Result<()> {
 }
 
 fn reopen_directory_for_flush(dir: &CapDir) -> io::Result<OwnedHandle> {
-    // `.` is one UTF-16 unit, so the NT name length is two bytes.
-    let mut name = [u16::from(b'.')];
+    // An empty name reopens `RootDirectory` itself. A `.` lookup is a
+    // different call and can fail on a directory handle.
     let unicode_name = UNICODE_STRING {
-        Length: 2,
-        MaximumLength: 2,
-        Buffer: name.as_mut_ptr(),
+        Length: 0,
+        MaximumLength: 0,
+        Buffer: ptr::null_mut(),
     };
     let attributes = OBJECT_ATTRIBUTES {
         Length: u32::try_from(size_of::<OBJECT_ATTRIBUTES>()).expect("structure size fits u32"),
