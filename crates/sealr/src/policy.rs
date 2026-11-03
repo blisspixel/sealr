@@ -67,7 +67,8 @@ fn is_false(value: &bool) -> bool {
 /// Durability requested before publication.
 ///
 /// Every mode uses private staging and native no-replace publication. None
-/// guarantees crash recovery or power-loss durability. `FlushOnly` and
+/// is a power-loss guarantee, and none adds a crash-recovery policy field.
+/// Process death at the rename is a separate contract. `FlushOnly` and
 /// `MemberSync` preserve the historical policy JSON `atomic` field.
 /// `DirectorySync` is a separate v12 selection.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

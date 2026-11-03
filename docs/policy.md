@@ -38,8 +38,11 @@ assert_eq!(validated.policy().durability(), Durability::MemberSync);
 | `Durability::DirectorySync` | Flush and sync each completed member file before publication | Sync every staged directory, then the destination parent | `directory-sync` when both directory phases succeed. After a successful rename, a failed parent sync reports `member-sync` and a finding. |
 
 All three modes stage members privately and publish with the same native no-replace
-operation. None guarantees crash recovery or power-loss durability. Inspection
-performs no materialization and reports durability `none`.
+operation. None of these selections is a crash-recovery mode or a power-loss
+guarantee. Process death at the no-replace rename is the separate
+[publication-crash contract](publication-crash.md). It does not add a policy
+field or a receipt string. Inspection performs no materialization and reports
+durability `none`.
 
 `FlushOnly` and `MemberSync` read and write the existing `atomic` field:
 `FlushOnly` maps to `false`, and `MemberSync` maps to `true`. Their canonical
@@ -235,8 +238,8 @@ Its exact digest is `afa0aeb04ceca00706b31dfd250216a87f2af0ada6e98d3815873de0d15
 | `max_metadata_bytes` | Bounds format-specific structural metadata. For ZIP this includes the central directory, EOCD comment, and referenced local name and extra bytes. For raw ustar it bounds admitted headers before trailing zero record padding is scanned. For every gzip-, zstd-, xz-, or bzip2-wrapped selection it cumulatively bounds the wrapper's structural bytes (headers, trailers, for xz the block headers, padding, checks, index, and footer, and for bzip2 the bit-granular block frames and padded footer rounded up to whole bytes) plus the inner dialect's structural metadata. For the 7z container it bounds the signature plus next header before the header is read. For raw PAX it additionally includes every extension payload and its zero padding; for raw GNU long-name it includes every carrier header and payload. |
 | `overwrite` | Existing destinations are refused. Replacement is not implemented even if a caller mutates this field. |
 | `encrypted` | Only `"deny"` compiles. Admission rejects traditional encryption bit 0, strong-encryption bit 6, and masked-header bit 13 even when LFH and CDH flags agree. |
-| `atomic` | Historical JSON and Rust backing field for flush-only and member-file sync. `false` selects `Durability::FlushOnly`; `true` without `directory_sync` selects `Durability::MemberSync`. Both modes retain private staging and native no-replace publication. The field and its position remain unchanged to preserve existing policy bytes and digests. Neither mode implements directory syncing, crash recovery, or power-loss durability. |
-| `directory_sync` | Optional JSON field after `atomic`, omitted when false. Valid only on policy v12, and only when `atomic` is `true`. `true` selects `Durability::DirectorySync`. A present value on v1 through v11 is `policy.unsupported`. The supervisor syncs staged directories before publication and the destination parent after the rename. A failed parent sync does not claim `directory-sync`. This is not crash recovery or power-loss durability. |
+| `atomic` | Historical JSON and Rust backing field for flush-only and member-file sync. `false` selects `Durability::FlushOnly`; `true` without `directory_sync` selects `Durability::MemberSync`. Both modes retain private staging and native no-replace publication. The field and its position remain unchanged to preserve existing policy bytes and digests. Neither mode implements directory syncing or power-loss durability. Process death at publication is `sealr.publication-crash.v1`, not a change to these modes. |
+| `directory_sync` | Optional JSON field after `atomic`, omitted when false. Valid only on policy v12, and only when `atomic` is `true`. `true` selects `Durability::DirectorySync`. A present value on v1 through v11 is `policy.unsupported`. The supervisor syncs staged directories before publication and the destination parent after the rename. A failed parent sync does not claim `directory-sync`. This selection is not power-loss durability. Process death around the rename is the separate publication-crash contract. |
 
 ## Reserved fields
 

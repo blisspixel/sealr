@@ -31,7 +31,9 @@ historical `atomic` field. Their policy JSON, worker encoding, and existing
 policy digests remain compatible. `DirectorySync` is a v12 selection. It adds
 an omitted-when-false `directory_sync` field, syncs directories in the
 supervisor, and leaves the worker's one member-sync byte unchanged. None of
-the modes guarantees crash recovery or power-loss durability. `ValidatedPolicy` remains
+the modes is a crash-recovery selection or a power-loss guarantee. Process
+death at the rename is [publication-crash.md](publication-crash.md) and does
+not change these modes. `ValidatedPolicy` remains
 immutable, so changing a selection after validation requires taking its policy
 and validating the changed value again. See [policy durability](policy.md#named-durability-controls).
 

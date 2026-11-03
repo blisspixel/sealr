@@ -28,7 +28,8 @@ Start with the [getting started guide](getting-started.md) and [illustrated CLI 
 |---|---|
 | [Implementation and security boundary](implementation.md) | Current implementation, measured evidence, limits, and research basis |
 | [Safety specification](safety.md) | Normative safety rules |
-| [Abandoned stage ownership](abandoned-stage.md) | Retained-capability ownership, current cleanup evidence, and the unimplemented recovery rule |
+| [Abandoned stage ownership](abandoned-stage.md) | Retained-capability ownership, cleanup evidence, and recovery of one presented stage |
+| [Publication crash](publication-crash.md) | Process death immediately before and after the no-replace rename |
 | [Threat model](threat-model.md) | Adversaries, exclusions, and parser-differential threats |
 | [Invariants](invariants.md) | Properties that implementation and evidence must preserve |
 | [Assurance](assurance.md) | Current evidence and the layered verification program |

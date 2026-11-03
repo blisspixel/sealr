@@ -14,13 +14,13 @@ pwsh -NoProfile -File scripts/generate_tcb_report.ps1
 
 | Measurement | Value |
 |---|---|
-| Runtime Rust lines (crates/sealr/src) | 47222 |
-| In-crate test lines | 20272 |
+| Runtime Rust lines (crates/sealr/src) | 47248 |
+| In-crate test lines | 20419 |
 | `unsafe` uses in runtime code | 57 |
 | `unsafe` uses in test code | 13 |
 | `extern "C"` blocks in runtime code | 1 |
 | Panic sites in runtime code (`.unwrap(`, `.expect(`, `panic!(`, `unreachable!(`) | 315 |
-| Panic sites in test code | 1446 |
+| Panic sites in test code | 1469 |
 
 ## Unsafe code
 
@@ -37,7 +37,7 @@ The parsing, verification, and identity path — every module that interprets un
 
 | Pattern | Runtime | Test |
 |---|---|---|
-| `.unwrap(` | 150 | 1285 |
+| `.unwrap(` | 150 | 1308 |
 | `.expect(` | 136 | 108 |
 | `panic!(` | 17 | 50 |
 | `unreachable!(` | 12 | 3 |
@@ -79,7 +79,7 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 
 | File | Runtime lines | Test lines | Runtime `unsafe` | Runtime panic sites |
 |---|---|---|---|---|
-| `crates/sealr/src/apply.rs` | 5714 | 2636 | 0 | 53 |
+| `crates/sealr/src/apply.rs` | 5714 | 2783 | 0 | 53 |
 | `crates/sealr/src/bzip2.rs` | 892 | 205 | 0 | 3 |
 | `crates/sealr/src/canonical_json.rs` | 175 | 133 | 0 | 0 |
 | `crates/sealr/src/covering.rs` | 3182 | 1084 | 0 | 11 |
@@ -92,12 +92,12 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/ir.rs` | 3492 | 281 | 0 | 16 |
 | `crates/sealr/src/jail.rs` | 375 | 185 | 0 | 4 |
 | `crates/sealr/src/lib.rs` | 233 | 0 | 0 | 0 |
-| `crates/sealr/src/materialize.rs` | 2608 | 1506 | 0 | 0 |
+| `crates/sealr/src/materialize.rs` | 2633 | 1506 | 0 | 0 |
 | `crates/sealr/src/materialize/apple.rs` | 33 | 39 | 3 | 0 |
 | `crates/sealr/src/materialize/windows.rs` | 961 | 69 | 41 | 8 |
 | `crates/sealr/src/outcome.rs` | 265 | 78 | 0 | 0 |
 | `crates/sealr/src/phase_trace.rs` | 144 | 76 | 0 | 0 |
-| `crates/sealr/src/policy.rs` | 1049 | 894 | 0 | 1 |
+| `crates/sealr/src/policy.rs` | 1050 | 894 | 0 | 1 |
 | `crates/sealr/src/quota.rs` | 82 | 51 | 0 | 0 |
 | `crates/sealr/src/ratio.rs` | 75 | 99 | 0 | 0 |
 | `crates/sealr/src/semantic_record.rs` | 4711 | 4032 | 0 | 45 |
