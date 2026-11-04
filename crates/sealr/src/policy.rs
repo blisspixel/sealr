@@ -864,7 +864,7 @@ fn static_vocabulary(field: &'static str, value: &str) -> Result<&'static str, F
 }
 
 /// Caller-authored policy data exactly as parsed from JSON, before any
-/// validation. This is the only deserializable policy shape: unknown fields
+/// validation. This preserves the original construction API: unknown fields
 /// are rejected, every field is required except the one field the canonical
 /// encoding makes conditional, and nothing here is usable for admission until
 /// [`PolicyDocument::validate`] proves it.
@@ -896,6 +896,85 @@ pub struct PolicyDocument {
     /// Historical JSON field retained for canonical policy compatibility.
     /// Rust callers can use [`PolicyDocument::set_durability`] before validation.
     pub atomic: bool,
+}
+
+impl PolicyDocument {
+    /// Read the requested durability before validating this document.
+    pub const fn durability(&self) -> Durability {
+        Durability::from_member_sync(self.atomic)
+    }
+
+    /// Select member-file durability before validating this document.
+    ///
+    /// This changes only the historical `atomic` backing field. The document
+    /// still requires [`PolicyDocument::validate`] before use for admission.
+    ///
+    /// # Panics
+    ///
+    /// Panics for `DirectorySync`, which this legacy shape cannot represent.
+    /// Convert with [`PolicyDocumentV12::from`] before selecting that mode.
+    pub fn set_durability(&mut self, durability: Durability) {
+        assert!(
+            !matches!(durability, Durability::DirectorySync),
+            "DirectorySync requires PolicyDocumentV12"
+        );
+        self.atomic = durability.member_sync();
+    }
+
+    /// Select member-file durability while building this unvalidated document.
+    pub fn with_durability(mut self, durability: Durability) -> Self {
+        self.set_durability(durability);
+        self
+    }
+
+    /// Validate the document into a policy whose validity and digest are
+    /// proven, or fail closed with a typed finding.
+    ///
+    /// Validation maps every string field onto the exact supported vocabulary,
+    /// reconstructs the canonical [`Policy`], proves it compiles, and bounds
+    /// every cap to the double-safe integer ceiling. The resulting digest is
+    /// the canonical policy digest: a document that used non-canonical JSON
+    /// spelling (for example an explicit `null` for the conditional field)
+    /// still validates to the same canonical policy and digest.
+    pub fn validate(self) -> Result<ValidatedPolicy, Finding> {
+        PolicyDocumentV12::from(self).validate()
+    }
+}
+
+/// Caller-authored policy data exactly as parsed from JSON, before any
+/// validation. This versioned superset accepts v1 through v12 JSON: unknown fields
+/// are rejected, every field is required except the one field the canonical
+/// encoding makes conditional, and nothing here is usable for admission until
+/// [`PolicyDocumentV12::validate`] proves it.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields)]
+#[non_exhaustive]
+pub struct PolicyDocumentV12 {
+    pub schema: String,
+    pub id: String,
+    pub formats: Vec<String>,
+    pub max_archive_bytes: u64,
+    #[serde(default)]
+    pub max_derived_archive_bytes: Option<u64>,
+    pub max_files: u64,
+    pub max_member_bytes: u64,
+    pub max_total_bytes: u64,
+    pub max_ratio: Option<u64>,
+    pub max_path_depth: u32,
+    pub max_metadata_bytes: u64,
+    pub max_dict_bytes: u64,
+    pub symlinks: String,
+    pub hardlinks: String,
+    pub overwrite: String,
+    pub setuid: String,
+    pub nested_depth: u32,
+    pub ambiguity: String,
+    pub case_fold_collision: String,
+    pub magic_vs_extension: String,
+    pub encrypted: String,
+    /// Historical JSON field retained for canonical policy compatibility.
+    /// Rust callers can use [`PolicyDocumentV12::set_durability`] before validation.
+    pub atomic: bool,
     /// Present only when the caller wrote `directory_sync`. Absence means
     /// false on every schema. A present value is valid only for
     /// `sealr.policy.v12`, including explicit `false`.
@@ -903,7 +982,7 @@ pub struct PolicyDocument {
     pub directory_sync: Option<bool>,
 }
 
-impl PolicyDocument {
+impl PolicyDocumentV12 {
     /// Read the requested durability before validating this document.
     pub const fn durability(&self) -> Durability {
         if matches!(self.directory_sync, Some(true)) {
@@ -917,7 +996,7 @@ impl PolicyDocument {
     ///
     /// `FlushOnly` and `MemberSync` leave `directory_sync` absent so v1
     /// through v11 documents stay valid. `DirectorySync` records the field
-    /// and still requires [`PolicyDocument::validate`].
+    /// and still requires [`PolicyDocumentV12::validate`].
     pub fn set_durability(&mut self, durability: Durability) {
         self.atomic = durability.member_sync();
         self.directory_sync = if durability.directory_sync() {
@@ -982,6 +1061,36 @@ impl PolicyDocument {
             directory_sync,
         };
         ValidatedPolicy::new(policy)
+    }
+}
+
+impl From<PolicyDocument> for PolicyDocumentV12 {
+    fn from(document: PolicyDocument) -> Self {
+        Self {
+            schema: document.schema,
+            id: document.id,
+            formats: document.formats,
+            max_archive_bytes: document.max_archive_bytes,
+            max_derived_archive_bytes: document.max_derived_archive_bytes,
+            max_files: document.max_files,
+            max_member_bytes: document.max_member_bytes,
+            max_total_bytes: document.max_total_bytes,
+            max_ratio: document.max_ratio,
+            max_path_depth: document.max_path_depth,
+            max_metadata_bytes: document.max_metadata_bytes,
+            max_dict_bytes: document.max_dict_bytes,
+            symlinks: document.symlinks,
+            hardlinks: document.hardlinks,
+            overwrite: document.overwrite,
+            setuid: document.setuid,
+            nested_depth: document.nested_depth,
+            ambiguity: document.ambiguity,
+            case_fold_collision: document.case_fold_collision,
+            magic_vs_extension: document.magic_vs_extension,
+            encrypted: document.encrypted,
+            atomic: document.atomic,
+            directory_sync: None,
+        }
     }
 }
 
@@ -1905,7 +2014,7 @@ mod tests {
                 .insert("directory_sync".into(), serde_json::json!(false));
             value["schema"] = serde_json::json!(policy.schema);
             value["id"] = serde_json::json!(policy.id);
-            let document: PolicyDocument = serde_json::from_value(value).unwrap();
+            let document: PolicyDocumentV12 = serde_json::from_value(value).unwrap();
             assert_eq!(
                 document.validate().unwrap_err().code,
                 FindingCode::PolicyUnsupported
@@ -1934,7 +2043,7 @@ mod tests {
             .as_object_mut()
             .unwrap()
             .insert("directory_sync".into(), serde_json::json!(false));
-        let validated = serde_json::from_value::<PolicyDocument>(explicit_false)
+        let validated = serde_json::from_value::<PolicyDocumentV12>(explicit_false)
             .unwrap()
             .validate()
             .unwrap();

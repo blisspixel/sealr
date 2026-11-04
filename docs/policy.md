@@ -4,7 +4,13 @@ Policy is an input to `apply()` and is bound into every receipt by id and SHA-25
 
 The implemented pre-release schemas are `sealr.policy.v1` through
 `sealr.policy.v12`. Rust callers may use the versioned `Policy` constructors or
-deserialize the closed `PolicyDocument` shape and call `validate()`.
+deserialize the closed `PolicyDocumentV12` shape and call `validate()`.
+The original `PolicyDocument` retains its exhaustive struct construction API
+and historical fields. Convert it with `PolicyDocumentV12::from(document)`
+before selecting directory sync. Both types reject unknown JSON fields.
+The legacy durability setters support `FlushOnly` and `MemberSync`; passing
+`DirectorySync` to a legacy setter panics rather than silently weakening the
+requested durability. The versioned type supports all three modes.
 `PolicyDocument` rejects unknown fields, unsupported schemas and vocabulary,
 noncanonical format sets, and caps above the double-safe integer ceiling before
 producing a `ValidatedPolicy`. The CLI `--policy` path applies that same

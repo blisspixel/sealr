@@ -96,7 +96,8 @@ member-read authority.
 Alpha.17 also adds [named durability controls](policy.md#named-durability-controls)
 on `Policy` and `PolicyDocument`, preserving the historical `atomic` encoding
 and its existing member-sync behavior. `Durability::DirectorySync` is separate:
-it is valid only on policy v12, syncs staged directories and the destination
+use `PolicyDocumentV12` for its JSON/document representation. It is valid
+only on policy v12, syncs staged directories and the destination
 parent, and does not add a crash-recovery mode or power-loss guarantees.
 `FlushOnly` and `MemberSync` do not sync directories. A failed cleanup can return
 `Outcome::stage_retention`, a separate `sealr.stage-retention.v1` record.

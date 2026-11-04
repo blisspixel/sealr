@@ -7,7 +7,7 @@ use std::process::ExitCode;
 
 use clap::{Args, ColorChoice, Parser, Subcommand};
 use sealr::{
-    ApplyOptions, Finding, FindingCode, LinuxWorker, Outcome, Policy, PolicyDocument, Request,
+    ApplyOptions, Finding, FindingCode, LinuxWorker, Outcome, Policy, PolicyDocumentV12, Request,
     SevenZInterpretationProfile, Source, TarBzip2InterpretationProfile,
     TarGnuLongNameInterpretationProfile, TarGzipInterpretationProfile, TarInterpretationProfile,
     TarPaxInterpretationProfile, TarXzInterpretationProfile, TarZstdInterpretationProfile,
@@ -581,7 +581,7 @@ fn load_policy(path: &Path) -> Result<Policy, SetupFailure> {
             ));
         }
     };
-    let document: PolicyDocument = match serde_json::from_slice(&bytes) {
+    let document: PolicyDocumentV12 = match serde_json::from_slice(&bytes) {
         Ok(document) => document,
         Err(error) => {
             return Err(refuse(

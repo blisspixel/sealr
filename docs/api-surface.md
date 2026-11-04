@@ -13,7 +13,7 @@ Everything supported flows through the crate root's re-exports plus the two publ
 | Findings | `Finding`, `FindingCode`, `Severity` |
 | IR and per-format evidence | `ArchiveIR`, `IrMember`, `ByteRange`, the per-format `*Evidence`/`*Covering` records, the eight `*InterpretationProfile` selections, the per-profile `*_canonical_bytes`/`*_digest` function pairs, and the `*_SCHEMA` and profile-id constants |
 | Identity | `content_root`, `layout_root`, the eleven `encode_*_layout` functions, `OutcomeIdentities`, `TreeRoot`, and the `TREE_ENCODING_*` ids |
-| Policy | `Policy` (non-exhaustive; constructed through the versioned defaults or a validated document), `PolicyDocument`, their `durability`, `set_durability`, and `with_durability` methods, `Durability` (`FlushOnly`, `MemberSync`, `DirectorySync`), `ValidatedPolicy`, `CompiledControls`, `ResourceBudget`, the `POLICY_FORMAT_*` constants, and the stable utilities `hex_sha256` and `ratio_exceeds` |
+| Policy | `Policy` (non-exhaustive; constructed through the versioned defaults or a validated document), `PolicyDocument`, `PolicyDocumentV12`, their `durability`, `set_durability`, and `with_durability` methods, `Durability` (`FlushOnly`, `MemberSync`, `DirectorySync`), `ValidatedPolicy`, `CompiledControls`, `ResourceBudget`, the `POLICY_FORMAT_*` constants, and the stable utilities `hex_sha256` and `ratio_exceeds` |
 | Path jail | `jail_name`, `jail_relative`, `join_under_dest`, `JailedName`, and the two portable-name bound constants |
 | Capability | `VerifiedArchive` (including `read_member` and `read_member_prefix`), `RetentionPlan`, `RetentionStatus`, `MemberReadError` and kind, `RetentionPlanError` and kind, and the three retention bound constants |
 | Supervision | `apply_supervised`, `inspect_supervised`, `LinuxWorker`, `SupervisionError` and kind |
@@ -46,3 +46,8 @@ controls preserve the existing serialized policy language. The
 [migration manifest](../tests/package-contract/consumer-migrations.json) binds
 the exact public cases. These tests close those replacement rows without
 declaring an API freeze or stronger lifecycle guarantees.
+
+`PolicyDocument` keeps its original fields for exhaustive Rust literals. The
+non-exhaustive `PolicyDocumentV12` adds `directory_sync` and accepts all supported
+JSON schemas. Convert a legacy document before selecting `DirectorySync`; the
+legacy setter rejects that unrepresentable mode rather than downgrading it.
