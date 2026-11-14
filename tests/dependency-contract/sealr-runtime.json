@@ -20,7 +20,7 @@
     {
       "target": "aarch64-apple-darwin",
       "package_count": 54,
-      "graph_sha256": "e1a86ef6c06493d2f3b9ad5090857a4d10c10df78041b10310d00f7cffa05a5d",
+      "graph_sha256": "8c2308999142c406944e8840e07ba3fff5c30d1b3dfd4a8f88ec36536fd93dd6",
       "direct_dependencies": [
         "bzip2",
         "cap_fs_ext",
@@ -110,7 +110,7 @@
     {
       "target": "x86_64-unknown-linux-gnu",
       "package_count": 56,
-      "graph_sha256": "9459523e18aa0ab91c0143a516d29d0b5df832bdd6d9058f50bc108186376a10",
+      "graph_sha256": "db15715f784165dfe5b97205c2c912bde7ae10914ec1eb14d35048a4ba771e29",
       "direct_dependencies": [
         "bzip2",
         "cap_fs_ext",

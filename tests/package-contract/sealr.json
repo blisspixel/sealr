@@ -104,6 +104,7 @@
     "tests/durability_migration.rs",
     "tests/evidence_encoding.rs",
     "tests/golden_identity.rs",
+    "tests/policy_document_compatibility.rs",
     "tests/public_api.rs",
     "tests/sevenz_public_api.rs",
     "tests/support/wheel_producers.rs",

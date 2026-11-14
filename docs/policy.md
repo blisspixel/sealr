@@ -4,10 +4,11 @@ Policy is an input to `apply()` and is bound into every receipt by id and SHA-25
 
 The implemented pre-release schemas are `sealr.policy.v1` through
 `sealr.policy.v12`. Rust callers may use the versioned `Policy` constructors or
-deserialize the closed `PolicyDocument` shape and call `validate()`.
-`PolicyDocument` rejects unknown fields, unsupported schemas and vocabulary,
-noncanonical format sets, and caps above the double-safe integer ceiling before
-producing a `ValidatedPolicy`. The CLI `--policy` path applies that same
+deserialize `PolicyDocumentV12` and call `validate()`. `PolicyDocument` keeps
+the original exhaustive fields and accepts the same JSON only when
+`directory_sync` is absent. Both document types reject unknown fields,
+unsupported schemas and vocabulary, noncanonical format sets, and caps above
+the double-safe integer ceiling before producing a `ValidatedPolicy`. The CLI `--policy` path applies that same
 validation before archive access. The validated policy retains the caller's
 explicit id and memoizes the digest of Sealr's deterministic declaration-order
 serialization. That digest is not yet an RFC 8785 cross-encoder policy promise,
@@ -55,12 +56,17 @@ planning record still stores one member-sync byte; directory sync is performed
 by the supervisor. There is no independent operation-options override and no
 CLI flag.
 
-`PolicyDocument` accepts the historical JSON `atomic` field. An additional or
-replacement JSON `durability` key is rejected as an unknown field. A Rust caller
-may select a mode on a parsed document before calling `validate()`; this does
-not bypass any policy validation. `ValidatedPolicy` remains immutable. To change
-a validated selection, take the policy with `into_policy()`, change its mode,
-and call `ValidatedPolicy::new()` to validate and compute the new digest.
+`PolicyDocument` accepts the historical JSON `atomic` field and does not have
+a `directory_sync` field. `PolicyDocumentV12` accepts that same document plus
+the optional `directory_sync` field. An additional or replacement JSON
+`durability` key is rejected as an unknown field on both types. A Rust caller
+may select `FlushOnly` or `MemberSync` on either parsed document before calling
+`validate()`. `DirectorySync` is selected on `PolicyDocumentV12`. Passing it to
+`PolicyDocument::set_durability` or `with_durability` panics instead of keeping
+only member sync. This does not bypass any policy validation.
+`ValidatedPolicy` remains immutable. To change a validated selection, take the
+policy with `into_policy()`, change its mode, and call `ValidatedPolicy::new()`
+to validate and compute the new digest.
 
 The four public [durability migration tests](../crates/sealr/tests/durability_migration.rs)
 bind these selections to legacy encoding parity across all supported schemas,

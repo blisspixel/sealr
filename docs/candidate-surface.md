@@ -296,9 +296,11 @@ requires its own policy and migration contract.
 changing `FlushOnly`, `MemberSync`, v1 through v11 policy bytes, or the worker
 record's single member-sync byte. The selection is valid only on
 `sealr.policy.v12`. Canonical JSON adds `directory_sync` after `atomic` and
-omits it when false. A present `directory_sync` value on v1 through v11 is
-rejected, including explicit `false`. `directory_sync` without member-file sync
-is rejected. The default v12 digest is
+omits it when false. The Rust field lives on non-exhaustive
+`PolicyDocumentV12`. `PolicyDocument` keeps its baseline fields and exhaustive
+construction. A present `directory_sync` value on v1 through v11 is rejected,
+including explicit `false`. `directory_sync` without member-file sync is
+rejected. The default v12 digest is
 `ed075c44695ee5d0bedeb66c8eef87a05decf5850e91b6c6995704c9d1ba9076`. The
 directory-sync digest of that same default is
 `e7f469f14f0bdfdad481b3971e2be89a079905de825cf2003a0b1d5d45627b7b`.
