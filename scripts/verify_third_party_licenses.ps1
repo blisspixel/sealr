@@ -35,7 +35,7 @@ $expected = [ordered]@{
         Notices = 11
         Present = @(
             'errno 0.3.14',
-            'rustix 1.1.4',
+            'rustix 1.1.6',
             'libc 0.2.189',
             'lzma-rust2 0.25.0',
             'bzip2 0.6.1',
@@ -54,7 +54,7 @@ $expected = [ordered]@{
             'bzip2 0.6.1',
             'libbz2-rs-sys 0.2.5'
         )
-        Absent = @('rustix 1.1.4', 'libc 0.2.189', 'errno 0.3.14')
+        Absent = @('rustix 1.1.6', 'libc 0.2.189', 'errno 0.3.14')
     }
 }
 $targetRoot = [System.IO.Path]::GetFullPath((Join-Path $workspace 'target'))
