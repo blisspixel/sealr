@@ -14,7 +14,7 @@ UntrustedArchive x Policy
 Three decisions recorded ahead of the public API freeze:
 
 - `Request` is deliberately an exhaustive three-field struct — `source`, `policy`, `dest` — and stays that shape permanently. Every future operation input arrives through `ApplyOptions`, which grows additively behind builder methods. Freezing the literal-constructible request is the contract; callers may rely on `Request { source, policy, dest }` construction forever.
-- `Policy` is non-exhaustive. The supported construction pattern is the versioned default constructors plus field mutation (or a validated `PolicyDocument`); the reserved-fields discipline anticipates additive fields, and a literal `Policy` construction outside the crate was never the supported pattern.
+- `Policy` is non-exhaustive. The supported construction pattern is the versioned default constructors plus field mutation (or a validated `PolicyDocument` or `PolicyDocumentV12`); the reserved-fields discipline anticipates additive fields, and a literal `Policy` construction outside the crate was never the supported pattern. `PolicyDocument` stays exhaustively constructible with its baseline fields. `PolicyDocumentV12` is non-exhaustive and is the document shape that carries `directory_sync`.
 - `hex_sha256` and `ratio_exceeds` remain deliberate root-level utilities: external evidence tooling (including the frozen research laboratory) consumes them, and they are stable, dependency-free, and semantically frozen alongside the digests they reproduce.
 
 Error types expose accessors, not public fields; `RealizationIdentityError` now matches `MemberReadError` and `RetentionPlanError` with `code()`, `detail()`, and `path()`.
@@ -96,7 +96,8 @@ member-read authority.
 Alpha.17 also adds [named durability controls](policy.md#named-durability-controls)
 on `Policy` and `PolicyDocument`, preserving the historical `atomic` encoding
 and its existing member-sync behavior. `Durability::DirectorySync` is separate:
-it is valid only on policy v12, syncs staged directories and the destination
+its JSON and document representation is `PolicyDocumentV12`. It is valid only
+on policy v12, syncs staged directories and the destination
 parent, and does not add a crash-recovery mode or power-loss guarantees.
 `FlushOnly` and `MemberSync` do not sync directories. A failed cleanup can return
 `Outcome::stage_retention`, a separate `sealr.stage-retention.v1` record.

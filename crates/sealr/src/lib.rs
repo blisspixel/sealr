@@ -215,8 +215,8 @@ pub use policy::{
     POLICY_FORMAT_TAR_GNU_LONGNAME, POLICY_FORMAT_TAR_GZIP_GNU_LONGNAME,
     POLICY_FORMAT_TAR_GZIP_PAX, POLICY_FORMAT_TAR_GZIP_USTAR, POLICY_FORMAT_TAR_PAX,
     POLICY_FORMAT_TAR_USTAR, POLICY_FORMAT_TAR_XZ_USTAR, POLICY_FORMAT_TAR_ZSTD_USTAR,
-    POLICY_FORMAT_ZIP, POLICY_FORMAT_ZIP64, Policy, PolicyDocument, ResourceBudget,
-    ValidatedPolicy, hex_sha256, ratio_exceeds,
+    POLICY_FORMAT_ZIP, POLICY_FORMAT_ZIP64, Policy, PolicyDocument, PolicyDocumentV12,
+    ResourceBudget, ValidatedPolicy, hex_sha256, ratio_exceeds,
 };
 pub use snapshot::SnapshotKind;
 pub use stage_witness::{

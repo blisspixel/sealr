@@ -1772,6 +1772,31 @@ fn a_policy_file_that_does_not_authorize_the_selected_format_rejects_with_eviden
 }
 
 #[test]
+fn versioned_policy_input_retains_directory_sync_identity() {
+    let run = RunDirectory::create("policy-v12-directory-sync");
+    let archive = run.path.join("mission.tar");
+    write_tar_fixture(&archive);
+    let policy = sealr::Policy::default_v12().with_durability(sealr::Durability::DirectorySync);
+    let policy_path = run.path.join("v12.json");
+    fs::write(&policy_path, serde_json::to_vec(&policy).unwrap()).unwrap();
+    let output = sealr(&[
+        Path::new("--format"),
+        Path::new("tar-ustar"),
+        &archive,
+        Path::new("--policy"),
+        &policy_path,
+    ]);
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let receipt = json(&output.stderr, "stderr");
+    assert_eq!(receipt["policy"]["digest"]["sha256"], policy.digest_hex());
+}
+
+#[test]
 fn invalid_policy_files_are_refused_before_any_evaluation() {
     let (run, fixtures) = fixture_set("policy-file-invalid");
 
