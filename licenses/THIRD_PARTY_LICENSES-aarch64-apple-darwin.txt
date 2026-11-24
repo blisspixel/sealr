@@ -182,7 +182,7 @@ quote 1.0.47
 Declared license: MIT OR Apache-2.0
 Source: https://github.com/dtolnay/quote
 
-rustix 1.1.4
+rustix 1.1.6
 Declared license: Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT
 Source: https://github.com/bytecodealliance/rustix
 
@@ -1992,7 +1992,7 @@ Used by:
 - io-lifetimes 2.0.4
 - io-lifetimes 3.0.1
 - once_cell 1.21.4
-- rustix 1.1.4
+- rustix 1.1.6
 - unicode-normalization 0.1.25
 - unicode-width 0.2.2
 
@@ -3324,7 +3324,7 @@ is licensed under:
 at your option.
 
 ===============================================================================
-rustix@1.1.4 / COPYRIGHT
+rustix@1.1.6 / COPYRIGHT
 Original SHA-256: 377c2e7c53250cc5905c0b0532d35973392af16ffb9596a41d99d202cf3617c9
 ===============================================================================
 

@@ -33,7 +33,7 @@ use sealr::{
     POLICY_FORMAT_TAR_PAX, POLICY_FORMAT_TAR_USTAR, POLICY_FORMAT_TAR_XZ_USTAR,
     POLICY_FORMAT_TAR_ZSTD_USTAR, POLICY_FORMAT_ZIP, POLICY_FORMAT_ZIP64,
     PORTABLE_NAME_MAX_COMPONENT_UTF8_BYTES, PORTABLE_NAME_MAX_COMPONENT_UTF16_UNITS, Policy,
-    PolicyDocument, PolicyMeta, Receipt, Request, ResourceBudget, RetentionPlan,
+    PolicyDocument, PolicyDocumentV12, PolicyMeta, Receipt, Request, ResourceBudget, RetentionPlan,
     RetentionPlanError, RetentionPlanErrorKind, RetentionStatus, SEVENZ_COPY_PORTABLE_V1,
     STAGE_RETENTION_SCHEMA, STAGE_WITNESS_SCHEMA, SevenZInterpretationProfile, Severity,
     SnapshotKind, Source, SourceDigest, SourceMeta, StageRetention, StageWitnessRecord,
@@ -90,6 +90,10 @@ fn the_core_operation_signatures_are_pinned() {
     let _: fn(&PolicyDocument) -> Durability = PolicyDocument::durability;
     let _: fn(&mut PolicyDocument, Durability) = PolicyDocument::set_durability;
     let _: fn(PolicyDocument, Durability) -> PolicyDocument = PolicyDocument::with_durability;
+    let _: fn(&PolicyDocumentV12) -> Durability = PolicyDocumentV12::durability;
+    let _: fn(&mut PolicyDocumentV12, Durability) = PolicyDocumentV12::set_durability;
+    let _: fn(PolicyDocumentV12, Durability) -> PolicyDocumentV12 =
+        PolicyDocumentV12::with_durability;
 }
 
 #[test]

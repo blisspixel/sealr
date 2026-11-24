@@ -14,7 +14,7 @@ pwsh -NoProfile -File scripts/generate_tcb_report.ps1
 
 | Measurement | Value |
 |---|---|
-| Runtime Rust lines (crates/sealr/src) | 47248 |
+| Runtime Rust lines (crates/sealr/src) | 47373 |
 | In-crate test lines | 20419 |
 | `unsafe` uses in runtime code | 57 |
 | `unsafe` uses in test code | 13 |
@@ -56,9 +56,9 @@ These figures restate the pinned dependency contract at `tests/dependency-contra
 
 Pinned graph digests:
 
-- `aarch64-apple-darwin`: `e1a86ef6c06493d2f3b9ad5090857a4d10c10df78041b10310d00f7cffa05a5d`
+- `aarch64-apple-darwin`: `8c2308999142c406944e8840e07ba3fff5c30d1b3dfd4a8f88ec36536fd93dd6`
 - `x86_64-pc-windows-msvc`: `682a4bb8f2743c1c355a9a9d24c06e90584365c33b855385a5dfad16543dca22`
-- `x86_64-unknown-linux-gnu`: `9459523e18aa0ab91c0143a516d29d0b5df832bdd6d9058f50bc108186376a10`
+- `x86_64-unknown-linux-gnu`: `db15715f784165dfe5b97205c2c912bde7ae10914ec1eb14d35048a4ba771e29`
 
 ## Conditionally compiled modules
 
@@ -97,7 +97,7 @@ Every `mod` declaration carrying a `cfg` gate, verbatim:
 | `crates/sealr/src/materialize/windows.rs` | 961 | 69 | 41 | 8 |
 | `crates/sealr/src/outcome.rs` | 265 | 78 | 0 | 0 |
 | `crates/sealr/src/phase_trace.rs` | 144 | 76 | 0 | 0 |
-| `crates/sealr/src/policy.rs` | 1050 | 894 | 0 | 1 |
+| `crates/sealr/src/policy.rs` | 1175 | 894 | 0 | 1 |
 | `crates/sealr/src/quota.rs` | 82 | 51 | 0 | 0 |
 | `crates/sealr/src/ratio.rs` | 75 | 99 | 0 | 0 |
 | `crates/sealr/src/semantic_record.rs` | 4711 | 4032 | 0 | 45 |
